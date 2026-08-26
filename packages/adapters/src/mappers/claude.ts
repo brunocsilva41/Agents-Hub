@@ -34,6 +34,10 @@ export function claudeMapper(line: unknown): MappedEvent[] {
 
       for (const block of blocks as Array<Record<string, unknown>>) {
         if (block['type'] === 'text' && typeof block['text'] === 'string') {
+          // Blocos de texto vazios são frequentes no stream (o modelo abre o
+          // bloco antes de escrever) e só poluiriam a timeline com linhas em
+          // branco.
+          if (block['text'].trim().length === 0) continue;
           events.push({ type: 'message', payload: { text: block['text'] }, raw: block });
         } else if (block['type'] === 'thinking') {
           events.push({

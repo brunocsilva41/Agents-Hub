@@ -2,39 +2,54 @@
 
 Ordem derivada do ADR 04.4: **vertical fina primeiro**. Cada fase termina com algo que roda de verdade.
 
-## Fase 1 — Vertical fina (em andamento)
+## Fase 1 — Vertical fina ✅ concluída e validada em 2026-08-26
 
-Objetivo: uma sessão real com UM agente, ponta a ponta, provando o contrato antes de multiplicar por oito.
+Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o contrato antes de multiplicar por oito.
 
-- [x] Monorepo, tooling, tipos do domínio
-- [x] `EventEnvelope` + tipos de evento
-- [x] `PolicyEngine` (níveis de risco, não-escalação)
-- [x] `BudgetLedger` (herança do orçamento da raiz)
-- [x] `CallGraph` (profundidade + detecção de ciclo semântico)
-- [x] `store`: SQLite via `node:sqlite`, migrações, repositórios
-- [x] Contrato de adapter + registry dirigido por manifesto
-- [x] Adapter genérico de CLI (spawn + JSONL + mappers)
-- [x] Mappers: Claude Code, Codex
-- [x] Daemon HTTP + SSE
-- [x] CLI `hub` (doctor, agents, start, send, watch, sessions, cancel)
-- [ ] `WorktreeManager` (isolamento por sessão)
-- [ ] Teste de fumaça com agente real instalado
+- [x] Monorepo (npm workspaces + TS project references), tipos do domínio
+- [x] `EventEnvelope` + vocabulário de eventos
+- [x] `PolicyEngine`: níveis de risco, overlay de supervisão, não-escalação por interseção
+- [x] `BudgetLedger`: orçamento da raiz consumido pelos descendentes
+- [x] `CallGraph`: profundidade + detecção de ciclo semântico
+- [x] `store`: SQLite via `node:sqlite`, migrações versionadas, repositórios
+- [x] Contrato de adapter + registry dirigido por manifesto + cache de probe em disco
+- [x] Adapter genérico de CLI (spawn, JSONL, timeout, heartbeat, kill de árvore no Windows)
+- [x] Mappers dedicados: Claude Code e Codex
+- [x] Manifestos dos 8 agentes
+- [x] `WorktreeManager`: isolamento por git worktree, branch preservado ao encerrar
+- [x] Daemon HTTP + SSE com replay de eventos
+- [x] CLI: `daemon`, `doctor`, `agents`, `project`, `start`, `watch`, `send`, `delegate`, `graph`, `budget`, `cancel`
+- [x] Testes do domínio (27, verdes)
+- [x] **Teste de fumaça real**: sessão Claude → delegação para Codex, grafo e custo consolidados
 
-## Fase 2 — Delegação e o resto dos agentes
+### O que o teste real revelou (e já foi corrigido)
 
-- [ ] `Orchestrator`: `agent.call` completo com Brief, task lifecycle A2A, pipeline de resiliência
-- [ ] **MCP server do Hub** (`hub_agent_call` e cia.) — o momento em que agente-chama-agente passa a existir
-- [ ] Comando de instalação: registrar o Hub como MCP server em cada agente automaticamente
-- [ ] Mappers restantes: OpenCode (HTTP+SSE), Cursor, Copilot, Antigravity, Kimi, MiMo
-- [ ] Fila de aprovações (bloqueio real em `input_required`) na CLI
+| Achado | Correção |
+|---|---|
+| `where <bin>` no Windows devolve primeiro o shim sem extensão; `spawn` dá ENOENT | O resolver agora prefere `.exe`, depois `.cmd`/`.bat` |
+| CLIs travavam no `--version` com stdin aberto | Probe roda com `stdin: ignore` |
+| `.exe` a frio no Windows leva até 20s (antivírus + descompressão); 6 em paralelo estouravam o timeout | Timeout de probe para 45s, concorrência limitada a 2, cache em disco |
+| Reserva de orçamento sem dimensão explícita sequestrava todo o saldo, travando fan-out | Dimensão não pedida reserva zero; o teto continua garantido no consumo |
+| `--detach "objetivo"` engolia o objetivo como valor da flag | Flags booleanas declaradas + suporte a `--chave=valor` |
+| Filhos não indentavam sob o pai no grafo | Conector aplicado a todo descendente, não só a partir do nível 2 |
+
+## Fase 2 — Delegação plena e o resto dos agentes
+
+- [ ] **MCP server do Hub** (`hub_agent_call`, `hub_agent_status`, `hub_agent_stream`, `hub_agent_cancel`, `hub_session_send`) — o momento em que *qualquer* agente vira orquestrador
+- [ ] Comando `hub install-mcp <agente>`: registra o Hub como MCP server na config de cada CLI
+- [ ] Pipeline de resiliência completo: retry com backoff → fallback por cadeia → portão de validação
+- [ ] Fila de aprovações com bloqueio real em `input_required` (hoje a política classifica, mas ainda não intercepta a ação)
+- [ ] Adapter HTTP do OpenCode sobre `opencode serve` (sessões, SSE e custo reais)
+- [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo
+- [ ] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo hoje sai incompleto
 - [ ] TUI: grafo ao vivo, streams lado a lado, controles (pausar/interromper/injetar/matar)
 - [ ] Web UI React+Vite servida pelo daemon
 
 ## Fase 3 — Plataforma
 
-- [ ] **A2A server**: Agent Card assinado, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`
+- [ ] **A2A server**: Agent Card assinado em `/.well-known/agent-card.json`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`
 - [ ] Motor de workflows declarativos em YAML (fan-out paralelo, gates, condicionais)
-- [ ] Handoff de sessão (A transfere o principal para B em tempo de execução)
+- [ ] Handoff de sessão (A transfere o papel de principal para B em tempo de execução)
 - [ ] Validação por revisão cruzada (segundo agente revisa o resultado do primeiro)
 - [ ] Painel de custos com projeção e alertas de orçamento
 - [ ] Isolamento por container como modo opcional (`isolation: container`)

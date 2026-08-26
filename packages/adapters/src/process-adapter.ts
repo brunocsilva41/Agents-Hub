@@ -65,7 +65,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
         resolved,
         this.manifest.detect.args,
         this.manifest.invoke.env,
-        10_000,
+        this.manifest.detect.timeoutMs,
       );
       const match = new RegExp(this.manifest.detect.versionRegex).exec(output);
       return {
@@ -389,6 +389,9 @@ async function runToCompletion(
         env: { ...process.env, ...extraEnv },
         shell: bin.needsShell,
         windowsHide: true,
+        // stdin fechado é essencial: vários CLIs de agente, ao verem um stdin
+        // aberto, ficam esperando entrada em vez de imprimir a versão e sair.
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
 

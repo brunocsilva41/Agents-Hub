@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { AgentRegistry } from '@agents-hub/adapters';
 import { createStore } from '@agents-hub/store';
 import type { UnitOfWork } from '@agents-hub/core';
@@ -25,7 +26,9 @@ export interface Hub {
 export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const config = loadConfig(overrides);
   const store = createStore(config.dbFile);
-  const registry = AgentRegistry.fromDirectory(config.manifestsDir);
+  const registry = AgentRegistry.fromDirectory(config.manifestsDir, {
+    probeCacheFile: path.join(config.home, 'probes.json'),
+  });
   const bus = new InMemoryEventBus();
   const worktrees = new WorktreeManager(config.worktreeRoot);
   const sessions = new SessionManager(config, store, registry, bus, worktrees);

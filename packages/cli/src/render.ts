@@ -93,24 +93,28 @@ export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } 
   }
 }
 
-export function renderGraph(nodes: GraphSummary[], prefix = ''): string[] {
+export function renderGraph(nodes: GraphSummary[], prefix = '', isRoot = true): string[] {
   const lines: string[] = [];
+
   nodes.forEach((node, index) => {
     const last = index === nodes.length - 1;
-    const branch = prefix === '' ? '' : last ? '└─ ' : '├─ ';
-    const state = stateBadge(node.state);
+    // A raiz não recebe conector; todo descendente recebe — inclusive os
+    // filhos diretos da raiz, que é onde a indentação estava se perdendo.
+    const branch = isRoot ? '' : last ? '└─ ' : '├─ ';
+    const childPrefix = isRoot ? '   ' : `${prefix}${last ? '   ' : '│  '}`;
+
     lines.push(
-      `${prefix}${branch}${bold(node.agentId)} ${state} ${dim(
+      `${prefix}${branch}${bold(node.agentId)} ${stateBadge(node.state)} ${dim(
         `US$ ${node.usd.toFixed(4)} · ${formatTokens(node.tokens)} tok`,
       )}`,
     );
-    lines.push(`${prefix}${prefix === '' ? '' : last ? '   ' : '│  '}${dim(node.title ?? node.sessionId)}`);
+    lines.push(`${childPrefix}${dim(node.title ?? node.sessionId)}`);
+
     if (node.children.length > 0) {
-      lines.push(
-        ...renderGraph(node.children, `${prefix}${prefix === '' ? '' : last ? '   ' : '│  '}`),
-      );
+      lines.push(...renderGraph(node.children, childPrefix, false));
     }
   });
+
   return lines;
 }
 

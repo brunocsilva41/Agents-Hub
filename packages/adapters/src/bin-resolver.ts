@@ -34,12 +34,25 @@ async function lookup(bin: string): Promise<ResolvedBin | null> {
 
   try {
     const { stdout } = await execFileAsync(finder, [bin], { windowsHide: true });
-    const first = stdout
+    const candidates = stdout
       .split(/\r?\n/)
       .map((l) => l.trim())
-      .find((l) => l.length > 0);
-    if (!first) return null;
-    return { path: first, needsShell: isWindows && /\.(cmd|bat)$/i.test(first) };
+      .filter((l) => l.length > 0);
+    if (candidates.length === 0) return null;
+
+    if (!isWindows) {
+      return { path: candidates[0] as string, needsShell: false };
+    }
+
+    // `where codex` costuma devolver DUAS entradas: o script sh sem extensão
+    // (instalado pelo npm para o Git Bash) e o shim .cmd. A primeira linha é a
+    // sem extensão — e o Windows não sabe executá-la, dando ENOENT.
+    const best =
+      candidates.find((c) => /\.exe$/i.test(c)) ??
+      candidates.find((c) => /\.(cmd|bat)$/i.test(c)) ??
+      candidates[0] as string;
+
+    return { path: best, needsShell: /\.(cmd|bat)$/i.test(best) };
   } catch {
     return null;
   }

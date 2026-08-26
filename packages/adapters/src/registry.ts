@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { HubError } from '@agents-hub/core';
@@ -32,12 +32,27 @@ export function loadManifestDir(dir: string): AgentManifest[] {
  * quais agentes existem, se estão realmente instalados, e como resolver uma
  * capability (`cap:test-writing`) em um agente concreto.
  */
+export interface RegistryOptions {
+  /** Arquivo onde o resultado dos probes é persistido entre execuções. */
+  probeCacheFile?: string;
+  /** Validade do cache em milissegundos. */
+  probeCacheTtlMs?: number;
+}
+
+const DEFAULT_PROBE_TTL_MS = 24 * 60 * 60 * 1000;
+
 export class AgentRegistry {
   readonly #adapters = new Map<string, AgentAdapter>();
   readonly #probes = new Map<string, ProbeResult>();
+  readonly #options: RegistryOptions;
 
-  static fromDirectory(dir: string): AgentRegistry {
-    const registry = new AgentRegistry();
+  constructor(options: RegistryOptions = {}) {
+    this.#options = options;
+    this.#loadProbeCache();
+  }
+
+  static fromDirectory(dir: string, options: RegistryOptions = {}): AgentRegistry {
+    const registry = new AgentRegistry(options);
     for (const manifest of loadManifestDir(dir)) registry.register(manifest);
     return registry;
   }
@@ -80,22 +95,65 @@ export class AgentRegistry {
     return [...this.#adapters.values()].map((a) => a.manifest);
   }
 
-  /** Roda o probe de todos em paralelo — é o `hub doctor`. */
-  async probeAll(force = false): Promise<ProbeResult[]> {
-    const results = await Promise.all(
-      [...this.#adapters.values()].map((adapter) => this.probe(adapter.manifest.id, force)),
-    );
+  /**
+   * Roda o probe de todos — é o `hub doctor`.
+   *
+   * DE PROPÓSITO com concorrência limitada: no Windows, subir seis CLIs
+   * empacotados como .exe ao mesmo tempo faz eles se atropelarem em disco e
+   * antivírus, e todos estouram o timeout — reportando "quebrado" um conjunto
+   * de agentes perfeitamente saudáveis.
+   */
+  async probeAll(force = false, concurrency = 2): Promise<ProbeResult[]> {
+    const ids = this.ids();
+    const results: ProbeResult[] = [];
+
+    for (let i = 0; i < ids.length; i += concurrency) {
+      const batch = ids.slice(i, i + concurrency);
+      results.push(...(await Promise.all(batch.map((id) => this.probe(id, force)))));
+    }
+
+    this.#saveProbeCache();
     return results;
   }
 
   async probe(agentId: string, force = false): Promise<ProbeResult> {
     if (!force) {
       const cached = this.#probes.get(agentId);
-      if (cached) return cached;
+      if (cached && this.#isFresh(cached)) return cached;
     }
     const result = await this.get(agentId).probe();
     this.#probes.set(agentId, result);
     return result;
+  }
+
+  #isFresh(probe: ProbeResult): boolean {
+    const ttl = this.#options.probeCacheTtlMs ?? DEFAULT_PROBE_TTL_MS;
+    return Date.now() - new Date(probe.checkedAt).getTime() < ttl;
+  }
+
+  #loadProbeCache(): void {
+    const file = this.#options.probeCacheFile;
+    if (!file || !existsSync(file)) return;
+    try {
+      const cached = JSON.parse(readFileSync(file, 'utf8')) as ProbeResult[];
+      for (const probe of cached) {
+        if (this.#isFresh(probe)) this.#probes.set(probe.agentId, probe);
+      }
+    } catch {
+      // Cache corrompido não pode impedir o Hub de subir: o probe simplesmente
+      // roda de novo.
+    }
+  }
+
+  #saveProbeCache(): void {
+    const file = this.#options.probeCacheFile;
+    if (!file) return;
+    try {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, `${JSON.stringify([...this.#probes.values()], null, 2)}\n`, 'utf8');
+    } catch {
+      // Cache é otimização, não requisito.
+    }
   }
 
   cachedProbe(agentId: string): ProbeResult | null {

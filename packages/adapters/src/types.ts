@@ -20,6 +20,13 @@ export const AgentManifestSchema = z.object({
     .object({
       args: z.array(z.string()).default(['--version']),
       versionRegex: z.string().default('(\\d+\\.\\d+\\.\\d+)'),
+      /**
+       * Generoso de propósito: no Windows, o primeiro start de um CLI
+       * empacotado como .exe passa por varredura de antivírus e descompressão
+       * — 20s a frio é comum. Timeout curto aqui reporta "quebrado" um agente
+       * que está perfeitamente saudável.
+       */
+      timeoutMs: z.number().int().positive().default(45_000),
     })
     .default({}),
 

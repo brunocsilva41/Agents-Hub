@@ -21,6 +21,13 @@ interface Args {
   flags: Record<string, string | boolean>;
 }
 
+/**
+ * Flags sem valor precisam ser declaradas: sem isso, `--detach "objetivo"`
+ * consome o objetivo como valor de `--detach` e o comando falha dizendo que
+ * faltou o objetivo — que estava lá o tempo todo.
+ */
+const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet']);
+
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
   const positional: string[] = [];
@@ -32,7 +39,20 @@ function parseArgs(argv: string[]): Args {
       positional.push(token);
       continue;
     }
+
+    // Forma explícita `--chave=valor` sempre vence a heurística.
+    const equals = token.indexOf('=');
+    if (equals > 2) {
+      flags[token.slice(2, equals)] = token.slice(equals + 1);
+      continue;
+    }
+
     const key = token.slice(2);
+    if (BOOLEAN_FLAGS.has(key)) {
+      flags[key] = true;
+      continue;
+    }
+
     const next = rest[i + 1];
     if (next === undefined || next.startsWith('--')) {
       flags[key] = true;

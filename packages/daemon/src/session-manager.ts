@@ -15,6 +15,7 @@ import {
   pathKey,
   renderBriefAsPrompt,
   type Brief,
+  type BudgetLimits,
   type BudgetSnapshot,
   type EventEnvelope,
   type GraphNode,
@@ -139,14 +140,25 @@ export class SessionManager {
     const sessionId = newId('ses');
     const rootId = parent ? parent.rootId : sessionId;
 
-    // --- orçamento: reserva sai do saldo da RAIZ ----------------------------
-    const ledger = this.#ledger(rootId);
+    // --- orçamento ----------------------------------------------------------
+    // Na raiz, o budget do Brief DEFINE o teto do fluxo inteiro.
+    // Num filho, ele RESERVA uma fatia do que a raiz ainda tem.
     const taskId = newId('tsk');
-    ledger.reserve(taskId, {
-      usd: brief.budget.usd ?? undefined,
-      tokens: brief.budget.tokens ?? undefined,
-      seconds: brief.budget.seconds ?? undefined,
-    });
+    const ledger = parent
+      ? this.#ledger(rootId)
+      : this.#ledger(rootId, {
+          usd: brief.budget.usd ?? this.config.policy.defaultBudget.usd,
+          tokens: brief.budget.tokens ?? this.config.policy.defaultBudget.tokens,
+          seconds: brief.budget.seconds ?? this.config.policy.defaultBudget.seconds,
+        });
+
+    if (parent) {
+      ledger.reserve(taskId, {
+        usd: brief.budget.usd ?? undefined,
+        tokens: brief.budget.tokens ?? undefined,
+        seconds: brief.budget.seconds ?? undefined,
+      });
+    }
     this.#persistLedger(ledger);
 
     // --- isolamento ---------------------------------------------------------
@@ -586,11 +598,14 @@ export class SessionManager {
     }
   }
 
-  #ledger(rootId: string): BudgetLedger {
+  #ledger(rootId: string, initialLimits?: BudgetLimits): BudgetLedger {
     const cached = this.#ledgers.get(rootId);
     if (cached) return cached;
 
-    const record = this.store.budgets.ensure(rootId, this.config.policy.defaultBudget);
+    const record = this.store.budgets.ensure(
+      rootId,
+      initialLimits ?? this.config.policy.defaultBudget,
+    );
     const ledger = new BudgetLedger(rootId, record.limits, record.consumed, ZERO_USAGE);
     this.#ledgers.set(rootId, ledger);
     return ledger;

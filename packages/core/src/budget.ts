@@ -98,10 +98,15 @@ export class BudgetLedger {
    */
   reserve(taskId: string, request: Partial<BudgetLimits>): BudgetUsage {
     const { remaining } = this.snapshot();
+
+    // Dimensão não pedida reserva ZERO, não "todo o resto".
+    // Reservar o saldo inteiro faria o primeiro filho de um fan-out travar
+    // todos os irmãos com BUDGET_EXCEEDED — o teto do fluxo continua sendo
+    // garantido pelo `charge`, que é onde o consumo real acontece.
     const want: BudgetUsage = {
-      usd: request.usd ?? remaining.usd,
-      tokens: request.tokens ?? remaining.tokens,
-      seconds: request.seconds ?? remaining.seconds,
+      usd: request.usd ?? 0,
+      tokens: request.tokens ?? 0,
+      seconds: request.seconds ?? 0,
     };
 
     if (want.usd > remaining.usd || want.tokens > remaining.tokens || want.seconds > remaining.seconds) {
