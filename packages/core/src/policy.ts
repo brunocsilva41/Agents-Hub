@@ -118,7 +118,18 @@ export const DEFAULT_POLICY: PolicyDocument = {
     max: 2,
     backoffMs: 2000,
   },
-  fallback: {},
+  // Cadeia curta de propósito (ADR 06.2): se claude, codex e opencode falharem
+  // na mesma tarefa, o problema está no brief — insistir em mais agentes só
+  // queima orçamento. Os demais continuam disponíveis por chamada explícita.
+  fallback: {
+    'code-edit': ['claude', 'codex', 'opencode'],
+    refactor: ['claude', 'codex', 'opencode'],
+    'test-writing': ['claude', 'codex', 'opencode'],
+    'code-review': ['claude', 'codex'],
+    debug: ['claude', 'codex'],
+    planning: ['claude', 'codex'],
+    shell: ['codex', 'opencode'],
+  },
 };
 
 /** Comandos cujo efeito não dá para desfazer — sempre passam por aprovação. */

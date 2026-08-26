@@ -59,8 +59,8 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 
 | Tema | Pergunta | Bloqueia |
 |---|---|---|
-| Escalação humana em falha | Quando retry + fallback + validação se esgotam, a task morre em `failed` (assunção do ADR 04). Confirmar ou trocar por `input_required`. | Fase 2 |
-| Cadeias de fallback | Qual a ordem por capability? (ex.: `code-edit: claude → codex → opencode`) | Fase 2 |
-| Retenção | Por quanto tempo guardar eventos brutos e worktrees de sessões encerradas? | Fase 2 |
 | Acesso remoto | Expor o daemon na rede/túnel exige authn/authz — desejado? | Fase 3 |
-| Modelos por agente | Fixar modelo por agente no manifesto ou deixar o default de cada CLI? | Fase 2 |
+
+Tudo que bloqueava a Fase 2 foi decidido no [ADR 06](decisoes/06-resiliencia-retencao.md):
+falha final termina em `failed` sem travar o fluxo, fallback é `claude → codex → opencode`,
+eventos ficam para sempre e worktrees por 7 dias, e o modelo é o default de cada CLI.
