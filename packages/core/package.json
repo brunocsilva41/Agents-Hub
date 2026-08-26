@@ -1,0 +1,14 @@
+{
+  "name": "@agents-hub/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Domínio puro do Agents-Hub: tipos, eventos, política, orçamento e grafo de chamadas. Sem I/O.",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "zod": "^3.24.1"
+  }
+}

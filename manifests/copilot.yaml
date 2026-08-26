@@ -1,0 +1,49 @@
+id: copilot
+name: GitHub Copilot CLI
+vendor: GitHub / Microsoft
+description: >
+  Agente de terminal do Copilot, com controle fino de ferramentas por flag
+  (`--allow-tool`, `--allow-url`).
+
+bin: copilot
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  # Não lê prompt de stdin de forma documentada: usamos arquivo, que também
+  # elimina o problema de prompt multilinha na linha de comando do Windows.
+  oneShot: ["-p", "{{promptFile}}"]
+  stdinPrompt: false
+  interactive: false
+  # DELIBERADAMENTE sem `--allow-all-tools`: essa flag dá ao agente o mesmo
+  # poder que você tem na máquina, sem revisão. Quem concede permissão aqui é
+  # a política do Hub, não uma flag global.
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: replay
+
+stream:
+  format: text
+  mapper: generic-text
+
+capabilities:
+  - code-edit
+  - shell
+  - github
+
+auth:
+  mode: inherit
+  loginHint: "rode `copilot` e autentique com sua conta GitHub"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: supervised
+
+caveats:
+  - "Se `-p` não aceitar caminho de arquivo, ajuste para {{prompt}} após rodar `hub verify copilot`."
+  - "Nunca adicione --allow-all-tools aqui: isso contorna toda a política do Hub."

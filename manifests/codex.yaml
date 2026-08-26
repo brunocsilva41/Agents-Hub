@@ -1,0 +1,51 @@
+id: codex
+name: OpenAI Codex CLI
+vendor: OpenAI
+description: >
+  CLI da OpenAI. Emite JSONL de eventos em `codex exec --json` e retoma threads
+  nativamente. Também roda como servidor MCP (`codex mcp`), então orquestra e é
+  orquestrado sem adaptação.
+
+bin: codex
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  # O `-` final faz o Codex ler o prompt de stdin.
+  oneShot: ["exec", "--json", "-"]
+  resume: ["exec", "resume", "{{nativeSessionId}}", "--json", "-"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: native
+  idFrom: "$.thread_id"
+
+stream:
+  format: jsonl
+  mapper: codex
+
+capabilities:
+  - code-edit
+  - refactor
+  - test-writing
+  - code-review
+  - debug
+  - shell
+  - planning
+
+auth:
+  mode: inherit
+  loginHint: "rode `codex login` (ou configure ~/.codex/config.toml)"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: semi
+
+caveats:
+  - "A política de sandbox do próprio Codex (~/.codex/config.toml) continua valendo por dentro e pode ser mais restritiva que a do Hub."

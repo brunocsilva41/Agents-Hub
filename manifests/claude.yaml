@@ -1,0 +1,52 @@
+id: claude
+name: Claude Code
+vendor: Anthropic
+description: >
+  Agente de terminal da Anthropic. Superfície programável mais rica do conjunto:
+  stream-json evento a evento, custo por turno, resume nativo e hooks.
+
+bin: claude
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  # `--verbose` é o que faz o stream-json emitir os eventos intermediários;
+  # sem ele só chega o resultado final e a timeline ao vivo fica vazia.
+  oneShot: ["-p", "--output-format", "stream-json", "--verbose"]
+  resume: ["-p", "--resume", "{{nativeSessionId}}", "--output-format", "stream-json", "--verbose"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: native
+  idFrom: "$.session_id"
+
+stream:
+  format: jsonl
+  mapper: claude
+
+capabilities:
+  - code-edit
+  - refactor
+  - test-writing
+  - code-review
+  - debug
+  - shell
+  - planning
+  - long-context
+
+auth:
+  mode: inherit
+  loginHint: "rode `claude` uma vez no terminal para autenticar"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: semi
+
+caveats:
+  - "No Windows, `interrupt` degrada para cancelamento: SIGINT não é entregável de forma confiável."

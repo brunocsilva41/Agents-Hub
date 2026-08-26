@@ -1,0 +1,45 @@
+id: antigravity
+name: Antigravity CLI
+vendor: Google
+description: >
+  CLI em Go do Antigravity 2.0, sucessor do Gemini CLI (que deixou de servir
+  Pro/Ultra em jun/2026). Startup rápido e bom em ambiente headless/SSH.
+
+bin: antigravity
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  oneShot: ["-p"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: replay
+
+stream:
+  format: text
+  mapper: generic-text
+
+capabilities:
+  - code-edit
+  - refactor
+  - browser
+  - multi-agent
+
+auth:
+  mode: inherit
+  loginHint: "rode `antigravity` e autentique com sua conta Google"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: supervised
+
+caveats:
+  - "Flags de headless não verificadas contra a versão instalada — rode `hub verify antigravity`."
+  - "Antigravity tem seu próprio gerenciador de agentes; usar os dois em paralelo pode duplicar trabalho."

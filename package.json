@@ -1,0 +1,30 @@
+{
+  "name": "agents-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Plano de controle onde qualquer agente de IA pode orquestrar e ser orquestrado.",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "build:watch": "tsc -b --watch",
+    "clean": "tsc -b --clean",
+    "typecheck": "tsc -b --noEmit false --dry",
+    "daemon": "node --experimental-sqlite packages/daemon/dist/main.js",
+    "hub": "node packages/cli/dist/main.js",
+    "test": "node --test --experimental-sqlite packages/*/dist/**/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1",
+    "zod": "^3.24.1"
+  }
+}

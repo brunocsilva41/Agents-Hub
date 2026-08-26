@@ -1,0 +1,49 @@
+id: cursor
+name: Cursor CLI (cursor-agent)
+vendor: Anysphere
+description: >
+  Braço de terminal do Cursor. Modo print (`-p`) com saída estruturada,
+  compartilhando a mesma conta e histórico do editor.
+
+bin: cursor-agent
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  oneShot: ["-p", "--output-format", "stream-json"]
+  resume: ["--resume", "{{nativeSessionId}}", "-p", "--output-format", "stream-json"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: native
+  idFrom: "$.session_id"
+
+stream:
+  format: jsonl
+  # O envelope do Cursor difere do Claude; o mapper genérico já entrega
+  # timeline utilizável até escrevermos um dedicado na fase 2.
+  mapper: generic-json
+
+capabilities:
+  - code-edit
+  - refactor
+  - debug
+  - shell
+
+auth:
+  mode: inherit
+  loginHint: "rode `cursor-agent login`"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: semi
+
+caveats:
+  - "Mapper genérico: eventos de ferramenta e custo ainda não são extraídos."
+  - "Formato exato do stream-json precisa ser confirmado com `hub verify cursor`."

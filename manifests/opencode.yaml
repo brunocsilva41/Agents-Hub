@@ -1,0 +1,51 @@
+id: opencode
+name: OpenCode
+vendor: SST (open source)
+description: >
+  Agente model-agnostic e auto-hospedável. Único do conjunto com servidor HTTP
+  próprio (`opencode serve`, REST + OpenAPI 3.1 + SSE) — na fase 2 ganha um
+  adapter HTTP dedicado, que é a integração de maior fidelidade possível.
+
+bin: opencode
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  oneShot: ["run"]
+  resume: ["run", "--session", "{{nativeSessionId}}"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  # Via CLI o id da sessão não vem no stdout; o resume nativo existe, mas
+  # depende de capturarmos o id — o que só o adapter HTTP faz de forma confiável.
+  strategy: replay
+  idFrom: "$.sessionID"
+
+stream:
+  format: text
+  mapper: generic-text
+
+capabilities:
+  - code-edit
+  - refactor
+  - test-writing
+  - shell
+  - local-models
+
+auth:
+  mode: inherit
+  loginHint: "rode `opencode auth login` e escolha o provedor de modelo"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: semi
+
+caveats:
+  - "Adapter de CLI é provisório: a timeline vem como texto puro, sem custo por turno."
+  - "Fase 2 substitui por adapter HTTP sobre `opencode serve` (sessões, SSE e custo reais)."

@@ -1,0 +1,19 @@
+{
+  "name": "@agents-hub/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Daemon do Agents-Hub: orquestrador, gerenciador de sessões e API HTTP+SSE.",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agents-hubd": "./dist/main.js"
+  },
+  "dependencies": {
+    "@agents-hub/adapters": "0.1.0",
+    "@agents-hub/core": "0.1.0",
+    "@agents-hub/store": "0.1.0"
+  }
+}

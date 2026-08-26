@@ -1,0 +1,45 @@
+id: kimi
+name: Kimi Code CLI
+vendor: Moonshot AI
+description: >
+  CLI da Moonshot (ex-"Kimi CLI", renomeado em jan/2026). Suporta ACP para
+  editores e MCP para ferramentas, com modo headless `kimi -p`.
+
+bin: kimi
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  oneShot: ["-p"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: replay
+
+stream:
+  format: text
+  mapper: generic-text
+
+capabilities:
+  - code-edit
+  - refactor
+  - shell
+  - swarm
+
+auth:
+  mode: inherit
+  loginHint: "rode `kimi` e faça login com sua conta Moonshot"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: supervised
+
+caveats:
+  - "Projeto migrando de Python para Bun+TypeScript: flags podem mudar entre versões."
+  - "Suporta ACP — candidato natural a integração mais rica na fase 3."

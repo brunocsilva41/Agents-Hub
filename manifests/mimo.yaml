@@ -1,0 +1,45 @@
+id: mimo
+name: MiMo Code
+vendor: Xiaomi
+description: >
+  CLI gratuito da Xiaomi com memória persistente entre sessões. Bom candidato a
+  fallback de baixo custo em tarefas mecânicas.
+
+bin: mimo
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  oneShot: ["-p"]
+  stdinPrompt: true
+  interactive: false
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: replay
+
+stream:
+  format: text
+  mapper: generic-text
+
+capabilities:
+  - code-edit
+  - test-writing
+  - shell
+  - low-cost
+
+auth:
+  mode: inherit
+  loginHint: "rode `mimo` e siga o login indicado"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: supervised
+
+caveats:
+  - "Flags não verificadas contra a versão instalada — rode `hub verify mimo`."
+  - "A memória persistente do MiMo vive fora do Hub: o que ele lembra não aparece na auditoria."

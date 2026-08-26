@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# estado local do Hub, se algum dia for materializado dentro do repo
+.agents-hub/state/

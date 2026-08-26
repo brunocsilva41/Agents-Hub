@@ -1,0 +1,14 @@
+{
+  "name": "@agents-hub/store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistência do Agents-Hub: SQLite (node:sqlite) + repositórios.",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@agents-hub/core": "0.1.0"
+  }
+}
