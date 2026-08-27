@@ -33,17 +33,38 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 | `--detach "objetivo"` engolia o objetivo como valor da flag | Flags booleanas declaradas + suporte a `--chave=valor` |
 | Filhos não indentavam sob o pai no grafo | Conector aplicado a todo descendente, não só a partir do nível 2 |
 
-## Fase 2 — Delegação plena e o resto dos agentes
+## Fase 2 — Delegação plena, MCP e painel
 
-- [ ] **MCP server do Hub** (`hub_agent_call`, `hub_agent_status`, `hub_agent_stream`, `hub_agent_cancel`, `hub_session_send`) — o momento em que *qualquer* agente vira orquestrador
-- [ ] Comando `hub install-mcp <agente>`: registra o Hub como MCP server na config de cada CLI
+### Concluído e validado em 2026-08-27
+
+- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial; validado com um agente
+      externo simulado delegando ao Codex e recebendo o resultado
+- [x] **Adoção de agente externo**: quando o principal roda fora do Hub, o MCP server
+      adota uma sessão-raiz na primeira chamada que precise de identidade
+- [x] `packages/client`: cliente HTTP compartilhado por CLI, MCP e Web UI
+- [x] `hub mcp` / `show` / `install --write`: registro na config de cada agente,
+      com backup e merge; imprime por padrão em vez de gravar
+- [x] Mensagens de erro de delegação que dizem ao agente o que fazer
+- [x] **Web UI React+Vite** servida pelo próprio daemon: grafo ao vivo como
+      navegação, timeline unificada, painel de custo, controles ao vivo
+- [x] `scripts/mcp-smoke.py`: harness JSON-RPC que mantém stdin aberto como um
+      hospedeiro real faz
+
+### O que o uso real revelou (e já foi corrigido)
+
+| Achado | Correção |
+|---|---|
+| SSE com `event: <tipo>` fazia o `onmessage` do navegador descartar tudo que não se chamasse `message` — o painel perdia `turn.completed`, `delegation.*` e `error` sem nenhum sinal de erro | Campo `event:` removido; o tipo já viaja no JSON. `id:` só no stream de uma sessão, onde `seq` é inequívoco |
+| Fechar stdin matava o MCP server antes de a resposta calculada ser escrita | Carência de 3s no desligamento por stdin; sinal explícito continua saindo na hora |
+
+### Restante da fase 2
+
 - [ ] Pipeline de resiliência completo: retry com backoff → fallback por cadeia → portão de validação
 - [ ] Fila de aprovações com bloqueio real em `input_required` (hoje a política classifica, mas ainda não intercepta a ação)
 - [ ] Adapter HTTP do OpenCode sobre `opencode serve` (sessões, SSE e custo reais)
 - [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo
-- [ ] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo hoje sai incompleto
-- [ ] TUI: grafo ao vivo, streams lado a lado, controles (pausar/interromper/injetar/matar)
-- [ ] Web UI React+Vite servida pelo daemon
+- [ ] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo sai incompleto
+- [ ] TUI (a Web UI cobriu a necessidade; a TUI virou conveniência, não bloqueio)
 
 ## Fase 3 — Plataforma
 

@@ -4,6 +4,7 @@ import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import type { SessionManager } from './session-manager.js';
+import { serveStatic } from './static.js';
 
 type Handler = (
   req: IncomingMessage,
@@ -90,6 +91,9 @@ export class HubServer {
       }
       return;
     }
+
+    // Nenhuma rota de API bateu: pode ser a Web UI.
+    if (req.method === 'GET' && serveStatic(this.config.webRoot, url.pathname, res)) return;
 
     sendJson(res, 404, { error: { code: 'NOT_FOUND', message: `Rota ${url.pathname} não existe` } });
   }
@@ -316,12 +320,13 @@ export class HubServer {
           sessionId,
           since === null ? undefined : Number(since),
         )) {
-          writeSse(res, past);
+          writeSse(res, past, true);
         }
       }
 
+      const singleSession = sessionId !== undefined;
       const unsubscribe = this.bus.subscribe({ sessionId, rootId }, (event) =>
-        writeSse(res, event),
+        writeSse(res, event, singleSession),
       );
 
       // Proxies e antivírus derrubam conexão ociosa; o comentário periódico
@@ -336,8 +341,22 @@ export class HubServer {
   }
 }
 
-function writeSse(res: ServerResponse, event: EventEnvelope): void {
-  res.write(`id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+/**
+ * Escreve um evento no stream SSE.
+ *
+ * DELIBERADAMENTE sem o campo `event:`. Nomear o evento com o tipo parece
+ * elegante, mas faz o `onmessage` do navegador ignorar tudo que não se chame
+ * literalmente "message" — o cliente receberia as falas do agente e perderia
+ * `turn.completed`, `delegation.*` e `error` sem nenhum sinal de erro.
+ * O tipo já viaja dentro do JSON, que é onde todo consumidor o lê.
+ *
+ * O `id:` só é enviado no stream de UMA sessão, porque `seq` é monotônico por
+ * sessão: num stream multi-sessão ele seria ambíguo e estragaria o
+ * `Last-Event-ID` na reconexão.
+ */
+function writeSse(res: ServerResponse, event: EventEnvelope, withId: boolean): void {
+  const id = withId ? `id: ${event.seq}\n` : '';
+  res.write(`${id}data: ${JSON.stringify(event)}\n\n`);
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {

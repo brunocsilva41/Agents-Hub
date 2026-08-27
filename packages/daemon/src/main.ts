@@ -7,7 +7,8 @@ const hub = createHub(port ? { port: Number(port) } : {});
 
 const { host, port: listening } = await hub.server.listen();
 
-console.log(`Agents-Hub daemon ouvindo em ${baseUrl({ host, port: listening })}`);
+console.log(`Agents-Hub daemon no ar`);
+console.log(`  painel:    ${baseUrl({ host, port: listening })}`);
 console.log(`  home:      ${hub.config.home}`);
 console.log(`  banco:     ${hub.config.dbFile}`);
 console.log(`  manifests: ${hub.config.manifestsDir}`);

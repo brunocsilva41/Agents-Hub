@@ -9,3 +9,6 @@ dist/
 
 # estado local do Hub, se algum dia for materializado dentro do repo
 .agents-hub/state/
+
+# build da Web UI (gerado por `npm run build`)
+packages/web/dist/

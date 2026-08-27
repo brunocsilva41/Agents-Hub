@@ -17,16 +17,13 @@ Cada agente é ótimo em algo e cego para o resto. Hoje, fazer um chamar o outro
 
 ## Estado atual
 
-**Fase 1 concluída e testada de ponta a ponta.** Um agente inicia sessão real, produz eventos normalizados, é isolado em worktree, respeita orçamento — e delega para outro agente.
+**Fases 1 e 2 rodando e validadas com agentes reais.** Um agente inicia sessão, produz eventos normalizados, roda isolado, respeita orçamento — e delega para outro agente, pela CLI, pelo painel ou por MCP.
 
 ```
-claude ✓ concluída US$ 0.7678 · 150 tok
-   Responda apenas com a palavra PRONTO.
-   └─ codex ✓ concluída US$ 0.0000 · 17.2k tok
-      Responda apenas com a palavra DELEGADO.
+cursor [running]  US$ 0.0000 · 0 tok      ← agente externo, adotado como raiz
+  └ codex [completed] US$ 0.0000 · 17.2k tok
+    Responda apenas com a palavra MCP_OK.
 ```
-
-Veja [docs/02-roadmap.md](docs/02-roadmap.md) para o que vem nas fases 2 e 3.
 
 ## Começando
 
@@ -34,13 +31,13 @@ Veja [docs/02-roadmap.md](docs/02-roadmap.md) para o que vem nas fases 2 e 3.
 npm install && npm run build
 ```
 
-Suba o daemon (mantém as sessões vivas independente do terminal):
+Suba o daemon — ele mantém as sessões vivas e serve o painel:
 
 ```bash
 node packages/cli/dist/main.js daemon
 ```
 
-Em outro terminal, veja quais agentes você tem:
+O painel abre em **http://127.0.0.1:4747**. Em outro terminal, veja quais agentes você tem:
 
 ```bash
 node packages/cli/dist/main.js doctor
@@ -66,16 +63,39 @@ node packages/cli/dist/main.js graph <rootId>
 
 `hub help` lista tudo.
 
+## Dar aos seus agentes o poder de chamar os outros
+
+O Hub se expõe como **MCP server** — o único protocolo que os oito CLIs já falam. Registrado uma vez, o Cursor pode chamar o Claude, que chama o Codex.
+
+```bash
+node packages/cli/dist/main.js mcp                        # o que está registrado onde
+node packages/cli/dist/main.js mcp install codex --write  # grava, com backup e merge
+```
+
+O agente ganha 11 ferramentas: `hub_agent_call` (delega e volta na hora com um `task_id`), `hub_agent_status`, `hub_agent_wait`, `hub_agent_events`, `hub_agent_cancel`, `hub_session_send`, `hub_graph`, `hub_budget` e mais.
+
+Funciona mesmo com o agente rodando **fora** do Hub: nesse caso o MCP server adota uma sessão-raiz na primeira chamada, para o filho ter pai de quem herdar política e raiz onde debitar orçamento. Detalhes em [docs/03-mcp-e-painel.md](docs/03-mcp-e-painel.md).
+
+## Painel
+
+Servido pelo próprio daemon, na mesma API que a CLI consome — nenhuma lógica mora no cliente, então os dois têm a mesma capacidade por construção.
+
+O grafo de chamadas é a **navegação**: clicar num nó abre a timeline daquele agente. Ao lado, o consumo contra o orçamento do fluxo e os controles ao vivo — interromper turno, pausar, encerrar, delegar a partir dali, ou simplesmente falar com a sessão.
+
+```bash
+npm run web:dev   # opcional: Vite com hot reload em :4748, proxy para o daemon
+```
+
 ## Arquitetura em uma tela
 
 ```
-CLIENTES     CLI · TUI · Web UI  ──── HTTP + SSE (API única) ────┐
-TRANSPORTS   MCP server · A2A server · REST/SSE                  │
-CORE         Orchestrator · SessionManager · CallGraph           │
-             PolicyEngine · BudgetLedger · CapabilityRegistry    │
-ADAPTERS     claude · codex · opencode · cursor · copilot        │
-             antigravity · kimi · mimo   (dirigidos por manifesto)│
-INFRA        SQLite · WorktreeManager · ProcessHost              ┘
+CLIENTES     CLI · Web UI  ──────── HTTP + SSE (API única) ───────┐
+TRANSPORTS   MCP server · A2A server (fase 3) · REST/SSE          │
+CORE         Orchestrator · SessionManager · CallGraph            │
+             PolicyEngine · BudgetLedger · CapabilityRegistry     │
+ADAPTERS     claude · codex · opencode · cursor · copilot         │
+             antigravity · kimi · mimo  (dirigidos por manifesto) │
+INFRA        SQLite · WorktreeManager · ProcessHost               ┘
 ```
 
 Dependências apontam só para baixo. O `core` não conhece adapters nem HTTP — recebe portas injetadas, e por isso dá para testar orquestração, política e orçamento sem invocar nenhum agente.
@@ -113,6 +133,8 @@ O Hub **nunca** toca nas suas credenciais: cada adapter roda com o login que o p
 
 Detalhes e níveis de risco em [docs/decisoes/03-seguranca-limites.md](docs/decisoes/03-seguranca-limites.md).
 
+> A política já classifica toda ação em nível de risco e o motor está testado, mas o gancho que **bloqueia** a ação entra junto com a fila de aprovações. Até lá, o controle real é o worktree isolado, o orçamento e o botão de encerrar.
+
 ## Decisões
 
 Cada escolha estrutural está registrada como ADR em [docs/decisoes/](docs/decisoes/), com a consequência que ela impõe. A pesquisa de mercado que embasou o desenho está em [docs/00-pesquisa-mercado.md](docs/00-pesquisa-mercado.md).
@@ -120,7 +142,9 @@ Cada escolha estrutural está registrada como ADR em [docs/decisoes/](docs/decis
 ## Testes
 
 ```bash
-node --test packages/core/dist/*.test.js
+node --test packages/core/dist/*.test.js   # domínio: 28 testes
+python scripts/mcp-smoke.py                # MCP, só leitura, sem custo
+python scripts/mcp-smoke.py --delegate codex   # delega de verdade (gasta tokens)
 ```
 
-Cobrem o que não pode quebrar em silêncio: não-escalação de privilégio, herança de orçamento e detecção de ciclo no grafo de delegação.
+Os testes de domínio cobrem o que não pode quebrar em silêncio: não-escalação de privilégio, herança de orçamento e detecção de ciclo no grafo de delegação.

@@ -11,17 +11,25 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run build --workspace @agents-hub/web",
     "build:watch": "tsc -b --watch",
     "clean": "tsc -b --clean",
     "typecheck": "tsc -b --noEmit false --dry",
     "daemon": "node --experimental-sqlite packages/daemon/dist/main.js",
     "hub": "node packages/cli/dist/main.js",
-    "test": "node --test --experimental-sqlite packages/*/dist/**/*.test.js"
+    "test": "node --test --experimental-sqlite packages/*/dist/**/*.test.js",
+    "build:packages": "tsc -b",
+    "web:dev": "npm run dev --workspace @agents-hub/web"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.2"
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^4.7.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.3"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

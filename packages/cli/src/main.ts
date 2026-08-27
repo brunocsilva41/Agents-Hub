@@ -181,7 +181,9 @@ async function main(): Promise<void> {
 async function runDaemon(): Promise<void> {
   const hub = createHub();
   const { host, port } = await hub.server.listen();
-  console.log(green(`daemon ouvindo em ${baseUrl({ host, port })}`));
+  const url = baseUrl({ host, port });
+  console.log(green(`daemon ouvindo em ${url}`));
+  console.log(`painel: ${bold(url)}`);
   console.log(dim(`home: ${hub.config.home}`));
   console.log(dim(`agentes: ${hub.registry.ids().join(', ')}`));
 

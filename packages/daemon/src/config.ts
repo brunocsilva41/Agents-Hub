@@ -13,6 +13,8 @@ export interface HubConfig {
   manifestsDir: string;
   host: string;
   port: number;
+  /** Estáticos da Web UI. Servida pelo próprio daemon: um processo só (ADR 05.3). */
+  webRoot: string;
   policy: PolicyDocument;
 }
 
@@ -20,11 +22,19 @@ export function defaultHome(): string {
   return process.env['AGENTS_HUB_HOME'] ?? path.join(os.homedir(), '.agents-hub');
 }
 
-/** Manifestos que vêm com o repositório, quando o usuário não tem os seus. */
-function bundledManifestsDir(): string {
+function repoRoot(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // dist/ -> packages/daemon -> packages -> raiz do repo
-  return path.resolve(here, '..', '..', '..', 'manifests');
+  return path.resolve(here, '..', '..', '..');
+}
+
+/** Manifestos que vêm com o repositório, quando o usuário não tem os seus. */
+function bundledManifestsDir(): string {
+  return path.join(repoRoot(), 'manifests');
+}
+
+function bundledWebRoot(): string {
+  return path.join(repoRoot(), 'packages', 'web', 'dist');
 }
 
 export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
@@ -44,6 +54,7 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
     manifestsDir: existsSync(userManifests) ? userManifests : bundledManifestsDir(),
     host: '127.0.0.1',
     port: 4747,
+    webRoot: bundledWebRoot(),
     ...onDisk,
     ...overrides,
     // A política nunca é substituída inteira por acidente: campos ausentes no
