@@ -7,6 +7,10 @@ import {
   ZERO_USAGE,
   buildGraph,
   checkDelegation,
+  classifyOutcome,
+  failureContext,
+  nextStep,
+  validationPassed,
   inheritMode,
   makeEvent,
   newId,
@@ -14,6 +18,7 @@ import {
   parseBrief,
   pathKey,
   renderBriefAsPrompt,
+  resolveEventCost,
   watchForMode,
   type Approval,
   type Brief,
@@ -26,13 +31,25 @@ import {
   type Project,
   type Session,
   type SessionMode,
+  type OutcomeClass,
+  type PolicyDocument,
   type RiskLevel,
   type Task,
+  type TaskAttempt,
+  type ValidationOutcome,
   type UnitOfWork,
 } from '@agents-hub/core';
-import type { AgentRegistry, MappedEvent, RunContext, RunHandle } from '@agents-hub/adapters';
+import type {
+  AgentRegistry,
+  MappedEvent,
+  RunContext,
+  RunHandle,
+  RunOutcome,
+} from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
+import { loadProjectOverrides, mergeProjectPolicy } from './project-config.js';
+import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
 
 /**
@@ -63,6 +80,36 @@ function guardedActionsOf(mapped: MappedEvent, workdir: string): GuardedAction[]
   }
 
   return [];
+}
+
+/** Fecha a última tentativa registrada com o desfecho observado. */
+function closeLastAttempt(
+  attempts: TaskAttempt[],
+  outcome: OutcomeClass | 'invalid',
+  error: string | null,
+): TaskAttempt[] {
+  if (attempts.length === 0) return attempts;
+
+  const mapped: TaskAttempt['outcome'] =
+    outcome === 'success'
+      ? 'success'
+      : outcome === 'invalid'
+        ? 'invalid'
+        : outcome === 'canceled'
+          ? null
+          : 'error';
+
+  return attempts.map((a, i, arr) =>
+    i === arr.length - 1 ? { ...a, endedAt: nowIso(), outcome: mapped, error } : a,
+  );
+}
+
+function novaTentativa(n: number, agentId: string): TaskAttempt {
+  return { n, agentId, startedAt: nowIso(), endedAt: null, outcome: null, error: null };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function describeAction(action: GuardedAction): string {
@@ -120,6 +167,8 @@ export class SessionManager {
   readonly #runs = new Map<string, LiveRun>();
   /** Sessões cujo `seq` já foi reconciliado com o banco nesta instância. */
   readonly #seeded = new Set<string>();
+  /** Modelo declarado por sessão, para precificar os eventos que não o repetem. */
+  readonly #models = new Map<string, string>();
 
   constructor(
     private readonly config: HubConfig,
@@ -733,7 +782,8 @@ export class SessionManager {
     let nativeSeen = session.nativeSessionId;
 
     try {
-      for await (const mapped of handle.events) {
+      for await (const bruto of handle.events) {
+        const mapped = this.#priceEvent(session, bruto);
         this.#persistMapped(session, task, mapped);
 
         // Vigilância: classifica o que o agente ACABOU de fazer. Não previne a
@@ -804,49 +854,257 @@ export class SessionManager {
       return;
     }
 
-    const failed = outcome.reason !== 'exit' || (outcome.exitCode ?? 0) !== 0;
-    const attempts = (current?.attempts ?? task.attempts).map((a, i, arr) =>
-      i === arr.length - 1
-        ? {
-            ...a,
-            endedAt: nowIso(),
-            outcome: failed ? ('error' as const) : ('success' as const),
-            error: outcome.error,
-          }
-        : a,
-    );
+    await this.#settle(session, current ?? task, outcome, elapsedSeconds);
+  }
 
-    this.store.tasks.update(task.id, {
-      state: failed ? 'failed' : 'completed',
-      attempts,
-      result: failed
-        ? null
-        : {
-            summary: this.#summarize(session.id, task.id),
-            artifacts: [],
-            usage: {
-              ...this.store.events.costOf(session.id),
-              seconds: elapsedSeconds,
-            },
-          },
-    });
+  /**
+   * Decide o destino de uma run que terminou (ADR 04.3).
+   *
+   * Sucesso ainda não é entrega: passa pelo portão de validação antes de ser
+   * aceito. Falha não é fim: passa pela cadeia retry → fallback. Só quando os
+   * dois se esgotam a task morre — e morre mesmo, sem ficar pendurada
+   * esperando alguém aparecer (ADR 06.1).
+   */
+  async #settle(
+    session: Session,
+    task: Task,
+    outcome: RunOutcome,
+    elapsedSeconds: number,
+  ): Promise<void> {
+    const outcomeClass = classifyOutcome(outcome);
+    let attempts = closeLastAttempt(task.attempts, outcomeClass, outcome.error);
 
     this.#emit({
       sessionId: session.id,
       taskId: task.id,
       agentId: session.agentId,
-      type: failed ? 'error' : 'turn.completed',
+      type: outcomeClass === 'success' ? 'turn.completed' : 'error',
       payload: {
         reason: outcome.reason,
         exitCode: outcome.exitCode,
         error: outcome.error,
         elapsedSeconds,
+        outcomeClass,
       },
     });
 
-    // Avisa o pai de que a delegação terminou — é o que permite ao chamador
-    // reagir sem ficar em polling.
-    if (session.parentId) {
+    // --- sucesso: o portão de validação ainda pode reprovar -----------------
+    let effectiveClass = outcomeClass;
+    let validation: ValidationOutcome | null = null;
+
+    if (outcomeClass === 'success') {
+      validation = await runValidation(this.policyFor(session).policy.validation, {
+        workdir: session.workdir,
+        acceptanceCriteria: task.brief.acceptanceCriteria,
+      });
+
+      if (validationPassed(validation)) {
+        this.store.tasks.update(task.id, {
+          state: 'completed',
+          attempts,
+          result: {
+            summary: this.#summarize(session.id, task.id),
+            artifacts: [],
+            usage: { ...this.store.events.costOf(session.id), seconds: elapsedSeconds },
+            ...(validation ? { validation } : {}),
+          },
+        });
+        await this.#concludeSession(session, task, 'completed', null);
+        return;
+      }
+
+      const detail = validation?.checks.map((c) => c.detail).filter(Boolean).join(' | ') ?? '';
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'error',
+        payload: { message: `validação reprovou: ${detail}`, validation },
+      });
+
+      // Reprovar na validação volta para o retry (ADR 06), porque agora temos
+      // algo concreto para dizer ao agente — é a tentativa com mais chance de
+      // dar certo de todas.
+      effectiveClass = 'transient';
+      attempts = closeLastAttempt(attempts, 'invalid', detail || 'validação reprovou');
+    }
+
+    // --- falha: retry → fallback → desistir ---------------------------------
+    const step = nextStep(
+      { attempts, currentAgentId: session.agentId },
+      effectiveClass,
+      {
+        maxRetries: this.config.policy.retries.max,
+        backoffMs: this.config.policy.retries.backoffMs,
+        fallbackChain: this.#fallbackChain(session.agentId),
+      },
+    );
+
+    this.store.tasks.update(task.id, { attempts });
+
+    if (step.kind === 'retry') {
+      await this.#retry(session, task, step.agentId, step.backoffMs, step.reason, validation);
+      return;
+    }
+
+    if (step.kind === 'fallback') {
+      await this.#fallback(session, task, step.agentId, step.reason);
+      return;
+    }
+
+    this.store.tasks.update(task.id, { state: 'failed' });
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'error',
+      payload: {
+        // Alta prioridade porque é o fim da linha: ninguém mais vai tentar.
+        priority: 'high',
+        message: `tarefa encerrada sem sucesso — ${step.reason}`,
+        attempts: attempts.length,
+        lastError: outcome.error,
+      },
+    });
+    await this.#concludeSession(session, task, 'failed', outcome.error);
+  }
+
+  /** Nova tentativa com o mesmo agente, dizendo a ele o que deu errado. */
+  async #retry(
+    session: Session,
+    task: Task,
+    agentId: string,
+    backoffMs: number,
+    reason: string,
+    validation: ValidationOutcome | null,
+  ): Promise<void> {
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId,
+      type: 'log',
+      payload: { level: 'warn', text: `nova tentativa em ${backoffMs}ms — ${reason}` },
+    });
+
+    await sleep(backoffMs);
+
+    // A sessão pode ter sido cancelada enquanto esperávamos o backoff.
+    const fresh = this.store.sessions.get(session.id);
+    if (!fresh || fresh.state === 'killed' || fresh.state === 'waiting_approval') return;
+
+    // Relê do banco: `#settle` acabou de fechar a tentativa anterior com o
+    // desfecho dela. Usar o `task` recebido aqui reescreveria o histórico com
+    // a versão sem desfecho, e a auditoria perderia o motivo de cada falha.
+    const anterior = this.store.tasks.get(task.id) ?? task;
+    const updated = this.store.tasks.update(task.id, {
+      attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
+    });
+
+    const feedback = validation
+      ? `A tentativa anterior terminou, mas a validação reprovou:\n${validation.checks
+          .map((c) => `- ${c.name}: ${c.detail ?? 'reprovou'}`)
+          .join('\n')}\n\nCorrija exatamente isso e conclua.`
+      : `A tentativa anterior falhou (${reason}). Continue de onde parou.`;
+
+    // Retomar a sessão nativa é bem mais barato que reenviar o brief inteiro,
+    // e o agente já sabe o que tentou.
+    const canResume =
+      this.registry.get(agentId).manifest.session.strategy === 'native' &&
+      fresh.nativeSessionId !== null;
+
+    await this.#launch(
+      fresh,
+      updated,
+      canResume ? feedback : `${renderBriefAsPrompt(task.brief)}\n\n${feedback}`,
+      canResume ? fresh.nativeSessionId : null,
+    );
+  }
+
+  /**
+   * Passa a tarefa para o próximo agente da cadeia.
+   *
+   * O substituto entra como IRMÃO no grafo, não como filho: ele não foi
+   * chamado pelo que falhou, ele o está substituindo — e ver os dois lado a
+   * lado é o que deixa claro que houve uma troca.
+   */
+  async #fallback(
+    session: Session,
+    task: Task,
+    agentId: string,
+    reason: string,
+  ): Promise<void> {
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'log',
+      payload: { level: 'warn', text: `passando a tarefa para ${agentId} — ${reason}` },
+    });
+
+    await this.#concludeSession(session, task, 'failed', reason, { silentParent: true });
+
+    const project = this.store.projects.get(session.projectId);
+    if (!project) return;
+
+    const sessionId = newId('ses');
+    const worktree = await this.worktrees.create({
+      projectPath: project.path,
+      projectName: project.name,
+      sessionId,
+      isolation: session.isolation,
+    });
+
+    const replacement: Session = {
+      ...session,
+      id: sessionId,
+      agentId,
+      nativeSessionId: null,
+      // Mesma posição no grafo: troca de executor, não novo nível.
+      path: [...session.path.slice(0, -1), pathKey(agentId, task.brief.objective)],
+      state: 'running',
+      workdir: worktree.path,
+      title: session.title,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: null,
+    };
+
+    this.store.sessions.create(replacement);
+    this.bus.registerSession(sessionId, replacement.rootId);
+
+    const anterior = this.store.tasks.get(task.id) ?? task;
+    const updated = this.store.tasks.update(task.id, {
+      sessionId,
+      attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
+    });
+
+    // O histórico de falhas vai junto: sem ele o substituto recomeça cego e
+    // tende a cair no mesmo buraco.
+    const prompt = [renderBriefAsPrompt(task.brief), failureContext(updated.attempts)]
+      .filter((part) => part.length > 0)
+      .join('\n\n');
+
+    await this.#launch(replacement, updated, prompt, null);
+  }
+
+  /** Cadeia de fallback do agente, já filtrando quem não está instalado. */
+  #fallbackChain(agentId: string): string[] {
+    return this.registry
+      .fallbackFor(agentId, this.config.policy.fallback)
+      .filter((id) => this.registry.cachedProbe(id)?.installed !== false);
+  }
+
+  /** Fecha a sessão, avisa o pai e libera o que precisa ser liberado. */
+  async #concludeSession(
+    session: Session,
+    task: Task,
+    state: 'completed' | 'failed',
+    error: string | null,
+    options: { silentParent?: boolean } = {},
+  ): Promise<void> {
+    // Numa troca de agente o pai não deve ouvir "falhou": a tarefa dele
+    // continua viva, só mudou de mãos.
+    if (session.parentId && options.silentParent !== true) {
       const parent = this.store.sessions.get(session.parentId);
       if (parent) {
         this.#emit({
@@ -857,14 +1115,14 @@ export class SessionManager {
           payload: {
             childSessionId: session.id,
             agentId: session.agentId,
-            state: failed ? 'failed' : 'completed',
-            error: outcome.error,
+            state,
+            error,
           },
         });
       }
     }
 
-    await this.#finish(session.id, failed ? 'failed' : 'completed', outcome.error ?? undefined);
+    await this.#finish(session.id, state, error ?? undefined);
   }
 
   /**
@@ -931,6 +1189,47 @@ export class SessionManager {
       this.#seeded.add(sessionId);
     }
     return this.#seq.next(sessionId);
+  }
+
+  /**
+   * Preenche o custo em dólares antes de o evento virar histórico.
+   *
+   * Metade dos agentes reporta só tokens — o Codex é o caso claro. Sem esta
+   * etapa, o orçamento em dólares do fluxo simplesmente não se aplicaria a
+   * eles, e o painel mostraria "US$ 0,0000" para uma sessão que obviamente
+   * custou dinheiro. Estimar é melhor que fingir que foi de graça, desde que
+   * fique registrado que é estimativa: `costBasis` viaja no payload para a UI
+   * poder mostrar a diferença.
+   */
+  #priceEvent(session: Session, mapped: MappedEvent): MappedEvent {
+    // O modelo costuma aparecer uma vez, no início da sessão; guardamos para
+    // precificar os eventos seguintes, que não o repetem.
+    const declarado = mapped.payload['model'];
+    if (typeof declarado === 'string' && declarado.length > 0) {
+      this.#models.set(session.id, declarado);
+    }
+
+    if (!mapped.cost) return mapped;
+
+    const estimate = resolveEventCost(mapped.cost, {
+      model: this.#models.get(session.id),
+      agentId: session.agentId,
+    });
+
+    // `unknown` significa que não sabemos, não que foi zero: deixamos o campo
+    // como veio para não inventar um número com cara de exato.
+    if (estimate.basis === 'unknown') return mapped;
+
+    return {
+      ...mapped,
+      cost: { ...mapped.cost, usd: estimate.usd },
+      payload: {
+        ...mapped.payload,
+        costBasis: estimate.basis,
+        costConfidence: estimate.confidence,
+        ...(estimate.model ? { costModel: estimate.model } : {}),
+      },
+    };
   }
 
   #persistMapped(session: Session, task: Task, mapped: MappedEvent): void {
@@ -1062,13 +1361,26 @@ export class SessionManager {
    * pai, que é o que garante que delegar nunca aumente privilégio (ADR 03).
    */
   policyFor(session: Session): PolicyEngine {
-    const base = new PolicyEngine(this.config.policy);
+    const base = new PolicyEngine(this.#projectPolicy(session.projectId));
     if (!session.parentId) return base;
 
     const parent = this.store.sessions.get(session.parentId);
     if (!parent) return base;
 
-    return this.policyFor(parent).intersect(this.config.policy);
+    return this.policyFor(parent).intersect(base.policy);
+  }
+
+  /**
+   * Política global com os ajustes do projeto aplicados por cima (ADR 05.2).
+   *
+   * O projeto só consegue APERTAR — a fusão garante isso. Um repositório que
+   * pudesse elevar o próprio teto transformaria qualquer clone malicioso em
+   * execução arbitrária.
+   */
+  #projectPolicy(projectId: string): PolicyDocument {
+    const project = this.store.projects.get(projectId);
+    if (!project) return this.config.policy;
+    return mergeProjectPolicy(this.config.policy, loadProjectOverrides(project.path));
   }
 
   briefOf(sessionId: string): Brief {

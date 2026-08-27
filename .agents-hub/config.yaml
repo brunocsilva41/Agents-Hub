@@ -1,0 +1,29 @@
+# Configuração do Agents-Hub para ESTE repositório (ADR 05.2).
+#
+# Fica versionada junto do código: quem clona herda as regras que valem aqui.
+# Regra de ouro: o projeto só pode APERTAR a política global, nunca afrouxar —
+# a fusão em `packages/daemon/src/project-config.ts` garante isso, senão um
+# `.agents-hub/config.yaml` malicioso num repo clonado viraria execução
+# arbitrária na sua máquina.
+
+policy:
+  validation:
+    # Rodado no worktree da sessão quando o agente termina. Saída != 0 reprova
+    # e devolve a tarefa ao pipeline de resiliência, com o erro em mãos.
+    # Compilar é o portão certo aqui: pega a falha mais comum (o agente diz que
+    # terminou e o TypeScript não fecha) em segundos, sem depender de rede.
+    command: npx tsc -b
+    commandTimeoutSeconds: 300
+
+    review:
+      # Revisão por segundo agente custa uma sessão de modelo por tarefa.
+      # Ligue quando o trabalho justificar.
+      enabled: false
+      agent: null
+
+  commands:
+    # Somam à deny list global: aqui ninguém publica pacote nem mexe em release.
+    deny:
+      - npm publish
+      - npm version
+      - gh release

@@ -125,15 +125,43 @@ Só se escreve código quando o agente oferece algo que o genérico não cobre �
 
 O Hub **nunca** toca nas suas credenciais: cada adapter roda com o login que o próprio CLI já tem. O que ele controla é o resto.
 
-- Escrita fora do worktree da sessão pede aprovação
-- Comandos fora da allow list pedem aprovação
-- `git push`, deletes e publicações sempre pedem aprovação
+- Cada sessão roda num git worktree próprio — agentes não pisam uns nos outros nem nas suas mudanças locais
+- Orçamento é do fluxo inteiro, consumido pelos descendentes: o que um gasta, falta para os outros
 - Política de um filho = interseção com a do pai: **delegar nunca aumenta privilégio**
-- Orçamento é do fluxo inteiro, consumido pelos descendentes
+- Profundidade máxima e detecção de ciclo semântico impedem que delegação vire loop caro
+- `git push`, `rm -rf`, publish e caminhos sensíveis (`.ssh`, `.env`) param a sessão e abrem uma aprovação
 
 Detalhes e níveis de risco em [docs/decisoes/03-seguranca-limites.md](docs/decisoes/03-seguranca-limites.md).
 
-> A política já classifica toda ação em nível de risco e o motor está testado, mas o gancho que **bloqueia** a ação entra junto com a fila de aprovações. Até lá, o controle real é o worktree isolado, o orçamento e o botão de encerrar.
+**Dois níveis de controle, com garantias diferentes** — e é importante não confundi-los:
+
+- **Portão (preventivo):** delegação agente→agente e reserva de orçamento passam por dentro do Hub, então são retidas *antes* de acontecer. Em sessão `supervised`, toda delegação espera seu OK.
+- **Vigilância (reativa):** comando executado e arquivo alterado chegam como evento, *depois* do fato. O que o Hub impede é a próxima ação, parando a sessão. Chamar isso de aprovação prévia seria mentira.
+
+Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) para a sessão; sair da allow list vira alerta na timeline. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero.
+
+O gate verdadeiramente preventivo para shell e arquivo depende de integração por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) e está na fila.
+
+```bash
+node packages/cli/dist/main.js approvals        # o que espera sua decisão
+node packages/cli/dist/main.js approve <id>     # libera e a sessão continua
+```
+
+## Quando um agente falha
+
+O Hub não desiste na primeira: **retry** com backoff no mesmo agente (retomando a sessão nativa, que é mais barato), **fallback** pela cadeia `claude → codex → opencode` levando junto o histórico de falhas, e um **portão de validação** que roda o build/testes do projeto antes de aceitar o resultado — porque "terminou sem erro" e "entregou o que foi pedido" são coisas diferentes.
+
+O substituto entra como irmão no grafo, não como filho: ele não foi chamado por quem falhou, está no lugar dele.
+
+Configure o portão por repositório em `<repo>/.agents-hub/config.yaml`:
+
+```yaml
+policy:
+  validation:
+    command: npx tsc -b
+```
+
+O projeto só pode **apertar** a política global, nunca afrouxar — senão um `.agents-hub/config.yaml` num repo clonado viraria execução arbitrária. Detalhes em [docs/04-resiliencia-e-politica.md](docs/04-resiliencia-e-politica.md).
 
 ## Decisões
 

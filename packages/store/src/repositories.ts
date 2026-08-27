@@ -245,10 +245,15 @@ class SqliteTaskRepository implements TaskRepository {
     const next: Task = { ...current, ...patch, id, updatedAt: nowIso() };
     this.db
       .prepare(
-        `UPDATE tasks SET state = ?, attempts_json = ?, result_json = ?, brief_json = ?, updated_at = ?
+        // `session_id` entra no UPDATE porque o fallback MOVE a task para a
+        // sessão do agente substituto: a tarefa é a mesma, quem executa é que
+        // mudou. Sem isto a task continuaria apontando para a sessão que falhou.
+        `UPDATE tasks SET session_id = ?, state = ?, attempts_json = ?, result_json = ?,
+                          brief_json = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
+        next.sessionId,
         next.state,
         toJson(next.attempts),
         next.result ? toJson(next.result) : null,

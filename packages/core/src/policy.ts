@@ -59,6 +59,34 @@ export interface PolicyDocument {
   /** Cadeia de fallback por capability, ex.: `{"code-edit": ["claude","codex"]}`. */
   fallback: Record<string, string[]>;
   watch: WatchPolicy;
+  validation: ValidationPolicy;
+}
+
+/**
+ * Portão de validação do resultado (ADR 04.3).
+ *
+ * "O agente terminou sem erro" e "o agente entregou o que foi pedido" são
+ * coisas diferentes, e só a segunda importa. O portão existe para pegar
+ * resultado ruim, não só execução quebrada.
+ */
+export interface ValidationPolicy {
+  /**
+   * Comando rodado no worktree da sessão quando ela termina bem.
+   * Saída diferente de zero reprova e aciona a cadeia de resiliência.
+   * `null` desliga — é o padrão, porque não dá para adivinhar o comando de
+   * teste de um projeto qualquer.
+   */
+  command: string | null;
+  commandTimeoutSeconds: number;
+  /**
+   * Revisão por um segundo agente. Desligada por padrão: custa uma sessão
+   * inteira de modelo por task, o que só compensa em trabalho de alto valor.
+   */
+  review: {
+    enabled: boolean;
+    /** `null` usa o primeiro agente disponível da capability `code-review`. */
+    agent: string | null;
+  };
 }
 
 /**
@@ -154,6 +182,11 @@ export const DEFAULT_POLICY: PolicyDocument = {
   watch: {
     pauseOn: ['irreversible'],
     flagOn: ['escalate'],
+  },
+  validation: {
+    command: null,
+    commandTimeoutSeconds: 600,
+    review: { enabled: false, agent: null },
   },
 };
 
@@ -325,6 +358,18 @@ export class PolicyEngine {
         // pararia, mais o que ele mesmo declarar.
         pauseOn: [...new Set([...parent.watch.pauseOn, ...child.watch.pauseOn])],
         flagOn: [...new Set([...parent.watch.flagOn, ...child.watch.flagOn])],
+      },
+      validation: {
+        // O filho não pode desligar um portão que o pai exige.
+        command: parent.validation.command ?? child.validation.command,
+        commandTimeoutSeconds: Math.min(
+          parent.validation.commandTimeoutSeconds,
+          child.validation.commandTimeoutSeconds,
+        ),
+        review: {
+          enabled: parent.validation.review.enabled || child.validation.review.enabled,
+          agent: child.validation.review.agent ?? parent.validation.review.agent,
+        },
       },
     });
   }

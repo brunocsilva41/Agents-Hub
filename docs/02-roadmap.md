@@ -79,9 +79,38 @@ Fecha os dois desvios que a auditoria encontrou entre os ADRs e o código.
 | A rota de delegação não devolvia a aprovação e reportava o estado do objeto em memória: quem chamou via "working" numa tarefa que nem começou — um agente ficaria em polling eterno | Estado relido do banco e `approval` propagado até o `hub_agent_call` do MCP, com instrução explícita de não ficar em polling |
 | `seq` vivia só em memória: emitir evento numa sessão criada antes de um restart do daemon recomeçava do 1 e colidia com a chave única `(session_id, seq)`, derrubando cancelamento e negação | Semeadura preguiçosa a partir do banco na primeira vez que a sessão é vista |
 
-### Restante da fase 2
+### Pipeline de resiliência — 2026-08-27
 
-- [ ] Pipeline de resiliência completo: retry com backoff → fallback por cadeia → portão de validação
+Fecha o ADR 04.3 e coloca em uso a cadeia de fallback do ADR 06.2, que até
+então estava configurada sem consumidor.
+
+- [x] `packages/core/src/resilience.ts`: classificação de desfecho e decisão
+      retry / fallback / desistir, em forma **pura** — a lógica que mais precisa
+      de teste é a que menos precisa de processo rodando
+- [x] Retry com backoff exponencial no mesmo agente, retomando a sessão nativa
+      quando o agente suporta (mais barato que reenviar o brief) e levando junto
+      o motivo da falha anterior
+- [x] Fallback pela cadeia `claude → codex → opencode`, filtrando quem não está
+      instalado. O substituto entra como **irmão** no grafo, não como filho:
+      ele não foi chamado pelo que falhou, está no lugar dele — e ver os dois
+      lado a lado é o que torna a troca auditável
+- [x] `failureContext`: o histórico de falhas vai anexado ao brief do substituto,
+      senão ele recomeça cego e cai no mesmo buraco
+- [x] **Portão de validação** por comando (build/testes/lint) rodado no worktree;
+      reprovar volta ao retry com o detalhe do que falhou — a tentativa com mais
+      chance de dar certo de todas
+- [x] Desistência termina em `failed` com evento de prioridade alta (ADR 06.1),
+      sem pendurar a task esperando alguém
+- [x] 15 testes unitários + **teste de integração com agentes falsos**: scripts
+      Node que falham sob comando, exercitando retry e fallback com custo zero
+
+**Limite assumido:** os critérios de aceite em linguagem natural NÃO são
+verificados por heurística de texto. Comparar critério com resumo por
+similaridade produz veredito que parece rigoroso e não é. Quem faz isso de
+verdade é o portão de revisão por segundo agente, que custa uma sessão de modelo
+e por isso é opt-in; os critérios seguem no brief dessa revisão.
+
+### Restante da fase 2
 - [ ] Gate PRÉ-execução por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) — hoje comando e arquivo só podem ser vigiados depois do fato
 - [ ] Adapter HTTP do OpenCode sobre `opencode serve` (sessões, SSE e custo reais)
 - [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo

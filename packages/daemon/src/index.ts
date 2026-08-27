@@ -13,4 +13,13 @@ export { SessionManager, type StartSessionInput, type StartSessionResult } from 
 export { HubServer } from './server.js';
 export { serveStatic } from './static.js';
 export { WorktreeReaper, type SweepResult } from './reaper.js';
+export {
+  loadProjectOverrides,
+  mergeProjectPolicy,
+  projectConfigPath,
+  clearProjectConfigCache,
+  PROJECT_CONFIG_RELATIVE,
+  type ProjectPolicyOverrides,
+} from './project-config.js';
+export { runValidation } from './validation.js';
 export { createHub, type Hub } from './hub.js';
