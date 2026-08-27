@@ -1,0 +1,20 @@
+{
+  "name": "@agents-hub/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server do Agents-Hub: dá a qualquer agente as ferramentas para chamar, observar e controlar os outros.",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agents-hub-mcp": "./dist/main.js"
+  },
+  "dependencies": {
+    "@agents-hub/client": "0.1.0",
+    "@agents-hub/core": "0.1.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.24.1"
+  }
+}

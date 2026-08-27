@@ -12,6 +12,7 @@
     "hub": "./dist/main.js"
   },
   "dependencies": {
+    "@agents-hub/client": "0.1.0",
     "@agents-hub/core": "0.1.0",
     "@agents-hub/daemon": "0.1.0"
   }

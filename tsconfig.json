@@ -2,9 +2,11 @@
   "files": [],
   "references": [
     { "path": "packages/core" },
+    { "path": "packages/client" },
     { "path": "packages/store" },
     { "path": "packages/adapters" },
     { "path": "packages/daemon" },
+    { "path": "packages/mcp" },
     { "path": "packages/cli" }
   ]
 }

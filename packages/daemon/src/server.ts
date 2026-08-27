@@ -169,6 +169,58 @@ export class HubServer {
       sendJson(res, 201, result);
     });
 
+    /**
+     * Adoção: um agente rodando fora do Hub se apresenta como sessão-raiz.
+     * Registrada antes de `/sessions/:id` para "adopt" não ser lido como id.
+     */
+    this.#route('POST', '/sessions/adopt', async (req, res) => {
+      const body = await readJson<{
+        agentId: string;
+        projectPath?: string;
+        projectId?: string;
+        title?: string;
+        budget?: { usd?: number; tokens?: number; seconds?: number };
+      }>(req);
+
+      const projectId =
+        body.projectId ?? this.sessions.registerProject(body.projectPath ?? process.cwd()).id;
+
+      sendJson(res, 201, {
+        session: this.sessions.adoptExternal({
+          agentId: body.agentId,
+          projectId,
+          title: body.title,
+          budget: body.budget,
+        }),
+      });
+    });
+
+    this.#route('POST', '/sessions/:id/detach', async (_req, res, params) => {
+      await this.sessions.detach(params['id'] ?? '');
+      sendJson(res, 200, { ok: true });
+    });
+
+    this.#route('GET', '/sessions/:id/tasks', (_req, res, params) => {
+      sendJson(res, 200, { tasks: this.sessions.listTasks(params['id'] ?? '') });
+    });
+
+    this.#route('GET', '/tasks/:id', (_req, res, params) => {
+      const task = this.sessions.getTask(params['id'] ?? '');
+      const session = this.sessions.getSession(task.sessionId);
+      sendJson(res, 200, {
+        task,
+        session,
+        live: this.sessions.isLive(task.sessionId),
+        budget: this.sessions.budget(session.rootId),
+      });
+    });
+
+    this.#route('GET', '/context', (req, res) => {
+      const url = new URL(req.url ?? '/', 'http://local');
+      const ref = url.searchParams.get('ref') ?? '';
+      sendJson(res, 200, this.sessions.fetchContext(ref));
+    });
+
     this.#route('GET', '/sessions/:id', (_req, res, params) => {
       const id = params['id'] ?? '';
       sendJson(res, 200, {

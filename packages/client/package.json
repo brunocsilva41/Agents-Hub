@@ -1,0 +1,14 @@
+{
+  "name": "@agents-hub/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cliente da API do daemon, compartilhado por CLI, MCP server e Web UI.",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@agents-hub/core": "0.1.0"
+  }
+}

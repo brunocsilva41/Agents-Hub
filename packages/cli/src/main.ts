@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { baseUrl, createHub, loadConfig } from '@agents-hub/daemon';
-import { HubClient, type GraphSummary, type ProbeSummary } from './client.js';
+import { HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import {
   bold,
   cyan,
@@ -14,6 +15,14 @@ import {
   stateBadge,
   yellow,
 } from './render.js';
+import {
+  MCP_TARGETS,
+  mcpEntrypoint,
+  renderSnippet,
+  resolveConfigPath,
+  serverSpec,
+  writeConfig,
+} from './mcp-install.js';
 
 interface Args {
   command: string;
@@ -26,7 +35,7 @@ interface Args {
  * consome o objetivo como valor de `--detach` e o comando falha dizendo que
  * faltou o objetivo — que estava lá o tempo todo.
  */
-const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet']);
+const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write']);
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -99,6 +108,12 @@ ${bold('Delegação e custo')}
   hub graph <rootId>                                  árvore de quem chamou quem
   hub budget <rootId>                                 consumo contra o orçamento
 
+${bold('MCP — dar ao agente o poder de chamar os outros')}
+  hub mcp                            mostra o estado do registro em cada agente
+  hub mcp show <agente>              imprime o trecho de config para colar
+  hub mcp install <agente> --write   grava a config (com backup .bak e merge)
+      --project <caminho>    para agentes com config por projeto (Claude Code)
+
 ${dim('Alvo do --agent aceita id (codex) ou capability (cap:test-writing).')}
 `;
 
@@ -142,6 +157,9 @@ async function main(): Promise<void> {
       });
     case 'delegate':
       return withDaemon(() => delegate(client, args));
+    case 'mcp':
+      // Não exige daemon: registrar a config é offline.
+      return mcpCommand(args, config);
     case 'graph':
       return withDaemon(() => showGraph(client, args));
     case 'budget':
@@ -288,14 +306,19 @@ async function start(client: HubClient, args: Args): Promise<void> {
   }
 
   const projectId = await resolveProjectId(client, args.flags['project']);
-  const brief: Record<string, unknown> = {
+  const brief: BriefInput = {
     agent,
     objective,
-    isolation: typeof args.flags['isolation'] === 'string' ? args.flags['isolation'] : 'worktree',
+    isolation:
+      args.flags['isolation'] === 'none'
+        ? 'none'
+        : args.flags['isolation'] === 'container'
+          ? 'container'
+          : 'worktree',
   };
-  if (typeof args.flags['mode'] === 'string') brief['supervision'] = args.flags['mode'];
+  if (isSupervision(args.flags['mode'])) brief.supervision = args.flags['mode'];
   if (typeof args.flags['budget-usd'] === 'string') {
-    brief['budget'] = { usd: Number(args.flags['budget-usd']) };
+    brief.budget = { usd: Number(args.flags['budget-usd']) };
   }
 
   const result = await client.startSession({ projectId, brief });
@@ -404,9 +427,9 @@ async function delegate(client: HubClient, args: Args): Promise<void> {
     return;
   }
 
-  const brief: Record<string, unknown> = { agent, objective };
+  const brief: BriefInput = { agent, objective };
   if (typeof args.flags['budget-usd'] === 'string') {
-    brief['budget'] = { usd: Number(args.flags['budget-usd']) };
+    brief.budget = { usd: Number(args.flags['budget-usd']) };
   }
 
   const result = await client.delegate(sessionId, brief);
@@ -447,6 +470,108 @@ async function showBudget(client: HubClient, args: Args): Promise<void> {
   );
   console.log(`${dim('tempo:  ')} ${budget.consumed.seconds}s / ${budget.limits.seconds}s`);
   if (budget.exhausted) console.log(red('\norçamento esgotado — tasks entram em espera por você'));
+}
+
+// ---------------------------------------------------------------- MCP
+
+function mcpCommand(args: Args, config: { host: string; port: number }): void {
+  const hubUrl = baseUrl(config);
+  const [sub, agentId] = args.positional;
+  const projectPath = path.resolve(
+    typeof args.flags['project'] === 'string' ? args.flags['project'] : process.cwd(),
+  );
+
+  if (sub === undefined) return mcpStatus(hubUrl, projectPath);
+
+  const target = MCP_TARGETS.find((t) => t.agentId === agentId);
+  if (!target) {
+    console.error(
+      red(`agente "${agentId ?? ''}" desconhecido.`),
+      dim(`disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')}`),
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const spec = serverSpec(target.agentId, hubUrl);
+  const configPath = resolveConfigPath(target, projectPath);
+
+  if (sub === 'show') {
+    console.log(`${bold(target.label)}\n${dim(configPath)}\n`);
+    console.log(renderSnippet(target, spec));
+    if (!target.verified) {
+      console.log(`\n${yellow('⚠')} ${dim('caminho/formato não confirmado — verifique na doc do agente')}`);
+    }
+    return;
+  }
+
+  if (sub !== 'install') {
+    console.error(red('uso: hub mcp [show|install] <agente>'));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (args.flags['write'] !== true) {
+    // Escrever em config de outra ferramenta é ação persistente e fora do
+    // nosso território: por padrão só mostramos o que faríamos.
+    console.log(`${bold(target.label)}\n${dim(configPath)}\n`);
+    console.log(renderSnippet(target, spec));
+    console.log(
+      `\n${dim('nada foi gravado. para aplicar:')} ${bold(
+        `hub mcp install ${target.agentId} --write`,
+      )}`,
+    );
+    return;
+  }
+
+  try {
+    const outcome = writeConfig(target, spec, configPath);
+    const verb = { created: 'criado', merged: 'atualizado', unchanged: 'já estava correto' }[
+      outcome.action
+    ];
+    console.log(`${green('✓')} ${target.label}: ${verb}`);
+    console.log(`   ${dim(outcome.path)}`);
+    if (outcome.backup) console.log(`   ${dim(`backup: ${outcome.backup}`)}`);
+    if (!target.verified) {
+      console.log(
+        `   ${yellow('⚠')} ${dim('formato não confirmado para este agente — teste antes de confiar')}`,
+      );
+    }
+    console.log(`\n${dim('reinicie o agente para ele carregar o MCP server.')}`);
+  } catch (err) {
+    console.error(red((err as Error).message));
+    process.exitCode = 1;
+  }
+}
+
+function mcpStatus(hubUrl: string, projectPath: string): void {
+  console.log(`${dim('MCP server:')} ${mcpEntrypoint()}`);
+  console.log(`${dim('daemon:    ')} ${hubUrl}\n`);
+
+  for (const target of MCP_TARGETS) {
+    const configPath = resolveConfigPath(target, projectPath);
+    const registered = isRegistered(configPath);
+    const icon = registered ? green('✓') : dim('○');
+    const status = registered ? green('registrado') : dim('não registrado');
+    console.log(`${icon} ${bold(target.agentId.padEnd(12))} ${status}`);
+    console.log(`   ${dim(configPath)}`);
+    if (target.note) console.log(`   ${dim(target.note)}`);
+    if (!target.verified) console.log(`   ${yellow('⚠')} ${dim('caminho não confirmado')}`);
+  }
+
+  console.log(`\n${dim('para registrar:')} ${bold('hub mcp install <agente> --write')}`);
+}
+
+function isRegistered(configPath: string): boolean {
+  try {
+    return readFileSync(configPath, 'utf8').includes('agents-hub');
+  } catch {
+    return false;
+  }
+}
+
+function isSupervision(value: unknown): value is 'supervised' | 'semi' | 'autonomous' {
+  return value === 'supervised' || value === 'semi' || value === 'autonomous';
 }
 
 function required(value: string | undefined, name: string): string {

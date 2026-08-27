@@ -299,10 +299,143 @@ export class SessionManager {
     this.store.sessions.update(sessionId, { state: 'paused' });
   }
 
+  /**
+   * Adota um agente que roda FORA do Hub como sessão-raiz.
+   *
+   * É o que faz "qualquer um pode ser o principal" funcionar de verdade:
+   * quando você abre o Cursor na mão e ele chama `hub_agent_call`, o Cursor não
+   * tem sessão no Hub — sem adoção, o filho nasceria órfão e o grafo, o
+   * orçamento do fluxo e a herança de política não teriam a quem se ancorar.
+   *
+   * A sessão adotada é um nó de controle: não tem processo, não é isolada
+   * (o agente externo trabalha onde já estava), e existe para ser pai.
+   */
+  adoptExternal(input: {
+    agentId: string;
+    projectId: string;
+    title?: string;
+    budget?: Partial<BudgetLimits>;
+  }): Session {
+    const project = this.store.projects.get(input.projectId);
+    if (!project) {
+      throw new HubError('PROJECT_NOT_FOUND', `Projeto ${input.projectId} não encontrado`, {
+        projectId: input.projectId,
+      });
+    }
+    if (!this.registry.has(input.agentId)) {
+      throw new HubError('AGENT_NOT_FOUND', `Agente "${input.agentId}" não registrado`, {
+        agentId: input.agentId,
+        available: this.registry.ids(),
+      });
+    }
+
+    const manifest = this.registry.get(input.agentId).manifest;
+    const sessionId = newId('ses');
+    const session: Session = {
+      id: sessionId,
+      projectId: project.id,
+      agentId: input.agentId,
+      nativeSessionId: null,
+      rootId: sessionId,
+      parentId: null,
+      depth: 0,
+      path: [pathKey(input.agentId, `external:${input.agentId}`)],
+      state: 'running',
+      mode: manifest.defaults.supervision,
+      isolation: 'none',
+      workdir: project.path,
+      title: input.title ?? `${manifest.name} (externo)`,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: null,
+    };
+
+    this.store.sessions.create(session);
+    this.bus.registerSession(sessionId, sessionId);
+
+    this.#ledger(sessionId, {
+      usd: input.budget?.usd ?? this.config.policy.defaultBudget.usd,
+      tokens: input.budget?.tokens ?? this.config.policy.defaultBudget.tokens,
+      seconds: input.budget?.seconds ?? this.config.policy.defaultBudget.seconds,
+    });
+
+    this.#emit({
+      sessionId,
+      taskId: null,
+      agentId: input.agentId,
+      type: 'session.started',
+      payload: { external: true, adoptedAt: nowIso() },
+    });
+
+    return session;
+  }
+
+  /**
+   * Encerra uma sessão adotada sem matar os filhos: o agente externo saiu, mas
+   * o trabalho que ele delegou continua valendo.
+   */
+  async detach(sessionId: string): Promise<void> {
+    const session = this.#session(sessionId);
+    this.#emit({
+      sessionId,
+      taskId: null,
+      agentId: session.agentId,
+      type: 'session.ended',
+      payload: { reason: 'agente externo desconectou', external: true },
+    });
+    await this.#finish(sessionId, 'completed');
+  }
+
   // ---------------------------------------------------------------- consultas
 
   getSession(sessionId: string): Session {
     return this.#session(sessionId);
+  }
+
+  getTask(taskId: string): Task {
+    const task = this.store.tasks.get(taskId);
+    if (!task) {
+      throw new HubError('TASK_NOT_FOUND', `Task ${taskId} não encontrada`, { taskId });
+    }
+    return task;
+  }
+
+  listTasks(sessionId: string): Task[] {
+    return this.store.tasks.list({ sessionId });
+  }
+
+  /**
+   * Resolve referências de contexto do Brief (`session:<id>#event:<seq>`).
+   *
+   * A delegação passa ponteiros, não conteúdo (ADR 03.4) — este é o método que
+   * o filho usa quando decide que precisa mesmo ver um trecho do que o pai fez.
+   */
+  fetchContext(ref: string): { ref: string; events: EventEnvelope[] } {
+    const match = /^session:([^#]+)(?:#event:(\d+))?$/.exec(ref.trim());
+    if (!match) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `Referência inválida: "${ref}". Use session:<id> ou session:<id>#event:<seq>`,
+        { ref },
+      );
+    }
+
+    const sessionId = match[1] as string;
+    this.#session(sessionId);
+
+    if (match[2] === undefined) {
+      return { ref, events: this.store.events.list({ sessionId, limit: 200 }) };
+    }
+
+    const seq = Number(match[2]);
+    // Uma janela ao redor do evento apontado: um evento isolado quase nunca
+    // é interpretável sem o que veio logo antes e depois.
+    return {
+      ref,
+      events: this.store.events
+        .list({ sessionId, sinceSeq: Math.max(0, seq - 6), limit: 13 })
+        .filter((e) => e.seq <= seq + 6),
+    };
   }
 
   listSessions(filter: { projectId?: string; rootId?: string } = {}): Session[] {
