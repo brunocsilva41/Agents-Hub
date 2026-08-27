@@ -160,6 +160,10 @@ export class HubClient {
   }
 
   // ------------------------------------------------------------- manutenção
+  shutdown(): Promise<{ ok: boolean }> {
+    return this.#post('/shutdown', {});
+  }
+
   sweep(): Promise<{ sweep: { examined: number; removed: string[]; kept: number } }> {
     return this.#post('/maintenance/sweep', {});
   }

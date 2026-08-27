@@ -2,7 +2,7 @@
 
 > Plano de controle onde **qualquer** agente de IA pode orquestrar e ser orquestrado.
 
-Claude Code, Codex, Cursor, Copilot, OpenCode, Antigravity, Kimi Code e MiMo — todos reduzidos ao mesmo modelo de sessão, evento, política e orçamento. Nenhum papel é fixo: "principal" é apenas quem detém a sessão-raiz, e você escolhe isso a cada sessão.
+Claude Code, Codex, OpenCode, Copilot, Kimi Code, MiMo, OpenClaude, Cursor e Antigravity — todos reduzidos ao mesmo modelo de sessão, evento, política e orçamento. Nenhum papel é fixo: "principal" é apenas quem detém a sessão-raiz, e você escolhe isso a cada sessão.
 
 ## Por que existe
 
@@ -17,7 +17,7 @@ Cada agente é ótimo em algo e cego para o resto. Hoje, fazer um chamar o outro
 
 ## Estado atual
 
-**Fases 1 e 2 rodando e validadas com agentes reais.** Um agente inicia sessão, produz eventos normalizados, roda isolado, respeita orçamento — e delega para outro agente, pela CLI, pelo painel ou por MCP.
+**Fases 1 e 2 rodando e validadas com agentes reais.** Um agente inicia sessão, produz eventos normalizados, roda isolado num worktree, respeita orçamento, passa por portão de validação — e delega para outro agente, pela CLI, pelo painel ou por MCP. Quando falha, o Hub tenta de novo e depois troca de agente.
 
 ```
 cursor [running]  US$ 0.0000 · 0 tok      ← agente externo, adotado como raiz
@@ -28,48 +28,51 @@ cursor [running]  US$ 0.0000 · 0 tok      ← agente externo, adotado como raiz
 ## Começando
 
 ```bash
-npm install && npm run build
+npm install && npm run build && npm link --workspace @agents-hub/cli
 ```
 
-Suba o daemon — ele mantém as sessões vivas e serve o painel:
+Pronto — `hub` está no PATH. **Não existe passo "suba o daemon"**: ele nasce sozinho quando algum comando precisa e sobrevive ao terminal que você fechar.
 
 ```bash
-node packages/cli/dist/main.js daemon
+hub status     # agentes disponíveis, sessões vivas, o que espera sua decisão
+hub doctor     # o que está instalado, com versão e caminho
 ```
 
-O painel abre em **http://127.0.0.1:4747**. Em outro terminal, veja quais agentes você tem:
-
-```bash
-node packages/cli/dist/main.js doctor
-```
+O painel fica em **http://127.0.0.1:4747**.
 
 Abra uma sessão — o `--agent` é obrigatório porque **você escolhe o principal a cada vez**:
 
 ```bash
-node packages/cli/dist/main.js start --agent claude --budget-usd 2 "refatore o módulo de pagamentos"
+hub start --agent claude --budget-usd 2 "refatore o módulo de pagamentos"
 ```
 
 Faça um agente chamar outro:
 
 ```bash
-node packages/cli/dist/main.js delegate <sessionId> --agent codex --budget-usd 0.5 "escreva os testes do que foi refatorado"
+hub delegate <sessionId> --agent codex --budget-usd 0.5 "escreva os testes do que foi refatorado"
 ```
 
 Veja quem chamou quem e quanto custou:
 
 ```bash
-node packages/cli/dist/main.js graph <rootId>
+hub graph <rootId>
 ```
 
-`hub help` lista tudo.
+Quando quiser encerrar tudo:
+
+```bash
+hub stop
+```
+
+`hub help` lista o resto.
 
 ## Dar aos seus agentes o poder de chamar os outros
 
 O Hub se expõe como **MCP server** — o único protocolo que os oito CLIs já falam. Registrado uma vez, o Cursor pode chamar o Claude, que chama o Codex.
 
 ```bash
-node packages/cli/dist/main.js mcp                        # o que está registrado onde
-node packages/cli/dist/main.js mcp install codex --write  # grava, com backup e merge
+hub mcp                        # o que está registrado onde
+hub mcp install codex --write  # grava, com backup e merge
 ```
 
 O agente ganha 11 ferramentas: `hub_agent_call` (delega e volta na hora com um `task_id`), `hub_agent_status`, `hub_agent_wait`, `hub_agent_events`, `hub_agent_cancel`, `hub_session_send`, `hub_graph`, `hub_budget` e mais.
@@ -93,8 +96,8 @@ CLIENTES     CLI · Web UI  ──────── HTTP + SSE (API única) ─
 TRANSPORTS   MCP server · A2A server (fase 3) · REST/SSE          │
 CORE         Orchestrator · SessionManager · CallGraph            │
              PolicyEngine · BudgetLedger · CapabilityRegistry     │
-ADAPTERS     claude · codex · opencode · cursor · copilot         │
-             antigravity · kimi · mimo  (dirigidos por manifesto) │
+ADAPTERS     claude · codex · opencode · copilot · kimi · mimo    │
+             openclaude · cursor · antigravity (por manifesto)     │
 INFRA        SQLite · WorktreeManager · ProcessHost               ┘
 ```
 
@@ -143,8 +146,8 @@ Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) para a s
 O gate verdadeiramente preventivo para shell e arquivo depende de integração por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) e está na fila.
 
 ```bash
-node packages/cli/dist/main.js approvals        # o que espera sua decisão
-node packages/cli/dist/main.js approve <id>     # libera e a sessão continua
+hub approvals        # o que espera sua decisão
+hub approve <id>     # libera e a sessão continua
 ```
 
 ## Quando um agente falha

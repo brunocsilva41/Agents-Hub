@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { baseUrl, createHub, loadConfig } from '@agents-hub/daemon';
 import { HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
+import { ensureDaemon } from './daemon-control.js';
 import {
   bold,
   cyan,
@@ -80,9 +81,11 @@ function parseArgs(argv: string[]): Args {
 const HELP = `
 ${bold('hub')} — plano de controle do Agents-Hub
 
-${bold('Daemon')}
-  hub daemon                        sobe o daemon em primeiro plano
-  hub health                        verifica se o daemon responde
+${bold('Daemon')} ${dim('(sobe sozinho quando algum comando precisa)')}
+  hub status                        agentes, sessões vivas e o que espera você
+  hub daemon                        roda em primeiro plano, para ver os logs
+  hub stop                          encerra o daemon e as sessões vivas
+  hub health                        resposta crua da API
 
 ${bold('Agentes')}
   hub doctor                        checa quais agentes estão instalados
@@ -134,6 +137,10 @@ async function main(): Promise<void> {
   switch (args.command) {
     case 'daemon':
       return runDaemon();
+    case 'stop':
+      return stopDaemon(client);
+    case 'status':
+      return withDaemon(() => status(client));
     case 'health':
       return withDaemon(async () => {
         console.log(JSON.stringify(await client.health(), null, 2));
@@ -213,14 +220,30 @@ async function runDaemon(): Promise<void> {
   process.on('SIGTERM', () => void stop());
 }
 
-/** Mensagem útil em vez de um ECONNREFUSED cru quando o daemon não está de pé. */
+/**
+ * Garante o daemon no ar antes de qualquer comando.
+ *
+ * O daemon é detalhe de implementação do Hub: exigir que você lembre de subir
+ * um processo antes de usar a ferramenta era o atrito número um. Agora ele
+ * nasce sozinho na primeira necessidade e sobrevive ao terminal.
+ */
 async function withDaemon(fn: () => Promise<void>): Promise<void> {
+  const client = new HubClient(baseUrl(loadConfig()));
+
+  try {
+    await ensureDaemon(client);
+  } catch (err) {
+    console.error(red((err as Error).message));
+    process.exitCode = 1;
+    return;
+  }
+
   try {
     await fn();
   } catch (err) {
     const message = (err as Error).message ?? '';
     if (message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
-      console.error(red('daemon não está rodando.'), dim('suba com:'), bold('hub daemon'));
+      console.error(red('o daemon caiu no meio da operação.'), dim('veja:'), bold('hub daemon'));
       process.exitCode = 1;
       return;
     }
@@ -530,6 +553,60 @@ async function showBudget(client: HubClient, args: Args): Promise<void> {
   );
   console.log(`${dim('tempo:  ')} ${budget.consumed.seconds}s / ${budget.limits.seconds}s`);
   if (budget.exhausted) console.log(red('\norçamento esgotado — tasks entram em espera por você'));
+}
+
+/** Encerra o daemon sem caçar PID — ele sobe sozinho, então precisa morrer sozinho. */
+async function stopDaemon(client: HubClient): Promise<void> {
+  try {
+    await client.shutdown();
+    console.log(green('daemon encerrado'));
+  } catch (err) {
+    const message = (err as Error).message ?? '';
+    if (message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
+      console.log(dim('o daemon já não estava rodando.'));
+      return;
+    }
+    console.error(red(message));
+    process.exitCode = 1;
+  }
+}
+
+/** Uma tela com tudo que importa saber antes de começar a trabalhar. */
+async function status(client: HubClient): Promise<void> {
+  const [saude, { agents }, { sessions }, { approvals }] = await Promise.all([
+    client.health(),
+    client.agents(),
+    client.sessions(),
+    client.approvals(),
+  ]);
+
+  const disponiveis = agents.filter((a) => a.probe?.installed === true);
+  const vivas = sessions.filter((s) => s.state === 'running' || s.state === 'waiting_approval');
+
+  console.log(`${green('●')} daemon no ar ${dim(saude.home)}`);
+  console.log(
+    `${dim('agentes:  ')} ${disponiveis.length}/${agents.length} disponíveis ${dim(
+      disponiveis.map((a) => a.id).join(', '),
+    )}`,
+  );
+  console.log(`${dim('sessões:  ')} ${vivas.length} ativa(s) de ${sessions.length} no histórico`);
+
+  for (const sessao of vivas.slice(0, 8)) {
+    console.log(
+      `   ${stateBadge(sessao.state)} ${bold(sessao.id)} ${cyan(sessao.agentId)} ${dim(
+        sessao.title ?? '',
+      )}`,
+    );
+  }
+
+  if (approvals.length > 0) {
+    console.log(
+      `
+${yellow(`⏸ ${approvals.length} aprovação(ões) esperando você`)} ${dim(
+        '— hub approvals',
+      )}`,
+    );
+  }
 }
 
 // -------------------------------------------------------- aprovações

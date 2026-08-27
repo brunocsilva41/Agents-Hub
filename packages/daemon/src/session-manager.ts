@@ -12,6 +12,7 @@ import {
   nextStep,
   validationPassed,
   inheritMode,
+  isTerminalTaskState,
   makeEvent,
   newId,
   nowIso,
@@ -378,6 +379,51 @@ export class SessionManager {
     await this.#launch(session, task, renderBriefAsPrompt(brief), null);
 
     return { session, task, budget: ledger.snapshot() };
+  }
+
+  /**
+   * Reconcilia o estado persistido com a realidade, na subida do daemon.
+   *
+   * Uma run só existe DENTRO de um processo do daemon. Quando ele morre — crash,
+   * reinício, `hub stop` —, as sessões que estavam `running` ficam gravadas como
+   * ativas para sempre: aparecem vivas no `hub status` e no painel, ocupam lugar
+   * na cabeça de quem lê, e nunca progridem porque não há processo por trás.
+   *
+   * Sessões esperando aprovação humana são a exceção e ficam de pé: elas não
+   * dependem de processo nenhum, dependem de você.
+   */
+  reconcileOnStartup(): { revividas: number; encerradas: number } {
+    const pendentes = new Set(
+      this.store.approvals.listPending().map((a) => a.sessionId),
+    );
+
+    let encerradas = 0;
+    let revividas = 0;
+
+    for (const sessao of this.store.sessions.list()) {
+      if (sessao.state !== 'running' && sessao.state !== 'waiting_approval') continue;
+
+      if (sessao.state === 'waiting_approval' && pendentes.has(sessao.id)) {
+        revividas += 1;
+        continue;
+      }
+
+      this.store.sessions.update(sessao.id, {
+        state: 'killed',
+        endedAt: sessao.endedAt ?? nowIso(),
+      });
+
+      // A task fica em `failed` para o pipeline não achar que ainda há trabalho.
+      for (const task of this.store.tasks.list({ sessionId: sessao.id })) {
+        if (!isTerminalTaskState(task.state)) {
+          this.store.tasks.update(task.id, { state: 'failed' });
+        }
+      }
+
+      encerradas += 1;
+    }
+
+    return { revividas, encerradas };
   }
 
   // ------------------------------------------------------------- aprovações

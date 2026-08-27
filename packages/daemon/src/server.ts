@@ -31,6 +31,8 @@ interface Route {
 export class HubServer {
   readonly #routes: Route[] = [];
   #server: Server | null = null;
+  /** Preenchido pelo `createHub`: como derrubar o Hub inteiro, não só o HTTP. */
+  onShutdown: (() => Promise<void>) | null = null;
 
   constructor(
     private readonly config: HubConfig,
@@ -326,6 +328,19 @@ export class HubServer {
     });
 
     // --------------------------------------------------------- manutenção
+    /**
+     * Desligamento ordenado pelo cliente.
+     *
+     * Só existe porque o daemon agora sobe sozinho: se ele pode nascer sem você
+     * pedir, precisa poder morrer sem você caçar o PID. Aceita só de localhost
+     * — a mesma restrição de todas as outras rotas.
+     */
+    this.#route('POST', '/shutdown', (_req, res) => {
+      sendJson(res, 200, { ok: true, message: 'encerrando' });
+      // Responde ANTES de derrubar: quem pediu precisa saber que foi aceito.
+      setTimeout(() => void this.onShutdown?.(), 100);
+    });
+
     this.#route('POST', '/maintenance/sweep', async (_req, res) => {
       sendJson(res, 200, { sweep: await this.reaper.sweep() });
     });

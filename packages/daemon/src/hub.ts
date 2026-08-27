@@ -48,9 +48,21 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const reaper = new WorktreeReaper(store, worktrees, config.retention);
   const server = new HubServer(config, sessions, registry, bus, reaper);
 
+  // Antes de qualquer coisa: o que ficou marcado como vivo por um daemon que
+  // já morreu não está vivo. Sem isto, sessão zumbi se acumula para sempre.
+  const reconciliado = sessions.reconcileOnStartup();
+  if (reconciliado.encerradas > 0) {
+    console.error(
+      `reconciliação: ${reconciliado.encerradas} sessão(ões) órfã(s) de daemon anterior encerrada(s)` +
+        (reconciliado.revividas > 0
+          ? `, ${reconciliado.revividas} mantida(s) aguardando sua aprovação`
+          : ''),
+    );
+  }
+
   reaper.start();
 
-  return {
+  const hub: Hub = {
     config,
     store,
     registry,
@@ -67,4 +79,13 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
       store.close();
     },
   };
+
+  // O daemon pode ser encerrado pela API (`hub stop`), já que também sabe subir
+  // sozinho quando alguém precisa dele.
+  server.onShutdown = async () => {
+    await hub.shutdown();
+    process.exit(0);
+  };
+
+  return hub;
 }
