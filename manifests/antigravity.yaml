@@ -41,7 +41,8 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "NÃO VERIFICADO: as flags aqui são deduzidas da documentação, não confirmadas contra o binário — ele não está instalado nesta máquina."
-  - "A pasta ~/.antigravity é da IDE do Antigravity, não da CLI; ~/.antigravitycli existe mas está vazia."
-  - "O Gemini CLI (`gemini`), predecessor do Antigravity CLI, pode estar instalado e AINDA ASSIM não funcionar: desde jun/2026 ele responde IneligibleTierError para contas individuais, pedindo migração para o Antigravity. Instalar a CLI do Antigravity é o caminho."
-  - "Antigravity tem seu próprio gerenciador de agentes; usar os dois em paralelo pode duplicar trabalho."
+  - "NAO VERIFICADO: as flags aqui vem da documentacao da Antigravity CLI, nao de teste contra binario."
+  - "O que ESTA instalado nesta maquina e o Antigravity Hub (app Electron, v2.1.4) e a Antigravity IDE (fork do VS Code, 1.107.0) — nenhum dos dois expoe agente headless. O launcher `antigravity-ide` so tem as opcoes de editor do VS Code."
+  - "Por dentro, o app sobe um `language_server.exe --standalone --subclient_type hub` com servidor HTTPS local em PORTA DINAMICA e CSRF token por sessao, em protocolo interno. Da para falar com ele, mas seria adapter fragil: porta muda a cada boot, token muda a cada sessao, e o protocolo quebra a cada atualizacao automatica."
+  - "O caminho suportado e a Antigravity CLI (binario Go), produto separado do app e da IDE. Enquanto ela nao estiver no PATH, este manifesto nao roda."
+  - "Antigravity tem seu proprio gerenciador de agentes; usar os dois em paralelo pode duplicar trabalho."
