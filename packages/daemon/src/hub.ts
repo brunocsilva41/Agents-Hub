@@ -4,6 +4,7 @@ import { createStore } from '@agents-hub/store';
 import type { UnitOfWork } from '@agents-hub/core';
 import { InMemoryEventBus } from './bus.js';
 import { loadConfig, type HubConfig } from './config.js';
+import { WorktreeReaper } from './reaper.js';
 import { HubServer } from './server.js';
 import { SessionManager } from './session-manager.js';
 import { WorktreeManager } from './worktree.js';
@@ -14,6 +15,7 @@ export interface Hub {
   registry: AgentRegistry;
   bus: InMemoryEventBus;
   sessions: SessionManager;
+  reaper: WorktreeReaper;
   server: HubServer;
   shutdown(): Promise<void>;
 }
@@ -32,7 +34,10 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const bus = new InMemoryEventBus();
   const worktrees = new WorktreeManager(config.worktreeRoot);
   const sessions = new SessionManager(config, store, registry, bus, worktrees);
-  const server = new HubServer(config, sessions, registry, bus);
+  const reaper = new WorktreeReaper(store, worktrees, config.retention);
+  const server = new HubServer(config, sessions, registry, bus, reaper);
+
+  reaper.start();
 
   return {
     config,
@@ -40,8 +45,10 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
     registry,
     bus,
     sessions,
+    reaper,
     server,
     async shutdown() {
+      reaper.stop();
       await sessions.shutdown();
       await server.close();
       store.close();

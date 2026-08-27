@@ -14,15 +14,19 @@ import {
   parseBrief,
   pathKey,
   renderBriefAsPrompt,
+  watchForMode,
+  type Approval,
   type Brief,
   type BudgetLimits,
   type BudgetSnapshot,
   type EventEnvelope,
   type GraphNode,
+  type GuardedAction,
   type IsolationMode,
   type Project,
   type Session,
   type SessionMode,
+  type RiskLevel,
   type Task,
   type UnitOfWork,
 } from '@agents-hub/core';
@@ -30,6 +34,53 @@ import type { AgentRegistry, MappedEvent, RunContext, RunHandle } from '@agents-
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import type { WorktreeManager } from './worktree.js';
+
+/**
+ * Traduz um evento do agente nas ações que a política sabe classificar.
+ *
+ * Só existem duas fontes reais de risco observável: comando executado e
+ * arquivo alterado. Caminho relativo é resolvido contra o worktree da sessão —
+ * sem isso, todo arquivo do agente pareceria estar fora do diretório dele.
+ */
+function guardedActionsOf(mapped: MappedEvent, workdir: string): GuardedAction[] {
+  if (mapped.type === 'command.executed') {
+    const command = mapped.payload['command'];
+    return typeof command === 'string' && command.trim().length > 0
+      ? [{ kind: 'command', command }]
+      : [];
+  }
+
+  if (mapped.type === 'file.changed') {
+    const files = mapped.payload['files'];
+    const paths =
+      Array.isArray(files) && files.length > 0
+        ? files.map((f) => (f as Record<string, unknown>)['path'])
+        : [mapped.payload['path']];
+
+    return paths
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+      .map((p) => ({ kind: 'file.write', path: path.resolve(workdir, p) }));
+  }
+
+  return [];
+}
+
+function describeAction(action: GuardedAction): string {
+  switch (action.kind) {
+    case 'command':
+      return `executou: ${action.command}`;
+    case 'file.write':
+      return `escreveu em: ${action.path}`;
+    case 'file.read':
+      return `leu: ${action.path}`;
+    case 'network':
+      return `acessou: ${action.url}`;
+    case 'delegation':
+      return `delegou para: ${action.agent}`;
+    case 'budget.overrun':
+      return action.detail;
+  }
+}
 
 export interface StartSessionInput {
   projectId: string;
@@ -44,6 +95,8 @@ export interface StartSessionResult {
   session: Session;
   task: Task;
   budget: BudgetSnapshot;
+  /** Presente quando a delegação ficou retida esperando sua decisão. */
+  approval?: Approval;
 }
 
 interface LiveRun {
@@ -65,6 +118,8 @@ export class SessionManager {
   readonly #seq: SequenceCounter;
   readonly #ledgers = new Map<string, BudgetLedger>();
   readonly #runs = new Map<string, LiveRun>();
+  /** Sessões cujo `seq` já foi reconciliado com o banco nesta instância. */
+  readonly #seeded = new Set<string>();
 
   constructor(
     private readonly config: HubConfig,
@@ -224,9 +279,171 @@ export class SessionManager {
       });
     }
 
+    // --- portão de delegação: o único gate REALMENTE preventivo ------------
+    // A chamada agente→agente passa por dentro do Hub, então dá para segurá-la
+    // antes de qualquer processo subir. Comando de shell e escrita em arquivo
+    // não têm esse luxo: chegam como evento, depois de acontecer.
+    if (parent) {
+      const verdict = this.policyFor(parent).decide(
+        { kind: 'delegation', agent: agentId },
+        { workdir: parent.workdir, mode: parent.mode },
+      );
+
+      if (verdict.decision === 'deny') {
+        this.store.tasks.update(task.id, { state: 'rejected' });
+        this.store.sessions.update(session.id, { state: 'failed', endedAt: nowIso() });
+        ledger.release(task.id);
+        throw new HubError('POLICY_DENIED', `Delegação negada pela política: ${verdict.reason}`, {
+          agentId,
+          risk: verdict.risk,
+        });
+      }
+
+      if (verdict.decision === 'approve') {
+        const approval = this.#requestApproval({
+          session,
+          taskId: task.id,
+          risk: verdict.risk,
+          action: `${parent.agentId} quer delegar para ${agentId}`,
+          detail: {
+            kind: 'delegation',
+            objective: brief.objective,
+            requester: parent.id,
+            reason: verdict.reason,
+          },
+        });
+
+        // Relê do banco: `#requestApproval` moveu a task para `input_required`
+        // e a sessão para `waiting_approval`. Devolver os objetos em memória
+        // diria "working" para quem chamou, e um agente em polling esperaria
+        // para sempre por algo que nem começou.
+        return {
+          session: this.store.sessions.get(session.id) ?? session,
+          task: this.store.tasks.get(task.id) ?? task,
+          budget: ledger.snapshot(),
+          approval,
+        };
+      }
+    }
+
     await this.#launch(session, task, renderBriefAsPrompt(brief), null);
 
     return { session, task, budget: ledger.snapshot() };
+  }
+
+  // ------------------------------------------------------------- aprovações
+
+  pendingApprovals(sessionId?: string): Approval[] {
+    return this.store.approvals.listPending(sessionId ? { sessionId } : {});
+  }
+
+  getApproval(id: string): Approval {
+    const approval = this.store.approvals.get(id);
+    if (!approval) {
+      throw new HubError('ILLEGAL_STATE', `Aprovação ${id} não encontrada`, { id });
+    }
+    return approval;
+  }
+
+  /**
+   * Resolve uma aprovação pendente.
+   *
+   * Aprovar retoma de onde parou: delegação segura vira execução, sessão
+   * pausada por vigilância volta a andar com um aviso explícito do que foi
+   * liberado — o agente precisa saber que houve uma decisão humana, senão
+   * repete a mesma ação achando que falhou.
+   */
+  async resolveApproval(
+    id: string,
+    decision: 'approved' | 'denied',
+    by = 'você',
+  ): Promise<Approval> {
+    const approval = this.getApproval(id);
+    if (approval.state !== 'pending') {
+      throw new HubError('ILLEGAL_STATE', `Aprovação ${id} já foi ${approval.state}`, { id });
+    }
+
+    const resolved = this.store.approvals.update(id, {
+      state: decision,
+      resolvedAt: nowIso(),
+      resolvedBy: by,
+    });
+
+    const session = this.#session(approval.sessionId);
+    this.#emit({
+      sessionId: session.id,
+      taskId: approval.taskId,
+      agentId: session.agentId,
+      type: 'approval.resolved',
+      payload: { approvalId: id, decision, action: approval.action, by },
+    });
+
+    if (decision === 'denied') {
+      if (approval.taskId) this.store.tasks.update(approval.taskId, { state: 'rejected' });
+      await this.cancel(session.id, `negado por ${by}: ${approval.action}`);
+      return resolved;
+    }
+
+    const isDelegation = approval.detail['kind'] === 'delegation';
+    const task = approval.taskId ? this.store.tasks.get(approval.taskId) : null;
+
+    if (isDelegation && task) {
+      // A sessão nem chegou a subir: agora sobe.
+      this.store.tasks.update(task.id, { state: 'working' });
+      await this.#launch(session, task, renderBriefAsPrompt(task.brief), null);
+      return resolved;
+    }
+
+    // Vigilância: a run foi morta ao pausar, então continuamos por uma mensagem
+    // nova, dizendo ao agente o que exatamente foi liberado.
+    if (task) this.store.tasks.update(task.id, { state: 'working' });
+    await this.send(
+      session.id,
+      `A ação "${approval.action}" foi aprovada por ${by}. Continue de onde parou.`,
+    );
+    return resolved;
+  }
+
+  #requestApproval(input: {
+    session: Session;
+    taskId: string | null;
+    risk: RiskLevel;
+    action: string;
+    detail: Record<string, unknown>;
+  }): Approval {
+    const approval: Approval = {
+      id: newId('apv'),
+      sessionId: input.session.id,
+      taskId: input.taskId,
+      risk: input.risk,
+      action: input.action,
+      detail: input.detail,
+      state: 'pending',
+      requestedAt: nowIso(),
+      resolvedAt: null,
+      resolvedBy: null,
+    };
+
+    this.store.transaction(() => {
+      this.store.approvals.create(approval);
+      this.store.sessions.update(input.session.id, { state: 'waiting_approval' });
+      if (input.taskId) this.store.tasks.update(input.taskId, { state: 'input_required' });
+    });
+
+    this.#emit({
+      sessionId: input.session.id,
+      taskId: input.taskId,
+      agentId: input.session.agentId,
+      type: 'approval.requested',
+      payload: {
+        approvalId: approval.id,
+        risk: approval.risk,
+        action: approval.action,
+        ...approval.detail,
+      },
+    });
+
+    return approval;
   }
 
   /**
@@ -493,7 +710,6 @@ export class SessionManager {
       heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
     };
 
-    this.#seq.seed(session.id, this.store.events.lastSeq(session.id));
     this.store.sessions.update(session.id, { state: 'running' });
 
     const handle = nativeSessionId
@@ -519,6 +735,14 @@ export class SessionManager {
     try {
       for await (const mapped of handle.events) {
         this.#persistMapped(session, task, mapped);
+
+        // Vigilância: classifica o que o agente ACABOU de fazer. Não previne a
+        // ação que já ocorreu — impede a próxima, parando a sessão.
+        const breach = this.#watch(session, task, mapped);
+        if (breach === 'paused') {
+          await this.registry.get(session.agentId).cancel(handle);
+          break;
+        }
 
         if (mapped.nativeSessionId && mapped.nativeSessionId !== nativeSeen) {
           nativeSeen = mapped.nativeSessionId;
@@ -643,6 +867,72 @@ export class SessionManager {
     await this.#finish(session.id, failed ? 'failed' : 'completed', outcome.error ?? undefined);
   }
 
+  /**
+   * Olha um evento recém-chegado e decide se ele merece alerta ou parada.
+   *
+   * Retorna 'paused' quando a sessão foi interrompida e uma aprovação foi
+   * aberta — o chamador precisa matar a run.
+   */
+  #watch(session: Session, task: Task, mapped: MappedEvent): 'ok' | 'flagged' | 'paused' {
+    const actions = guardedActionsOf(mapped, session.workdir);
+    if (actions.length === 0) return 'ok';
+
+    const engine = this.policyFor(session);
+    const watch = watchForMode(this.config.policy.watch, session.mode);
+
+    let flagged = false;
+    for (const action of actions) {
+      const { risk, reason } = engine.classify(action, {
+        workdir: session.workdir,
+        mode: session.mode,
+      });
+
+      if (watch.pauseOn.includes(risk)) {
+        this.#requestApproval({
+          session,
+          taskId: task.id,
+          risk,
+          action: describeAction(action),
+          detail: { kind: 'watch', reason, eventType: mapped.type, alreadyExecuted: true },
+        });
+        return 'paused';
+      }
+
+      if (watch.flagOn.includes(risk)) {
+        this.#emit({
+          sessionId: session.id,
+          taskId: task.id,
+          agentId: session.agentId,
+          type: 'log',
+          payload: {
+            level: 'warn',
+            text: `ação de risco "${risk}": ${describeAction(action)} — ${reason}`,
+          },
+        });
+        flagged = true;
+      }
+    }
+
+    return flagged ? 'flagged' : 'ok';
+  }
+
+  /**
+   * Próximo `seq` da sessão, semeado do banco na primeira vez que a vemos.
+   *
+   * O contador vive em memória, mas a sessão vive no banco: depois de o daemon
+   * reiniciar, emitir um evento numa sessão antiga recomeçaria do 1 e colidiria
+   * com a chave única `(session_id, seq)`. Isso derrubava operações inteiras —
+   * cancelar ou negar uma aprovação de antes do restart falhava com um erro de
+   * SQLite que não dizia nada sobre a causa real.
+   */
+  #nextSeq(sessionId: string): number {
+    if (!this.#seeded.has(sessionId)) {
+      this.#seq.seed(sessionId, this.store.events.lastSeq(sessionId));
+      this.#seeded.add(sessionId);
+    }
+    return this.#seq.next(sessionId);
+  }
+
   #persistMapped(session: Session, task: Task, mapped: MappedEvent): void {
     const event = makeEvent(
       {
@@ -654,7 +944,7 @@ export class SessionManager {
         cost: mapped.cost ?? null,
         raw: mapped.raw,
       },
-      this.#seq.next(session.id),
+      this.#nextSeq(session.id),
     );
     this.store.events.append(event);
     this.bus.publish(event);
@@ -669,7 +959,7 @@ export class SessionManager {
   }): void {
     const event = makeEvent(
       { ...draft, cost: null, raw: null },
-      this.#seq.next(draft.sessionId),
+      this.#nextSeq(draft.sessionId),
     );
     this.store.events.append(event);
     this.bus.publish(event);
@@ -682,15 +972,9 @@ export class SessionManager {
     this.store.sessions.update(sessionId, { state, endedAt: nowIso() });
     this.bus.forgetSession(sessionId);
 
-    if (session.isolation === 'worktree') {
-      const project = this.store.projects.get(session.projectId);
-      if (project) {
-        await this.worktrees.release({
-          projectPath: project.path,
-          worktreePath: session.workdir,
-        });
-      }
-    }
+    // O worktree DELIBERADAMENTE sobrevive ao fim da sessão (ADR 06.3): é a
+    // janela em que você consegue abrir o diretório e ver o que o agente fez.
+    // Quem recolhe é o WorktreeReaper, depois do prazo de retenção.
   }
 
   /** Último texto do agente — serve de resumo quando ele não produz um. */
@@ -771,9 +1055,20 @@ export class SessionManager {
     return task;
   }
 
-  /** Exposto para o motor de política das próximas fases. */
+  /**
+   * Política efetiva de uma sessão.
+   *
+   * Numa sessão-raiz é a política do Hub; num filho é a interseção com a do
+   * pai, que é o que garante que delegar nunca aumente privilégio (ADR 03).
+   */
   policyFor(session: Session): PolicyEngine {
-    return new PolicyEngine(this.config.policy).intersect(this.config.policy);
+    const base = new PolicyEngine(this.config.policy);
+    if (!session.parentId) return base;
+
+    const parent = this.store.sessions.get(session.parentId);
+    if (!parent) return base;
+
+    return this.policyFor(parent).intersect(this.config.policy);
   }
 
   briefOf(sessionId: string): Brief {

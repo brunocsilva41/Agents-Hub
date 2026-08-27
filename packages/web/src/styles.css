@@ -132,8 +132,10 @@ textarea {
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr;
+  /* topo, fila de aprovações (some quando vazia), conteúdo */
+  grid-template-rows: auto auto 1fr;
   height: 100%;
+  min-height: 0;
 }
 
 .topbar {
@@ -538,4 +540,79 @@ textarea {
   padding: 8px 10px;
   font-size: 12px;
   margin-bottom: 12px;
+}
+
+/* ------------------------------------------------------------- aprovações */
+
+.approvals {
+  border-bottom: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg-panel));
+  flex-shrink: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.approval {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 24%, transparent);
+}
+.approval:last-child {
+  border-bottom: none;
+}
+
+.approval-body {
+  flex: 1;
+  min-width: 0;
+}
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+.approval-time {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.approval-action {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-word;
+}
+.approval-reason {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.approval-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.badge.risk {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.badge.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button.linkish {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: underline;
+}
+button.linkish:hover {
+  background: none;
+  border-color: transparent;
+  filter: brightness(1.2);
 }

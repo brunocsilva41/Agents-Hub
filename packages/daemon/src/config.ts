@@ -15,8 +15,28 @@ export interface HubConfig {
   port: number;
   /** Estáticos da Web UI. Servida pelo próprio daemon: um processo só (ADR 05.3). */
   webRoot: string;
+  retention: RetentionPolicy;
   policy: PolicyDocument;
 }
+
+export interface RetentionPolicy {
+  /**
+   * Dias que o worktree de uma sessão encerrada continua no disco (ADR 06.3).
+   *
+   * Apagar na hora que a sessão termina — como fazíamos antes — destrói
+   * justamente o que você quer olhar: o estado em que o agente deixou as
+   * coisas. O branch `hub/<sessionId>` sobrevive à limpeza de qualquer forma,
+   * então nada de trabalho se perde; o que expira é só o checkout.
+   */
+  worktreeDays: number;
+  /** Intervalo entre passadas do coletor, em minutos. */
+  sweepIntervalMinutes: number;
+}
+
+export const DEFAULT_RETENTION: RetentionPolicy = {
+  worktreeDays: 7,
+  sweepIntervalMinutes: 60,
+};
 
 export function defaultHome(): string {
   return process.env['AGENTS_HUB_HOME'] ?? path.join(os.homedir(), '.agents-hub');
@@ -60,6 +80,11 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
     // A política nunca é substituída inteira por acidente: campos ausentes no
     // arquivo do usuário caem no padrão, que é o lado seguro.
     policy: { ...DEFAULT_POLICY, ...(onDisk.policy ?? {}), ...(overrides.policy ?? {}) },
+    retention: {
+      ...DEFAULT_RETENTION,
+      ...(onDisk.retention ?? {}),
+      ...(overrides.retention ?? {}),
+    },
   };
 
   mkdirSync(config.home, { recursive: true });

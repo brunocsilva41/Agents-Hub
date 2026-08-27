@@ -4,6 +4,9 @@ import { HubApiError, type BriefInput, type HubClient } from '@agents-hub/client
 import type { CallerIdentity } from './caller.js';
 import { formatBudget, formatEvents, formatGraph, formatTaskStatus, formatTokens } from './format.js';
 
+/** Quebra de linha literal, para nao brigar com escapes ao montar texto. */
+const NEWLINE = String.fromCharCode(10);
+
 const TERMINAL_STATES = new Set(['completed', 'failed', 'canceled', 'rejected']);
 
 /** Formato de `CallToolResult` do MCP — a index signature é exigida pelo SDK. */
@@ -170,6 +173,24 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         };
 
         const result = await client.delegate(callerSessionId, brief);
+
+        // Retida pela política: dizer "delegado" aqui faria o agente entrar em
+        // polling eterno por uma tarefa que sequer começou.
+        if (result.approval) {
+          return ok(
+            [
+              `DELEGAÇÃO RETIDA — aguardando aprovação humana.`,
+              `motivo: ${result.approval.action}`,
+              `task_id: ${result.taskId}`,
+              `session_id: ${result.sessionId}`,
+              '',
+              'A tarefa NÃO começou e não vai começar sozinha. Avise seu usuário de que',
+              'há uma aprovação pendente no Agents-Hub. Se ele liberar, a tarefa parte do',
+              'zero e você pode acompanhar com hub_agent_status. Não fique em polling:',
+              'siga com outra coisa ou pergunte ao usuário.',
+            ].join(NEWLINE),
+          );
+        }
 
         return ok(
           [

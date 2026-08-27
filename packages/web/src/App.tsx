@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Approvals } from './components/Approvals';
 import { FlowTree } from './components/FlowTree';
 import { SessionModal } from './components/SessionModal';
 import { SidePanel } from './components/SidePanel';
@@ -105,6 +106,12 @@ export function App() {
           Nova sessão
         </button>
       </header>
+
+      <Approvals
+        approvals={state.approvals}
+        onResolved={() => void state.refresh()}
+        onSelectSession={setSelectedId}
+      />
 
       <div className="columns">
         <aside className="col col-left">

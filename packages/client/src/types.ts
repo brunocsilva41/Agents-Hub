@@ -99,3 +99,17 @@ export interface HealthSummary {
   liveSessions: number;
   subscribers: number;
 }
+
+export interface ApprovalSummary {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  risk: string;
+  /** Frase legível do que está sendo pedido. */
+  action: string;
+  detail: Record<string, unknown>;
+  state: 'pending' | 'approved' | 'denied' | 'expired';
+  requestedAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+}

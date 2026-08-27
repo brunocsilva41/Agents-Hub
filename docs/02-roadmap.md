@@ -57,10 +57,32 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 | SSE com `event: <tipo>` fazia o `onmessage` do navegador descartar tudo que não se chamasse `message` — o painel perdia `turn.completed`, `delegation.*` e `error` sem nenhum sinal de erro | Campo `event:` removido; o tipo já viaja no JSON. `id:` só no stream de uma sessão, onde `seq` é inequívoco |
 | Fechar stdin matava o MCP server antes de a resposta calculada ser escrita | Carência de 3s no desligamento por stdin; sinal explícito continua saindo na hora |
 
+### Fila de aprovações e retenção — 2026-08-27
+
+Fecha os dois desvios que a auditoria encontrou entre os ADRs e o código.
+
+- [x] **Portão de delegação** (preventivo de verdade): a chamada agente→agente passa
+      por dentro do Hub, então é retida ANTES de qualquer processo subir. Validado:
+      sessão supervisionada delegando ao Codex ficou em `input_required`, foi liberada
+      pela CLI e só então executou
+- [x] **Vigilância reativa** sobre comando executado e arquivo alterado, com
+      `pauseOn` / `flagOn` por nível de risco
+- [x] Rotas `/approvals`, CLI `hub approvals` / `approve` / `deny`, e fila no topo do painel
+- [x] **Retenção de worktree** (ADR 06.3): o checkout sobrevive ao fim da sessão e é
+      recolhido pelo `WorktreeReaper` depois de 7 dias; `hub prune` força a passada
+- [x] 10 testes novos cobrindo vigilância, herança e o portão de delegação
+
+#### Correções que os testes reais expuseram
+
+| Achado | Correção |
+|---|---|
+| A rota de delegação não devolvia a aprovação e reportava o estado do objeto em memória: quem chamou via "working" numa tarefa que nem começou — um agente ficaria em polling eterno | Estado relido do banco e `approval` propagado até o `hub_agent_call` do MCP, com instrução explícita de não ficar em polling |
+| `seq` vivia só em memória: emitir evento numa sessão criada antes de um restart do daemon recomeçava do 1 e colidia com a chave única `(session_id, seq)`, derrubando cancelamento e negação | Semeadura preguiçosa a partir do banco na primeira vez que a sessão é vista |
+
 ### Restante da fase 2
 
 - [ ] Pipeline de resiliência completo: retry com backoff → fallback por cadeia → portão de validação
-- [ ] Fila de aprovações com bloqueio real em `input_required` (hoje a política classifica, mas ainda não intercepta a ação)
+- [ ] Gate PRÉ-execução por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) — hoje comando e arquivo só podem ser vigiados depois do fato
 - [ ] Adapter HTTP do OpenCode sobre `opencode serve` (sessões, SSE e custo reais)
 - [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo
 - [ ] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo sai incompleto

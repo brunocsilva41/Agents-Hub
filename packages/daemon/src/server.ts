@@ -3,6 +3,7 @@ import { isHubError, nowIso, type EventEnvelope } from '@agents-hub/core';
 import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
+import type { WorktreeReaper } from './reaper.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
 
@@ -36,6 +37,7 @@ export class HubServer {
     private readonly sessions: SessionManager,
     private readonly registry: AgentRegistry,
     private readonly bus: InMemoryEventBus,
+    private readonly reaper: WorktreeReaper,
   ) {
     this.#registerRoutes();
   }
@@ -286,7 +288,46 @@ export class HubServer {
         agentId: result.session.agentId,
         state: result.task.state,
         budget: result.budget,
+        // Presente quando a política reteve a delegação: sem isto, quem chamou
+        // acharia que a tarefa está rodando e ficaria em polling eterno.
+        approval: result.approval ?? null,
       });
+    });
+
+    // ---------------------------------------------------------- aprovações
+    this.#route('GET', '/approvals', (req, res) => {
+      const url = new URL(req.url ?? '/', 'http://local');
+      sendJson(res, 200, {
+        approvals: this.sessions.pendingApprovals(
+          url.searchParams.get('sessionId') ?? undefined,
+        ),
+      });
+    });
+
+    this.#route('GET', '/approvals/:id', (_req, res, params) => {
+      sendJson(res, 200, { approval: this.sessions.getApproval(params['id'] ?? '') });
+    });
+
+    this.#route('POST', '/approvals/:id', async (req, res, params) => {
+      const body = await readJson<{ decision: 'approved' | 'denied'; by?: string }>(req);
+      if (body.decision !== 'approved' && body.decision !== 'denied') {
+        sendJson(res, 422, {
+          error: { code: 'INVALID_BRIEF', message: 'decision deve ser "approved" ou "denied"' },
+        });
+        return;
+      }
+      sendJson(res, 200, {
+        approval: await this.sessions.resolveApproval(
+          params['id'] ?? '',
+          body.decision,
+          body.by ?? 'você',
+        ),
+      });
+    });
+
+    // --------------------------------------------------------- manutenção
+    this.#route('POST', '/maintenance/sweep', async (_req, res) => {
+      sendJson(res, 200, { sweep: await this.reaper.sweep() });
     });
 
     // ------------------------------------------------------------- grafo e custo

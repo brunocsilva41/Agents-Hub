@@ -58,6 +58,27 @@ export interface PolicyDocument {
   };
   /** Cadeia de fallback por capability, ex.: `{"code-edit": ["claude","codex"]}`. */
   fallback: Record<string, string[]>;
+  watch: WatchPolicy;
+}
+
+/**
+ * Vigilância reativa sobre o que o agente JÁ fez.
+ *
+ * O Hub roda os agentes como processos opacos: ele não intercepta a syscall,
+ * vê o evento depois que o comando executou. Chamar isso de "aprovação prévia"
+ * seria mentira — é vigilância, e o que ela pode fazer é impedir a PRÓXIMA
+ * ação, parando a sessão.
+ *
+ * Por isso o padrão pausa apenas no irreversível: um agente executa dezenas de
+ * comandos legítimos que não estão em allow list nenhuma, e pausar em todos
+ * transformaria o Hub em algo que ninguém usa. O resto vira evento visível na
+ * timeline, sem interromper o trabalho.
+ */
+export interface WatchPolicy {
+  /** Níveis que param a sessão e abrem uma aprovação pendente. */
+  pauseOn: RiskLevel[];
+  /** Níveis que só viram evento de alerta na timeline. */
+  flagOn: RiskLevel[];
 }
 
 export const DEFAULT_POLICY: PolicyDocument = {
@@ -130,7 +151,20 @@ export const DEFAULT_POLICY: PolicyDocument = {
     planning: ['claude', 'codex'],
     shell: ['codex', 'opencode'],
   },
+  watch: {
+    pauseOn: ['irreversible'],
+    flagOn: ['escalate'],
+  },
 };
+
+/** Em modo supervisionado, sair da allow list também para a sessão. */
+export function watchForMode(watch: WatchPolicy, mode: SessionMode): WatchPolicy {
+  if (mode !== 'supervised') return watch;
+  return {
+    pauseOn: [...new Set<RiskLevel>([...watch.pauseOn, 'escalate'])],
+    flagOn: watch.flagOn,
+  };
+}
 
 /** Comandos cujo efeito não dá para desfazer — sempre passam por aprovação. */
 const IRREVERSIBLE_PATTERNS: RegExp[] = [
@@ -285,6 +319,12 @@ export class PolicyEngine {
         allowDomains: child.network.allowDomains.filter((d) =>
           parent.network.allowDomains.includes(d),
         ),
+      },
+      watch: {
+        // Vigilância é união, não interseção: o filho para em tudo que o pai
+        // pararia, mais o que ele mesmo declarar.
+        pauseOn: [...new Set([...parent.watch.pauseOn, ...child.watch.pauseOn])],
+        flagOn: [...new Set([...parent.watch.flagOn, ...child.watch.flagOn])],
       },
     });
   }

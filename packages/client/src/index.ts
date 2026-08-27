@@ -1,6 +1,7 @@
 import type { EventEnvelope } from '@agents-hub/core';
 import type {
   AgentSummary,
+  ApprovalSummary,
   BudgetSummary,
   GraphSummary,
   HealthSummary,
@@ -31,6 +32,8 @@ export interface DelegationResult {
   agentId: string;
   state: string;
   budget: BudgetSummary;
+  /** Não-nulo quando a política reteve a delegação aguardando decisão humana. */
+  approval: ApprovalSummary | null;
 }
 
 export interface TaskStatus {
@@ -137,6 +140,28 @@ export class HubClient {
 
   tasks(sessionId: string): Promise<{ tasks: TaskSummary[] }> {
     return this.#get(`/sessions/${sessionId}/tasks`);
+  }
+
+  // -------------------------------------------------------------- aprovações
+  approvals(sessionId?: string): Promise<{ approvals: ApprovalSummary[] }> {
+    return this.#get(`/approvals${queryOf({ sessionId })}`);
+  }
+
+  approval(id: string): Promise<{ approval: ApprovalSummary }> {
+    return this.#get(`/approvals/${id}`);
+  }
+
+  resolveApproval(
+    id: string,
+    decision: 'approved' | 'denied',
+    by?: string,
+  ): Promise<{ approval: ApprovalSummary }> {
+    return this.#post(`/approvals/${id}`, { decision, by });
+  }
+
+  // ------------------------------------------------------------- manutenção
+  sweep(): Promise<{ sweep: { examined: number; removed: string[]; kept: number } }> {
+    return this.#post('/maintenance/sweep', {});
   }
 
   // ------------------------------------------------------------ observação

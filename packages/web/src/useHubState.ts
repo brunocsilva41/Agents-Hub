@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EventEnvelope } from '@agents-hub/core';
 import type {
   AgentSummary,
+  ApprovalSummary,
   BudgetSummary,
   GraphSummary,
   SessionSummary,
@@ -14,6 +15,8 @@ const STRUCTURAL = new Set([
   'session.ended',
   'delegation.requested',
   'delegation.completed',
+  'approval.requested',
+  'approval.resolved',
   'turn.completed',
   'budget.exceeded',
   'error',
@@ -26,6 +29,7 @@ export interface HubState {
   agents: AgentSummary[];
   sessions: SessionSummary[];
   roots: SessionSummary[];
+  approvals: ApprovalSummary[];
   graphs: Record<string, GraphSummary[]>;
   budgets: Record<string, BudgetSummary>;
   eventsOf: (sessionId: string) => EventEnvelope[];
@@ -45,6 +49,7 @@ export function useHubState(): HubState {
   const [connected, setConnected] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalSummary[]>([]);
   const [graphs, setGraphs] = useState<Record<string, GraphSummary[]>>({});
   const [budgets, setBudgets] = useState<Record<string, BudgetSummary>>({});
   const [events, setEvents] = useState<Record<string, EventEnvelope[]>>({});
@@ -54,12 +59,11 @@ export function useHubState(): HubState {
 
   const refresh = useCallback(async () => {
     try {
-      const [{ sessions: list }, { agents: agentList }] = await Promise.all([
-        hub.sessions(),
-        hub.agents(),
-      ]);
+      const [{ sessions: list }, { agents: agentList }, { approvals: pending }] =
+        await Promise.all([hub.sessions(), hub.agents(), hub.approvals()]);
       setSessions(list);
       setAgents(agentList);
+      setApprovals(pending);
       setError(null);
 
       const rootIds = [...new Set(list.map((s) => s.rootId))];
@@ -133,7 +137,18 @@ export function useHubState(): HubState {
     [sessions],
   );
 
-  return { connected, agents, sessions, roots, graphs, budgets, eventsOf, refresh, error };
+  return {
+    connected,
+    agents,
+    sessions,
+    roots,
+    approvals,
+    graphs,
+    budgets,
+    eventsOf,
+    refresh,
+    error,
+  };
 }
 
 /**

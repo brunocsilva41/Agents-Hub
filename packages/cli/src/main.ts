@@ -24,6 +24,9 @@ import {
   writeConfig,
 } from './mcp-install.js';
 
+/** Quebra de linha literal, para não brigar com escapes em template string. */
+const NEWLINE = String.fromCharCode(10);
+
 interface Args {
   command: string;
   positional: string[];
@@ -108,6 +111,12 @@ ${bold('Delegação e custo')}
   hub graph <rootId>                                  árvore de quem chamou quem
   hub budget <rootId>                                 consumo contra o orçamento
 
+${bold('Aprovações e manutenção')}
+  hub approvals                      o que está esperando sua decisão
+  hub approve <id>                   libera e a sessão continua de onde parou
+  hub deny <id>                      nega e encerra a sessão
+  hub prune                          recolhe worktrees de sessões já expiradas
+
 ${bold('MCP — dar ao agente o poder de chamar os outros')}
   hub mcp                            mostra o estado do registro em cada agente
   hub mcp show <agente>              imprime o trecho de config para colar
@@ -157,6 +166,14 @@ async function main(): Promise<void> {
       });
     case 'delegate':
       return withDaemon(() => delegate(client, args));
+    case 'approvals':
+      return withDaemon(() => listApprovals(client));
+    case 'approve':
+      return withDaemon(() => decide(client, args, 'approved'));
+    case 'deny':
+      return withDaemon(() => decide(client, args, 'denied'));
+    case 'prune':
+      return withDaemon(() => prune(client));
     case 'mcp':
       // Não exige daemon: registrar a config é offline.
       return mcpCommand(args, config);
@@ -472,6 +489,61 @@ async function showBudget(client: HubClient, args: Args): Promise<void> {
   );
   console.log(`${dim('tempo:  ')} ${budget.consumed.seconds}s / ${budget.limits.seconds}s`);
   if (budget.exhausted) console.log(red('\norçamento esgotado — tasks entram em espera por você'));
+}
+
+// -------------------------------------------------------- aprovações
+
+async function listApprovals(client: HubClient): Promise<void> {
+  const { approvals } = await client.approvals();
+  if (approvals.length === 0) {
+    console.log(dim('nada esperando você.'));
+    return;
+  }
+
+  for (const approval of approvals) {
+    const posterior = approval.detail['alreadyExecuted'] === true;
+    console.log(
+      `${yellow('⏸')} ${bold(approval.id)} ${dim(`[${approval.risk}]`)} ${
+        posterior ? red('(já executada — sessão parada)') : dim('(retida antes de executar)')
+      }`,
+    );
+    console.log(`   ${approval.action}`);
+    if (typeof approval.detail['reason'] === 'string') {
+      console.log(`   ${dim(String(approval.detail['reason']))}`);
+    }
+    console.log(`   ${dim(`sessão ${approval.sessionId} · ${approval.requestedAt.slice(11, 19)}`)}`);
+  }
+
+  console.log(`${NEWLINE}${dim('libere com:')} ${bold('hub approve <id>')}  ${dim('ou')}  ${bold('hub deny <id>')}`);
+}
+
+async function decide(
+  client: HubClient,
+  args: Args,
+  decision: 'approved' | 'denied',
+): Promise<void> {
+  const id = required(args.positional[0], 'approvalId');
+  const { approval } = await client.resolveApproval(id, decision);
+  const verb = decision === 'approved' ? green('aprovada') : red('negada');
+  console.log(`${verb}: ${approval.action}`);
+  console.log(
+    dim(
+      decision === 'approved'
+        ? `a sessão ${approval.sessionId} retoma de onde parou`
+        : `a sessão ${approval.sessionId} foi encerrada`,
+    ),
+  );
+}
+
+async function prune(client: HubClient): Promise<void> {
+  const { sweep } = await client.sweep();
+  console.log(
+    `${sweep.examined} sessão(ões) encerrada(s) examinada(s) · ${sweep.removed.length} worktree(s) recolhido(s) · ${sweep.kept} ainda no prazo`,
+  );
+  for (const removed of sweep.removed) console.log(`   ${dim(removed)}`);
+  if (sweep.removed.length > 0) {
+    console.log(dim(NEWLINE + 'os branches hub/<sessionId> continuam intactos.'));
+  }
 }
 
 // ---------------------------------------------------------------- MCP
