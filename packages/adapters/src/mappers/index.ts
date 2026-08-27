@@ -1,6 +1,8 @@
 import type { EventMapper } from '../types.js';
 import { claudeMapper } from './claude.js';
 import { codexMapper } from './codex.js';
+import { copilotMapper } from './copilot.js';
+import { kimiMapper } from './kimi.js';
 import { genericJsonMapper, genericTextMapper } from './generic.js';
 
 /**
@@ -11,6 +13,8 @@ import { genericJsonMapper, genericTextMapper } from './generic.js';
 const MAPPERS: Record<string, EventMapper> = {
   claude: claudeMapper,
   codex: codexMapper,
+  copilot: copilotMapper,
+  kimi: kimiMapper,
   'generic-json': genericJsonMapper,
   'generic-text': genericTextMapper,
 };
@@ -29,4 +33,4 @@ export function listMappers(): string[] {
   return Object.keys(MAPPERS);
 }
 
-export { claudeMapper, codexMapper, genericJsonMapper, genericTextMapper };
+export { claudeMapper, codexMapper, copilotMapper, kimiMapper, genericJsonMapper, genericTextMapper };

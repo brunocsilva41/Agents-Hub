@@ -2,8 +2,9 @@ id: mimo
 name: MiMo Code
 vendor: Xiaomi
 description: >
-  CLI gratuito da Xiaomi com memória persistente entre sessões. Bom candidato a
-  fallback de baixo custo em tarefas mecânicas.
+  CLI da Xiaomi. É um fork do OpenCode — mesma estrutura de comandos (`run`,
+  `serve`, `session`, `attach`) e o servidor publica uma OpenAPI cujo título é
+  literalmente "opencode". Bom candidato a fallback de baixo custo.
 
 bin: mimo
 
@@ -12,18 +13,27 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  oneShot: ["-p"]
-  stdinPrompt: true
+  # Verificado contra o binário. ATENÇÃO: `-p` aqui é `--password`, NÃO prompt —
+  # o texto vai como posicional de `run`. A versão anterior deste manifesto
+  # mandava o prompt pela flag errada.
+  oneShot: ["run", "{{prompt}}", "--format", "json"]
+  resume: ["run", "{{prompt}}", "--session", "{{nativeSessionId}}", "--format", "json"]
+  stdinPrompt: false
   interactive: false
   extraArgs: []
   env: {}
 
 session:
-  strategy: replay
+  strategy: native
+  idFrom: "$.sessionID"
 
 stream:
-  format: text
-  mapper: generic-text
+  format: jsonl
+  # Sendo fork do OpenCode, os eventos brutos têm forma parecida, mas a versão
+  # aqui é mais antiga e o vocabulário não foi confirmado evento a evento.
+  # O mapper genérico entrega timeline utilizável sem fingir precisão que não
+  # foi verificada.
+  mapper: generic-json
 
 capabilities:
   - code-edit
@@ -33,7 +43,7 @@ capabilities:
 
 auth:
   mode: inherit
-  loginHint: "rode `mimo` e siga o login indicado"
+  loginHint: "rode `mimo providers` para configurar credenciais"
 
 defaults:
   isolation: worktree
@@ -41,5 +51,7 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "Flags não verificadas contra a versão instalada — rode `hub verify mimo`."
+  - "É fork do OpenCode, mas expõe a API v1 LEGADA (rotas na raiz, sem /api) — o adapter HTTP do Hub fala só v2, então este agente roda por CLI."
+  - "A API v1 não tem custo por passo; o custo do Hub sai estimado pela tabela de preços."
+  - "Vocabulário de eventos do `--format json` não confirmado evento a evento: usa o mapper genérico."
   - "A memória persistente do MiMo vive fora do Hub: o que ele lembra não aparece na auditoria."

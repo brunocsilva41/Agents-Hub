@@ -2,8 +2,8 @@ id: copilot
 name: GitHub Copilot CLI
 vendor: GitHub / Microsoft
 description: >
-  Agente de terminal do Copilot, com controle fino de ferramentas por flag
-  (`--allow-tool`, `--allow-url`).
+  Agente de terminal do Copilot, com controle fino de ferramentas por flag e
+  saída estruturada em JSONL. Escolhe o modelo sozinho em modo auto.
 
 bin: copilot
 
@@ -12,23 +12,28 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  # Não lê prompt de stdin de forma documentada: usamos arquivo, que também
-  # elimina o problema de prompt multilinha na linha de comando do Windows.
-  oneShot: ["-p", "{{promptFile}}"]
+  # Verificado contra o binário 1.0.70: `-p` recebe o TEXTO do prompt como
+  # valor, não caminho de arquivo, e `--output-format json` emite JSONL — um
+  # objeto por linha.
+  oneShot: ["-p", "{{prompt}}", "--output-format", "json", "--no-color"]
+  resume: ["-p", "{{prompt}}", "--resume", "{{nativeSessionId}}", "--output-format", "json", "--no-color"]
   stdinPrompt: false
   interactive: false
-  # DELIBERADAMENTE sem `--allow-all-tools`: essa flag dá ao agente o mesmo
-  # poder que você tem na máquina, sem revisão. Quem concede permissão aqui é
-  # a política do Hub, não uma flag global.
+  # DELIBERADAMENTE sem `--allow-all-tools`: essa flag dá ao agente o mesmo poder
+  # que você tem na máquina, sem revisão. Quem concede permissão aqui é a
+  # política do Hub. A consequência assumida está nos caveats.
   extraArgs: []
   env: {}
 
 session:
-  strategy: replay
+  # `--resume=<id>` existe e foi confirmado no help; o id vem no evento `result`,
+  # no fim da execução — tarde, mas suficiente para o próximo turno.
+  strategy: native
+  idFrom: "$.sessionId"
 
 stream:
-  format: text
-  mapper: generic-text
+  format: jsonl
+  mapper: copilot
 
 capabilities:
   - code-edit
@@ -37,7 +42,7 @@ capabilities:
 
 auth:
   mode: inherit
-  loginHint: "rode `copilot` e autentique com sua conta GitHub"
+  loginHint: "rode `copilot login` e autentique com sua conta GitHub"
 
 defaults:
   isolation: worktree
@@ -45,5 +50,7 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "Se `-p` não aceitar caminho de arquivo, ajuste para {{prompt}} após rodar `hub verify copilot`."
-  - "Nunca adicione --allow-all-tools aqui: isso contorna toda a política do Hub."
+  - "O help diz que `--allow-all-tools` é necessário para modo não-interativo. Sem ele, tarefas que precisem de ferramenta podem parar esperando confirmação e estourar o heartbeat — prefira `--allow-tool=<ferramenta>` em extraArgs a liberar tudo."
+  - "Fatura em créditos, não em dólares, e não reporta uso de entrada: o custo do Hub sai estimado e por baixo."
+  - "O modelo é escolhido automaticamente (`session.auto_mode_resolved`); a estimativa de custo usa o que ele escolheu, que muda entre execuções."
+  - "O id da sessão só aparece no evento final `result`, então o resume nativo só vale a partir do segundo turno."

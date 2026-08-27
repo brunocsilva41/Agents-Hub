@@ -110,8 +110,6 @@ similaridade produz veredito que parece rigoroso e não é. Quem faz isso de
 verdade é o portão de revisão por segundo agente, que custa uma sessão de modelo
 e por isso é opt-in; os critérios seguem no brief dessa revisão.
 
-### Restante da fase 2
-- [ ] Gate PRÉ-execução por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) — hoje comando e arquivo só podem ser vigiados depois do fato
 ### Adapter HTTP do OpenCode — 2026-08-27
 
 - [x] API real levantada contra o binário (1.17.15) lendo a OpenAPI que o próprio
@@ -136,12 +134,39 @@ e por isso é opt-in; os critérios seguem no brief dessa revisão.
 | **Worktree isolado não tem `node_modules`**: `npm test` e `tsc` falhavam na primeira linha para todo agente, e o portão de validação reprovava por um motivo alheio ao trabalho | `WorktreeManager` liga `node_modules`/`.venv`/`vendor` por junction (Windows) ou symlink |
 | A CLI devolvia o terminal no fim do TURNO, enquanto validação, retry e fallback ainda podiam mudar o resultado | Espera a tarefa chegar a estado terminal e relata o portão de validação |
 
-- [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo
-- [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo — **não entregue**: o agente
-      designado morreu por limite de sessão antes de rodar os `--help`. Os cinco manifestos
-      seguem com flags deduzidas, e os `caveats` dizem isso
-- [x] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo sai incompleto
-- [ ] TUI (a Web UI cobriu a necessidade; a TUI virou conveniência, não bloqueio)
+### Verificação dos manifestos contra os binários reais — 2026-08-27
+
+Os manifestos de cinco agentes tinham sido escritos por dedução. Verificados um a
+um contra o binário instalado (`--help` é grátis; uma execução mínima por agente
+onde o formato de saída precisava ser visto). **Todos os três verificados estavam
+errados**, dois deles de forma que quebraria a invocação:
+
+| Agente | O que o manifesto dizia | O que o binário faz |
+|---|---|---|
+| **Copilot** | prompt por arquivo (`{{promptFile}}`), saída texto | `-p` recebe o **texto**; `--output-format json` emite **JSONL**; `--resume=<id>` existe |
+| **Kimi** | prompt por stdin, saída texto | `-p` recebe o **texto**; `--output-format stream-json`; `--session <id>` |
+| **MiMo** | `-p` com prompt por stdin | **`-p` é `--password`** — o prompt teria virado senha. O certo é `run <texto> --format json` |
+
+- [x] Mapper **verificado** do Copilot (JSONL com `ephemeral` marcando bastidor,
+      `session.auto_mode_resolved` revelando o modelo escolhido — única base para
+      estimar custo, já que o Copilot fatura em créditos e não reporta dólares)
+- [x] Mapper **verificado** do Kimi (formato orientado a `role`; `session.resume_hint`
+      é a única fonte do id nativo)
+- [x] Descoberta: **MiMo é um fork do OpenCode** — o `mimo serve` publica uma OpenAPI
+      cujo título é literalmente `opencode`. Mas expõe a **v1 legada** (rotas na raiz,
+      sem `/api`), que é justamente a que o adapter HTTP não fala, então ele roda por
+      CLI com o mapper genérico
+- [x] 14 testes com amostras capturadas da execução real, não inventadas
+
+### Restante da fase 2
+
+- [ ] **Mappers dedicados para Cursor e Antigravity** — os dois binários não estão
+      instalados nesta máquina, então os manifestos seguem deduzidos e os `caveats`
+      dizem isso. Verificar quando forem instalados
+- [ ] Mapper dedicado do MiMo, quando o vocabulário de eventos da v1 for confirmado
+- [ ] Gate PRÉ-execução por agente (hook `PreToolUse` do Claude Code, modos de aprovação
+      do Codex) — hoje comando e arquivo só podem ser vigiados **depois** do fato
+- [ ] TUI (a Web UI cobriu a necessidade; virou conveniência, não bloqueio)
 
 ## Fase 3 — Plataforma
 

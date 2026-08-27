@@ -3,7 +3,7 @@ name: Kimi Code CLI
 vendor: Moonshot AI
 description: >
   CLI da Moonshot (ex-"Kimi CLI", renomeado em jan/2026). Suporta ACP para
-  editores e MCP para ferramentas, com modo headless `kimi -p`.
+  editores e MCP para ferramentas, com modo headless e saída em stream-json.
 
 bin: kimi
 
@@ -12,18 +12,24 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  oneShot: ["-p"]
-  stdinPrompt: true
+  # Verificado contra o binário: `-p` recebe o TEXTO do prompt como valor
+  # (não stdin), e `--output-format stream-json` emite um JSON por linha.
+  oneShot: ["-p", "{{prompt}}", "--output-format", "stream-json"]
+  resume: ["-p", "{{prompt}}", "--session", "{{nativeSessionId}}", "--output-format", "stream-json"]
+  stdinPrompt: false
   interactive: false
+  # Sem `--yolo` nem `--auto` de propósito: são o equivalente do Kimi a liberar
+  # tudo sem revisão. Quem concede permissão aqui é a política do Hub.
   extraArgs: []
   env: {}
 
 session:
-  strategy: replay
+  strategy: native
+  idFrom: "$.session_id"
 
 stream:
-  format: text
-  mapper: generic-text
+  format: jsonl
+  mapper: kimi
 
 capabilities:
   - code-edit
@@ -33,7 +39,7 @@ capabilities:
 
 auth:
   mode: inherit
-  loginHint: "rode `kimi` e faça login com sua conta Moonshot"
+  loginHint: "rode `kimi login` (fluxo de device code)"
 
 defaults:
   isolation: worktree
@@ -41,5 +47,7 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "Projeto migrando de Python para Bun+TypeScript: flags podem mudar entre versões."
-  - "Suporta ACP — candidato natural a integração mais rica na fase 3."
+  - "O id da sessão só chega no evento final `session.resume_hint`, então o resume nativo só vale a partir do segundo turno."
+  - "Não reporta uso de tokens nas execuções observadas: o custo do Hub sai estimado pelo modelo padrão do agente."
+  - "Projeto migrando de Python para Bun+TypeScript; o formato do stream-json pode mudar entre versões."
+  - "Suporta ACP (`kimi acp`) — candidato a integração mais rica na fase 3."
