@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { HubError, type IsolationMode } from '@agents-hub/core';
@@ -12,6 +12,25 @@ export interface WorktreeInfo {
   branch: string | null;
   isolated: boolean;
 }
+
+/**
+ * Diretórios de dependência ligados do projeto para o worktree.
+ *
+ * Um `git worktree` traz só o que está versionado — e `node_modules` não está.
+ * Sem esta ligação, o agente entra num checkout onde `npm test` e `tsc` falham
+ * na primeira linha, por um motivo que não tem nada a ver com o trabalho dele:
+ * foi assim que o portão de validação reprovou três tentativas seguidas no
+ * primeiro teste real.
+ *
+ * A ligação é um junction (Windows) ou symlink (POSIX), não uma cópia — copiar
+ * `node_modules` a cada sessão custaria minutos e gigabytes.
+ *
+ * **Contrapartida assumida:** as dependências passam a ser COMPARTILHADAS com o
+ * projeto. Um `npm install` dentro do worktree altera a árvore do repositório
+ * principal. Por isso `npm install` não está na allow list de comandos: ele cai
+ * em `escalate` e aparece na timeline.
+ */
+const DEPENDENCIAS_LIGADAS = ['node_modules', '.venv', 'vendor'];
 
 /**
  * Isolamento por git worktree (ADR 01.3).
@@ -78,7 +97,34 @@ export class WorktreeManager {
       });
     }
 
+    await this.#ligarDependencias(params.projectPath, dir);
+
     return { path: dir, branch, isolated: true };
+  }
+
+  /**
+   * Liga as dependências do projeto no worktree recém-criado.
+   *
+   * Falhar aqui não invalida o worktree: o agente ainda consegue ler e editar
+   * código, só não roda build nem testes. Derrubar a sessão inteira por causa
+   * disso seria pior que degradar.
+   */
+  async #ligarDependencias(projectPath: string, worktreePath: string): Promise<void> {
+    for (const nome of DEPENDENCIAS_LIGADAS) {
+      const origem = path.join(projectPath, nome);
+      const destino = path.join(worktreePath, nome);
+
+      if (!existsSync(origem) || existsSync(destino)) continue;
+
+      try {
+        // 'junction' no Windows não exige privilégio de administrador, ao
+        // contrário de symlink de diretório.
+        await symlink(origem, destino, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch {
+        // Degrada em silêncio: sem a ligação o agente perde build e testes,
+        // mas continua conseguindo trabalhar no código.
+      }
+    }
   }
 
   /**

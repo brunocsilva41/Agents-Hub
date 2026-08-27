@@ -3,8 +3,9 @@ name: OpenCode
 vendor: SST (open source)
 description: >
   Agente model-agnostic e auto-hospedável. Único do conjunto com servidor HTTP
-  próprio (`opencode serve`, REST + OpenAPI 3.1 + SSE) — na fase 2 ganha um
-  adapter HTTP dedicado, que é a integração de maior fidelidade possível.
+  próprio (`opencode serve`, REST + OpenAPI 3.1 + SSE), e por isso o único que o
+  Hub aciona por HTTP em vez de spawn de processo — é onde estão o id de sessão
+  durável, o custo por passo e os eventos estruturados.
 
 bin: opencode
 
@@ -12,6 +13,8 @@ detect:
   args: ["--version"]
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
+# Mantido para o caso de o adapter HTTP não estar disponível: o Hub cai no
+# adapter genérico de processo e a sessão ainda roda, só com timeline pobre.
 invoke:
   oneShot: ["run"]
   resume: ["run", "--session", "{{nativeSessionId}}"]
@@ -21,10 +24,10 @@ invoke:
   env: {}
 
 session:
-  # Via CLI o id da sessão não vem no stdout; o resume nativo existe, mas
-  # depende de capturarmos o id — o que só o adapter HTTP faz de forma confiável.
-  strategy: replay
-  idFrom: "$.sessionID"
+  # `GET /api/session/{id}` recupera sessão criada em outro processo do servidor
+  # (confirmado contra o binário real), então o id nativo é handle durável.
+  strategy: native
+  idFrom: "$.data.sessionID"
 
 stream:
   format: text
@@ -47,5 +50,7 @@ defaults:
   supervision: semi
 
 caveats:
-  - "Adapter de CLI é provisório: a timeline vem como texto puro, sem custo por turno."
-  - "Fase 2 substitui por adapter HTTP sobre `opencode serve` (sessões, SSE e custo reais)."
+  - "O Hub sobe um `opencode serve` em 127.0.0.1:4790 se não houver um respondendo, e só derruba o que ele mesmo subiu."
+  - "O servidor roda sem senha (ele avisa no boot); por isso nunca é exposto além de 127.0.0.1."
+  - "A rota de replay por sessão (`GET /api/session/{id}/event`) derruba a conexão na 1.17.15, então o stream abre antes do prompt e eventos perdidos não voltam."
+  - "Modelo e agente só valem na criação da sessão: passá-los no corpo do prompt é silenciosamente ignorado pelo servidor."

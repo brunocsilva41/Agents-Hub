@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { AgentRegistry } from '@agents-hub/adapters';
+import { AgentRegistry, createOpenCodeAdapter, type OpenCodeAdapter } from '@agents-hub/adapters';
 import { createStore } from '@agents-hub/store';
 import type { UnitOfWork } from '@agents-hub/core';
 import { InMemoryEventBus } from './bus.js';
@@ -31,6 +31,17 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const registry = AgentRegistry.fromDirectory(config.manifestsDir, {
     probeCacheFile: path.join(config.home, 'probes.json'),
   });
+  // O OpenCode é o único do conjunto com servidor próprio. Trocamos o adapter
+  // de processo pelo HTTP: pelo CLI perdíamos exatamente o que ele tem de melhor
+  // — id de sessão durável, custo por passo e eventos estruturados.
+  let opencode: OpenCodeAdapter | null = null;
+  if (registry.has('opencode')) {
+    opencode = createOpenCodeAdapter(registry.get('opencode').manifest, {
+      port: config.opencodePort,
+    });
+    registry.registerAdapter(opencode);
+  }
+
   const bus = new InMemoryEventBus();
   const worktrees = new WorktreeManager(config.worktreeRoot);
   const sessions = new SessionManager(config, store, registry, bus, worktrees);
@@ -50,6 +61,8 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
     async shutdown() {
       reaper.stop();
       await sessions.shutdown();
+      // Derruba o `opencode serve` que o Hub subiu — nunca um que já existia.
+      if (opencode) await opencode.close();
       await server.close();
       store.close();
     },

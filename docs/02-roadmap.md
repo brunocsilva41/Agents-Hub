@@ -112,9 +112,35 @@ e por isso é opt-in; os critérios seguem no brief dessa revisão.
 
 ### Restante da fase 2
 - [ ] Gate PRÉ-execução por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) — hoje comando e arquivo só podem ser vigiados depois do fato
-- [ ] Adapter HTTP do OpenCode sobre `opencode serve` (sessões, SSE e custo reais)
+### Adapter HTTP do OpenCode — 2026-08-27
+
+- [x] API real levantada contra o binário (1.17.15) lendo a OpenAPI que o próprio
+      servidor publica em `/doc`; spec e resumo em [`docs/referencias/`](referencias/)
+- [x] `OpenCodeAdapter`: sessão por `POST /api/session` com `location.directory`
+      apontando para o worktree — um servidor só, N sessões isoladas
+- [x] Tradutor de eventos SSE puro e testável sem servidor (19 testes)
+- [x] **Custo por passo real**, que a CLI headless simplesmente não entrega
+- [x] `interrupt` de verdade (`POST /interrupt`), sem a degradação para kill que o
+      adapter de processo sofre no Windows
+- [x] `send()` ao vivo com `delivery: steer` — a única integração do conjunto que
+      injeta mensagem no turno em andamento
+- [x] Ciclo de vida do servidor: sobe se não houver, reaproveita se houver, e só
+      derruba o que ele mesmo subiu
+
+#### O que o teste real expôs
+
+| Achado | Correção |
+|---|---|
+| O poll de fim de turno começava junto com a run, antes do prompt ser enviado: três ausências em 3s e a run era encerrada **antes de o turno existir**, com zero token e ar de sucesso | Poll só começa depois do prompt aceito, e ausência só conta como fim depois de o turno ter sido visto ativo |
+| Turno que falhava no provedor (401, modelo inválido) saía do adapter como `exit 0` — o pipeline não via falha, mandava para a validação e queimava tentativas culpando o motivo errado | O adapter registra o erro do turno e o reflete no desfecho da run |
+| **Worktree isolado não tem `node_modules`**: `npm test` e `tsc` falhavam na primeira linha para todo agente, e o portão de validação reprovava por um motivo alheio ao trabalho | `WorktreeManager` liga `node_modules`/`.venv`/`vendor` por junction (Windows) ou symlink |
+| A CLI devolvia o terminal no fim do TURNO, enquanto validação, retry e fallback ainda podiam mudar o resultado | Espera a tarefa chegar a estado terminal e relata o portão de validação |
+
 - [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo
-- [ ] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo sai incompleto
+- [ ] Mappers dedicados: Cursor, Copilot, Antigravity, Kimi, MiMo — **não entregue**: o agente
+      designado morreu por limite de sessão antes de rodar os `--help`. Os cinco manifestos
+      seguem com flags deduzidas, e os `caveats` dizem isso
+- [x] Tabela de preços por modelo — Codex reporta tokens mas não USD, então o custo em dólar do fluxo sai incompleto
 - [ ] TUI (a Web UI cobriu a necessidade; a TUI virou conveniência, não bloqueio)
 
 ## Fase 3 — Plataforma

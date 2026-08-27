@@ -393,28 +393,69 @@ async function streamUntilDone(
   const rootId = filter.rootId;
   const showAgent = rootId !== undefined;
 
+  const alvo = filter.sessionId ?? rootId;
+
   for await (const event of client.stream(filter)) {
     console.log(renderEvent(event, { showAgent }));
 
-    const isRootEnd =
-      event.type === 'session.ended' &&
-      (rootId === undefined || event.sessionId === rootId);
-    const isTerminalTurn =
-      (event.type === 'turn.completed' || event.type === 'error') &&
-      (rootId === undefined ? true : event.sessionId === rootId);
+    const doAlvo = alvo === undefined || event.sessionId === alvo;
+    const fimDeTurno =
+      doAlvo && (event.type === 'turn.completed' || event.type === 'error' || event.type === 'session.ended');
 
-    if (isRootEnd || isTerminalTurn) {
-      if (rootId) {
-        const { budget } = await client.budget(rootId);
+    if (!fimDeTurno) continue;
+
+    // O turno acabar NÃO quer dizer que a tarefa acabou: ainda faltam o portão
+    // de validação e, se ele reprovar, retry ou troca de agente. Devolver o
+    // terminal aqui mostraria "concluído" para algo que pode falhar em seguida.
+    if (alvo !== undefined && (await aguardarTaskTerminal(client, alvo))) return;
+  }
+}
+
+/**
+ * Espera a tarefa da sessão chegar a um estado terminal, relatando o portão de
+ * validação. Devolve `false` quando a tarefa continua viva (retry ou fallback),
+ * para o chamador seguir acompanhando o stream.
+ */
+async function aguardarTaskTerminal(client: HubClient, sessionId: string): Promise<boolean> {
+  const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
+  let avisou = false;
+
+  for (let i = 0; i < 600; i += 1) {
+    const { tasks } = await client.tasks(sessionId).catch(() => ({ tasks: [] }));
+    const task = tasks[0];
+    if (!task) return true;
+
+    if (!terminais.has(task.state)) {
+      if (!avisou) {
+        console.log(dim('… aguardando o portão de validação'));
+        avisou = true;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+      continue;
+    }
+
+    const validacao = task.result?.validation;
+    if (validacao) {
+      for (const check of validacao.checks) {
         console.log(
-          `\n${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${formatTokens(
-            budget.consumed.tokens,
-          )} tokens ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
+          `${check.passed ? green('✓') : red('✗')} validação: ${check.name}${
+            check.detail ? dim(` — ${check.detail}`) : ''
+          }`,
         );
       }
-      return;
     }
+
+    const { session } = await client.session(sessionId);
+    const { budget } = await client.budget(session.rootId);
+    console.log(
+      `\n${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${formatTokens(
+        budget.consumed.tokens,
+      )} tokens ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
+    );
+    return true;
   }
+
+  return true;
 }
 
 async function send(client: HubClient, args: Args): Promise<void> {

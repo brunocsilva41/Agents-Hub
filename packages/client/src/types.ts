@@ -57,6 +57,11 @@ export interface TaskSummary {
     summary: string;
     artifacts: string[];
     usage: { usd: number; tokens: number; seconds: number };
+    /** Presente quando o portão de validação rodou (ADR 04.3). */
+    validation?: {
+      passed: boolean;
+      checks: Array<{ name: string; passed: boolean; detail?: string }>;
+    };
   } | null;
   createdAt: string;
   updatedAt: string;

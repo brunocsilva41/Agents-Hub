@@ -16,6 +16,12 @@ export interface HubConfig {
   /** Estáticos da Web UI. Servida pelo próprio daemon: um processo só (ADR 05.3). */
   webRoot: string;
   retention: RetentionPolicy;
+  /**
+   * Porta do `opencode serve`. Separada da do Hub de propósito: se o usuário já
+   * tem um servidor do OpenCode no ar, o adapter reaproveita em vez de subir
+   * outro — e derrubar um servidor alheio no shutdown seria invasivo.
+   */
+  opencodePort: number;
   policy: PolicyDocument;
 }
 
@@ -75,6 +81,7 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
     host: '127.0.0.1',
     port: 4747,
     webRoot: bundledWebRoot(),
+    opencodePort: 4790,
     ...onDisk,
     ...overrides,
     // A política nunca é substituída inteira por acidente: campos ausentes no
