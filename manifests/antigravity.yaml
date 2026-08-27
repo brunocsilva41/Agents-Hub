@@ -41,5 +41,7 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "Flags de headless não verificadas contra a versão instalada — rode `hub verify antigravity`."
+  - "NÃO VERIFICADO: as flags aqui são deduzidas da documentação, não confirmadas contra o binário — ele não está instalado nesta máquina."
+  - "A pasta ~/.antigravity é da IDE do Antigravity, não da CLI; ~/.antigravitycli existe mas está vazia."
+  - "O Gemini CLI (`gemini`), predecessor do Antigravity CLI, pode estar instalado e AINDA ASSIM não funcionar: desde jun/2026 ele responde IneligibleTierError para contas individuais, pedindo migração para o Antigravity. Instalar a CLI do Antigravity é o caminho."
   - "Antigravity tem seu próprio gerenciador de agentes; usar os dois em paralelo pode duplicar trabalho."

@@ -45,5 +45,6 @@ defaults:
   supervision: semi
 
 caveats:
-  - "Mapper genérico: eventos de ferramenta e custo ainda não são extraídos."
-  - "Formato exato do stream-json precisa ser confirmado com `hub verify cursor`."
+  - "NAO VERIFICADO: as flags aqui sao deduzidas da documentacao, nao confirmadas contra o binario."
+  - "A IDE do Cursor estar instalada NAO basta: o agente de terminal e um binario separado (`cursor-agent`), e nesta maquina so existem `cursor` e os tuneis. Instale a CLI do Cursor para este manifesto valer."
+  - "Mapper generico: eventos de ferramenta e custo ainda nao sao extraidos."

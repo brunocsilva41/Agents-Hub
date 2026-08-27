@@ -1,0 +1,58 @@
+id: openclaude
+name: OpenClaude
+vendor: comunidade (fork do Claude Code)
+description: >
+  Fork do Claude Code com a mesma superfície de flags e o mesmo formato de
+  stream-json — por isso reaproveita o mapper do Claude sem uma linha de código
+  nova. Diferencial: multi-provider (anthropic, openai, gemini, github, bedrock,
+  vertex, ollama), o que o torna útil como rota alternativa quando um provedor
+  está fora ou caro.
+
+bin: openclaude
+
+detect:
+  args: ["--version"]
+  versionRegex: "(\\d+\\.\\d+\\.\\d+)"
+
+invoke:
+  # Verificado contra o binário 0.13.0: mesma forma do Claude Code.
+  oneShot: ["-p", "--output-format", "stream-json", "--verbose"]
+  resume: ["-p", "--resume", "{{nativeSessionId}}", "--output-format", "stream-json", "--verbose"]
+  stdinPrompt: true
+  interactive: false
+  # Sem `--allow-dangerously-skip-permissions` nem `--permission-mode
+  # bypassPermissions`: quem concede permissão aqui é a política do Hub.
+  extraArgs: []
+  env: {}
+
+session:
+  strategy: native
+  idFrom: "$.session_id"
+
+stream:
+  format: jsonl
+  # Mesmo envelope do Claude Code (system/assistant/user/result).
+  mapper: claude
+
+capabilities:
+  - code-edit
+  - refactor
+  - test-writing
+  - code-review
+  - debug
+  - shell
+  - multi-provider
+
+auth:
+  mode: inherit
+  loginHint: "configure o provedor com as variáveis de ambiente da sua escolha (ANTHROPIC_API_KEY, OPENAI_API_KEY, ...)"
+
+defaults:
+  isolation: worktree
+  timeoutSeconds: 1800
+  supervision: semi
+
+caveats:
+  - "Sendo fork, o formato do stream-json pode divergir do Claude Code entre versões — se a timeline empobrecer, é o primeiro lugar a olhar."
+  - "Aceita `--session-id <uuid>` definido por quem chama: dá para o Hub fixar o id em vez de extraí-lo da saída (melhoria futura do adapter)."
+  - "O modelo e o provedor dependem de variáveis de ambiente; a estimativa de custo usa o modelo que ele reportar, não um padrão fixo."
