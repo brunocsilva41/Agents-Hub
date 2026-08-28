@@ -2,6 +2,7 @@ import type { EventEnvelope } from '@agents-hub/core';
 import type {
   AgentSummary,
   ApprovalSummary,
+  ArtifactSummary,
   BudgetSummary,
   GraphSummary,
   HealthSummary,
@@ -138,6 +139,15 @@ export class HubClient {
   // ------------------------------------------------------------------- tasks
   task(taskId: string): Promise<TaskStatus> {
     return this.#get(`/tasks/${taskId}`);
+  }
+
+  /** O que a sessão mudou no código, em patch unificado. */
+  diff(sessionId: string): Promise<{ diff: string | null; path?: string; message?: string }> {
+    return this.#get(`/sessions/${sessionId}/diff`);
+  }
+
+  artifacts(sessionId: string): Promise<{ artifacts: ArtifactSummary[] }> {
+    return this.#get(`/sessions/${sessionId}/artifacts`);
   }
 
   tasks(sessionId: string): Promise<{ tasks: TaskSummary[] }> {

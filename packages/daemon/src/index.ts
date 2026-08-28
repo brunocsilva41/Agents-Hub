@@ -22,6 +22,8 @@ export {
   type ProjectPolicyOverrides,
 } from './project-config.js';
 export { runValidation } from './validation.js';
+export { interpretarRevisao } from './review-verdict.js';
+export { captureDiff, persistDiff, type DiffCapture } from './diff-capture.js';
 export {
   actionsOfToolCall,
   combineVerdicts,

@@ -126,6 +126,7 @@ ${bold('Sessões')}
 
 ${bold('Delegação e custo')}
   hub delegate <sessionId> --agent <id> "objetivo"   um agente pede a outro
+  hub diff <sessionId>                                o que o agente mudou no código
   hub graph <rootId>                                  árvore de quem chamou quem
   hub budget <rootId>                                 consumo contra o orçamento
 
@@ -206,6 +207,8 @@ async function main(): Promise<void> {
     case 'mcp':
       // Não exige daemon: registrar a config é offline.
       return mcpCommand(args, config);
+    case 'diff':
+      return withDaemon(() => showDiff(client, args));
     case 'graph':
       return withDaemon(() => showGraph(client, args));
     case 'budget':
@@ -551,6 +554,24 @@ async function aguardarTaskTerminal(client: HubClient, sessionId: string): Promi
     const task = tasks[0];
     if (!task) return true;
 
+    // Bloqueio por decisão humana NÃO é espera: ninguém vai destravar enquanto
+    // o terminal está preso. Antes, a CLI ficava dez minutos calada aqui.
+    if (task.state === 'input_required') {
+      const { approvals } = await client.approvals(sessionId).catch(() => ({ approvals: [] }));
+      const pendente = approvals[0];
+
+      console.log(`${NEWLINE}${yellow('⏸ bloqueado, esperando você')}`);
+      if (pendente) {
+        console.log(`   ${pendente.action} ${dim(`[${pendente.risk}]`)}`);
+        console.log(
+          `${NEWLINE}   ${bold(`hub approve ${pendente.id}`)}   ${dim('ou')}   ${bold(`hub deny ${pendente.id}`)}`,
+        );
+      } else {
+        console.log(dim('   nenhuma aprovação registrada — veja `hub approvals`'));
+      }
+      return true;
+    }
+
     if (!terminais.has(task.state)) {
       if (!avisou) {
         console.log(dim('… aguardando o portão de validação'));
@@ -623,6 +644,26 @@ async function delegate(client: HubClient, args: Args): Promise<void> {
     `${green('delegado')} para ${bold(result.agentId)} ${dim(`sessão ${result.sessionId}`)}`,
   );
   console.log(dim(`acompanhe com: hub watch ${result.sessionId}`));
+}
+
+/** Mostra o patch da sessão — a pergunta que sempre vem primeiro. */
+async function showDiff(client: HubClient, args: Args): Promise<void> {
+  const sessionId = required(args.positional[0], 'sessionId');
+  const { diff, message } = await client.diff(sessionId);
+
+  if (!diff) {
+    console.log(dim(message ?? 'nada a mostrar'));
+    return;
+  }
+
+  for (const linha of diff.split(NEWLINE)) {
+    if (linha.startsWith('+++') || linha.startsWith('---')) console.log(bold(linha));
+    else if (linha.startsWith('+')) console.log(green(linha));
+    else if (linha.startsWith('-')) console.log(red(linha));
+    else if (linha.startsWith('@@')) console.log(cyan(linha));
+    else if (linha.startsWith('#')) console.log(dim(linha));
+    else console.log(linha);
+  }
 }
 
 async function showGraph(client: HubClient, args: Args): Promise<void> {

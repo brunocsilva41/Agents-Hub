@@ -118,3 +118,12 @@ export interface ApprovalSummary {
   resolvedAt: string | null;
   resolvedBy: string | null;
 }
+
+export interface ArtifactSummary {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  kind: 'diff' | 'file' | 'report' | 'log' | 'transcript';
+  path: string;
+  createdAt: string;
+}

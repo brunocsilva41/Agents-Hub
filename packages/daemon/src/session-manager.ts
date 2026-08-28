@@ -23,6 +23,7 @@ import {
   resolveEventCost,
   watchForMode,
   type Approval,
+  type Artifact,
   type Brief,
   type BudgetLimits,
   type Decision,
@@ -52,6 +53,8 @@ import type {
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { loadProjectOverrides, mergeProjectPolicy } from './project-config.js';
+import { captureDiff, persistDiff } from './diff-capture.js';
+import { interpretarRevisao } from './review-verdict.js';
 import { actionsOfToolCall, combineVerdicts } from './pretool-gate.js';
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
@@ -107,6 +110,9 @@ function closeLastAttempt(
     i === arr.length - 1 ? { ...a, endedAt: nowIso(), outcome: mapped, error } : a,
   );
 }
+
+/** Quebra de linha literal para montar prompt sem brigar com escapes. */
+const NEWLINE_PROMPT = String.fromCharCode(10);
 
 function novaTentativa(n: number, agentId: string): TaskAttempt {
   return { n, agentId, startedAt: nowIso(), endedAt: null, outcome: null, error: null };
@@ -594,6 +600,30 @@ export class SessionManager {
     const isDelegation = approval.detail['kind'] === 'delegation';
     const task = approval.taskId ? this.store.tasks.get(approval.taskId) : null;
 
+    // Liberar um bloqueio de orçamento sem aumentar o teto faria a sessão
+    // retomar e estourar de novo na primeira chamada — um ciclo de aprovações
+    // que nunca sai do lugar.
+    if (approval.detail['kind'] === 'budget') {
+      const incremento = approval.detail['increment'] as
+        | { usd?: number; tokens?: number; seconds?: number }
+        | undefined;
+
+      const ledger = this.#ledger(session.rootId);
+      const snapshot = ledger.raiseLimits(incremento ?? {});
+      this.#persistLedger(ledger);
+
+      this.#emit({
+        sessionId: session.id,
+        taskId: approval.taskId,
+        agentId: session.agentId,
+        type: 'budget.updated',
+        payload: {
+          text: `orçamento ampliado por ${by}: agora US$ ${snapshot.limits.usd.toFixed(2)}`,
+          snapshot,
+        },
+      });
+    }
+
     if (isDelegation && task) {
       // A sessão nem chegou a subir: agora sobe.
       this.store.tasks.update(task.id, { state: 'working' });
@@ -1013,8 +1043,6 @@ export class SessionManager {
           this.#persistLedger(ledger);
 
           if (snapshot.exhausted) {
-            // Estouro é decisão humana por definição (ADR 03): paramos o agente
-            // e deixamos a task esperando você, sem matar o trabalho já feito.
             this.#emit({
               sessionId: session.id,
               taskId: task.id,
@@ -1022,8 +1050,26 @@ export class SessionManager {
               type: 'budget.exceeded',
               payload: { snapshot },
             });
-            this.store.tasks.update(task.id, { state: 'input_required' });
-            this.store.sessions.update(session.id, { state: 'waiting_approval' });
+
+            // Estouro é decisão humana por definição (ADR 03) — mas antes isto
+            // só marcava a sessão como "aguardando" SEM criar aprovação: ela
+            // não aparecia em `hub approvals` e não havia como destravar.
+            // Beco sem saída silencioso, encontrado rodando de verdade.
+            this.#requestApproval({
+              session,
+              taskId: task.id,
+              risk: 'budget',
+              action: `orçamento do fluxo esgotado (US$ ${snapshot.consumed.usd.toFixed(4)} de ${snapshot.limits.usd.toFixed(2)})`,
+              detail: {
+                kind: 'budget',
+                consumed: snapshot.consumed,
+                limits: snapshot.limits,
+                // Aprovar libera outra rodada do mesmo tamanho: é previsível e
+                // evita que um "ok" vire orçamento ilimitado.
+                increment: snapshot.limits,
+              },
+            });
+
             await this.registry.get(session.agentId).cancel(handle);
           }
         }
@@ -1111,13 +1157,40 @@ export class SessionManager {
         acceptanceCriteria: task.brief.acceptanceCriteria,
       });
 
+      // O portão de revisão roda DEPOIS do comando: reprovar no build é barato
+      // e determinístico, e não faz sentido pagar uma sessão de modelo para
+      // revisar código que nem compila.
       if (validationPassed(validation)) {
+        const artefatos = await this.#capturarMudancas(session, task);
+        const revisao = await this.#revisar(session, task, artefatos);
+
+        if (revisao && !revisao.passed) {
+          validation = {
+            passed: false,
+            checks: [...(validation?.checks ?? []), ...revisao.checks],
+          };
+          this.#emit({
+            sessionId: session.id,
+            taskId: task.id,
+            agentId: session.agentId,
+            type: 'error',
+            payload: { message: `revisão reprovou: ${revisao.checks[0]?.detail ?? ''}` },
+          });
+        }
+      }
+
+      if (validationPassed(validation)) {
+        const artefatos = this.store.artifacts
+          .list({ sessionId: session.id })
+          .filter((a) => a.taskId === task.id)
+          .map((a) => a.id);
+
         this.store.tasks.update(task.id, {
           state: 'completed',
           attempts,
           result: {
             summary: this.#summarize(session.id, task.id),
-            artifacts: [],
+            artifacts: artefatos,
             usage: { ...this.store.events.costOf(session.id), seconds: elapsedSeconds },
             ...(validation ? { validation } : {}),
           },
@@ -1503,6 +1576,229 @@ export class SessionManager {
     // O worktree DELIBERADAMENTE sobrevive ao fim da sessão (ADR 06.3): é a
     // janela em que você consegue abrir o diretório e ver o que o agente fez.
     // Quem recolhe é o WorktreeReaper, depois do prazo de retenção.
+  }
+
+  /**
+   * Revisão cruzada: um SEGUNDO agente olha o resultado do primeiro.
+   *
+   * É o único portão capaz de julgar os critérios de aceite em linguagem
+   * natural — o portão de comando só sabe dizer se compila. Custa uma sessão de
+   * modelo por tarefa, e por isso é opt-in (`policy.validation.review.enabled`).
+   *
+   * Até agora esse campo existia na configuração, era herdado na interseção e
+   * aparecia na documentação, mas nada o consumia: quem ligasse não recebia
+   * revisão nenhuma, em silêncio.
+   */
+  async #revisar(
+    session: Session,
+    task: Task,
+    artefatos: string[],
+  ): Promise<ValidationOutcome | null> {
+    const politica = this.policyFor(session).policy.validation.review;
+    if (!politica.enabled) return null;
+
+    // Diff vazio NÃO é aprovação automática.
+    //
+    // Observado num teste real: o agente foi barrado pelo próprio sandbox,
+    // disse "não foi possível criar o arquivo", saiu com código 0 — e a task
+    // foi marcada como concluída. "Terminou limpo" e "fez o que foi pedido"
+    // continuam sendo coisas diferentes, e é justamente aqui que divergem.
+    //
+    // O Hub não sabe se a tarefa deveria mudar arquivos (análise não muda). O
+    // revisor sabe, porque tem os critérios de aceite — então a pergunta vai
+    // para ele, com o fato explícito de que nada mudou.
+    let revisor: string;
+    try {
+      revisor = this.registry.resolveTarget(
+        politica.agent ?? 'cap:code-review',
+        this.config.policy.fallback,
+      );
+    } catch {
+      return {
+        passed: true,
+        checks: [
+          { name: 'revisão', passed: true, detail: 'nenhum agente de revisão disponível — portão ignorado' },
+        ],
+      };
+    }
+
+    // O revisor não pode ser quem escreveu: revisar o próprio trabalho é
+    // exatamente o viés que a revisão existe para evitar.
+    if (revisor === session.agentId) {
+      const alternativa = this.#fallbackChain(session.agentId)[0];
+      if (!alternativa) {
+        return {
+          passed: true,
+          checks: [
+            { name: 'revisão', passed: true, detail: 'só há um agente disponível; sem revisor independente' },
+          ],
+        };
+      }
+      revisor = alternativa;
+    }
+
+    return this.#executarRevisao(session, task, revisor);
+  }
+
+  /**
+   * Roda o revisor num processo efêmero e interpreta o veredito.
+   *
+   * NÃO cria sessão do Hub: uma revisão não é trabalho delegado, é um portão de
+   * qualidade. Virar sessão poluiria o grafo com nós que ninguém pediu e faria
+   * o custo da revisão parecer uma delegação do agente.
+   */
+  async #executarRevisao(
+    session: Session,
+    task: Task,
+    revisorId: string,
+  ): Promise<ValidationOutcome> {
+    const adapter = this.registry.get(revisorId);
+    const diff = await captureDiff(session.workdir);
+    // Sem o que o agente disse, o revisor não vê a discrepância entre o
+    // relato e o resultado — que foi exatamente o caso que motivou isto.
+    const resumoDoAgente = this.#summarize(session.id, task.id);
+
+    const prompt = [
+      '# Revisão de código',
+      '',
+      'Outro agente executou a tarefa abaixo. Revise o que ele mudou.',
+      '',
+      '## Tarefa original',
+      '',
+      task.brief.objective,
+      '',
+      ...(task.brief.acceptanceCriteria.length > 0
+        ? ['## Critérios de aceite', '', ...task.brief.acceptanceCriteria.map((c) => `- ${c}`), '']
+        : []),
+      ...(task.brief.constraints.length > 0
+        ? ['## Restrições', '', ...task.brief.constraints.map((c) => `- ${c}`), '']
+        : []),
+      '## Mudanças',
+      '',
+      ...(diff && !diff.empty
+        ? [
+            `${diff.filesChanged} arquivo(s) alterado(s), +${diff.insertions} −${diff.deletions}`,
+            ...(diff.untracked.length > 0
+              ? [`Arquivos novos: ${diff.untracked.join(', ')}`]
+              : []),
+            '',
+            '```diff',
+            diff.patch.slice(0, 60_000),
+            '```',
+          ]
+        : [
+            'O AGENTE NÃO ALTEROU NENHUM ARQUIVO.',
+            '',
+            'Se a tarefa exigia mudança de código, isso é uma reprovação — pode ter',
+            'sido bloqueio de permissão, engano do agente ou tarefa mal compreendida.',
+            'Se a tarefa era de análise ou resposta, não alterar nada é o esperado.',
+          ]),
+      '',
+      '## O que o agente respondeu',
+      '',
+      resumoDoAgente,
+      '',
+      '## Como responder',
+      '',
+      'Responda em UMA linha, começando exatamente com APROVADO ou REPROVADO,',
+      'seguido de um motivo curto. Reprove apenas se um critério de aceite não',
+      'foi atendido ou se há defeito claro — não reprove por estilo.',
+    ].join(NEWLINE_PROMPT);
+
+    const ctx: RunContext = {
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: revisorId,
+      workdir: session.workdir,
+      mode: session.mode,
+      env: {},
+      timeoutSeconds: Math.min(600, this.config.policy.taskTimeoutSeconds),
+      heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
+    };
+
+    try {
+      const handle = await adapter.start(ctx, prompt);
+      const textos: string[] = [];
+
+      for await (const evento of handle.events) {
+        if (evento.type === 'message') {
+          const texto = evento.payload['text'];
+          if (typeof texto === 'string') textos.push(texto);
+        }
+        // O custo da revisão é do fluxo como qualquer outro: sai do mesmo
+        // orçamento, senão ligar a revisão furaria o teto em silêncio.
+        if (evento.cost) {
+          this.#ledger(session.rootId).charge({
+            usd: evento.cost.usd ?? 0,
+            tokens: (evento.cost.inputTokens ?? 0) + (evento.cost.outputTokens ?? 0),
+            seconds: 0,
+          });
+        }
+      }
+
+      await handle.done;
+      this.#persistLedger(this.#ledger(session.rootId));
+
+      return interpretarRevisao(textos.join(' '), revisorId);
+    } catch (err) {
+      // Revisor quebrado não pode reprovar trabalho bom: falhar aqui e barrar a
+      // entrega puniria o agente executor por um problema que não é dele.
+      return {
+        passed: true,
+        checks: [
+          {
+            name: `revisão (${revisorId})`,
+            passed: true,
+            detail: `revisor indisponível (${(err as Error).message}) — portão ignorado`,
+          },
+        ],
+      };
+    }
+  }
+
+  /**
+   * Registra o que a sessão mudou no código.
+   *
+   * Sem isto, `TaskResult.artifacts` era sempre `[]` e a tabela de artefatos
+   * nunca via uma linha: o Hub sabia quanto custou e o que o agente disse, mas
+   * não o que ele efetivamente escreveu. O diff é a resposta à pergunta que
+   * sempre vem primeiro.
+   */
+  async #capturarMudancas(session: Session, task: Task): Promise<string[]> {
+    const capture = await captureDiff(session.workdir);
+    if (!capture || capture.empty) return [];
+
+    const arquivo = await persistDiff(this.config.artifactRoot, session.id, capture);
+    if (!arquivo) return [];
+
+    const artifact: Artifact = {
+      id: newId('art'),
+      sessionId: session.id,
+      taskId: task.id,
+      kind: 'diff',
+      path: arquivo,
+      hash: null,
+      createdAt: nowIso(),
+    };
+    this.store.artifacts.create(artifact);
+
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'file.changed',
+      payload: {
+        summary: `${capture.filesChanged} arquivo(s), +${capture.insertions} −${capture.deletions}`,
+        untracked: capture.untracked,
+        artifactId: artifact.id,
+      },
+    });
+
+    return [artifact.id];
+  }
+
+  listArtifacts(sessionId: string): Artifact[] {
+    return this.store.artifacts.list({ sessionId });
   }
 
   /** Último texto do agente — serve de resumo quando ele não produz um. */

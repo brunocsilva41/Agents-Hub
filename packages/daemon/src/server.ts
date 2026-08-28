@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { HubError, isHubError, nowIso, type EventEnvelope } from '@agents-hub/core';
 import type { ZodType } from 'zod';
@@ -225,6 +226,36 @@ export class HubServer {
     this.#route('POST', '/sessions/:id/detach', async (_req, res, params) => {
       await this.sessions.detach(params['id'] ?? '');
       sendJson(res, 200, { ok: true });
+    });
+
+    this.#route('GET', '/sessions/:id/artifacts', (_req, res, params) => {
+      sendJson(res, 200, {
+        artifacts: this.sessions.listArtifacts(param(params['id'], SessionIdSchema, 'id')),
+      });
+    });
+
+    /** Conteúdo do diff — o que o agente efetivamente mudou no código. */
+    this.#route('GET', '/sessions/:id/diff', (_req, res, params) => {
+      const sessionId = param(params['id'], SessionIdSchema, 'id');
+      const diff = this.sessions
+        .listArtifacts(sessionId)
+        .filter((a) => a.kind === 'diff')
+        .at(-1);
+
+      if (!diff) {
+        sendJson(res, 200, { diff: null, message: 'esta sessão não alterou nenhum arquivo' });
+        return;
+      }
+
+      try {
+        sendJson(res, 200, { diff: readFileSync(diff.path, 'utf8'), path: diff.path });
+      } catch {
+        // O artefato pode ter sido apagado à mão; dizer isso é melhor que 500.
+        sendJson(res, 200, {
+          diff: null,
+          message: `o arquivo do diff não está mais em ${diff.path}`,
+        });
+      }
     });
 
     this.#route('GET', '/sessions/:id/tasks', (_req, res, params) => {

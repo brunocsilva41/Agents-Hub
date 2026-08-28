@@ -9,6 +9,8 @@ export interface HubConfig {
   home: string;
   dbFile: string;
   worktreeRoot: string;
+  /** Onde ficam diffs e demais saídas materiais das sessões. */
+  artifactRoot: string;
   logDir: string;
   manifestsDir: string;
   host: string;
@@ -76,6 +78,7 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
     home,
     dbFile: path.join(home, 'hub.db'),
     worktreeRoot: path.join(home, 'worktrees'),
+    artifactRoot: path.join(home, 'artifacts'),
     logDir: path.join(home, 'logs'),
     manifestsDir: existsSync(userManifests) ? userManifests : bundledManifestsDir(),
     host: '127.0.0.1',
@@ -96,6 +99,7 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
 
   mkdirSync(config.home, { recursive: true });
   mkdirSync(config.worktreeRoot, { recursive: true });
+  mkdirSync(config.artifactRoot, { recursive: true });
   mkdirSync(config.logDir, { recursive: true });
 
   return config;
