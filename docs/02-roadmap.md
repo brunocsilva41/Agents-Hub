@@ -158,14 +158,28 @@ errados**, dois deles de forma que quebraria a invocação:
       CLI com o mapper genérico
 - [x] 14 testes com amostras capturadas da execução real, não inventadas
 
+### Endurecimento — 2026-08-28
+
+- [x] **Guarda de borda do daemon**: falha confirmada rodando contra o daemon real —
+      um POST com `Origin` de outro site e `Content-Type: text/plain` criava recurso e
+      devolvia 201. Qualquer página web que você visitasse podia dirigir o Hub com o
+      seu privilégio. Fechado por checagem de `Host` (DNS rebinding), `Origin` e
+      content-type
+- [x] Validação de contrato na borda: todo corpo e parâmetro de rota por schema
+      `strict`, com id do Hub validado por formato
+- [x] `static`: traversal comparado por caminho relativo, não por prefixo de string
+
 ### Restante da fase 2
 
 - [ ] **Mappers dedicados para Cursor e Antigravity** — os dois binários não estão
       instalados nesta máquina, então os manifestos seguem deduzidos e os `caveats`
       dizem isso. Verificar quando forem instalados
 - [ ] Mapper dedicado do MiMo, quando o vocabulário de eventos da v1 for confirmado
-- [ ] Gate PRÉ-execução por agente (hook `PreToolUse` do Claude Code, modos de aprovação
-      do Codex) — hoje comando e arquivo só podem ser vigiados **depois** do fato
+- [x] **Gate PRÉ-execução** (Claude Code) — contrato confirmado por sonda contra o
+      binário, não deduzido: a decisão de perguntar é `escalate` (não `ask`), e
+      `AGENTS_HUB_SESSION_ID` chega no hook, o que resolve a correlação de sessão.
+      Validado com o agente real: `git push` barrado antes de executar
+- [ ] Gate pré-execução para o Codex (modos de aprovação próprios) e demais agentes
 - [ ] TUI (a Web UI cobriu a necessidade; virou conveniência, não bloqueio)
 
 ## Fase 3 — Plataforma
