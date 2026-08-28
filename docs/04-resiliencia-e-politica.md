@@ -13,9 +13,37 @@ O Hub roda os agentes como **processos opacos**. Ele não intercepta syscall: v�
 | **Portão** (preventivo) | Ações que passam por dentro do Hub: delegação agente→agente, reserva de orçamento | Real. A ação **não acontece** sem liberação |
 | **Vigilância** (reativa) | Comando executado, arquivo alterado | O comando **já rodou**. O que o Hub impede é o *próximo*, parando a sessão |
 
-Chamar a vigilância de "aprovação prévia" seria mentira, e mentira em recurso de segurança é pior que ausência dele. O gate verdadeiramente preventivo para shell e arquivo depende de integração por agente — o hook `PreToolUse` do Claude Code, os modos de aprovação do Codex — e está na fila da fase 2.
+Chamar a vigilância de "aprovação prévia" seria mentira, e mentira em recurso de segurança é pior que ausência dele.
 
-Enquanto isso, o controle real e verificável é: **worktree isolado**, **orçamento do fluxo**, **portão de delegação** e **botão de encerrar**.
+**Existe um terceiro nível, e ele é o mais forte:** o *gate pré-execução* por hook do agente, hoje implementado para o Claude Code. Aí a resposta do Hub decide se a ferramenta roda — o agente pergunta antes, não depois.
+
+| Nível | Como funciona | Cobertura hoje |
+|---|---|---|
+| **Gate pré-execução** | O agente consulta o Hub antes de executar a ferramenta e obedece à resposta | Claude Code (`PreToolUse`) |
+| **Portão** | Ação que passa por dentro do Hub: delegação, reserva de orçamento | Todos |
+| **Vigilância** | Evento do que já aconteceu; para a próxima ação | Todos |
+
+### O gate pré-execução
+
+Contrato confirmado **empiricamente** contra o binário, não deduzido da documentação — uma sonda que registrava tudo o que chegava ao hook resolveu três dúvidas que a documentação deixava em aberto:
+
+- o hook recebe `{ session_id, cwd, tool_name, tool_input, tool_use_id, permission_mode }`;
+- a resposta é `hookSpecificOutput.permissionDecision` com `allow | deny | **escalate**` — **não** `ask`, como parecia;
+- `AGENTS_HUB_SESSION_ID`, injetada pelo Hub ao spawnar o agente, **chega no processo do hook**. É ela que correlaciona a chamada com a sessão, sem depender de adivinhar por diretório.
+
+Duas decisões de projeto que mudam o resultado na prática:
+
+**`approve` do Hub vira `escalate`, nunca `deny`.** Transformar "precisa de aprovação" em "negado" faria o agente concluir que a ação é impossível e procurar outro caminho para o mesmo efeito — exatamente o comportamento que um gate não pode induzir. A mensagem devolvida diz explicitamente para não contornar.
+
+**O hook falha ABERTO.** Ele pode estar instalado globalmente e disparar em toda sessão do agente, inclusive quando o Hub não está envolvido. Bloquear porque o daemon está desligado transformaria o Hub numa dependência do editor, e a primeira reação de qualquer pessoa seria desinstalar o hook — o pior desfecho possível para um controle de segurança. A garantia que fica de pé é a que importa: **quando o daemon responde e diz não, a ferramenta não roda.**
+
+O matcher cobre só `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch`. Cada chamada gateada custa um processo Node novo; incluir `Read`, `Glob` e `Grep` — que a política sempre libera — colocaria esse custo no caminho quente de toda leitura, em troca de nenhuma proteção.
+
+```bash
+hub hooks install claude --write
+```
+
+Validado com o Claude Code de verdade: mandado a rodar `git push origin main`, o comando foi barrado antes de executar, e o Hub registrou o evento de auditoria com ferramenta, risco e motivo.
 
 ### Níveis de risco
 

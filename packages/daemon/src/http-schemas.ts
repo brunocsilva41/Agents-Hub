@@ -84,6 +84,24 @@ export const ResolveApprovalSchema = z
   })
   .strict();
 
+/**
+ * Consulta do gate pré-execução.
+ *
+ * Campos em snake_case porque vêm direto do hook do agente — traduzir na CLI
+ * seria mais um lugar para o contrato divergir em silêncio.
+ */
+export const PreToolGateSchema = z
+  .object({
+    /** Id da sessão do Hub, quando o hook conseguiu herdá-lo do ambiente. */
+    sessionId: SessionIdSchema.optional(),
+    /** Id nativo do agente (o `session_id` do Claude Code, por exemplo). */
+    nativeSessionId: z.string().min(1).max(200).optional(),
+    cwd: z.string().max(4096).optional(),
+    toolName: z.string().min(1).max(200),
+    toolInput: z.record(z.unknown()).default({}),
+  })
+  .strict();
+
 /** Query params chegam como texto e podem ser lixo; NaN vira ausência. */
 export function inteiroOpcional(valor: string | null, max: number): number | undefined {
   if (valor === null) return undefined;

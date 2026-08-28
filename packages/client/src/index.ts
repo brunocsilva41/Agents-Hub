@@ -159,6 +159,26 @@ export class HubClient {
     return this.#post(`/approvals/${id}`, { decision, by });
   }
 
+  // ------------------------------------------------- gate pré-execução
+  /** Consultado pelo hook do agente ANTES de a ferramenta rodar. */
+  gateToolCall(body: {
+    sessionId?: string;
+    nativeSessionId?: string;
+    cwd?: string;
+    toolName: string;
+    toolInput: Record<string, unknown>;
+  }): Promise<{
+    permission: 'allow' | 'deny' | 'escalate';
+    decision: string;
+    risk: string;
+    reason: string;
+    explanation: string;
+    sessionId: string | null;
+    agentId: string | null;
+  }> {
+    return this.#post('/hooks/pretooluse', body);
+  }
+
   // ------------------------------------------------------------- manutenção
   shutdown(): Promise<{ ok: boolean }> {
     return this.#post('/shutdown', {});

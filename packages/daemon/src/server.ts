@@ -5,6 +5,7 @@ import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { guardRequest } from './guard.js';
+import { explainToAgent, toHookPermission } from './pretool-gate.js';
 import {
   AdoptSessionSchema,
   ApprovalIdSchema,
@@ -14,6 +15,7 @@ import {
   ResolveApprovalSchema,
   SendMessageSchema,
   SessionIdSchema,
+  PreToolGateSchema,
   StartSessionSchema,
   TaskIdSchema,
   inteiroOpcional,
@@ -336,6 +338,29 @@ export class HubServer {
           body.decision,
           body.by ?? 'você',
         ),
+      });
+    });
+
+    // ------------------------------------------------- gate pré-execução
+    /**
+     * Consultado pelo hook do agente ANTES de a ferramenta rodar.
+     *
+     * É a única prevenção real que o Hub consegue sem sandbox de sistema: aqui
+     * a resposta decide se a ação acontece, ao contrário da vigilância
+     * reativa, que só vê o fato consumado.
+     */
+    this.#route('POST', '/hooks/pretooluse', async (req, res) => {
+      const body = await readBody(req, PreToolGateSchema);
+      const verdict = this.sessions.gateToolCall(body);
+
+      sendJson(res, 200, {
+        permission: toHookPermission(verdict.decision),
+        decision: verdict.decision,
+        risk: verdict.risk,
+        reason: verdict.reason,
+        explanation: explainToAgent(verdict, verdict.session?.mode ?? 'semi'),
+        sessionId: verdict.session?.id ?? null,
+        agentId: verdict.session?.agentId ?? null,
       });
     });
 

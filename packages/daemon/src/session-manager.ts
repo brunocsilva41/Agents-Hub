@@ -24,6 +24,7 @@ import {
   type Approval,
   type Brief,
   type BudgetLimits,
+  type Decision,
   type BudgetSnapshot,
   type EventEnvelope,
   type GraphNode,
@@ -50,6 +51,7 @@ import type {
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { loadProjectOverrides, mergeProjectPolicy } from './project-config.js';
+import { actionsOfToolCall, combineVerdicts } from './pretool-gate.js';
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
 
@@ -424,6 +426,106 @@ export class SessionManager {
     }
 
     return { revividas, encerradas };
+  }
+
+  /**
+   * Decide uma chamada de ferramenta ANTES de ela executar (gate pré-execução).
+   *
+   * É a única prevenção real que o Hub consegue sem sandbox de sistema: o
+   * agente pergunta, nós respondemos, e a ferramenta só roda se deixarmos.
+   * A vigilância reativa continua existindo para os agentes que não têm hook.
+   */
+  gateToolCall(input: {
+    sessionId?: string | undefined;
+    nativeSessionId?: string | undefined;
+    cwd?: string | undefined;
+    toolName: string;
+    toolInput?: Record<string, unknown> | undefined;
+  }): { decision: Decision; risk: RiskLevel; reason: string; session: Session | null } {
+    const session = this.#localizarSessao(input);
+
+    // Sem sessão conhecida o Hub não tem política de quem aplicar. Barrar aqui
+    // transformaria qualquer uso do agente FORA do Hub num bloqueio, então a
+    // resposta honesta é não opinar.
+    if (!session) {
+      return {
+        decision: 'allow',
+        risk: 'read',
+        reason: 'chamada fora de uma sessão do Hub — sem política a aplicar',
+        session: null,
+      };
+    }
+
+    const workdir = input.cwd ?? session.workdir;
+    const engine = this.policyFor(session);
+    const actions = actionsOfToolCall(
+      { toolName: input.toolName, toolInput: input.toolInput ?? {}, cwd: input.cwd },
+      workdir,
+    );
+
+    const vereditos = actions.map((action) => {
+      const v = engine.decide(action, { workdir: session.workdir, mode: session.mode });
+      return { decision: v.decision, risk: v.risk, reason: v.reason };
+    });
+
+    const combinado = combineVerdicts(vereditos);
+
+    // O agente perguntou: registrar na timeline é o que torna a decisão
+    // auditável depois, inclusive quando foi "allow".
+    if (combinado.decision !== 'allow') {
+      this.#emit({
+        sessionId: session.id,
+        taskId: null,
+        agentId: session.agentId,
+        type: 'approval.requested',
+        payload: {
+          gate: 'pre-execution',
+          tool: input.toolName,
+          risk: combinado.risk,
+          decision: combinado.decision,
+          reason: combinado.reason,
+        },
+      });
+    }
+
+    return { ...combinado, session };
+  }
+
+  /**
+   * Encontra a sessão do Hub a partir do que o hook conseguiu informar.
+   *
+   * A variável de ambiente é o caminho confiável (nós a injetamos ao spawnar);
+   * id nativo e diretório são as saídas quando o hook roda num contexto que a
+   * perdeu.
+   */
+  #localizarSessao(input: {
+    sessionId?: string | undefined;
+    nativeSessionId?: string | undefined;
+    cwd?: string | undefined;
+  }): Session | null {
+    if (input.sessionId) {
+      const direta = this.store.sessions.get(input.sessionId);
+      if (direta) return direta;
+    }
+
+    const candidatas = this.store.sessions.list();
+
+    if (input.nativeSessionId) {
+      const porNativa = candidatas.find((s) => s.nativeSessionId === input.nativeSessionId);
+      if (porNativa) return porNativa;
+    }
+
+    if (input.cwd) {
+      const alvo = path.resolve(input.cwd);
+      // A mais recente vence: worktrees são por sessão, mas `isolation: none`
+      // faz várias sessões dividirem o mesmo diretório do projeto.
+      const porDiretorio = candidatas
+        .filter((s) => path.resolve(s.workdir) === alvo)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      if (porDiretorio[0]) return porDiretorio[0];
+    }
+
+    return null;
   }
 
   // ------------------------------------------------------------- aprovações

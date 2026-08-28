@@ -4,6 +4,16 @@ import path from 'node:path';
 import { baseUrl, createHub, loadConfig } from '@agents-hub/daemon';
 import { HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
+import { decideToolCall, lerStdin, type HookInput } from './hook.js';
+import {
+  HOOK_TARGETS,
+  MATCHER_DE_RISCO,
+  gravarConfig,
+  hookCommand,
+  hookInstalado,
+  lerConfig,
+  mergeHooks,
+} from './hooks-install.js';
 import {
   bold,
   cyan,
@@ -87,6 +97,11 @@ ${bold('Daemon')} ${dim('(sobe sozinho quando algum comando precisa)')}
   hub stop                          encerra o daemon e as sessões vivas
   hub health                        resposta crua da API
 
+${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar)')}
+  hub hooks install claude --write   registra o hook PreToolUse no Claude Code
+  hub hooks                          mostra onde o gate está instalado
+  hub hook                           uso interno: o agente chama, não você
+
 ${bold('Agentes')}
   hub doctor                        checa quais agentes estão instalados
   hub agents                        lista agentes, capabilities e limitações
@@ -137,6 +152,13 @@ async function main(): Promise<void> {
   switch (args.command) {
     case 'daemon':
       return runDaemon();
+    case 'hook':
+      // NAO passa por withDaemon: subir o daemon de dentro de um hook faria
+      // isso acontecer a cada chamada de ferramenta do agente.
+      return runHook(config);
+    case 'hooks':
+      // Offline como o `mcp`: mexer em config não precisa do daemon.
+      return hooksCommand(args);
     case 'stop':
       return stopDaemon(client);
     case 'status':
@@ -198,6 +220,87 @@ async function main(): Promise<void> {
       console.log(HELP);
       process.exitCode = 1;
   }
+}
+
+/**
+ * Responde ao hook do agente. Silencioso por construção: qualquer coisa fora do
+ * JSON no stdout confunde quem está lendo a resposta.
+ */
+async function runHook(config: ReturnType<typeof loadConfig>): Promise<void> {
+  let entrada: HookInput = {};
+  try {
+    const bruto = await lerStdin();
+    entrada = bruto.trim().length > 0 ? (JSON.parse(bruto) as HookInput) : {};
+  } catch {
+    // stdin ilegível não pode virar bloqueio: o agente ficaria travado.
+    entrada = {};
+  }
+
+  const { saida, codigo } = await decideToolCall(entrada, baseUrl(config));
+  process.stdout.write(saida);
+  process.exitCode = codigo;
+}
+
+// ------------------------------------------------------ gate pré-execução
+
+async function hooksCommand(args: Args): Promise<void> {
+  const [sub, alvoId] = args.positional;
+
+  if (sub === undefined) {
+    for (const alvo of HOOK_TARGETS) {
+      const config = lerConfig(alvo.configUsuario);
+      const instalado = hookInstalado(config);
+      console.log(`${instalado ? green('●') : dim('○')} ${bold(alvo.id)} ${dim(alvo.nome)}`);
+      console.log(`   ${dim(alvo.configUsuario)}`);
+      console.log(`   ${dim(alvo.nota)}`);
+    }
+    console.log(
+      `${NEWLINE}${dim('instale com:')} ${bold('hub hooks install claude --write')}`,
+    );
+    console.log(
+      dim(`o gate cobre ${MATCHER_DE_RISCO.split('|').length} ferramentas de risco; leitura passa direto`),
+    );
+    return;
+  }
+
+  if (sub !== 'install') {
+    console.error(red('uso: hub hooks [install <agente> [--write]]'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const alvo = HOOK_TARGETS.find((t) => t.id === (alvoId ?? 'claude'));
+  if (!alvo) {
+    console.error(
+      red(`agente "${String(alvoId)}" não suporta gate pré-execução`),
+      dim(`(disponíveis: ${HOOK_TARGETS.map((t) => t.id).join(', ')})`),
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const projeto = typeof args.flags['project'] === 'string' ? args.flags['project'] : undefined;
+  const destino =
+    projeto && alvo.configProjeto ? alvo.configProjeto(path.resolve(projeto)) : alvo.configUsuario;
+
+  const atual = lerConfig(destino);
+  const novo = mergeHooks(atual, hookCommand());
+
+  if (args.flags['write'] !== true) {
+    console.log(dim(`destino: ${destino}${NEWLINE}`));
+    console.log(JSON.stringify(novo['hooks'], null, 2));
+    console.log(`${NEWLINE}${dim('para gravar:')} ${bold(`hub hooks install ${alvo.id} --write`)}`);
+    return;
+  }
+
+  const backup = gravarConfig(destino, novo);
+  console.log(`${green('gate instalado')} em ${bold(destino)}`);
+  if (backup) console.log(dim(`backup: ${backup}`));
+  console.log(
+    dim(
+      'a partir da próxima sessão, Bash/Write/Edit passam pela política do Hub antes de rodar.',
+    ),
+  );
 }
 
 // ---------------------------------------------------------------- daemon

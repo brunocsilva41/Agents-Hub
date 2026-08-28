@@ -22,4 +22,13 @@ export {
   type ProjectPolicyOverrides,
 } from './project-config.js';
 export { runValidation } from './validation.js';
+export {
+  actionsOfToolCall,
+  combineVerdicts,
+  explainToAgent,
+  toHookPermission,
+  type HookPermission,
+  type ToolCall,
+} from './pretool-gate.js';
+export { guardRequest, type GuardVerdict } from './guard.js';
 export { createHub, type Hub } from './hub.js';

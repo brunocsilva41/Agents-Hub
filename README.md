@@ -136,14 +136,23 @@ O Hub **nunca** toca nas suas credenciais: cada adapter roda com o login que o p
 
 Detalhes e níveis de risco em [docs/decisoes/03-seguranca-limites.md](docs/decisoes/03-seguranca-limites.md).
 
-**Dois níveis de controle, com garantias diferentes** — e é importante não confundi-los:
+**Três níveis de controle, com garantias diferentes** — e é importante não confundi-los:
 
-- **Portão (preventivo):** delegação agente→agente e reserva de orçamento passam por dentro do Hub, então são retidas *antes* de acontecer. Em sessão `supervised`, toda delegação espera seu OK.
-- **Vigilância (reativa):** comando executado e arquivo alterado chegam como evento, *depois* do fato. O que o Hub impede é a próxima ação, parando a sessão. Chamar isso de aprovação prévia seria mentira.
+| Nível | Como funciona | Cobertura |
+|---|---|---|
+| **Gate pré-execução** | O agente pergunta ao Hub *antes* de rodar a ferramenta e obedece à resposta. Prevenção real | Claude Code |
+| **Portão** | Ação que passa por dentro do Hub: delegação, reserva de orçamento. Retida antes de acontecer | Todos |
+| **Vigilância** | Evento do que já aconteceu; para a *próxima* ação. Chamar isso de aprovação prévia seria mentira | Todos |
 
-Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) para a sessão; sair da allow list vira alerta na timeline. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero.
+Ligue o gate pré-execução:
 
-O gate verdadeiramente preventivo para shell e arquivo depende de integração por agente (hook `PreToolUse` do Claude Code, modos de aprovação do Codex) e está na fila.
+```bash
+hub hooks install claude --write
+```
+
+Validado com o Claude Code de verdade: mandado a rodar `git push origin main`, o comando foi **barrado antes de executar** e o Hub registrou o evento de auditoria.
+
+Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) interrompe; sair da allow list vira alerta na timeline. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero.
 
 ```bash
 hub approvals        # o que espera sua decisão
