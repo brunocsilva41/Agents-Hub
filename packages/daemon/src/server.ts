@@ -1,9 +1,23 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { isHubError, nowIso, type EventEnvelope } from '@agents-hub/core';
+import { HubError, isHubError, nowIso, type EventEnvelope } from '@agents-hub/core';
+import type { ZodType } from 'zod';
 import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { guardRequest } from './guard.js';
+import {
+  AdoptSessionSchema,
+  ApprovalIdSchema,
+  CancelSchema,
+  CreateProjectSchema,
+  DelegateSchema,
+  ResolveApprovalSchema,
+  SendMessageSchema,
+  SessionIdSchema,
+  StartSessionSchema,
+  TaskIdSchema,
+  inteiroOpcional,
+} from './http-schemas.js';
 import type { WorktreeReaper } from './reaper.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
@@ -159,7 +173,7 @@ export class HubServer {
     });
 
     this.#route('POST', '/projects', async (req, res) => {
-      const body = await readJson<{ path: string; name?: string }>(req);
+      const body = await readBody(req, CreateProjectSchema);
       sendJson(res, 201, { project: this.sessions.registerProject(body.path, body.name) });
     });
 
@@ -175,12 +189,7 @@ export class HubServer {
     });
 
     this.#route('POST', '/sessions', async (req, res) => {
-      const body = await readJson<{
-        projectId: string;
-        brief: unknown;
-        requesterSessionId?: string | null;
-        title?: string;
-      }>(req);
+      const body = await readBody(req, StartSessionSchema);
       const result = await this.sessions.start({
         projectId: body.projectId,
         agentId: '',
@@ -196,13 +205,7 @@ export class HubServer {
      * Registrada antes de `/sessions/:id` para "adopt" não ser lido como id.
      */
     this.#route('POST', '/sessions/adopt', async (req, res) => {
-      const body = await readJson<{
-        agentId: string;
-        projectPath?: string;
-        projectId?: string;
-        title?: string;
-        budget?: { usd?: number; tokens?: number; seconds?: number };
-      }>(req);
+      const body = await readBody(req, AdoptSessionSchema);
 
       const projectId =
         body.projectId ?? this.sessions.registerProject(body.projectPath ?? process.cwd()).id;
@@ -227,7 +230,7 @@ export class HubServer {
     });
 
     this.#route('GET', '/tasks/:id', (_req, res, params) => {
-      const task = this.sessions.getTask(params['id'] ?? '');
+      const task = this.sessions.getTask(param(params['id'], TaskIdSchema, 'id'));
       const session = this.sessions.getSession(task.sessionId);
       sendJson(res, 200, {
         task,
@@ -253,19 +256,20 @@ export class HubServer {
 
     this.#route('GET', '/sessions/:id/events', (req, res, params) => {
       const url = new URL(req.url ?? '/', 'http://local');
-      const since = url.searchParams.get('since');
+      // Query param e texto: NaN e negativo viram ausencia, senao chegariam ao
+      // SQL como comparacao que nunca casa e devolveriam vazio em silencio.
       sendJson(res, 200, {
         events: this.sessions.listEvents(
-          params['id'] ?? '',
-          since === null ? undefined : Number(since),
-          Number(url.searchParams.get('limit') ?? 500),
+          param(params['id'], SessionIdSchema, 'id'),
+          inteiroOpcional(url.searchParams.get('since'), Number.MAX_SAFE_INTEGER),
+          inteiroOpcional(url.searchParams.get('limit'), 5000) ?? 500,
         ),
       });
     });
 
     this.#route('POST', '/sessions/:id/send', async (req, res, params) => {
-      const body = await readJson<{ text: string }>(req);
-      sendJson(res, 200, await this.sessions.send(params['id'] ?? '', body.text));
+      const body = await readBody(req, SendMessageSchema);
+      sendJson(res, 200, await this.sessions.send(param(params['id'], SessionIdSchema, 'id'), body.text));
     });
 
     this.#route('POST', '/sessions/:id/interrupt', async (_req, res, params) => {
@@ -279,8 +283,8 @@ export class HubServer {
     });
 
     this.#route('POST', '/sessions/:id/cancel', async (req, res, params) => {
-      const body = await readJson<{ reason?: string }>(req).catch(() => ({ reason: undefined }));
-      await this.sessions.cancel(params['id'] ?? '', body.reason);
+      const body = await readBody(req, CancelSchema).catch(() => ({ reason: undefined }));
+      await this.sessions.cancel(param(params['id'], SessionIdSchema, 'id'), body.reason);
       sendJson(res, 200, { ok: true });
     });
 
@@ -290,8 +294,8 @@ export class HubServer {
      * reserva de orçamento a partir do saldo da raiz.
      */
     this.#route('POST', '/sessions/:id/delegate', async (req, res, params) => {
-      const body = await readJson<{ brief: unknown; projectId?: string }>(req);
-      const requester = this.sessions.getSession(params['id'] ?? '');
+      const body = await readBody(req, DelegateSchema);
+      const requester = this.sessions.getSession(param(params['id'], SessionIdSchema, 'id'));
       const result = await this.sessions.start({
         projectId: body.projectId ?? requester.projectId,
         agentId: '',
@@ -325,16 +329,10 @@ export class HubServer {
     });
 
     this.#route('POST', '/approvals/:id', async (req, res, params) => {
-      const body = await readJson<{ decision: 'approved' | 'denied'; by?: string }>(req);
-      if (body.decision !== 'approved' && body.decision !== 'denied') {
-        sendJson(res, 422, {
-          error: { code: 'INVALID_BRIEF', message: 'decision deve ser "approved" ou "denied"' },
-        });
-        return;
-      }
+      const body = await readBody(req, ResolveApprovalSchema);
       sendJson(res, 200, {
         approval: await this.sessions.resolveApproval(
-          params['id'] ?? '',
+          param(params['id'], ApprovalIdSchema, 'id'),
           body.decision,
           body.by ?? 'você',
         ),
@@ -475,6 +473,33 @@ function statusFor(code: string): number {
     default:
       return 400;
   }
+}
+
+/**
+ * Lê e VALIDA o corpo. Erro de contrato vira 422 apontando o campo, em vez de
+ * virar exceção obscura no meio do domínio.
+ */
+async function readBody<T>(req: IncomingMessage, schema: ZodType<T>): Promise<T> {
+  const raw = await readJson<unknown>(req);
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    throw new HubError('INVALID_BRIEF', 'corpo da requisição inválido', {
+      issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+    });
+  }
+  return parsed.data;
+}
+
+/** Valida um parâmetro de rota antes de ele virar consulta ao banco. */
+function param<T>(valor: string | undefined, schema: ZodType<T>, nome: string): T {
+  const parsed = schema.safeParse(valor ?? '');
+  if (!parsed.success) {
+    throw new HubError('INVALID_BRIEF', `parâmetro "${nome}" inválido`, {
+      valor,
+      message: parsed.error.issues[0]?.message,
+    });
+  }
+  return parsed.data;
 }
 
 async function readJson<T>(req: IncomingMessage): Promise<T> {

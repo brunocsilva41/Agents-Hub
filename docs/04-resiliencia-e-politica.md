@@ -102,3 +102,23 @@ Testar retry e fallback contra agentes de verdade seria caro, lento e dependente
 ```bash
 node --test packages/core/dist/*.test.js packages/daemon/dist/*.test.js
 ```
+
+## 6. Guarda de borda do daemon
+
+O Hub roda agentes com **todo o privilégio do seu usuário**. Um daemon HTTP em localhost sem guarda é dirigível por qualquer página web que você visitar — e isso não é teórico: um POST com `Origin` de outro site e `Content-Type: text/plain` criava recurso e devolvia `201` contra o daemon real.
+
+O vetor é o `<form enctype="text/plain">`: o navegador **não** faz preflight dele. Qualquer página aberta enquanto o daemon estivesse no ar poderia iniciar sessões de agente, aprovar aprovações pendentes, cancelar trabalho e derrubar o Hub.
+
+Três checagens antes de qualquer rota, cada uma fechando um caminho distinto:
+
+| Checagem | Fecha |
+|---|---|
+| `Host` precisa ser loopback | **DNS rebinding** — domínio do atacante resolvendo para 127.0.0.1, o que faria o `Origin` parecer legítimo |
+| `Origin`, quando presente, precisa ser a nossa | Página remota. Navegador não deixa página forjar esse cabeçalho, e a Web UI é servida por este mesmo daemon, então sempre passa |
+| Corpo só como `application/json` | **CSRF por formulário** — formulário HTML não consegue mandar esse content-type sem preflight |
+
+Cliente fora do navegador (CLI, MCP server, `curl`) não manda `Origin` e passa. **Isso é proposital:** um processo local já roda como você e não ganharia nada atacando o Hub. Quem precisa ser barrado é a página remota.
+
+### Validação na borda
+
+Todo corpo e todo parâmetro de rota passam por schema antes de chegar ao domínio. Ids do Hub têm prefixo (`ses_`, `tsk_`, `apv_`, `prj_`) e são validados por formato — `../../etc/passwd` não chega perto de virar consulta. Os schemas são `strict`: campo desconhecido é **recusado**, não ignorado, para um typo em cliente não passar despercebido. Query param numérico com lixo vira ausência, senão chegaria ao SQL como comparação que nunca casa e devolveria vazio em silêncio.
