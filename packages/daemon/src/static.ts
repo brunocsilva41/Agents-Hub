@@ -31,7 +31,10 @@ export function serveStatic(webRoot: string, urlPath: string, res: ServerRespons
   const candidate = path.resolve(webRoot, relative);
 
   // Path traversal: `GET /../../.ssh/id_rsa` não pode escapar da pasta da UI.
-  if (!candidate.startsWith(path.resolve(webRoot))) {
+  // Comparação por caminho relativo, não por prefixo de string: `startsWith`
+  // deixaria passar um diretório IRMÃO cujo nome começa igual (`dist-secreto`
+  // passa no prefixo de `dist`).
+  if (!dentroDe(webRoot, candidate)) {
     res.writeHead(403).end('forbidden');
     return true;
   }
@@ -48,6 +51,11 @@ export function serveStatic(webRoot: string, urlPath: string, res: ServerRespons
   });
   createReadStream(file).pipe(res);
   return true;
+}
+
+function dentroDe(raiz: string, alvo: string): boolean {
+  const rel = path.relative(path.resolve(raiz), alvo);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 function resolveFile(candidate: string, webRoot: string): string | null {

@@ -3,6 +3,7 @@ import { isHubError, nowIso, type EventEnvelope } from '@agents-hub/core';
 import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
+import { guardRequest } from './guard.js';
 import type { WorktreeReaper } from './reaper.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
@@ -74,8 +75,21 @@ export class HubServer {
   }
 
   async #dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    // Só localhost por padrão (ADR 01.2): expor o daemon na rede exigiria
-    // autenticação, que é decisão de fase 3.
+    // Guarda de borda ANTES de qualquer rota: o Hub roda agentes com todo o seu
+    // privilégio, e sem isto qualquer página web que você visitar conseguiria
+    // dirigi-lo. Ver `guard.ts`.
+    const verdict = guardRequest(req, { host: this.config.host, port: this.config.port });
+    if (!verdict.ok) {
+      sendJson(res, verdict.status ?? 403, {
+        error: { code: 'FORBIDDEN', message: verdict.reason ?? 'requisição recusada' },
+      });
+      return;
+    }
+
+    // `Vary: Origin` para nenhum proxy intermediário cachear a decisão da
+    // guarda e servi-la para uma origem diferente.
+    res.setHeader('Vary', 'Origin');
+
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
     for (const route of this.#routes) {
