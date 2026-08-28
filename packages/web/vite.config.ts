@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 const API_ROUTES = [
   '/health',
   '/agents',
+  '/approvals',
   '/projects',
   '/sessions',
   '/tasks',
@@ -14,6 +15,12 @@ const API_ROUTES = [
   '/events',
   '/context',
 ];
+
+// Ficam FORA de propósito, mesmo existindo no daemon: `/shutdown`,
+// `/maintenance/sweep` e `/hooks/pretooluse`. Repassá-las pelo servidor de
+// desenvolvimento daria a qualquer página aberta no navegador um caminho para
+// derrubar o Hub ou responder por um gate de segurança. `/a2a` também fica de
+// fora: é a superfície agente-a-agente, não a da interface.
 
 const target = process.env['AGENTS_HUB_URL'] ?? 'http://127.0.0.1:4747';
 
