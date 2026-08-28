@@ -1,9 +1,15 @@
 import { execFile } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+/** O git entende `/dev/null` como "vazio" também no Windows. */
+const NULO = '/dev/null';
+
+/** Quebra de linha (CR opcional), sem escapes que o shell possa comer. */
+const QUEBRA_DE_LINHA = new RegExp(String.fromCharCode(13) + '?' + String.fromCharCode(10));
 
 /**
  * Captura do que o agente realmente mudou.
@@ -20,13 +26,59 @@ const execFileAsync = promisify(execFile);
 export interface DiffCapture {
   /** Patch unificado das mudanças em arquivos rastreados. */
   patch: string;
-  /** Arquivos novos que o git ainda não conhece — não aparecem no patch. */
+  /** Arquivos que o git ainda não rastreia; o conteúdo deles entra no patch. */
   untracked: string[];
   filesChanged: number;
   insertions: number;
   deletions: number;
   /** `true` quando o agente não mexeu em nada. */
   empty: boolean;
+}
+
+/** Teto de arquivos novos incluídos por inteiro: um `npm install` acidental traria milhares. */
+const MAX_ARQUIVOS_NOVOS = 50;
+const MAX_BYTES_POR_ARQUIVO = 200_000;
+
+/**
+ * Patch de um arquivo que o git ainda não conhece.
+ *
+ * `diff --no-index` contra o vazio produz um patch normal sem tocar no índice —
+ * `git add -N` resolveria também, mas alteraria o estado do trabalho que
+ * estamos justamente tentando observar sem perturbar.
+ */
+async function patchDeArquivoNovo(worktreePath: string, arquivo: string): Promise<string> {
+  try {
+    const { size } = await stat(path.join(worktreePath, arquivo));
+    if (size > MAX_BYTES_POR_ARQUIVO) {
+      return `
+# (arquivo novo omitido por tamanho: ${arquivo}, ${size} bytes)
+`;
+    }
+  } catch {
+    return '';
+  }
+
+  try {
+    await execFileAsync('git', ['diff', '--no-index', '--', NULO, arquivo], {
+      cwd: worktreePath,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    // Sem diferença: arquivo vazio.
+    return '';
+  } catch (err) {
+    // `diff --no-index` sai com código 1 QUANDO HÁ diferença — que é o caso
+    // normal aqui. Tratar isso como erro descartaria justamente o patch.
+    const saida = (err as { stdout?: string }).stdout;
+    return typeof saida === 'string' ? saida : '';
+  }
+}
+
+function contarLinhasAdicionadas(patches: string[]): number {
+  return patches.reduce(
+    (total, patch) =>
+      total + patch.split(QUEBRA_DE_LINHA).filter((l) => l.startsWith('+') && !l.startsWith('+++')).length,
+    0,
+  );
 }
 
 export async function captureDiff(worktreePath: string): Promise<DiffCapture | null> {
@@ -54,15 +106,27 @@ export async function captureDiff(worktreePath: string): Promise<DiffCapture | n
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    const { filesChanged, insertions, deletions } = somarNumstat(numstat);
+    // Arquivo NOVO não aparece em `git diff HEAD` — e criar arquivo é a ação
+    // mais comum de um agente. Sem isto, o diff de uma sessão que criou três
+    // arquivos mostrava só os três nomes, o que não serve nem para revisar nem
+    // para alimentar a revisão cruzada.
+    const patchesDeNovos = await Promise.all(
+      untracked.slice(0, MAX_ARQUIVOS_NOVOS).map((arquivo) => patchDeArquivoNovo(worktreePath, arquivo)),
+    );
+    const patchCompleto = [patch, ...patchesDeNovos.filter((p) => p.length > 0)].join('');
+
+    const contagem = somarNumstat(numstat);
+    const filesChanged = contagem.filesChanged + untracked.length;
+    const insertions = contagem.insertions + contarLinhasAdicionadas(patchesDeNovos);
+    const { deletions } = contagem;
 
     return {
-      patch,
+      patch: patchCompleto,
       untracked,
       filesChanged,
       insertions,
       deletions,
-      empty: patch.trim().length === 0 && untracked.length === 0,
+      empty: patchCompleto.trim().length === 0 && untracked.length === 0,
     };
   } catch {
     // Worktree já recolhido, diretório sem git, sessão com `isolation: none`
@@ -87,7 +151,7 @@ export async function persistDiff(
     `# Sessão: ${sessionId}`,
     `# Arquivos alterados: ${capture.filesChanged} (+${capture.insertions} −${capture.deletions})`,
     capture.untracked.length > 0
-      ? `# Arquivos novos, fora do patch: ${capture.untracked.join(', ')}`
+      ? `# Arquivos novos: ${capture.untracked.join(', ')}`
       : '',
     '',
   ]

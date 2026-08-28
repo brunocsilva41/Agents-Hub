@@ -21,6 +21,20 @@ invoke:
   extraArgs: []
   env: {}
 
+  # O modo do Hub vira o modo de permissão nativo do Claude Code.
+  #
+  # `plan` é read-only de verdade: em supervised o agente analisa e propõe, mas
+  # não altera. `acceptEdits` deixa editar dentro do diretório sem perguntar a
+  # cada arquivo — o que é seguro justamente porque o diretório é o worktree
+  # isolado da sessão, e porque o gate pré-execução continua ativo por cima.
+  #
+  # `bypassPermissions` NÃO é usado em nenhum modo: seria abrir mão do controle
+  # que o Hub existe para exercer.
+  modeArgs:
+    supervised: ["--permission-mode", "plan"]
+    semi: ["--permission-mode", "acceptEdits"]
+    autonomous: ["--permission-mode", "acceptEdits"]
+
 session:
   strategy: native
   idFrom: "$.session_id"
@@ -49,4 +63,6 @@ defaults:
   supervision: semi
 
 caveats:
+  - "O Hub define `--permission-mode` conforme o modo da sessão; `bypassPermissions` nunca é usado."
+  - "Em modo supervised o Claude entra em `plan`: analisa e propõe, mas não altera arquivo nenhum."
   - "No Windows, `interrupt` degrada para cancelamento: SIGINT não é entregável de forma confiável."

@@ -21,6 +21,20 @@ invoke:
   extraArgs: []
   env: {}
 
+  # O modo do Hub vira a política de sandbox do próprio Codex.
+  #
+  # Sem isto, o Codex recusava escrever no worktree que o Hub tinha acabado de
+  # criar para ele: o diretório não está na lista de projetos confiáveis do
+  # ~/.codex/config.toml, então caía em somente-leitura. A tarefa falhava por um
+  # motivo que não tinha nada a ver com a tarefa.
+  #
+  # `workspace-write` limita a escrita ao diretório de trabalho — que É o
+  # worktree isolado. As duas camadas passam a concordar em vez de brigar.
+  modeArgs:
+    supervised: ["--sandbox", "read-only"]
+    semi: ["--sandbox", "workspace-write"]
+    autonomous: ["--sandbox", "workspace-write"]
+
 session:
   strategy: native
   idFrom: "$.thread_id"
@@ -48,4 +62,5 @@ defaults:
   supervision: semi
 
 caveats:
-  - "A política de sandbox do próprio Codex (~/.codex/config.toml) continua valendo por dentro e pode ser mais restritiva que a do Hub."
+  - "O Hub passa `--sandbox` conforme o modo da sessão, sobrepondo o padrão do ~/.codex/config.toml. Nunca usa `--dangerously-bypass-approvals-and-sandbox`."
+  - "Em modo supervised o Codex fica em read-only: ele NÃO conseguirá editar arquivos. Use semi ou autonomous para tarefas de escrita."

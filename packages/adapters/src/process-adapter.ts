@@ -173,7 +173,13 @@ export class ProcessAgentAdapter implements AgentAdapter {
       model: ctx.model ?? '',
     };
 
-    const args = [...argsTemplate, ...this.manifest.invoke.extraArgs]
+    // A política nativa do agente vem do modo da sessão: é o que impede o
+    // sandbox do próprio CLI de contradizer o isolamento que o Hub já montou.
+    const args = [
+      ...argsTemplate,
+      ...this.manifest.invoke.modeArgs[ctx.mode],
+      ...this.manifest.invoke.extraArgs,
+    ]
       .map((arg) => applyTemplate(arg, vars))
       // Um placeholder vazio (ex.: `{{model}}` sem modelo definido) some do
       // comando em vez de virar um argumento em branco que quebra o parser.

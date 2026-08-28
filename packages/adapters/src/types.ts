@@ -42,6 +42,27 @@ export const AgentManifestSchema = z.object({
     env: z.record(z.string()).default({}),
     /** Args extras que o usuário quer sempre presentes (modelo, flags de política). */
     extraArgs: z.array(z.string()).default([]),
+
+    /**
+     * Como o modo de supervisão do Hub vira a política NATIVA do agente.
+     *
+     * Sem isto, o Hub isola a sessão num worktree e o agente aplica por cima o
+     * sandbox dele, calibrado para outro mundo. O resultado é errado nas duas
+     * direções: restritivo demais (o Codex recusou escrever no próprio worktree
+     * da sessão, porque o diretório não estava na lista de projetos confiáveis
+     * do `~/.codex/config.toml`) ou permissivo demais, se a config global do
+     * usuário for frouxa.
+     *
+     * Declarar aqui é o que faz `--mode supervised` significar a mesma coisa
+     * para o Hub e para o agente.
+     */
+    modeArgs: z
+      .object({
+        supervised: z.array(z.string()).default([]),
+        semi: z.array(z.string()).default([]),
+        autonomous: z.array(z.string()).default([]),
+      })
+      .default({}),
   }),
 
   session: z
