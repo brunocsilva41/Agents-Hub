@@ -46,10 +46,27 @@ export function formatTaskStatus(status: TaskStatus): string {
 
   lines.push(formatBudget(budget));
 
-  if (task.state === 'input_required') {
+  if (task.result?.validation) {
+    const v = task.result.validation;
     lines.push(
-      'AÇÃO NECESSÁRIA: a task está bloqueada aguardando decisão humana ' +
-        '(normalmente orçamento esgotado). Avise seu usuário — você não pode desbloquear sozinho.',
+      `validação: ${v.passed ? 'passou' : 'REPROVOU'} — ${v.checks
+        .map((c) => `${c.name}${c.passed ? ' ok' : `: ${c.detail ?? 'falhou'}`}`)
+        .join('; ')}`,
+    );
+  }
+
+  if (task.state === 'input_required') {
+    // Dizer "normalmente orçamento esgotado" quando o bloqueio foi outra coisa
+    // faz o agente orientar mal o usuário. O motivo real vem junto do status.
+    const motivo = status.approval
+      ? `${status.approval.action} (risco: ${status.approval.risk})`
+      : 'motivo não identificado';
+
+    lines.push(
+      `AÇÃO NECESSÁRIA: a task está bloqueada aguardando decisão humana — ${motivo}.`,
+      status.approval
+        ? `Peça ao seu usuário para rodar: hub approve ${status.approval.id}  (ou hub deny ${status.approval.id})`
+        : 'Avise seu usuário; você não pode desbloquear sozinho.',
     );
   }
 

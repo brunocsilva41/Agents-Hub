@@ -234,8 +234,13 @@ export class HubServer {
     this.#route('GET', '/tasks/:id', (_req, res, params) => {
       const task = this.sessions.getTask(param(params['id'], TaskIdSchema, 'id'));
       const session = this.sessions.getSession(task.sessionId);
+      // A aprovação pendente viaja junto: sem ela, o agente que delegou só
+      // consegue dizer "está bloqueado" sem saber POR QUÊ, e a orientação que
+      // ele passa ao usuário vira chute.
+      const blocking = this.sessions.pendingApprovals(session.id)[0] ?? null;
       sendJson(res, 200, {
         task,
+        approval: blocking,
         session,
         live: this.sessions.isLive(task.sessionId),
         budget: this.sessions.budget(session.rootId),

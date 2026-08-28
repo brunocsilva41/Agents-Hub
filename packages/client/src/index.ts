@@ -41,6 +41,8 @@ export interface TaskStatus {
   session: SessionSummary;
   live: boolean;
   budget: BudgetSummary;
+  /** Aprovação que está segurando a task, quando há uma. */
+  approval?: ApprovalSummary | null;
 }
 
 /**

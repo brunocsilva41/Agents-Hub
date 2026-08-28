@@ -53,8 +53,13 @@ export function App() {
       .sort((a, b) => a.ts.localeCompare(b.ts) || a.seq - b.seq);
   }, [selected, scope, history, state, timelineSessions]);
 
+  /** Sessão terminada não aceita mais mensagem — o daemon recusa, e com razão. */
+  const encerrada =
+    selected !== null &&
+    (selected.state === 'completed' || selected.state === 'failed' || selected.state === 'killed');
+
   const send = async (): Promise<void> => {
-    if (!selected || message.trim().length === 0) return;
+    if (!selected || encerrada || message.trim().length === 0) return;
     setSending(true);
     setSendError(null);
     try {
@@ -188,13 +193,20 @@ export function App() {
                       void send();
                     }
                   }}
-                  placeholder={`falar com ${selected.agentId}…`}
-                  disabled={sending}
+                  placeholder={
+                    encerrada
+                      ? `sessão ${STATE_LABEL[selected.state] ?? selected.state} — abra uma nova para continuar`
+                      : `falar com ${selected.agentId}…`
+                  }
+                  // Sessão terminada não aceita mensagem: bloquear no campo diz
+                  // isso antes, em vez de deixar o erro do servidor explicar
+                  // depois que a pessoa já digitou.
+                  disabled={sending || encerrada}
                 />
                 <button
                   className="primary"
                   onClick={() => void send()}
-                  disabled={sending || message.trim().length === 0}
+                  disabled={sending || encerrada || message.trim().length === 0}
                 >
                   {sending ? '…' : 'Enviar'}
                 </button>

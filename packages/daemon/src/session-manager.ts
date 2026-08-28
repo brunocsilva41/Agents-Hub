@@ -18,6 +18,7 @@ import {
   nowIso,
   parseBrief,
   pathKey,
+  rebuildConversation,
   renderBriefAsPrompt,
   resolveEventCost,
   watchForMode,
@@ -503,6 +504,8 @@ export class SessionManager {
     nativeSessionId?: string | undefined;
     cwd?: string | undefined;
   }): Session | null {
+    // O id do Hub é a fonte mais confiável: o próprio Hub o injetou no ambiente
+    // do agente ao spawná-lo.
     if (input.sessionId) {
       const direta = this.store.sessions.get(input.sessionId);
       if (direta) return direta;
@@ -517,12 +520,19 @@ export class SessionManager {
 
     if (input.cwd) {
       const alvo = path.resolve(input.cwd);
-      // A mais recente vence: worktrees são por sessão, mas `isolation: none`
-      // faz várias sessões dividirem o mesmo diretório do projeto.
-      const porDiretorio = candidatas
-        .filter((s) => path.resolve(s.workdir) === alvo)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      if (porDiretorio[0]) return porDiretorio[0];
+      const noDiretorio = candidatas.filter((s) => path.resolve(s.workdir) === alvo);
+
+      // Sessão VIVA primeiro. Worktrees são por sessão, mas `isolation: none`
+      // faz várias dividirem o diretório do projeto — e aplicar a política de
+      // uma sessão já encerrada seria decidir por um contexto que não existe
+      // mais, possivelmente mais frouxo que o da sessão que está rodando.
+      const viva = noDiretorio
+        .filter((s) => s.state === 'running' || s.state === 'waiting_approval')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (viva) return viva;
+
+      const recente = noDiretorio.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (recente) return recente;
     }
 
     return null;
@@ -594,6 +604,26 @@ export class SessionManager {
     // Vigilância: a run foi morta ao pausar, então continuamos por uma mensagem
     // nova, dizendo ao agente o que exatamente foi liberado.
     if (task) this.store.tasks.update(task.id, { state: 'working' });
+
+    // A sessão pode ter morrido enquanto a aprovação esperava — timeout do
+    // daemon, `hub stop`, reconciliação. Aprovar continua sendo registrado,
+    // mas não há para onde retomar, e dizer isso é melhor que estourar um erro
+    // que parece culpa de quem aprovou.
+    const viva = this.store.sessions.get(session.id);
+    if (!viva || viva.state === 'killed' || viva.state === 'failed' || viva.state === 'completed') {
+      this.#emit({
+        sessionId: session.id,
+        taskId: approval.taskId,
+        agentId: session.agentId,
+        type: 'log',
+        payload: {
+          level: 'warn',
+          text: `aprovação liberada, mas a sessão já havia terminado (${viva?.state ?? 'inexistente'}) — nada a retomar`,
+        },
+      });
+      return resolved;
+    }
+
     await this.send(
       session.id,
       `A ação "${approval.action}" foi aprovada por ${by}. Continue de onde parou.`,
@@ -671,11 +701,33 @@ export class SessionManager {
       );
     }
 
+    // Falar com sessão encerrada lançaria um processo novo numa sessão morta,
+    // e o trabalho ficaria pendurado num lugar que ninguém mais observa.
+    if (session.state === 'killed' || session.state === 'failed' || session.state === 'completed') {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${sessionId} já terminou (${session.state}). Abra uma sessão nova ou delegue a partir de outra.`,
+        { sessionId, state: session.state },
+      );
+    }
+
     const task = this.#latestTask(sessionId);
     const canResume =
       adapter.manifest.session.strategy === 'native' && session.nativeSessionId !== null;
 
-    await this.#launch(session, task, text, canResume ? session.nativeSessionId : null);
+    // Sem sessão nativa, o processo novo nasce com contexto ZERO. Mandar só a
+    // mensagem entregaria ao agente um "faça também X" sem ele saber qual era a
+    // tarefa nem o que já tentou — que é o modo mais caro de ele recomeçar do
+    // zero e repetir o mesmo erro.
+    const prompt = canResume
+      ? text
+      : rebuildConversation({
+          brief: task.brief,
+          history: this.store.events.list({ sessionId, limit: 400 }),
+          message: text,
+        });
+
+    await this.#launch(session, task, prompt, canResume ? session.nativeSessionId : null);
     return { mode: canResume ? 'resume' : 'replay' };
   }
 
@@ -907,6 +959,11 @@ export class SessionManager {
       heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
     };
 
+    // O vínculo sessão→raiz vive em memória no barramento. Depois de um
+    // restart do daemon, retomar uma sessão sem reidratá-lo deixaria o
+    // `watch --root` e o painel cegos para os eventos dela — sem erro nenhum,
+    // só silêncio, que é o pior tipo de falha de observabilidade.
+    this.bus.registerSession(session.id, session.rootId);
     this.store.sessions.update(session.id, { state: 'running' });
 
     const handle = nativeSessionId
@@ -989,15 +1046,23 @@ export class SessionManager {
     this.#persistLedger(ledger);
 
     const current = this.store.tasks.get(task.id);
-    // Se o orçamento já colocou a task em `input_required`, o fim do processo
-    // não deve sobrescrever esse estado com "falhou".
+    // A task já está esperando decisão humana (orçamento estourado ou ação
+    // barrada pela vigilância): o fim do processo não pode sobrescrever esse
+    // estado com "falhou", senão a aprovação apontaria para uma sessão morta.
     if (current && current.state === 'input_required') {
+      const pendente = this.store.approvals.listPending({ sessionId: session.id })[0];
       this.#emit({
         sessionId: session.id,
         taskId: task.id,
         agentId: session.agentId,
         type: 'session.ended',
-        payload: { reason: 'orçamento esgotado', outcome },
+        payload: {
+          // Dizer "orçamento esgotado" para uma pausa da vigilância faria a
+          // timeline mentir sobre o próprio motivo da parada.
+          reason: pendente ? `aguardando aprovação: ${pendente.action}` : 'aguardando decisão humana',
+          approvalId: pendente?.id ?? null,
+          outcome,
+        },
       });
       return;
     }
@@ -1193,6 +1258,22 @@ export class SessionManager {
 
     const project = this.store.projects.get(session.projectId);
     if (!project) return;
+
+    // O substituto é um processo novo como qualquer outro: uma cadeia de
+    // fallbacks em paralelo não pode furar o teto de concorrência.
+    try {
+      this.#assertConcurrency(agentId);
+    } catch (err) {
+      this.store.tasks.update(task.id, { state: 'failed' });
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'error',
+        payload: { priority: 'high', message: `fallback recusado: ${(err as Error).message}` },
+      });
+      return;
+    }
 
     const sessionId = newId('ses');
     const worktree = await this.worktrees.create({
