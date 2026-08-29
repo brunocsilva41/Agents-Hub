@@ -35,6 +35,17 @@ const TASK_TEMPLATES = [
   },
 ];
 
+/**
+ * O agente está de fato nesta máquina?
+ *
+ * `probe.installed` vem da sondagem que o daemon faz contra o binário real. Um
+ * agente ausente aceito aqui só falha depois, com erro de binário — longe da
+ * escolha que o causou.
+ */
+function estaInstalado(a: AgentSummary): boolean {
+  return a.probe?.installed !== false;
+}
+
 export function SessionModal({
   agents,
   delegateFrom,
@@ -45,7 +56,11 @@ export function SessionModal({
 }: Props): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState('');
-  const [agent, setAgent] = useState(defaultAgentId || agents[0]?.id || '');
+  const [agent, setAgent] = useState(
+    // Padrão: o primeiro agente INSTALADO. Abrir o formulário já apontando para
+    // um agente ausente é oferecer um caminho que não leva a lugar nenhum.
+    defaultAgentId || agents.find(estaInstalado)?.id || agents[0]?.id || '',
+  );
   const [objective, setObjective] = useState('');
   const [criteria, setCriteria] = useState('');
   const [budgetUsd, setBudgetUsd] = useState(delegateFrom ? '0.50' : '2.00');
@@ -63,6 +78,14 @@ export function SessionModal({
       })
       .catch(() => {});
   }, [delegateFrom]);
+
+  // Instalados primeiro. A ordem alfabética punia quem só queria começar:
+  // o primeiro cartão da grade podia ser um agente ausente.
+  const agentesOrdenados = [...agents].sort((a, b) => {
+    const diff = Number(estaInstalado(b)) - Number(estaInstalado(a));
+    return diff !== 0 ? diff : a.name.localeCompare(b.name, 'pt-BR');
+  });
+  const indisponiveis = agents.filter((a) => !estaInstalado(a));
 
   const applyTemplate = (tpl: (typeof TASK_TEMPLATES)[0]) => {
     setObjective(tpl.objective);
@@ -167,17 +190,44 @@ export function SessionModal({
           </div>
         )}
 
-        {/* 2. Seleção Visual de Agente */}
+        {/*
+          Agente: os instalados primeiro, e os ausentes desabilitados.
+
+          Antes os nove apareciam com o mesmo peso, inclusive os que não estão
+          na máquina. Escolher um deles montava a sessão inteira para falhar
+          depois, com um erro de binário não encontrado que não tem relação
+          aparente com a escolha feita aqui. O dado de instalação já vinha na
+          sondagem; só não estava sendo mostrado.
+        */}
         <div className="field">
-          <label>Agente Especialista</label>
+          <div className="field-label-row">
+            <label>Agente</label>
+            {indisponiveis.length > 0 && (
+              <span className="help">
+                {indisponiveis.length} não {indisponiveis.length === 1 ? 'está' : 'estão'} nesta
+                máquina
+              </span>
+            )}
+          </div>
           <div className="agent-selection-grid">
-            {agents.map((a) => {
+            {agentesOrdenados.map((a) => {
               const isSelected = agent === a.id;
               const color = agentColor(a.id);
+              const disponivel = estaInstalado(a);
               return (
-                <div
+                <button
                   key={a.id}
-                  className={`agent-card-select ${isSelected ? 'selected' : ''}`}
+                  type="button"
+                  disabled={!disponivel}
+                  aria-pressed={isSelected}
+                  title={
+                    disponivel
+                      ? `${a.name} — ${a.vendor}`
+                      : `${a.name} não está instalado: ${a.probe?.error ?? 'binário não encontrado'}`
+                  }
+                  className={`agent-card-select ${isSelected ? 'selected' : ''} ${
+                    disponivel ? '' : 'indisponivel'
+                  }`}
                   style={{ '--agent-color': color } as React.CSSProperties}
                   onClick={() => setAgent(a.id)}
                 >
@@ -186,9 +236,11 @@ export function SessionModal({
                   </div>
                   <div className="agent-card-meta">
                     <div className="agent-card-name">{a.name}</div>
-                    <div className="agent-card-vendor">{a.vendor}</div>
+                    <div className="agent-card-vendor">
+                      {disponivel ? a.vendor : 'não instalado'}
+                    </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>

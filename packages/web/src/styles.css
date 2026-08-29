@@ -2778,7 +2778,10 @@ textarea {
 /* Visual Agent Grid Selection */
 .agent-selection-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  /* 168px cabe "GitHub Copilot CLI" e "Antigravity CLI (agy)" sem cortar.
+     Com 130px a grade truncava sete dos nove nomes, e o usuário precisava
+     adivinhar qual agente estava escolhendo pelas duas letras do avatar. */
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 8px;
   margin-top: 6px;
 }
@@ -2794,6 +2797,33 @@ textarea {
   cursor: pointer;
   transition: all var(--transition-fast);
   user-select: none;
+  /* Virou <button> para ser alcançável por teclado. Como <div>, quem navega
+     por Tab não chegava na escolha do agente — o campo mais importante do
+     formulário. O reset abaixo mantém a aparência que já existia. */
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+/* Agente que não está na máquina.
+   Mostrar sem distinção convidava a escolher um caminho que falharia depois,
+   com erro de binário — longe da escolha que o causou. */
+.agent-card-select.indisponivel {
+  opacity: 0.42;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.agent-card-select.indisponivel:hover {
+  background: var(--bg-card);
+  border-color: var(--border);
+  transform: none;
+}
+
+.agent-card-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .agent-card-select:hover {
@@ -2831,9 +2861,11 @@ textarea {
   font-size: 11.5px;
   font-weight: 700;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Sem `white-space: nowrap`: o nome quebra em duas linhas em vez de sumir
+     atrás de reticências. Nome de agente é a informação que decide a escolha —
+     é o último lugar onde economizar espaço. */
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .agent-card-vendor {
