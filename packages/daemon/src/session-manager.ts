@@ -13,6 +13,7 @@ import {
   nextStep,
   validationPassed,
   inheritMode,
+  isTerminalSessionState,
   isTerminalTaskState,
   makeEvent,
   newId,
@@ -284,6 +285,24 @@ export class SessionManager {
     return envForAgent(loadProjectContext(project.path), session.agentId);
   }
 
+  /**
+   * Recusa operar sobre sessão que já terminou.
+   *
+   * O invariante estava escrito à mão em `send` e `handoff`, e esquecido em
+   * `pause`, `cancel` e `delegate`. Nomeá-lo em um lugar só é o que impede a
+   * próxima rota de esquecer de novo.
+   */
+  #exigirNaoTerminal(session: Session, acao: string): void {
+    if (isTerminalSessionState(session.state)) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${session.id} já terminou (${session.state}); não é possível ${acao}. ` +
+          'Abra uma sessão nova ou delegue a partir de outra que ainda esteja viva.',
+        { sessionId: session.id, state: session.state, acao },
+      );
+    }
+  }
+
   /** Projeto por id, ou erro — nunca `null` seguindo adiante em silêncio. */
   #project(projectId: string): Project {
     const project = this.store.projects.get(projectId);
@@ -390,6 +409,12 @@ export class SessionManager {
         sessionId: input.requesterSessionId,
       });
     }
+
+    // Delegar a partir de sessão morta criava um filho órfão: ele nasce, gasta
+    // orçamento do fluxo e responde a um pai que não está mais ouvindo. Ninguém
+    // recolhe o resultado, e o custo aparece num fluxo que o usuário já
+    // considerava fechado.
+    if (parent) this.#exigirNaoTerminal(parent, 'delegar a partir dela');
 
     const agentId = this.registry.resolveTarget(brief.agent, this.config.policy.fallback);
     const manifest = this.registry.get(agentId).manifest;
@@ -958,6 +983,15 @@ export class SessionManager {
     visited.add(sessionId);
 
     const session = this.#session(sessionId);
+    // Cancelar o que já acabou reescrevia o desfecho: uma sessão `completed`
+    // virava `killed` na auditoria, com `{ok:true}` de resposta.
+    //
+    // Na recursão pela subárvore, filho já terminado é normal e não é erro —
+    // por isso o `visited` guarda só a raiz da chamada do usuário.
+    if (isTerminalSessionState(session.state)) {
+      if (visited.size === 1) this.#exigirNaoTerminal(session, 'cancelar');
+      return;
+    }
     const live = this.#runs.get(sessionId);
     if (live) await this.registry.get(session.agentId).cancel(live.handle);
 
@@ -980,6 +1014,10 @@ export class SessionManager {
   }
 
   async pause(sessionId: string): Promise<void> {
+    // Sem esta checagem, pausar uma sessão `completed` a devolvia para
+    // `paused` — e uma sessão pausada aceita resume, então uma conversa
+    // encerrada com sucesso voltava a rodar.
+    this.#exigirNaoTerminal(this.#session(sessionId), 'pausar');
     await this.interrupt(sessionId);
     this.store.sessions.update(sessionId, { state: 'paused' });
   }

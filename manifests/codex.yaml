@@ -30,10 +30,26 @@ invoke:
   #
   # `workspace-write` limita a escrita ao diretório de trabalho — que É o
   # worktree isolado. As duas camadas passam a concordar em vez de brigar.
+  # `-c sandbox_mode=...`, e NÃO `--sandbox`.
+  #
+  # `--sandbox` só existe em `codex exec`. Em `codex exec resume` ele não é
+  # reconhecido, e como o Hub anexa `modeArgs` às duas invocações, TODA
+  # retomada de conversa falhava com código 2:
+  #
+  #   error: unexpected argument '--sandbox' found
+  #   Usage: codex exec resume --json <SESSION_ID> <PROMPT>
+  #
+  # O estrago ia além de `hub send`: a retentativa do pipeline de resiliência
+  # também resume, então ela queimava tentativa por um motivo que não tinha
+  # relação com a tarefa, e o fallback trocava de agente culpando o errado.
+  #
+  # `-c` existe nos dois subcomandos, e `sandbox_mode` foi verificado contra o
+  # binário: com `read-only`, o agente é impedido de escrever e relata o
+  # "Acesso negado".
   modeArgs:
-    supervised: ["--sandbox", "read-only"]
-    semi: ["--sandbox", "workspace-write"]
-    autonomous: ["--sandbox", "workspace-write"]
+    supervised: ["-c", "sandbox_mode=\"read-only\""]
+    semi: ["-c", "sandbox_mode=\"workspace-write\""]
+    autonomous: ["-c", "sandbox_mode=\"workspace-write\""]
 
 session:
   strategy: native

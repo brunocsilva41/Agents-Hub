@@ -24,6 +24,25 @@ export function isTerminalTaskState(state: TaskState): boolean {
   return TERMINAL_TASK_STATES.includes(state);
 }
 
+/**
+ * Estados dos quais uma sessão não volta.
+ *
+ * Existe porque a checagem estava escrita à mão em dois lugares e esquecida em
+ * três. `pause` numa sessão `completed` a devolvia para `paused`, e `cancel` a
+ * reescrevia como `killed` — os dois respondendo `{ok:true}`.
+ *
+ * O estrago não é só de estado. Uma sessão concluída com sucesso passava a
+ * constar como morta na auditoria, e no caso medido a ressurreição encadeou:
+ * `paused` permitiu um resume, o resume falhou, o pipeline de resiliência
+ * concluiu "falha permanente" e trocou o agente — tudo sobre uma conversa que
+ * já tinha terminado bem.
+ */
+const TERMINAL_SESSION_STATES: SessionState[] = ['completed', 'failed', 'killed'];
+
+export function isTerminalSessionState(state: SessionState): boolean {
+  return TERMINAL_SESSION_STATES.includes(state);
+}
+
 export type SessionState =
   | 'idle'
   | 'running'
