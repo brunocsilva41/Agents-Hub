@@ -1,6 +1,55 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AgentSummary, BriefInput, ProjectSummary } from '@agents-hub/client';
+import { useAction } from '../actions';
 import { hub } from '../hub';
+
+/**
+ * Diálogo modal com o mínimo que o navegador não dá de graça: Esc fecha, o foco
+ * entra, fica preso enquanto está aberto e volta para onde estava ao sair.
+ *
+ * Sem isto, Tab passeia pela página atrás do modal e Esc não faz nada — quem
+ * navega por teclado fica preso num formulário que não sabe fechar.
+ */
+function useDialog(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    ref.current?.querySelector<HTMLElement>('select, input, textarea, button')?.focus();
+
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const focusables = [
+        ...(ref.current?.querySelectorAll<HTMLElement>(
+          'button, select, input, textarea, [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? []),
+      ].filter((el) => !el.hasAttribute('disabled'));
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      previous?.focus();
+    };
+  }, [onClose]);
+
+  return ref;
+}
 
 interface Props {
   agents: AgentSummary[];
@@ -25,22 +74,27 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
   const [budgetUsd, setBudgetUsd] = useState(delegateFrom ? '0.50' : '2.00');
   const [supervision, setSupervision] = useState<'supervised' | 'semi' | 'autonomous'>('semi');
   const [isolation, setIsolation] = useState<'worktree' | 'none'>('worktree');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const action = useAction();
+  const dialogRef = useDialog(onClose);
 
   useEffect(() => {
     if (delegateFrom) return;
-    void hub.projects().then(({ projects: list }) => {
-      setProjects(list);
-      setProjectId((current) => current || (list[0]?.id ?? ''));
-    });
+    hub
+      .projects()
+      .then(({ projects: list }) => {
+        setProjects(list);
+        setProjectId((current) => current || (list[0]?.id ?? ''));
+      })
+      // Sem projeto não há sessão: falhar em silêncio deixaria o formulário
+      // parecendo apenas vazio, e a pessoa procurando o erro no lugar errado.
+      .catch((err: Error) => setProjectsError(err.message));
   }, [delegateFrom]);
 
   const installed = agents.filter((a) => a.probe?.installed === true);
-  const submit = async (): Promise<void> => {
-    setSubmitting(true);
-    setError(null);
+  const submitting = action.busy !== null;
 
+  const submit = async (): Promise<void> => {
     const brief: BriefInput = {
       agent,
       objective: objective.trim(),
@@ -53,35 +107,46 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
       budget: budgetUsd ? { usd: Number(budgetUsd) } : undefined,
     };
 
-    try {
-      if (delegateFrom) {
-        const result = await hub.delegate(delegateFrom.sessionId, brief);
-        onCreated(result.sessionId);
-      } else {
-        const result = await hub.startSession({ projectId, brief });
-        onCreated(result.session.id);
-      }
-      onClose();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    const ok = await action.run(
+      'submit',
+      async () => {
+        if (delegateFrom) {
+          const result = await hub.delegate(delegateFrom.sessionId, brief);
+          onCreated(result.sessionId);
+        } else {
+          const result = await hub.startSession({ projectId, brief });
+          onCreated(result.session.id);
+        }
+      },
+      delegateFrom ? 'Delegação criada.' : 'Sessão iniciada.',
+    );
+    if (ok) onClose();
   };
 
   const valid = agent.length > 0 && objective.trim().length >= 8 && (delegateFrom || projectId);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>{delegateFrom ? 'Delegar tarefa' : 'Nova sessão'}</h2>
+      <div
+        className="modal"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="modal-title">{delegateFrom ? 'Delegar tarefa' : 'Nova sessão'}</h2>
         <p className="hint">
           {delegateFrom
             ? `${delegateFrom.agentId} vai pedir isto a outro agente. O orçamento sai do fluxo atual.`
             : 'O agente principal é escolhido a cada sessão — não existe padrão implícito.'}
         </p>
 
-        {error && <div className="error-banner">{error}</div>}
+        {action.error && (
+          <div className="error-banner" role="alert">
+            {action.error}
+          </div>
+        )}
 
         {!delegateFrom && (
           <div className="field">
@@ -94,7 +159,12 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
                 </option>
               ))}
             </select>
-            {projects.length === 0 && (
+            {projectsError && (
+              <div className="help danger-text">
+                não foi possível listar os projetos: {projectsError}
+              </div>
+            )}
+            {!projectsError && projects.length === 0 && (
               <div className="help">registre um com: hub project add [caminho]</div>
             )}
           </div>
@@ -135,6 +205,9 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
           <div className="help">
             Um objetivo por sessão. O agente começa com contexto limpo: escreva de forma
             autossuficiente.
+            {objective.trim().length > 0 && objective.trim().length < 8 && (
+              <> Faltam {8 - objective.trim().length} caracteres.</>
+            )}
           </div>
         </div>
 
@@ -149,7 +222,7 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
           />
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <div className="field-row">
           <div className="field">
             <label htmlFor="budget">Teto (US$)</label>
             <input

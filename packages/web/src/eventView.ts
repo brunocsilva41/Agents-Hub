@@ -8,6 +8,24 @@ export interface EventView {
 }
 
 /**
+ * Um envelope nunca muda depois de criado, então sua tradução também não.
+ *
+ * Sem este cache, `describeEvent` roda de novo para a timeline inteira a cada
+ * render — inclusive a cada tecla digitada no campo de mensagem. Com `WeakMap`
+ * a entrada some junto com o evento quando ele sai da janela, sem limite a
+ * ajustar nem vazamento a vigiar.
+ */
+const viewCache = new WeakMap<EventEnvelope, EventView>();
+
+export function viewOf(event: EventEnvelope): EventView {
+  const cached = viewCache.get(event);
+  if (cached) return cached;
+  const view = describeEvent(event);
+  viewCache.set(event, view);
+  return view;
+}
+
+/**
  * Traduz o `EventEnvelope` normalizado para uma linha legível.
  *
  * Como todos os oito agentes chegam aqui no mesmo formato, esta função é a
