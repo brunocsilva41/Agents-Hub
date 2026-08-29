@@ -44,6 +44,15 @@ export const AddFolderSchema = z
   })
   .strict();
 
+export const ProjectContextSchema = z
+  .object({
+    memory: z.string().max(20_000).optional(),
+    // Teto por agente: um prompt gigante entra em TODA tarefa do projeto e
+    // consome o contexto que deveria ser da tarefa.
+    prompts: z.record(z.string().max(64), z.string().max(8_000)).optional(),
+  })
+  .strict();
+
 export const StartSessionSchema = z
   .object({
     projectId: ProjectIdSchema,

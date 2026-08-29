@@ -7,6 +7,8 @@ import type {
   GraphSummary,
   HealthSummary,
   ProbeSummary,
+  ProjectContextDto,
+  ProjectFolder,
   ProjectSummary,
   SessionSummary,
   TaskSummary,
@@ -220,6 +222,43 @@ export class HubClient {
     return this.#get(`/context?ref=${encodeURIComponent(ref)}`);
   }
 
+  // ------------------------------------------------------------- projetos
+
+  /** Pastas que compõem o projeto, principal primeiro. */
+  folders(projectId: string): Promise<{ folders: ProjectFolder[] }> {
+    return this.#get(`/projects/${encodeURIComponent(projectId)}/folders`);
+  }
+
+  addFolder(
+    projectId: string,
+    folderPath: string,
+    label?: string,
+  ): Promise<{ folder: ProjectFolder }> {
+    return this.#post(`/projects/${encodeURIComponent(projectId)}/folders`, {
+      path: folderPath,
+      ...(label === undefined ? {} : { label }),
+    });
+  }
+
+  removeFolder(projectId: string, folderId: string): Promise<{ ok: true }> {
+    return this.#send(
+      'DELETE',
+      `/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(folderId)}`,
+    );
+  }
+
+  /** Memória e prompts por agente do projeto. */
+  projectContext(projectId: string): Promise<{ context: ProjectContextDto }> {
+    return this.#get(`/projects/${encodeURIComponent(projectId)}/context`);
+  }
+
+  saveProjectContext(
+    projectId: string,
+    context: ProjectContextDto,
+  ): Promise<{ context: ProjectContextDto }> {
+    return this.#send('PUT', `/projects/${encodeURIComponent(projectId)}/context`, context);
+  }
+
   graph(rootId: string): Promise<{ graph: GraphSummary[] }> {
     return this.#get(`/graph/${rootId}`);
   }
@@ -279,6 +318,19 @@ export class HubClient {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+      }),
+    );
+  }
+
+  /** Verbos que não são GET nem POST (hoje: DELETE e PUT). */
+  async #send<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return this.#handle(
+      await fetch(`${this.base}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        // Corpo ausente é diferente de corpo vazio: a guarda de borda só exige
+        // `application/json` quando HÁ corpo.
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
     );
   }

@@ -133,3 +133,19 @@ export interface ArtifactSummary {
   path: string;
   createdAt: string;
 }
+
+/** Uma das pastas que compõem um projeto. */
+export interface ProjectFolder {
+  id: string;
+  projectId: string;
+  path: string;
+  label: string | null;
+  isPrimary: boolean;
+  createdAt: string;
+}
+
+/** Memória e instruções por agente, guardadas no projeto. */
+export interface ProjectContextDto {
+  memory?: string;
+  prompts?: Record<string, string>;
+}

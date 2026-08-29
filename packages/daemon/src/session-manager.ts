@@ -61,6 +61,8 @@ import {
   loadProjectContext,
   loadProjectOverrides,
   mergeProjectPolicy,
+  saveProjectContext,
+  type ProjectContext,
 } from './project-config.js';
 import { captureDiff, persistDiff } from './diff-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
@@ -202,13 +204,30 @@ export class SessionManager {
   // ---------------------------------------------------------------- projetos
 
   registerProject(dir: string, name?: string): Project {
+    // Formato primeiro, COM O CAMINHO CRU.
+    //
+    // `path.resolve` transforma "./algo" num absoluto contra o diretório onde o
+    // DAEMON subiu — que quem chamou por HTTP não conhece e não escolheu.
+    // Resolver antes de validar fazia a checagem de relativo nunca disparar, e
+    // um relativo virava silenciosamente uma pasta em lugar nenhum esperado.
+    //
+    // Lista vazia: aqui só interessam as checagens de formato (vazio, relativo),
+    // não a de sobreposição — essa vem depois, e só quando for mesmo criar.
+    const formato = validarNovaPasta(dir, []);
+    if (!formato.ok) {
+      throw new HubError('PROJECT_FOLDER_CONFLICT', formato.motivo, { path: dir });
+    }
+
     const absolute = path.resolve(dir);
+
+    // Idempotência ANTES da checagem de sobreposição, e a ordem importa:
+    // registrar o mesmo projeto duas vezes é uso normal (a CLI faz isso a cada
+    // `hub start`), e a pasta dele conflita consigo mesma. Validar primeiro
+    // fazia a segunda chamada falhar com "esta pasta já pertence ao projeto X"
+    // — sendo X o próprio projeto que o chamador queria de volta.
     const existing = this.store.projects.getByPath(absolute);
     if (existing) return existing;
 
-    // A pasta pode já pertencer a OUTRO projeto, ou estar dentro de uma que
-    // pertence. Criar o projeto assim mesmo deixaria dois donos para a mesma
-    // árvore de arquivos, e nenhuma resposta para qual política vale ali.
     const veredito = validarNovaPasta(absolute, this.store.projects.allFolders());
     if (!veredito.ok) {
       throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
@@ -262,6 +281,18 @@ export class SessionManager {
     return project;
   }
 
+  /** Memória e prompts do projeto, como estão no arquivo. */
+  getProjectContext(projectId: string): ProjectContext {
+    return loadProjectContext(this.#project(projectId).path);
+  }
+
+  /** Grava memória e prompts, preservando o bloco de política do arquivo. */
+  setProjectContext(projectId: string, ctx: ProjectContext): ProjectContext {
+    const project = this.#project(projectId);
+    saveProjectContext(project.path, ctx);
+    return loadProjectContext(project.path);
+  }
+
   listProjectFolders(projectId: string): ProjectFolder[] {
     // Valida a existência para não devolver lista vazia de projeto inexistente,
     // que o chamador leria como "projeto sem pastas".
@@ -279,12 +310,13 @@ export class SessionManager {
    */
   addProjectFolder(projectId: string, dir: string, label?: string): ProjectFolder {
     const project = this.#project(projectId);
-    const absolute = path.resolve(dir);
 
-    const veredito = validarNovaPasta(absolute, this.store.projects.allFolders());
+    // Mesma razão de `registerProject`: validar o bruto, resolver depois.
+    const veredito = validarNovaPasta(dir, this.store.projects.allFolders());
     if (!veredito.ok) {
-      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
+      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: dir });
     }
+    const absolute = path.resolve(dir);
 
     return this.store.projects.addFolder({
       projectId: project.id,

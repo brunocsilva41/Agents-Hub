@@ -19,6 +19,7 @@ import {
   HandoffSessionSchema,
   ResolveApprovalSchema,
   SendMessageSchema,
+  ProjectContextSchema,
   ProjectIdSchema,
   SessionIdSchema,
   PreToolGateSchema,
@@ -298,6 +299,24 @@ export class HubServer {
         params['folderId'] ?? '',
       );
       sendJson(res, 200, { ok: true });
+    });
+
+    // Memória e prompts do projeto. Vivem no daemon, e não no navegador,
+    // porque precisam valer também para a sessão que um agente delega a outro.
+    this.#route('GET', '/projects/:id/context', (_req, res, params) => {
+      sendJson(res, 200, {
+        context: this.sessions.getProjectContext(param(params['id'], ProjectIdSchema, 'id')),
+      });
+    });
+
+    this.#route('PUT', '/projects/:id/context', async (req, res, params) => {
+      const body = await readBody(req, ProjectContextSchema);
+      sendJson(res, 200, {
+        context: this.sessions.setProjectContext(
+          param(params['id'], ProjectIdSchema, 'id'),
+          body,
+        ),
+      });
     });
 
     // ------------------------------------------------------------- sessões

@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { parse as parseYaml } from 'yaml';
-import type { ContextoDoProjeto, PolicyDocument } from '@agents-hub/core';
+import { parseDocument, parse as parseYaml, type Document } from 'yaml';
+import { HubError, type ContextoDoProjeto, type PolicyDocument } from '@agents-hub/core';
 
 /**
  * Configuração por projeto (ADR 05.2).
@@ -142,6 +142,67 @@ export function loadProjectContext(projectPath: string): ProjectContext {
     contextCache.set(file, null);
     return {};
   }
+}
+
+/**
+ * Grava memória e prompts, preservando o resto do arquivo.
+ *
+ * Reescrever o YAML inteiro a partir do que a tela conhece apagaria o bloco
+ * `policy` — que é onde vivem os limites de segurança do projeto e que nenhuma
+ * tela de configurações edita. Uma tela que salva o que ela sabe e descarta o
+ * que ela ignora é como se perde configuração sem ninguém notar.
+ *
+ * Por isso: lê o que está lá, muda só as duas chaves, grava de volta.
+ */
+export function saveProjectContext(projectPath: string, ctx: ProjectContext): void {
+  const file = projectConfigPath(projectPath);
+
+  // `parseDocument`, não `parse`.
+  //
+  // O ciclo `parse` -> objeto -> `stringify` preserva as CHAVES e destrói os
+  // COMENTÁRIOS. Medido: salvar o contexto uma vez apagou 17 linhas deste
+  // arquivo, incluindo a explicação de que o projeto só pode apertar a política
+  // global, nunca afrouxar. As chaves continuavam lá, então nada quebrava — a
+  // documentação da regra é que sumia, e ninguém notaria até precisar dela.
+  //
+  // O `Document` do `yaml` mantém comentários, ordem e formatação.
+  let doc: Document;
+  if (existsSync(file)) {
+    const bruto = readFileSync(file, 'utf8');
+    doc = parseDocument(bruto);
+    if (doc.errors.length > 0) {
+      // YAML quebrado: sobrescrever apagaria a política junto. Recusar é o
+      // único caminho honesto.
+      throw new HubError(
+        'PROJECT_CONFIG_INVALID',
+        `${file} não é YAML válido. Corrija o arquivo antes de salvar por aqui — ` +
+          'sobrescrevê-lo apagaria a política do projeto junto.',
+        { path: file },
+      );
+    }
+  } else {
+    doc = parseDocument('');
+  }
+
+  const memoria = ctx.memory?.trim();
+  if (memoria) doc.set('memory', memoria);
+  else doc.delete('memory');
+
+  const prompts = ctx.prompts ?? {};
+  const limpos: Record<string, string> = {};
+  for (const [agentId, valor] of Object.entries(prompts)) {
+    if (typeof valor === 'string' && valor.trim().length > 0) limpos[agentId] = valor.trim();
+  }
+  if (Object.keys(limpos).length > 0) doc.set('prompts', limpos);
+  else doc.delete('prompts');
+
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, String(doc), 'utf8');
+
+  // O cache é por mtime, mas gravar e ler no mesmo milissegundo devolveria o
+  // valor velho. Invalidar explicitamente evita esse ponto cego.
+  contextCache.delete(file);
+  cache.delete(file);
 }
 
 /** O contexto que este agente deve receber neste projeto. */

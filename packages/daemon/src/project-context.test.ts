@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { parseBrief, renderBriefAsPrompt } from '@agents-hub/core';
-import { contextForAgent, loadProjectContext, PROJECT_CONFIG_RELATIVE } from './project-config.js';
+import {
+  contextForAgent,
+  loadProjectContext,
+  PROJECT_CONFIG_RELATIVE,
+  saveProjectContext,
+} from './project-config.js';
 
 /**
  * Memória e prompts do projeto.
@@ -100,5 +105,46 @@ describe('contexto do projeto', () => {
     assert.equal(brief.objective, 'renomear a função X');
     assert.match(semContexto, /renomear a função X/);
     assert.ok(!semContexto.includes('Diretrizes do projeto'));
+  });
+  test('gravar NÃO destrói comentários nem a política do arquivo', () => {
+    // Regressão medida: a primeira versão usava `parse` -> objeto ->
+    // `stringify`, que preserva as CHAVES e apaga os COMENTÁRIOS. Salvar o
+    // contexto uma vez removeu 17 linhas do config.yaml real, incluindo a
+    // explicação da regra de que o projeto só pode APERTAR a política global.
+    // Nada quebrava — a documentação da regra é que sumia, e ninguém notaria
+    // até precisar dela.
+    const original = [
+      '# Regra de ouro: o projeto só pode APERTAR a política global.',
+      'policy:',
+      '  commands:',
+      '    # Somam à deny list global.',
+      '    deny:',
+      '      - npm publish',
+      '',
+    ].join('\n');
+    escrever(original);
+
+    saveProjectContext(raiz, { memory: 'Nunca comite em main.' });
+
+    const depois = readFileSync(path.join(raiz, PROJECT_CONFIG_RELATIVE), 'utf8');
+    assert.match(depois, /# Regra de ouro/, 'comentário de topo precisa sobreviver');
+    assert.match(depois, /# Somam à deny list global/, 'comentário interno precisa sobreviver');
+    assert.match(depois, /- npm publish/, 'a política precisa sobreviver');
+    assert.match(depois, /memory: Nunca comite em main\./);
+  });
+
+  test('remover a memória não leva o resto do arquivo junto', () => {
+    escrever(['# comentário', 'policy:', '  maxDepth: 2', 'memory: algo', ''].join('\n'));
+    saveProjectContext(raiz, {});
+    const depois = readFileSync(path.join(raiz, PROJECT_CONFIG_RELATIVE), 'utf8');
+    assert.ok(!depois.includes('memory:'));
+    assert.match(depois, /# comentário/);
+    assert.match(depois, /maxDepth: 2/);
+  });
+
+  test('YAML quebrado é recusado em vez de sobrescrito', () => {
+    // Sobrescrever apagaria a política junto com o erro de sintaxe.
+    escrever('policy: [nao: fecha');
+    assert.throws(() => saveProjectContext(raiz, { memory: 'x' }), /não é YAML válido/);
   });
 });
