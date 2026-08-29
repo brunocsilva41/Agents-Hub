@@ -7,12 +7,15 @@ import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { guardRequest } from './guard.js';
 import { explainToAgent, toHookPermission } from './pretool-gate.js';
+import { generateAgentCard, formatA2aTask } from './a2a.js';
 import {
+  A2aCreateTaskSchema,
   AdoptSessionSchema,
   ApprovalIdSchema,
   CancelSchema,
   CreateProjectSchema,
   DelegateSchema,
+  HandoffSessionSchema,
   ResolveApprovalSchema,
   SendMessageSchema,
   SessionIdSchema,
@@ -170,6 +173,94 @@ export class HubServer {
       sendJson(res, 200, { probes: await this.registry.probeAll(true) });
     });
 
+    // ------------------------------------------------------------- A2A Protocol
+    const getBaseUrl = (req: IncomingMessage): string => {
+      const host = req.headers.host ?? `${this.config.host}:${this.config.port}`;
+      return `http://${host}`;
+    };
+
+    this.#route('GET', '/.well-known/agent-card.json', (req, res) => {
+      sendJson(res, 200, generateAgentCard(this.config, this.registry, getBaseUrl(req)));
+    });
+
+    this.#route('GET', '/a2a/agent-card.json', (req, res) => {
+      sendJson(res, 200, generateAgentCard(this.config, this.registry, getBaseUrl(req)));
+    });
+
+    this.#route('POST', '/a2a/tasks', async (req, res) => {
+      const body = await readBody(req, A2aCreateTaskSchema);
+      const projectId =
+        body.projectId ??
+        this.sessions.registerProject(body.projectPath ?? process.cwd()).id;
+
+      const result = await this.sessions.start({
+        projectId,
+        agentId: body.agent ?? '',
+        brief: {
+          agent: body.agent ?? 'cap:code-edit',
+          objective: body.objective,
+          acceptanceCriteria: body.acceptanceCriteria ?? [],
+          constraints: body.constraints ?? [],
+          budget: body.budget ?? {},
+          supervision: body.supervision ?? 'semi',
+          isolation: body.isolation ?? 'worktree',
+        },
+        title: body.title,
+      });
+
+      sendJson(res, 201, {
+        task: formatA2aTask(result.task, result.session.state),
+        session: result.session,
+        budget: result.budget,
+        approval: result.approval ?? null,
+      });
+    });
+
+    this.#route('GET', '/a2a/tasks/:id', (_req, res, params) => {
+      const taskId = param(params['id'], TaskIdSchema, 'id');
+      const task = this.sessions.getTask(taskId);
+      const session = this.sessions.getSession(task.sessionId);
+      sendJson(res, 200, {
+        task: formatA2aTask(task, session.state),
+      });
+    });
+
+    this.#route('POST', '/a2a/tasks/:id/cancel', async (_req, res, params) => {
+      const taskId = param(params['id'], TaskIdSchema, 'id');
+      const task = this.sessions.getTask(taskId);
+      await this.sessions.cancel(task.sessionId, 'cancelado via A2A');
+      const updatedTask = this.sessions.getTask(taskId);
+      const session = this.sessions.getSession(task.sessionId);
+      sendJson(res, 200, {
+        task: formatA2aTask(updatedTask, session.state),
+      });
+    });
+
+    this.#route('GET', '/a2a/tasks/:id/events', (req, res, params) => {
+      const taskId = param(params['id'], TaskIdSchema, 'id');
+      const task = this.sessions.getTask(taskId);
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.write(`: conectado ao stream A2A da task ${taskId}\n\n`);
+
+      for (const event of this.sessions.listEvents(task.sessionId)) {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+
+      const unsubscribe = this.bus.subscribe({ sessionId: task.sessionId }, (event: EventEnvelope) => {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      });
+
+      req.on('close', () => {
+        unsubscribe();
+      });
+    });
+
     // ------------------------------------------------------------- projetos
     this.#route('GET', '/projects', (_req, res) => {
       sendJson(res, 200, { projects: this.sessions.listProjects() });
@@ -324,6 +415,13 @@ export class HubServer {
       const body = await readBody(req, CancelSchema).catch(() => ({ reason: undefined }));
       await this.sessions.cancel(param(params['id'], SessionIdSchema, 'id'), body.reason);
       sendJson(res, 200, { ok: true });
+    });
+
+    this.#route('POST', '/sessions/:id/handoff', async (req, res, params) => {
+      const body = await readBody(req, HandoffSessionSchema);
+      const sessionId = param(params['id'], SessionIdSchema, 'id');
+      const session = await this.sessions.handoff(sessionId, body.agentId, body.reason);
+      sendJson(res, 200, { ok: true, session });
     });
 
     /**

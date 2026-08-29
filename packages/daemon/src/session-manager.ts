@@ -26,6 +26,7 @@ import {
   type Artifact,
   type Brief,
   type BudgetLimits,
+  type BudgetProjection,
   type Decision,
   type BudgetSnapshot,
   type EventEnvelope,
@@ -634,6 +635,7 @@ export class SessionManager {
     // Vigilância: a run foi morta ao pausar, então continuamos por uma mensagem
     // nova, dizendo ao agente o que exatamente foi liberado.
     if (task) this.store.tasks.update(task.id, { state: 'working' });
+    this.store.sessions.update(session.id, { state: 'running' });
 
     // A sessão pode ter morrido enquanto a aprovação esperava — timeout do
     // daemon, `hub stop`, reconciliação. Aprovar continua sendo registrado,
@@ -767,7 +769,10 @@ export class SessionManager {
     await this.registry.get(this.#session(sessionId).agentId).interrupt(live.handle);
   }
 
-  async cancel(sessionId: string, reason = 'cancelado pelo usuário'): Promise<void> {
+  async cancel(sessionId: string, reason = 'cancelado pelo usuário', visited = new Set<string>()): Promise<void> {
+    if (visited.has(sessionId)) return;
+    visited.add(sessionId);
+
     const session = this.#session(sessionId);
     const live = this.#runs.get(sessionId);
     if (live) await this.registry.get(session.agentId).cancel(live.handle);
@@ -776,7 +781,7 @@ export class SessionManager {
     // agentes continuam gastando orçamento de um fluxo que você já abortou.
     for (const child of this.store.sessions.children(sessionId)) {
       if (child.state === 'running' || child.state === 'waiting_approval') {
-        await this.cancel(child.id, `pai ${sessionId} cancelado`);
+        await this.cancel(child.id, `pai ${sessionId} cancelado`, visited);
       }
     }
 
@@ -793,6 +798,64 @@ export class SessionManager {
   async pause(sessionId: string): Promise<void> {
     await this.interrupt(sessionId);
     this.store.sessions.update(sessionId, { state: 'paused' });
+  }
+
+  /**
+   * Transfere o controle da sessão para outro agente em tempo de execução (Fase 3).
+   *
+   * O agente anterior é interrompido e o novo agente assume a mesma sessão/worktree
+   * com todo o histórico acumulado reconstruído como contexto.
+   */
+  async handoff(sessionId: string, targetAgentId: string, reason?: string): Promise<Session> {
+    const session = this.#session(sessionId);
+    const resolvedTarget = this.registry.resolveTarget(targetAgentId, this.config.policy.fallback);
+
+    if (session.state === 'killed' || session.state === 'failed' || session.state === 'completed') {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${sessionId} já terminou (${session.state}). Não é possível fazer handoff.`,
+        { sessionId, state: session.state },
+      );
+    }
+
+    this.#assertConcurrency(resolvedTarget);
+
+    // Interrompe a execução atual se houver
+    const live = this.#runs.get(sessionId);
+    if (live) {
+      await this.registry.get(session.agentId).cancel(live.handle);
+      this.#runs.delete(sessionId);
+    }
+
+    const task = this.#latestTask(sessionId);
+    const fromAgentId = session.agentId;
+
+    this.#emit({
+      sessionId,
+      taskId: task.id,
+      agentId: resolvedTarget,
+      type: 'session.handoff',
+      payload: {
+        fromAgentId,
+        toAgentId: resolvedTarget,
+        reason: reason ?? 'transferência de controle solicitada',
+      },
+    });
+
+    const updatedSession = this.store.sessions.update(sessionId, {
+      agentId: resolvedTarget,
+      nativeSessionId: null,
+      state: 'running',
+    });
+
+    const prompt = rebuildConversation({
+      brief: task.brief,
+      history: this.store.events.list({ sessionId, limit: 400 }),
+      message: `Você está assumindo esta sessão que estava sob responsabilidade de ${fromAgentId}. Motivo da transferência: ${reason ?? 'continuidade de trabalho'}. Continue a tarefa de onde parou.`,
+    });
+
+    await this.#launch(updatedSession, task, prompt, null);
+    return updatedSession;
   }
 
   /**
@@ -946,8 +1009,12 @@ export class SessionManager {
     return buildGraph(this.store.sessions.graphRows(rootId));
   }
 
-  budget(rootId: string): BudgetSnapshot {
-    return this.#ledger(rootId).snapshot();
+  budget(rootId: string): BudgetSnapshot & { projection?: BudgetProjection } {
+    const ledger = this.#ledger(rootId);
+    const snap = ledger.snapshot();
+    const elapsedSeconds = snap.consumed.seconds;
+    const projection = elapsedSeconds > 0 ? ledger.project(elapsedSeconds) : undefined;
+    return { ...snap, projection };
   }
 
   isLive(sessionId: string): boolean {
@@ -1085,7 +1152,13 @@ export class SessionManager {
     }
 
     const outcome = await handle.done;
-    const elapsedSeconds = Math.round((Date.now() - (this.#runs.get(session.id)?.startedAt ?? Date.now())) / 1000);
+    const live = this.#runs.get(session.id);
+    // Se a run ativa na sessão já foi substituída (ex: por handoff),
+    // encerramos silenciosamente sem interferir na nova execução.
+    if (live && live.handle !== handle) {
+      return;
+    }
+    const elapsedSeconds = Math.round((Date.now() - (live?.startedAt ?? Date.now())) / 1000);
     this.#runs.delete(session.id);
 
     ledger.settle(task.id, { seconds: elapsedSeconds });
@@ -1277,6 +1350,23 @@ export class SessionManager {
     // A sessão pode ter sido cancelada enquanto esperávamos o backoff.
     const fresh = this.store.sessions.get(session.id);
     if (!fresh || fresh.state === 'killed' || fresh.state === 'waiting_approval') return;
+
+    // Verifica o teto de concorrência antes de criar nova tentativa —
+    // o mesmo controle que #fallback() já faz para o substituto.
+    try {
+      this.#assertConcurrency(agentId);
+    } catch (err) {
+      this.store.tasks.update(task.id, { state: 'failed' });
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId,
+        type: 'error',
+        payload: { priority: 'high', message: `retry recusado: ${(err as Error).message}` },
+      });
+      return;
+    }
+
 
     // Relê do banco: `#settle` acabou de fechar a tentativa anterior com o
     // desfecho dela. Usar o `task` recebido aqui reescreveria o histórico com
@@ -1803,11 +1893,18 @@ export class SessionManager {
 
   /** Último texto do agente — serve de resumo quando ele não produz um. */
   #summarize(sessionId: string, taskId: string): string {
+    // Para pegar os ÚLTIMOS 200 eventos (não os primeiros), calculamos o offset
+    // via lastSeq: sinceSeq = max(0, lastSeq - 200) garante uma janela que
+    // cobre o fim da sessão mesmo quando há mais de 200 eventos no total.
+    const WINDOW = 200;
+    const last = this.store.events.lastSeq(sessionId);
+    const sinceSeq = Math.max(0, last - WINDOW);
     const messages = this.store.events.list({
       sessionId,
       taskId,
       types: ['message', 'turn.completed'],
-      limit: 200,
+      sinceSeq,
+      limit: WINDOW,
     });
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const payload = messages[i]?.payload ?? {};
@@ -1885,14 +1982,15 @@ export class SessionManager {
    * Numa sessão-raiz é a política do Hub; num filho é a interseção com a do
    * pai, que é o que garante que delegar nunca aumente privilégio (ADR 03).
    */
-  policyFor(session: Session): PolicyEngine {
+  policyFor(session: Session, visited = new Set<string>()): PolicyEngine {
     const base = new PolicyEngine(this.#projectPolicy(session.projectId));
-    if (!session.parentId) return base;
+    if (!session.parentId || visited.has(session.id)) return base;
+    visited.add(session.id);
 
     const parent = this.store.sessions.get(session.parentId);
     if (!parent) return base;
 
-    return this.policyFor(parent).intersect(base.policy);
+    return this.policyFor(parent, visited).intersect(base.policy);
   }
 
   /**

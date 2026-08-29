@@ -1,0 +1,38 @@
+name: Pipeline de Refatoração e Testes Multi-Agente
+description: Orquestra Claude, Codex e OpenCode em um DAG com passos sequenciais e paralelos
+version: "1.0"
+
+steps:
+  - id: plan
+    agent: claude
+    objective: Analisar a arquitetura atual e mapear os módulos que precisam de refatoração
+    isolation: worktree
+    supervision: semi
+    acceptanceCriteria:
+      - Produzir plano detalhado de refatoração
+
+  - id: backend_refactor
+    agent: codex
+    objective: Refatorar lógica de backend conforme o plano
+    dependsOn:
+      - plan
+    isolation: worktree
+    supervision: semi
+    budget:
+      usd: 1.0
+
+  - id: test_suite
+    agent: opencode
+    objective: Escrever suíte de testes unitários para a nova lógica
+    dependsOn:
+      - backend_refactor
+    isolation: worktree
+    supervision: semi
+
+  - id: final_review
+    agent: claude
+    objective: Revisar código final e garantir integridade de todo o pipeline
+    dependsOn:
+      - test_suite
+    isolation: worktree
+    supervision: semi

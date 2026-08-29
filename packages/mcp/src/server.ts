@@ -239,21 +239,23 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Bloqueia até a tarefa chegar a um estado terminal ou até estourar o timeout. ' +
         'Use quando você REALMENTE precisa do resultado para continuar — se puder seguir ' +
         'trabalhando, prefira hub_agent_status, que não desperdiça tempo de parede. ' +
-        'Ao estourar o timeout, a tarefa continua rodando: só a espera termina.',
+        'Ao estourar o timeout, a tarefa continua rodando: só a espera termina. ' +
+        'Defaults to 300 seconds if not specified. Use 0 for no timeout (wait indefinitely - use with caution).',
       inputSchema: {
         task_id: z.string(),
         timeout_seconds: z
           .number()
           .int()
-          .positive()
+          .nonnegative()
           .max(1800)
-          .optional()
-          .describe('padrão 300s'),
+          .default(300)
+          .describe('padrão 300s; use 0 para aguardar sem limite de tempo'),
       },
     },
     async ({ task_id, timeout_seconds }): Promise<ToolResult> => {
-      const timeoutMs = (timeout_seconds ?? 300) * 1000;
-      const deadline = Date.now() + timeoutMs;
+      // timeout_seconds=0 significa "sem limite"; Infinity garante que o
+      // `Date.now() >= deadline` nunca dispara.
+      const deadline = timeout_seconds === 0 ? Infinity : Date.now() + timeout_seconds * 1000;
 
       try {
         // Backoff crescente: tarefas longas não precisam ser consultadas a cada
@@ -267,11 +269,11 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           if (Date.now() >= deadline) {
             return ok(
               `${formatTaskStatus(status)}\n\n` +
-                `A espera de ${timeout_seconds ?? 300}s terminou, mas a TAREFA CONTINUA RODANDO. ` +
+                `A espera de ${timeout_seconds}s terminou, mas a TAREFA CONTINUA RODANDO. ` +
                 `Consulte de novo com hub_agent_status("${task_id}").`,
             );
           }
-          await sleep(Math.min(intervalMs, Math.max(0, deadline - Date.now())));
+          await sleep(Math.min(intervalMs, deadline === Infinity ? intervalMs : Math.max(0, deadline - Date.now())));
           intervalMs = Math.min(intervalMs * 1.4, 10_000);
         }
       } catch (err) {
@@ -360,6 +362,30 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           replay: 'novo turno aberto (este agente não guarda sessão nativa)',
         }[mode];
         return ok(`mensagem entregue — ${explanation}`);
+      } catch (err) {
+        return fail(describe(err));
+      }
+    },
+  );
+
+  // ----------------------------------------------------------------- handoff
+  server.registerTool(
+    'hub_session_handoff',
+    {
+      title: 'Transferir controle da sessão para outro agente',
+      description:
+        'Transfere o controle da sessão para outro agente em tempo de execução. ' +
+        'O agente anterior é interrompido e o novo agente assume a sessão com todo o histórico acumulado como contexto.',
+      inputSchema: {
+        session_id: z.string().describe('id da sessão a ser transferida'),
+        target_agent: z.string().describe('id ou capability do agente de destino (ex: "codex" ou "cap:refactor")'),
+        reason: z.string().optional().describe('motivo da transferência para constar no contexto'),
+      },
+    },
+    async ({ session_id, target_agent, reason }): Promise<ToolResult> => {
+      try {
+        const { session } = await client.handoff(session_id, target_agent, reason);
+        return ok(`controle da sessão ${session.id} transferido para o agente "${session.agentId}"`);
       } catch (err) {
         return fail(describe(err));
       }

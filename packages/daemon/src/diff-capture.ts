@@ -83,6 +83,18 @@ function contarLinhasAdicionadas(patches: string[]): number {
 
 export async function captureDiff(worktreePath: string): Promise<DiffCapture | null> {
   try {
+    // Worktree recém-criado sem commits ainda: `git diff HEAD` sai com código
+    // 128 porque HEAD não existe. Verificar antes evita lançar exceção em caso
+    // perfeitamente normal no ciclo de vida de um worktree novo.
+    try {
+      await execFileAsync('git', ['rev-parse', '--verify', 'HEAD'], {
+        cwd: worktreePath,
+      });
+    } catch {
+      // HEAD não existe — worktree sem commits. Não há nada para diferenciar.
+      return { empty: true, filesChanged: 0, insertions: 0, deletions: 0, patch: '', untracked: [] };
+    }
+
     // `diff HEAD` pega staged e unstaged de uma vez, sem alterar o índice —
     // rodar `git add` aqui mudaria o estado do trabalho que estamos observando.
     const { stdout: patch } = await execFileAsync('git', ['diff', 'HEAD'], {

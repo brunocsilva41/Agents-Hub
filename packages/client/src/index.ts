@@ -136,6 +136,14 @@ export class HubClient {
     return this.#post(`/sessions/${sessionId}/cancel`, { reason });
   }
 
+  handoff(
+    sessionId: string,
+    agentId: string,
+    reason?: string,
+  ): Promise<{ ok: boolean; session: SessionSummary }> {
+    return this.#post(`/sessions/${sessionId}/handoff`, { agentId, reason });
+  }
+
   // ------------------------------------------------------------------- tasks
   task(taskId: string): Promise<TaskStatus> {
     return this.#get(`/tasks/${taskId}`);

@@ -1,4 +1,5 @@
 import type { EventMapper } from '../types.js';
+import { antigravityMapper } from './antigravity.js';
 import { claudeMapper } from './claude.js';
 import { codexMapper } from './codex.js';
 import { copilotMapper } from './copilot.js';
@@ -11,6 +12,7 @@ import { genericJsonMapper, genericTextMapper } from './generic.js';
  * utilizável (mensagens + fim de turno + erros) sem escrever código.
  */
 const MAPPERS: Record<string, EventMapper> = {
+  antigravity: antigravityMapper,
   claude: claudeMapper,
   codex: codexMapper,
   copilot: copilotMapper,
@@ -33,4 +35,13 @@ export function listMappers(): string[] {
   return Object.keys(MAPPERS);
 }
 
-export { claudeMapper, codexMapper, copilotMapper, kimiMapper, genericJsonMapper, genericTextMapper };
+export {
+  antigravityMapper,
+  claudeMapper,
+  codexMapper,
+  copilotMapper,
+  kimiMapper,
+  genericJsonMapper,
+  genericTextMapper,
+};
+

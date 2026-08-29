@@ -68,4 +68,26 @@ describe('BudgetLedger', () => {
     assert.equal(snapshot.exhausted, false);
     assert.equal(snapshot.consumed.usd, 1, 'o já gasto continua contabilizado');
   });
+
+  test('isWarning dispara quando a pressão atinge o limiar configurado', () => {
+    const ledger = new BudgetLedger('ses_root', { usd: 10, tokens: 1000, seconds: 100 });
+    ledger.charge({ usd: 7.9 });
+    assert.equal(ledger.snapshot(0.8).isWarning, false);
+
+    ledger.charge({ usd: 0.2 }); // total 8.1 / 10 = 81%
+    assert.equal(ledger.snapshot(0.8).isWarning, true);
+    assert.equal(ledger.snapshot(0.8).exhausted, false);
+  });
+
+  test('project calcula burn rate e projeção final corretamente', () => {
+    const ledger = new BudgetLedger('ses_root', { usd: 20, tokens: 100_000, seconds: 200 });
+    ledger.charge({ usd: 2.0, tokens: 10_000 });
+
+    // Em 20 segundos gastou 2 USD (0.10 USD/seg) -> em 200 segundos projeta 20 USD
+    const proj = ledger.project(20, 200);
+    assert.equal(proj.burnRateUsdPerSec, 0.1);
+    assert.equal(proj.projectedUsd, 20);
+    assert.equal(proj.projectedTokens, 100_000);
+  });
 });
+

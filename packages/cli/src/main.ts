@@ -34,6 +34,7 @@ import {
   serverSpec,
   writeConfig,
 } from './mcp-install.js';
+import { workflowCommand } from './workflow-cmd.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
 const NEWLINE = String.fromCharCode(10);
@@ -126,6 +127,7 @@ ${bold('Sessões')}
 
 ${bold('Delegação e custo')}
   hub delegate <sessionId> --agent <id> "objetivo"   um agente pede a outro
+  hub handoff <sessionId> --to <id>                  transfere a liderança da sessão
   hub diff <sessionId>                                o que o agente mudou no código
   hub graph <rootId>                                  árvore de quem chamou quem
   hub budget <rootId>                                 consumo contra o orçamento
@@ -135,6 +137,10 @@ ${bold('Aprovações e manutenção')}
   hub approve <id>                   libera e a sessão continua de onde parou
   hub deny <id>                      nega e encerra a sessão
   hub prune                          recolhe worktrees de sessões já expiradas
+
+${bold('Workflows (DAG de múltiplos agentes)')}
+  hub workflow validate <arquivo.yaml>       valida sintaxe, dependências e ciclos
+  hub workflow run <arquivo.yaml>            executa o workflow em lotes paralelos
 
 ${bold('MCP — dar ao agente o poder de chamar os outros')}
   hub mcp                            mostra o estado do registro em cada agente
@@ -196,6 +202,21 @@ async function main(): Promise<void> {
       });
     case 'delegate':
       return withDaemon(() => delegate(client, args));
+    case 'handoff':
+      return withDaemon(async () => {
+        const sessionId = required(args.positional[0], 'sessionId');
+        const targetAgent = required(
+          typeof args.flags['to'] === 'string'
+            ? args.flags['to']
+            : typeof args.flags['agent'] === 'string'
+              ? args.flags['agent']
+              : undefined,
+          '--to <agente>',
+        );
+        const reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : undefined;
+        const res = await client.handoff(sessionId, targetAgent, reason);
+        console.log(green(`\n✓ Controle da sessão ${res.session.id} transferido para o agente "${res.session.agentId}".`));
+      });
     case 'approvals':
       return withDaemon(() => listApprovals(client));
     case 'approve':
@@ -213,6 +234,8 @@ async function main(): Promise<void> {
       return withDaemon(() => showGraph(client, args));
     case 'budget':
       return withDaemon(() => showBudget(client, args));
+    case 'workflow':
+      return withDaemon(() => workflowCommand(client, args));
     case 'help':
     case '--help':
     case '-h':

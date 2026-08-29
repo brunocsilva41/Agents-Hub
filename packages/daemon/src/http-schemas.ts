@@ -77,6 +77,13 @@ export const CancelSchema = z
   .object({ reason: z.string().max(1000).optional() })
   .strict();
 
+export const HandoffSessionSchema = z
+  .object({
+    agentId: z.string().min(1).max(64),
+    reason: z.string().max(1000).optional(),
+  })
+  .strict();
+
 export const ResolveApprovalSchema = z
   .object({
     decision: z.enum(['approved', 'denied']),
@@ -101,6 +108,22 @@ export const PreToolGateSchema = z
     toolInput: z.record(z.unknown()).default({}),
   })
   .strict();
+
+export const A2aCreateTaskSchema = z
+  .object({
+    projectId: ProjectIdSchema.optional(),
+    projectPath: z.string().max(4096).optional(),
+    agent: z.string().min(1).max(64).optional(),
+    objective: z.string().min(1).max(50_000),
+    acceptanceCriteria: z.array(z.string().max(500)).optional(),
+    constraints: z.array(z.string().max(500)).optional(),
+    budget: BudgetInputSchema.optional(),
+    supervision: z.enum(['supervised', 'semi', 'autonomous']).optional(),
+    isolation: z.enum(['none', 'worktree', 'container']).optional(),
+    title: z.string().max(500).optional(),
+  })
+  .strict();
+
 
 /** Query params chegam como texto e podem ser lixo; NaN vira ausência. */
 export function inteiroOpcional(valor: string | null, max: number): number | undefined {

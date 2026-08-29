@@ -1,29 +1,31 @@
 id: antigravity
-name: Antigravity CLI
+name: Antigravity CLI (agy)
 vendor: Google
 description: >
-  CLI em Go do Antigravity 2.0, sucessor do Gemini CLI (que deixou de servir
-  Pro/Ultra em jun/2026). Startup rápido e bom em ambiente headless/SSH.
+  CLI em Go do Antigravity (agy), sucessor do Gemini CLI.
+  Suporta execução headless não-interativa com saída stream-json estruturada.
 
-bin: antigravity
+bin: agy
 
 detect:
   args: ["--version"]
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  oneShot: ["-p"]
-  stdinPrompt: true
+  oneShot: ["-p", "--output-format", "stream-json"]
+  resume: ["--conversation", "{{nativeSessionId}}", "-p", "--output-format", "stream-json"]
+  stdinPrompt: false
   interactive: false
   extraArgs: []
   env: {}
 
 session:
-  strategy: replay
+  strategy: native
+  idFrom: "$.conversation_id"
 
 stream:
-  format: text
-  mapper: generic-text
+  format: jsonl
+  mapper: antigravity
 
 capabilities:
   - code-edit
@@ -33,7 +35,7 @@ capabilities:
 
 auth:
   mode: inherit
-  loginHint: "rode `antigravity` e autentique com sua conta Google"
+  loginHint: "rode `agy` e autentique com sua conta Google"
 
 defaults:
   isolation: worktree
@@ -41,8 +43,7 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "NAO VERIFICADO: as flags aqui vem da documentacao da Antigravity CLI, nao de teste contra binario."
-  - "O que ESTA instalado nesta maquina e o Antigravity Hub (app Electron, v2.1.4) e a Antigravity IDE (fork do VS Code, 1.107.0) — nenhum dos dois expoe agente headless. O launcher `antigravity-ide` so tem as opcoes de editor do VS Code."
-  - "Por dentro, o app sobe um `language_server.exe --standalone --subclient_type hub` com servidor HTTPS local em PORTA DINAMICA e CSRF token por sessao, em protocolo interno. Da para falar com ele, mas seria adapter fragil: porta muda a cada boot, token muda a cada sessao, e o protocolo quebra a cada atualizacao automatica."
-  - "O caminho suportado e a Antigravity CLI (binario Go), produto separado do app e da IDE. Enquanto ela nao estiver no PATH, este manifesto nao roda."
-  - "Antigravity tem seu proprio gerenciador de agentes; usar os dois em paralelo pode duplicar trabalho."
+  - "VERIFICADO: validado contra o binario real `agy.exe` (v1.1.22)."
+  - "Utiliza `--output-format stream-json` com parser de eventos dedicado."
+  - "Suporta retomada nativa de sessao via `--conversation <conversation_id>`."
+

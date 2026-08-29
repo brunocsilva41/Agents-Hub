@@ -127,7 +127,9 @@ export class AgentRegistry {
   }
 
   #isFresh(probe: ProbeResult): boolean {
-    const ttl = this.#options.probeCacheTtlMs ?? DEFAULT_PROBE_TTL_MS;
+    // Probes não-instalados expiram em 5 minutos (em vez de 24h) para refletir novas instalações
+    const defaultTtl = probe.installed ? DEFAULT_PROBE_TTL_MS : 5 * 60 * 1000;
+    const ttl = this.#options.probeCacheTtlMs ?? defaultTtl;
     return Date.now() - new Date(probe.checkedAt).getTime() < ttl;
   }
 

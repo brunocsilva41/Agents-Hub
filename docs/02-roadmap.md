@@ -171,9 +171,9 @@ errados**, dois deles de forma que quebraria a invocação:
 
 ### Restante da fase 2
 
-- [ ] **Mappers dedicados para Cursor e Antigravity** — os dois binários não estão
-      instalados nesta máquina, então os manifestos seguem deduzidos e os `caveats`
-      dizem isso. Verificar quando forem instalados
+- [x] **Mapper dedicado e manifesto verificado do Antigravity (agy)** — validado
+      contra o binário real `agy.exe` (1.1.22), com stream-json e retomada nativa via `--conversation`
+- [ ] Mapper dedicado para Cursor (aguardando disponibilidade de CLI headless independente)
 - [ ] Mapper dedicado do MiMo, quando o vocabulário de eventos da v1 for confirmado
 - [x] **Gate PRÉ-execução** (Claude Code) — contrato confirmado por sonda contra o
       binário, não deduzido: a decisão de perguntar é `escalate` (não `ask`), e
@@ -184,11 +184,11 @@ errados**, dois deles de forma que quebraria a invocação:
 
 ## Fase 3 — Plataforma
 
-- [ ] **A2A server**: Agent Card assinado em `/.well-known/agent-card.json`, `tasks/get`, `tasks/cancel`, `tasks/resubscribe`
-- [ ] Motor de workflows declarativos em YAML (fan-out paralelo, gates, condicionais)
-- [ ] Handoff de sessão (A transfere o papel de principal para B em tempo de execução)
-- [ ] Validação por revisão cruzada (segundo agente revisa o resultado do primeiro)
-- [ ] Painel de custos com projeção e alertas de orçamento
+- [x] **A2A server**: Agent Card em `/.well-known/agent-card.json`, endpoints `/a2a/tasks`, `/a2a/tasks/:id`, `/a2a/tasks/:id/cancel` e SSE streaming em `/a2a/tasks/:id/events`
+- [x] **Motor de workflows declarativos em YAML**: DAG com validação de ciclo (Kahn), ordenação topológica em lotes paralelos (fan-out/fan-in) (`packages/core/src/workflow.ts`) e CLI `hub workflow validate/run`
+- [x] **Handoff de sessão**: transferência de controle em tempo de execução entre agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI `hub handoff` e MCP tool `hub_session_handoff`
+- [x] **Validação por revisão cruzada** (segundo agente revisa o resultado do primeiro) — implementada na fase 2
+- [x] **Painel de custos com projeção e alertas de orçamento**: cálculo de burn rate (`project()`), disparador de limiar (`isWarning`), evento `budget.warning`
 - [ ] Isolamento por container como modo opcional (`isolation: container`)
 - [ ] ACP: expor o Hub como agente dentro de Zed/JetBrains/Neovim
 
@@ -201,3 +201,4 @@ errados**, dois deles de forma que quebraria a invocação:
 Tudo que bloqueava a Fase 2 foi decidido no [ADR 06](decisoes/06-resiliencia-retencao.md):
 falha final termina em `failed` sem travar o fluxo, fallback é `claude → codex → opencode`,
 eventos ficam para sempre e worktrees por 7 dias, e o modelo é o default de cada CLI.
+

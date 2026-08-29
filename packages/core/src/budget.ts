@@ -30,6 +30,12 @@ export function subUsage(a: BudgetUsage, b: Partial<BudgetUsage>): BudgetUsage {
   };
 }
 
+export interface BudgetProjection {
+  projectedUsd: number;
+  projectedTokens: number;
+  burnRateUsdPerSec: number;
+}
+
 export interface BudgetSnapshot {
   limits: BudgetLimits;
   consumed: BudgetUsage;
@@ -38,6 +44,8 @@ export interface BudgetSnapshot {
   exhausted: boolean;
   /** Fração do limite mais apertado (0..1+). É o número que a UI mostra. */
   pressure: number;
+  /** Verdadeiro quando a pressão atingiu o limiar de alerta (ex.: >= 80%). */
+  isWarning: boolean;
 }
 
 /**
@@ -71,7 +79,7 @@ export class BudgetLedger {
     return this.#limits;
   }
 
-  snapshot(): BudgetSnapshot {
+  snapshot(warningThreshold = 0.8): BudgetSnapshot {
     const remaining: BudgetUsage = {
       usd: this.#limits.usd - this.#consumed.usd - this.#reserved.usd,
       tokens: this.#limits.tokens - this.#consumed.tokens - this.#reserved.tokens,
@@ -82,13 +90,32 @@ export class BudgetLedger {
       safeRatio(this.#consumed.tokens + this.#reserved.tokens, this.#limits.tokens),
       safeRatio(this.#consumed.seconds + this.#reserved.seconds, this.#limits.seconds),
     );
+    const exhausted = remaining.usd <= 0 || remaining.tokens <= 0 || remaining.seconds <= 0;
     return {
       limits: this.#limits,
       consumed: this.#consumed,
       reserved: this.#reserved,
       remaining,
-      exhausted: remaining.usd <= 0 || remaining.tokens <= 0 || remaining.seconds <= 0,
+      exhausted,
       pressure,
+      isWarning: pressure >= warningThreshold && !exhausted,
+    };
+  }
+
+  /**
+   * Calcula a projeção de custo final e taxa de consumo (burn rate)
+   * com base no tempo decorrido até agora.
+   */
+  project(elapsedSeconds: number, targetDurationSeconds?: number): BudgetProjection {
+    const totalSecs = targetDurationSeconds ?? this.#limits.seconds;
+    const safeElapsed = Math.max(1, elapsedSeconds);
+    const burnRateUsdPerSec = this.#consumed.usd / safeElapsed;
+    const burnRateTokensPerSec = this.#consumed.tokens / safeElapsed;
+
+    return {
+      projectedUsd: burnRateUsdPerSec * totalSecs,
+      projectedTokens: Math.round(burnRateTokensPerSec * totalSecs),
+      burnRateUsdPerSec,
     };
   }
 

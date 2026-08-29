@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -38,7 +41,7 @@ async function lookup(bin: string): Promise<ResolvedBin | null> {
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
-    if (candidates.length === 0) return null;
+    if (candidates.length === 0) return lookupFallback(bin, isWindows);
 
     if (!isWindows) {
       return { path: candidates[0] as string, needsShell: false };
@@ -54,8 +57,25 @@ async function lookup(bin: string): Promise<ResolvedBin | null> {
 
     return { path: best, needsShell: /\.(cmd|bat)$/i.test(best) };
   } catch {
-    return null;
+    return lookupFallback(bin, isWindows);
   }
+}
+
+function lookupFallback(bin: string, isWindows: boolean): ResolvedBin | null {
+  if (!isWindows) return null;
+  const fallbacks = [
+    path.join(process.env['LOCALAPPDATA'] ?? '', 'agy', 'bin', `${bin}.exe`),
+    path.join(process.env['LOCALAPPDATA'] ?? '', 'Programs', bin, `${bin}.exe`),
+    path.join(os.homedir(), '.local', 'bin', `${bin}.exe`),
+    path.join(os.homedir(), '.kimi-code', 'bin', `${bin}.exe`),
+    path.join(process.env['APPDATA'] ?? '', 'npm', `${bin}.cmd`),
+  ];
+  for (const fb of fallbacks) {
+    if (existsSync(fb)) {
+      return { path: fb, needsShell: /\.(cmd|bat)$/i.test(fb) };
+    }
+  }
+  return null;
 }
 
 /**

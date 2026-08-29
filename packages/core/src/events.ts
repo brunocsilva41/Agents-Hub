@@ -10,6 +10,7 @@ import { newId, nowIso } from './ids.js';
 export type EventType =
   | 'session.started'
   | 'session.ended'
+  | 'session.handoff'
   | 'turn.started'
   | 'turn.completed'
   | 'message'
@@ -24,6 +25,7 @@ export type EventType =
   | 'approval.requested'
   | 'approval.resolved'
   | 'budget.updated'
+  | 'budget.warning'
   | 'budget.exceeded'
   | 'error'
   | 'log';

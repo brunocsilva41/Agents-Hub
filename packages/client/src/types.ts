@@ -94,6 +94,12 @@ export interface BudgetSummary {
   remaining: UsageSummary;
   pressure: number;
   exhausted: boolean;
+  isWarning?: boolean;
+  projection?: {
+    projectedUsd: number;
+    projectedTokens: number;
+    burnRateUsdPerSec: number;
+  };
 }
 
 export interface HealthSummary {

@@ -12,3 +12,10 @@ dist/
 
 # build da Web UI (gerado por `npm run build`)
 packages/web/dist/
+
+# Exports de sessão do Claude Code. Ficam na raiz por conveniência da
+# ferramenta, mas contêm o transcript INTEIRO da conversa — incluindo qualquer
+# coisa que o agente tenha lido da tela ou de arquivos no caminho. Um
+# `git add -A` distraído publicaria tudo isso. Nunca versionar.
+session-export-*/
+session-export-*.zip
