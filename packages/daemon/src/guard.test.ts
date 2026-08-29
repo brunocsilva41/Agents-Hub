@@ -102,6 +102,19 @@ describe('guarda de borda — o que precisa ser barrado', () => {
     assert.match(String(v.reason), /rebinding/);
   });
 
+  // NÃO afrouxe isto para aceitar qualquer porta loopback.
+  //
+  // A tentação aparece porque em desenvolvimento a Web UI é servida pelo Vite
+  // na 4748, e o navegador manda `Origin: http://localhost:4748` em todo POST
+  // — inclusive de mesma origem. Toda ação de escrita do painel batia em 403.
+  //
+  // Aceitar qualquer porta local resolveria, e abriria um buraco: um XSS em
+  // QUALQUER outro servidor de desenvolvimento no ar na máquina passaria a
+  // dirigir o Hub, que roda agentes com todo o privilégio do usuário.
+  //
+  // A correção certa está em `packages/web/vite.config.ts`: o proxy reescreve
+  // o `Origin` para a origem do daemon, porque a requisição de fato vem da
+  // interface dele. A guarda continua estrita.
   test('origem de outra porta local também é outra origem', () => {
     const v = guardRequest(
       req('POST', {

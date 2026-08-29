@@ -38,8 +38,30 @@ export default defineConfig({
     proxy: Object.fromEntries(
       API_ROUTES.map((route) => [
         route,
-        // SSE precisa de proxy sem buffer, senão a timeline chega em blocos.
-        { target, changeOrigin: true, ws: false },
+        {
+          target,
+          changeOrigin: true,
+          ws: false,
+          // `changeOrigin` reescreve o `Host`, mas NÃO o `Origin` — e o daemon
+          // checa os dois. O navegador manda `Origin: http://localhost:4748`
+          // em todo POST, inclusive de mesma origem, e a guarda de borda
+          // rejeita com 403 porque a porta não é a dela.
+          //
+          // O efeito era silencioso e total: a interface listava tudo (GET não
+          // leva `Origin`) mas nenhuma acao de escrita funcionava — criar
+          // sessão, aprovar, negar, cancelar, enviar. Os botões estavam ali e
+          // não faziam nada.
+          //
+          // A correção fica aqui, e não afrouxando a guarda para aceitar
+          // qualquer porta loopback: isso deixaria um XSS em qualquer outro
+          // servidor local dirigir o Hub, e uma máquina de desenvolvimento
+          // costuma ter vários no ar.
+          configure: (proxy: { on: (e: string, cb: (r: { setHeader: (k: string, v: string) => void }) => void) => void }) => {
+            proxy.on('proxyReq', (proxyReq) => {
+              proxyReq.setHeader('origin', target);
+            });
+          },
+        },
       ]),
     ),
   },
