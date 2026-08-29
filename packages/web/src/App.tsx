@@ -11,6 +11,7 @@ import {
   mergeEvents,
   mergeFlowEvents,
   useBudget,
+  useFlowHistories,
   useHubState,
   useSessionHistory,
 } from './useHubState';
@@ -106,6 +107,8 @@ export function App() {
     return state.sessions.filter((s) => s.rootId === selected.rootId).map((s) => s.id);
   }, [selected, scope, state.sessions]);
 
+  const flowHistories = useFlowHistories(timelineSessions, scope === 'flow');
+
   // Depende de `eventsOf`, e não do objeto de estado inteiro: qualquer outra
   // mudança do Hub — uma aprovação resolvida, um agente sondado — não pode
   // custar um recálculo da timeline.
@@ -113,8 +116,8 @@ export function App() {
   const events = useMemo(() => {
     if (!selected) return [];
     if (scope === 'session') return mergeEvents(history, eventsOf(selected.id));
-    return mergeFlowEvents([...timelineSessions.map(eventsOf), history]);
-  }, [selected, scope, history, eventsOf, timelineSessions]);
+    return mergeFlowEvents([...timelineSessions.map(eventsOf), ...flowHistories, history]);
+  }, [selected, scope, history, eventsOf, timelineSessions, flowHistories]);
 
   /** Sessão terminada não aceita mais mensagem — o daemon recusa, e com razão. */
   const encerrada =

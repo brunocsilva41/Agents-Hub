@@ -320,6 +320,57 @@ export function useSessionHistory(sessionId: string | null): {
   return { history, loading };
 }
 
+/**
+ * Quantas sessões de um fluxo têm o histórico buscado na visão "fluxo inteiro".
+ *
+ * Uma por requisição, porque o daemon só serve eventos por sessão. O teto
+ * existe para que um fluxo com dezenas de delegações não vire uma rajada; nesse
+ * caso ficam as mais recentes, que é o que se está lendo.
+ */
+const MAX_FLOW_HISTORIES = 12;
+
+/**
+ * Histórico de TODAS as sessões do fluxo.
+ *
+ * A visão "fluxo inteiro" prometia juntar os agentes numa timeline só, mas só o
+ * histórico da sessão selecionada era carregado — o resto dependia do SSE, que
+ * só traz o que acontece a partir de agora. Em qualquer fluxo passado a visão
+ * de fluxo mostrava exatamente o mesmo que a visão de sessão.
+ *
+ * Só busca quando a visão está ligada: quem fica em "esta sessão" não paga nada.
+ */
+export function useFlowHistories(
+  sessionIds: readonly string[],
+  enabled: boolean,
+): EventEnvelope[][] {
+  const [histories, setHistories] = useState<EventEnvelope[][]>([]);
+  const key = enabled ? sessionIds.join(',') : '';
+
+  useEffect(() => {
+    if (key === '') {
+      setHistories([]);
+      return;
+    }
+    let cancelled = false;
+    const ids = key.split(',').slice(-MAX_FLOW_HISTORIES);
+    Promise.all(
+      ids.map((id) =>
+        hub
+          .events(id, { limit: 2000 })
+          .then(({ events }) => events)
+          .catch(() => [] as EventEnvelope[]),
+      ),
+    ).then((loaded) => {
+      if (!cancelled) setHistories(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+
+  return histories;
+}
+
 /** Junta histórico e stream ao vivo sem duplicar o que aparece nos dois. */
 export function mergeEvents(
   history: EventEnvelope[],

@@ -21,8 +21,31 @@ export function viewOf(event: EventEnvelope): EventView {
   const cached = viewCache.get(event);
   if (cached) return cached;
   const view = describeEvent(event);
-  viewCache.set(event, view);
-  return view;
+  const clean = { ...view, text: stripAnsi(view.text) };
+  viewCache.set(event, clean);
+  return clean;
+}
+
+const ESC = '\u001B';
+
+/** CSI (`ESC[…m`), OSC (`ESC]…BEL`) e as sequências de dois bytes. */
+const ANSI = /\u001B\[[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B[@-Z\\-_]/g;
+
+/**
+ * Agentes de terminal escrevem em ANSI e a saída deles vai crua para o payload
+ * do evento: um erro de validação chega com `ESC[41m` no meio. O navegador
+ * engole o ESC e mostra `[41m` como se fosse texto, embaralhando a mensagem
+ * justamente onde ela precisa ser lida.
+ *
+ * Limpar aqui é remendo — o certo é o mapper de cada agente não deixar passar.
+ * Fica assim mesmo porque a legibilidade do painel não pode depender disso:
+ * qualquer agente novo traria o problema de volta.
+ */
+function stripAnsi(text: string): string {
+  if (!text.includes(ESC) && !text.includes('\r')) return text;
+  // `\r` sozinho é barra de progresso reescrevendo a linha; numa timeline que
+  // não reescreve nada, vira quebra.
+  return text.replace(ANSI, '').replace(/\r\n?/g, '\n');
 }
 
 /**
