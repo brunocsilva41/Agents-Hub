@@ -285,29 +285,64 @@ export class HubClient {
 
   async #handle<T>(response: Response): Promise<T> {
     const text = await response.text();
-    const parsed = text.length > 0 ? (JSON.parse(text) as Record<string, unknown>) : {};
+
+    // `JSON.parse` sem guarda estourava com um erro que não diz nada a quem
+    // opera: "Unexpected token '<', \"<!doctype\"... is not valid JSON". Foi
+    // exatamente o que aconteceu quando o proxy de desenvolvimento devolveu o
+    // index.html no lugar da API — o sintoma apontava para o parser, e a causa
+    // estava a três camadas de distância.
+    let parsed: Record<string, unknown> = {};
+    if (text.length > 0) {
+      try {
+        parsed = JSON.parse(text) as Record<string, unknown>;
+      } catch {
+        throw new HubApiError(
+          `o Hub respondeu algo que não é JSON (HTTP ${response.status}). ` +
+            `Comece pelos primeiros caracteres da resposta: ${resumo(text)}`,
+          'RESPOSTA_NAO_JSON',
+          response.status,
+        );
+      }
+    }
+
     if (!response.ok) {
-      const error = parsed['error'] as { code?: string; message?: string } | undefined;
+      const error = parsed['error'] as
+        | { code?: string; message?: string; details?: unknown }
+        | undefined;
       throw new HubApiError(
         error?.message ?? text,
         error?.code ?? String(response.status),
         response.status,
+        // O daemon MANDA `details` — com o caminho e a mensagem de cada campo
+        // que falhou na validação — e o cliente descartava. A interface exibia
+        // "Brief inválido" enquanto a resposta trazia "o objetivo precisa ser
+        // descritivo". A informação útil chegava e morria aqui.
+        error?.details,
       );
     }
     return parsed as T;
   }
 }
 
+/** Primeiros caracteres da resposta, em uma linha, para caber numa mensagem. */
+function resumo(texto: string): string {
+  const limpo = texto.replace(/\s+/g, ' ').trim();
+  return limpo.length > 120 ? `${limpo.slice(0, 120)}…` : limpo;
+}
+
 /** Preserva o `code` do domínio para quem consome poder reagir a ele. */
 export class HubApiError extends Error {
   readonly code: string;
   readonly status: number;
+  /** Detalhes estruturados do daemon — por campo, quando é erro de validação. */
+  readonly details: unknown;
 
-  constructor(message: string, code: string, status: number) {
+  constructor(message: string, code: string, status: number, details?: unknown) {
     super(message);
     this.name = 'HubApiError';
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 

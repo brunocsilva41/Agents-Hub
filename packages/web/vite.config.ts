@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 
 /** Rotas do daemon — em desenvolvimento o Vite as repassa; em produção o
@@ -36,7 +36,7 @@ export default defineConfig({
   server: {
     port: 4748,
     proxy: Object.fromEntries(
-      API_ROUTES.map((route) => [
+      API_ROUTES.map((route): [string, ProxyOptions] => [
         route,
         {
           target,
@@ -56,7 +56,7 @@ export default defineConfig({
           // qualquer porta loopback: isso deixaria um XSS em qualquer outro
           // servidor local dirigir o Hub, e uma máquina de desenvolvimento
           // costuma ter vários no ar.
-          configure: (proxy: { on: (e: string, cb: (r: { setHeader: (k: string, v: string) => void }) => void) => void }) => {
+          configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq) => {
               proxyReq.setHeader('origin', target);
             });

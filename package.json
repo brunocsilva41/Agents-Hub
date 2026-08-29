@@ -14,7 +14,7 @@
     "build": "tsc -b && npm run build --workspace @agents-hub/web",
     "build:watch": "tsc -b --watch",
     "clean": "tsc -b --clean",
-    "typecheck": "tsc -b --noEmit false --dry",
+    "typecheck": "tsc -b && npm run typecheck --workspace @agents-hub/web",
     "daemon": "node --experimental-sqlite packages/daemon/dist/main.js",
     "hub": "node packages/cli/dist/main.js",
     "test": "node --test --experimental-sqlite packages/*/dist/**/*.test.js",

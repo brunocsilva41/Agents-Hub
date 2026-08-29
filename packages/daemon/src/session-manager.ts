@@ -763,10 +763,25 @@ export class SessionManager {
     return { mode: canResume ? 'resume' : 'replay' };
   }
 
-  async interrupt(sessionId: string): Promise<void> {
+  /**
+   * Interrompe o turno em andamento.
+   *
+   * Devolve `false` quando a sessão existe mas não tinha nada rodando — e isso
+   * precisa chegar a quem pediu. A versão anterior consultava `#runs` ANTES de
+   * validar a sessão e saía calada quando não achava nada, então
+   * `POST /sessions/ses_naoexiste/interrupt` respondia `{ok:true}` com 200.
+   * Sucesso relatado sobre coisa nenhuma, e divergente dos irmãos `cancel` e
+   * `pause`, que devolviam 404 para o mesmo id.
+   */
+  async interrupt(sessionId: string): Promise<boolean> {
+    // Validar primeiro: id desconhecido é erro do chamador, não silêncio.
+    const session = this.#session(sessionId);
+
     const live = this.#runs.get(sessionId);
-    if (!live) return;
-    await this.registry.get(this.#session(sessionId).agentId).interrupt(live.handle);
+    if (!live) return false;
+
+    await this.registry.get(session.agentId).interrupt(live.handle);
+    return true;
   }
 
   async cancel(sessionId: string, reason = 'cancelado pelo usuário', visited = new Set<string>()): Promise<void> {
