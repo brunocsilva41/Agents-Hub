@@ -4,6 +4,7 @@ import type {
   Artifact,
   BudgetRecord,
   Project,
+  ProjectFolder,
   Session,
   SessionState,
   Task,
@@ -23,6 +24,15 @@ export interface ProjectRepository {
   get(id: string): Project | null;
   getByPath(path: string): Project | null;
   list(): Project[];
+
+  /** Pastas que compõem o projeto, principal primeiro. */
+  listFolders(projectId: string): ProjectFolder[];
+  addFolder(input: Omit<ProjectFolder, 'id' | 'createdAt'>): ProjectFolder;
+  removeFolder(folderId: string): void;
+  /** A quem esta pasta pertence, se a alguém. */
+  findFolderByPath(path: string): ProjectFolder | null;
+  /** Todas as pastas de todos os projetos — base da checagem de sobreposição. */
+  allFolders(): ProjectFolder[];
 }
 
 export interface SessionRepository {

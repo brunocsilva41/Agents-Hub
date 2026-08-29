@@ -16,6 +16,7 @@ import {
   type EventType,
   type GraphNode,
   type Project,
+  type ProjectFolder,
   type ProjectRepository,
   type Session,
   type SessionRepository,
@@ -63,6 +64,49 @@ class SqliteProjectRepository implements ProjectRepository {
     return (this.db.prepare('SELECT * FROM projects ORDER BY created_at').all() as Row[]).map(
       mapProject,
     );
+  }
+
+  listFolders(projectId: string): ProjectFolder[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT * FROM project_folders WHERE project_id = ? ORDER BY is_primary DESC, created_at',
+        )
+        .all(projectId) as Row[]
+    ).map(mapProjectFolder);
+  }
+
+  addFolder(input: Omit<ProjectFolder, 'id' | 'createdAt'>): ProjectFolder {
+    const folder: ProjectFolder = { ...input, id: newId('pfd'), createdAt: nowIso() };
+    this.db
+      .prepare(
+        `INSERT INTO project_folders (id, project_id, path, label, is_primary, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        folder.id,
+        folder.projectId,
+        folder.path,
+        folder.label,
+        folder.isPrimary ? 1 : 0,
+        folder.createdAt,
+      );
+    return folder;
+  }
+
+  removeFolder(folderId: string): void {
+    this.db.prepare('DELETE FROM project_folders WHERE id = ?').run(folderId);
+  }
+
+  findFolderByPath(p: string): ProjectFolder | null {
+    const row = this.db.prepare('SELECT * FROM project_folders WHERE path = ?').get(p) as
+      | Row
+      | undefined;
+    return row ? mapProjectFolder(row) : null;
+  }
+
+  allFolders(): ProjectFolder[] {
+    return (this.db.prepare('SELECT * FROM project_folders').all() as Row[]).map(mapProjectFolder);
   }
 }
 
@@ -563,6 +607,19 @@ function mapProject(row: Row): Project {
     name: str(row['name']),
     path: str(row['path']),
     defaultBranch: str(row['default_branch']),
+    createdAt: str(row['created_at']),
+  };
+}
+
+function mapProjectFolder(row: Row): ProjectFolder {
+  return {
+    id: str(row['id']),
+    projectId: str(row['project_id']),
+    path: str(row['path']),
+    label: row['label'] === null || row['label'] === undefined ? null : str(row['label']),
+    // SQLite guarda booleano como 0/1; comparar com `=== 1` evita que a string
+    // "0" — que é truthy — vire `true` silenciosamente.
+    isPrimary: Number(row['is_primary']) === 1,
     createdAt: str(row['created_at']),
   };
 }

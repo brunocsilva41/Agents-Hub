@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   BudgetLedger,
   HubError,
+  validarNovaPasta,
   PolicyEngine,
   SequenceCounter,
   ZERO_USAGE,
@@ -34,6 +35,7 @@ import {
   type GuardedAction,
   type IsolationMode,
   type Project,
+  type ProjectFolder,
   type Session,
   type SessionMode,
   type OutcomeClass,
@@ -197,15 +199,104 @@ export class SessionManager {
     const absolute = path.resolve(dir);
     const existing = this.store.projects.getByPath(absolute);
     if (existing) return existing;
-    return this.store.projects.create({
+
+    // A pasta pode já pertencer a OUTRO projeto, ou estar dentro de uma que
+    // pertence. Criar o projeto assim mesmo deixaria dois donos para a mesma
+    // árvore de arquivos, e nenhuma resposta para qual política vale ali.
+    const veredito = validarNovaPasta(absolute, this.store.projects.allFolders());
+    if (!veredito.ok) {
+      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
+    }
+
+    const project = this.store.projects.create({
       name: name ?? path.basename(absolute),
       path: absolute,
       defaultBranch: 'main',
     });
+
+    // Todo projeto nasce com uma pasta: a dele. Sem isto, um projeto recém
+    // criado não teria onde rodar sessão nenhuma.
+    this.store.projects.addFolder({
+      projectId: project.id,
+      path: absolute,
+      label: project.name,
+      isPrimary: true,
+    });
+
+    return project;
   }
 
   listProjects(): Project[] {
     return this.store.projects.list();
+  }
+
+  /** Projeto por id, ou erro — nunca `null` seguindo adiante em silêncio. */
+  #project(projectId: string): Project {
+    const project = this.store.projects.get(projectId);
+    if (!project) {
+      throw new HubError('PROJECT_NOT_FOUND', `Projeto ${projectId} não encontrado`, {
+        projectId,
+      });
+    }
+    return project;
+  }
+
+  listProjectFolders(projectId: string): ProjectFolder[] {
+    // Valida a existência para não devolver lista vazia de projeto inexistente,
+    // que o chamador leria como "projeto sem pastas".
+    this.#project(projectId);
+    return this.store.projects.listFolders(projectId);
+  }
+
+  /**
+   * Acrescenta uma pasta ao projeto.
+   *
+   * É o que torna um "projeto" capaz de cobrir frontend e backend em
+   * repositórios separados sem perder a unificação de custo, política e
+   * histórico — e sem unir o acesso, porque a sessão continua rodando em uma
+   * pasta só.
+   */
+  addProjectFolder(projectId: string, dir: string, label?: string): ProjectFolder {
+    const project = this.#project(projectId);
+    const absolute = path.resolve(dir);
+
+    const veredito = validarNovaPasta(absolute, this.store.projects.allFolders());
+    if (!veredito.ok) {
+      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
+    }
+
+    return this.store.projects.addFolder({
+      projectId: project.id,
+      path: absolute,
+      label: label ?? path.basename(absolute),
+      isPrimary: false,
+    });
+  }
+
+  /**
+   * Remove uma pasta do projeto.
+   *
+   * A principal não sai: ela é a raiz padrão das sessões, e um projeto sem raiz
+   * padrão só descobriria o problema na próxima vez que alguém tentasse abrir
+   * uma sessão nele.
+   */
+  removeProjectFolder(projectId: string, folderId: string): void {
+    const pastas = this.listProjectFolders(projectId);
+    const alvo = pastas.find((f) => f.id === folderId);
+    if (!alvo) {
+      throw new HubError('FOLDER_NOT_FOUND', `pasta ${folderId} não pertence a este projeto`, {
+        projectId,
+        folderId,
+      });
+    }
+    if (alvo.isPrimary) {
+      throw new HubError(
+        'FOLDER_IS_PRIMARY',
+        'a pasta principal não pode ser removida; ela é a raiz padrão das sessões deste projeto',
+        { projectId, folderId },
+      );
+    }
+    this.store.projects.removeFolder(folderId);
   }
 
   // ---------------------------------------------------------------- sessões

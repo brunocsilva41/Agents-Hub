@@ -37,6 +37,13 @@ export const CreateProjectSchema = z
   })
   .strict();
 
+export const AddFolderSchema = z
+  .object({
+    path: z.string().min(1).max(4096),
+    label: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+
 export const StartSessionSchema = z
   .object({
     projectId: ProjectIdSchema,

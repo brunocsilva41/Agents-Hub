@@ -55,8 +55,39 @@ export type IsolationMode = 'none' | 'worktree' | 'container';
 export interface Project {
   id: string;
   name: string;
+  /**
+   * Pasta principal do projeto.
+   *
+   * Mantida por compatibilidade e como raiz padrão. As demais pastas do
+   * projeto vivem em [`ProjectFolder`] — um projeto real raramente é uma pasta
+   * só (frontend e backend em repositórios separados, o monorepo mais os
+   * scripts de infraestrutura ao lado).
+   */
   path: string;
   defaultBranch: string;
+  createdAt: string;
+}
+
+/**
+ * Uma das pastas que compõem um projeto.
+ *
+ * O `path` é único GLOBALMENTE, não por projeto: uma pasta pertence a no máximo
+ * um projeto. Se pertencesse a dois, não haveria resposta para "qual política
+ * vale aqui?" — e escolher uma das duas por conta própria é como se age no
+ * lugar errado.
+ *
+ * É também a unidade de confinamento: a sessão roda em UMA pasta, e a política
+ * já limita escrita ao diretório da sessão (`isInside(ctx.workdir, alvo)`).
+ * Agrupar pastas num projeto une custo, política e histórico sem unir acesso.
+ */
+export interface ProjectFolder {
+  id: string;
+  projectId: string;
+  path: string;
+  /** Nome curto que o usuário reconhece: "api", "web", "infra". */
+  label: string | null;
+  /** A pasta usada quando a sessão não escolhe outra. */
+  isPrimary: boolean;
   createdAt: string;
 }
 

@@ -13,11 +13,13 @@ import {
   AdoptSessionSchema,
   ApprovalIdSchema,
   CancelSchema,
+  AddFolderSchema,
   CreateProjectSchema,
   DelegateSchema,
   HandoffSessionSchema,
   ResolveApprovalSchema,
   SendMessageSchema,
+  ProjectIdSchema,
   SessionIdSchema,
   PreToolGateSchema,
   StartSessionSchema,
@@ -269,6 +271,33 @@ export class HubServer {
     this.#route('POST', '/projects', async (req, res) => {
       const body = await readBody(req, CreateProjectSchema);
       sendJson(res, 201, { project: this.sessions.registerProject(body.path, body.name) });
+    });
+
+    // Pastas do projeto. Um projeto agrupa N pastas; a sessão roda em UMA
+    // delas, e é isso que mantém o confinamento de acesso significando algo.
+    this.#route('GET', '/projects/:id/folders', (_req, res, params) => {
+      sendJson(res, 200, {
+        folders: this.sessions.listProjectFolders(param(params['id'], ProjectIdSchema, 'id')),
+      });
+    });
+
+    this.#route('POST', '/projects/:id/folders', async (req, res, params) => {
+      const body = await readBody(req, AddFolderSchema);
+      sendJson(res, 201, {
+        folder: this.sessions.addProjectFolder(
+          param(params['id'], ProjectIdSchema, 'id'),
+          body.path,
+          body.label,
+        ),
+      });
+    });
+
+    this.#route('DELETE', '/projects/:id/folders/:folderId', (_req, res, params) => {
+      this.sessions.removeProjectFolder(
+        param(params['id'], ProjectIdSchema, 'id'),
+        params['folderId'] ?? '',
+      );
+      sendJson(res, 200, { ok: true });
     });
 
     // ------------------------------------------------------------- sessões

@@ -110,4 +110,36 @@ CREATE TABLE budgets (
 );
 `,
   },
+  {
+    version: 2,
+    name: 'projeto com varias pastas',
+    sql: `
+-- Um projeto passa a agrupar N pastas.
+--
+-- Motivação: um "projeto" real raramente é uma pasta só — frontend e backend em
+-- repositórios separados, ou um monorepo mais os scripts de infraestrutura ao
+-- lado. Antes disso o usuário precisava criar dois projetos e perdia a
+-- unificação de custo, política e histórico entre eles.
+--
+-- \`path\` é UNIQUE GLOBALMENTE, não por projeto. Uma pasta pertence a no
+-- máximo um projeto — se pertencesse a dois, não haveria resposta para "qual
+-- política vale aqui?", e adivinhar a resposta é como se age no alvo errado.
+CREATE TABLE project_folders (
+  id         TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  path       TEXT NOT NULL UNIQUE,
+  label      TEXT,
+  -- A pasta principal é a que a sessão usa quando ninguém escolhe outra.
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_project_folders_project ON project_folders(project_id);
+
+-- Backfill: todo projeto existente vira um projeto de uma pasta só, a dele.
+-- Sem isto, projetos criados antes desta migração ficariam sem pasta nenhuma e
+-- nenhuma sessão nova conseguiria escolher onde rodar.
+INSERT INTO project_folders (id, project_id, path, label, is_primary, created_at)
+SELECT 'pfd_' || id, id, path, name, 1, created_at FROM projects;
+`,
+  },
 ];

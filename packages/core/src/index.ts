@@ -5,6 +5,7 @@ export * from './events.js';
 export * from './brief.js';
 export * from './conversation.js';
 export * from './policy.js';
+export * from './folders.js';
 export * from './budget.js';
 export * from './pricing.js';
 export * from './graph.js';

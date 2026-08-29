@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
  * Ids com prefixo legível. Ao ler um log ou um grafo de chamadas, saber que
  * `ses_...` é sessão e `tsk_...` é task economiza muito tempo de depuração.
  */
-export type IdPrefix = 'prj' | 'ses' | 'tsk' | 'evt' | 'apv' | 'art' | 'run';
+export type IdPrefix = 'prj' | 'pfd' | 'ses' | 'tsk' | 'evt' | 'apv' | 'art' | 'run';
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${randomUUID().replaceAll('-', '').slice(0, 24)}`;
