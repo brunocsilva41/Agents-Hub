@@ -6,6 +6,7 @@ import {
   actionsOfToolCall,
   combineVerdicts,
   explainToAgent,
+  toCodexHookOutput,
   toHookPermission,
 } from './pretool-gate.js';
 
@@ -134,5 +135,42 @@ describe('o gate concorda com a vigilância reativa', () => {
         `${call.toolName} não pode gerar atrito no fluxo normal`,
       );
     }
+  });
+});
+
+describe('dialeto do hook do Codex', () => {
+  // Contrato sondado contra o codex 0.149.1, com --dangerously-bypass-hook-trust.
+  // Ver os comentários em `toCodexHookOutput` para o porquê de cada regra.
+
+  test('permitir é NÃO escrever nada: "allow" faz o Codex marcar o hook como Failed', () => {
+    const saida = toCodexHookOutput(
+      { decision: 'allow', risk: 'read', reason: 'leitura de arquivo do projeto' },
+      'semi',
+    );
+    assert.equal(saida, null);
+  });
+
+  test('negar leva motivo obrigatório — o binário recusa deny sem motivo', () => {
+    const saida = toCodexHookOutput(
+      { decision: 'deny', risk: 'irreversible', reason: 'git push para remoto' },
+      'semi',
+    );
+    assert.ok(saida);
+    assert.equal(saida.hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(saida.hookSpecificOutput.hookEventName, 'PreToolUse');
+    assert.ok(saida.hookSpecificOutput.permissionDecisionReason.length > 0);
+  });
+
+  test('aprovação humana também vira deny: o Codex não tem "ask"', () => {
+    const saida = toCodexHookOutput(
+      { decision: 'approve', risk: 'escalate', reason: 'escrita fora do worktree' },
+      'semi',
+    );
+    assert.ok(saida);
+    // A decisão do Hub é "approve", mas no dialeto do Codex a única forma de
+    // parar a ação é negar — e o motivo precisa mandar o agente falar com o
+    // humano, senão ele tenta outro caminho para o mesmo efeito.
+    assert.equal(saida.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(saida.hookSpecificOutput.permissionDecisionReason, /aprovação humana/i);
   });
 });

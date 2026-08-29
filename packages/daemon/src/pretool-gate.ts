@@ -109,6 +109,53 @@ export function toHookPermission(decision: Decision): HookPermission {
   }
 }
 
+/**
+ * Saída do hook no dialeto do **Codex**, que não é o do Claude Code.
+ *
+ * Descoberto sondando o binário real (0.149.1), não deduzido — e as duas
+ * diferenças importam:
+ *
+ * 1. **Permitir é ficar calado.** Devolver `permissionDecision: "allow"` faz o
+ *    Codex registrar `hook: PreToolUse Failed`; o binário traz a string
+ *    "PreToolUse hook returned unsupported permissionDecision:allow". Saída
+ *    vazia dá `hook: PreToolUse Completed` e a ferramenta roda. Se o Hub
+ *    respondesse `allow` como responde ao Claude, **toda ação permitida
+ *    quebraria** — o caminho feliz seria o único a falhar.
+ *
+ * 2. **Não existe `ask`.** O Claude escala para aprovação humana com
+ *    `escalate`; o Codex marca `ask` como não suportado. Então a decisão
+ *    `approve` do Hub vira `deny` aqui, com um motivo que manda o agente
+ *    pedir ao humano em vez de tentar outro caminho. É menos elegante e mais
+ *    honesto do que fingir que existe uma escalada.
+ *
+ * O motivo é obrigatório em `deny`: o binário reclama de
+ * "permissionDecision:deny without a non-empty permissionDecisionReason".
+ *
+ * `null` significa "não escreva nada no stdout".
+ */
+export function toCodexHookOutput(
+  verdict: { decision: Decision; risk: RiskLevel; reason: string },
+  mode: SessionMode,
+): CodexHookOutput | null {
+  if (verdict.decision === 'allow') return null;
+
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: explainToAgent(verdict, mode),
+    },
+  };
+}
+
+export interface CodexHookOutput {
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse';
+    permissionDecision: 'deny';
+    permissionDecisionReason: string;
+  };
+}
+
 /** Frase que o agente vê quando a ação é barrada — precisa dizer o que fazer. */
 export function explainToAgent(
   verdict: { decision: Decision; risk: RiskLevel; reason: string },
