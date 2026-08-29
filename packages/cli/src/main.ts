@@ -101,7 +101,7 @@ ${bold('Daemon')} ${dim('(sobe sozinho quando algum comando precisa)')}
 ${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar)')}
   hub hooks install claude --write   registra o hook PreToolUse no Claude Code
   hub hooks                          mostra onde o gate está instalado
-  hub hook                           uso interno: o agente chama, não você
+  hub hook [--dialect codex]         uso interno: o agente chama, não você
 
 ${bold('Agentes')}
   hub doctor                        checa quais agentes estão instalados
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     case 'hook':
       // NAO passa por withDaemon: subir o daemon de dentro de um hook faria
       // isso acontecer a cada chamada de ferramenta do agente.
-      return runHook(config);
+      return runHook(config, args);
     case 'hooks':
       // Offline como o `mcp`: mexer em config não precisa do daemon.
       return hooksCommand(args);
@@ -252,7 +252,16 @@ async function main(): Promise<void> {
  * Responde ao hook do agente. Silencioso por construção: qualquer coisa fora do
  * JSON no stdout confunde quem está lendo a resposta.
  */
-async function runHook(config: ReturnType<typeof loadConfig>): Promise<void> {
+async function runHook(
+  config: ReturnType<typeof loadConfig>,
+  args: Args,
+): Promise<void> {
+  // O dialeto é DECLARADO por quem instala o hook, nunca farejado do payload.
+  // Codex e Claude mandam entrada quase idêntica e esperam saídas opostas para
+  // "permitir"; adivinhar por formato daria um erro silencioso no dia em que os
+  // dois payloads convergirem — e o erro cairia justamente no caminho feliz.
+  const dialeto = args.flags['dialect'] === 'codex' ? 'codex' : 'claude';
+
   let entrada: HookInput = {};
   try {
     const bruto = await lerStdin();
@@ -262,7 +271,7 @@ async function runHook(config: ReturnType<typeof loadConfig>): Promise<void> {
     entrada = {};
   }
 
-  const { saida, codigo } = await decideToolCall(entrada, baseUrl(config));
+  const { saida, codigo } = await decideToolCall(entrada, baseUrl(config), dialeto);
   process.stdout.write(saida);
   process.exitCode = codigo;
 }

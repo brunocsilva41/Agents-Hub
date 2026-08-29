@@ -14,7 +14,34 @@ import { HubClient } from '@agents-hub/client';
  * A sonda também confirmou que `AGENTS_HUB_SESSION_ID` — que o Hub injeta ao
  * spawnar o agente — CHEGA no processo do hook. É essa variável que correlaciona
  * a chamada com a sessão, sem depender de adivinhar por diretório.
+ *
+ * # Dois dialetos, e a diferença quebra o caminho feliz
+ *
+ * O Codex (0.149.1) tem o MESMO vocabulário de entrada — `tool_name: "Bash"`,
+ * `tool_input.command`, `cwd` — mas responde a um dialeto diferente na saída,
+ * medido contra o binário:
+ *
+ *   Claude:  permitir = { permissionDecision: "allow", ... }
+ *   Codex:   permitir = NÃO ESCREVER NADA
+ *
+ * Devolver `allow` ao Codex faz ele registrar `hook: PreToolUse Failed`. Ou
+ * seja, usar o dialeto errado não falharia no bloqueio — falharia em TODA ação
+ * permitida, que é a maioria esmagadora das chamadas.
+ *
+ * O Codex também não tem `ask`: a decisão `approve` do Hub vira `deny` com um
+ * motivo que manda o agente falar com o humano.
+ *
+ * O dialeto é declarado por quem chama, não farejado do payload. Para o Codex é
+ * o próprio Hub que emite o comando do hook (config inline por `-c hooks={...}`),
+ * então ele sabe o que está invocando; adivinhar por formato daria um erro
+ * silencioso no dia em que os payloads convergirem.
+ *
+ * O Codex também NÃO recebe `AGENTS_HUB_SESSION_ID` — a sonda confirmou que só
+ * chegam variáveis `CODEX_*`. Para ele a correlação sai do `cwd`, que no Hub é
+ * o worktree da sessão.
  */
+
+export type DialetoDeHook = 'claude' | 'codex';
 
 export interface HookInput {
   session_id?: string;
@@ -46,10 +73,11 @@ interface GateResponse {
 export async function decideToolCall(
   entrada: HookInput,
   baseUrl: string,
+  dialeto: DialetoDeHook = 'claude',
 ): Promise<{ saida: string; codigo: number }> {
   const toolName = entrada.tool_name;
   if (typeof toolName !== 'string' || toolName.length === 0) {
-    return { saida: permitir('chamada sem nome de ferramenta'), codigo: 0 };
+    return { saida: permitir('chamada sem nome de ferramenta', dialeto), codigo: 0 };
   }
 
   const client = new HubClient(baseUrl);
@@ -66,13 +94,28 @@ export async function decideToolCall(
       toolInput: entrada.tool_input ?? {},
     });
 
-    return { saida: responder(veredito), codigo: 0 };
+    return { saida: responder(veredito, dialeto), codigo: 0 };
   } catch {
-    return { saida: permitir('Agents-Hub indisponível — sem política a aplicar'), codigo: 0 };
+    return {
+      saida: permitir('Agents-Hub indisponível — sem política a aplicar', dialeto),
+      codigo: 0,
+    };
   }
 }
 
-function responder(veredito: GateResponse): string {
+function responder(veredito: GateResponse, dialeto: DialetoDeHook): string {
+  if (dialeto === 'codex') {
+    // Silêncio é o "sim" do Codex.
+    if (veredito.permission === 'allow') return '';
+    return JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: veredito.explanation,
+      },
+    });
+  }
+
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -82,7 +125,8 @@ function responder(veredito: GateResponse): string {
   });
 }
 
-function permitir(motivo: string): string {
+function permitir(motivo: string, dialeto: DialetoDeHook): string {
+  if (dialeto === 'codex') return '';
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
