@@ -65,7 +65,7 @@ import {
   saveProjectContext,
   type ProjectContext,
 } from './project-config.js';
-import { captureDiff, persistDiff } from './diff-capture.js';
+import { captureBaseline, captureDiff, loadBaseline, persistDiff, saveBaseline } from './diff-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
 import { actionsOfToolCall, combineVerdicts } from './pretool-gate.js';
 import { runValidation } from './validation.js';
@@ -481,6 +481,17 @@ export class SessionManager {
       this.store.tasks.create(task);
     });
     this.bus.registerSession(sessionId, rootId);
+
+    // Fotografa o que já estava pendente ANTES de o agente começar.
+    //
+    // Sem isto, `isolation: none` credita ao agente tudo que estivesse sujo na
+    // árvore. Foi medido numa sessão real em somente-leitura: o Hub anunciou
+    // "2 arquivo(s), +510 −0" para um agente que não tocou em nada.
+    await saveBaseline(
+      this.config.artifactRoot,
+      sessionId,
+      await captureBaseline(session.workdir),
+    );
 
     if (parent) {
       this.#emit({
@@ -1084,6 +1095,18 @@ export class SessionManager {
 
     this.store.sessions.create(session);
     this.bus.registerSession(sessionId, sessionId);
+
+    // Mesma razão da sessão comum: a sessão adotada roda no diretório do
+    // usuário, que raramente está limpo.
+    //
+    // Sem `await` porque a adoção é síncrona por contrato — quem adota espera a
+    // sessão de volta, não um disco. O risco é o agente alterar um arquivo
+    // antes da foto sair; nesse caso ele aparece como já-sujo e some do diff,
+    // que erra para o lado de atribuir de menos. Atribuir de menos é o erro
+    // menos danoso dos dois.
+    void captureBaseline(session.workdir).then((baseline) =>
+      saveBaseline(this.config.artifactRoot, sessionId, baseline),
+    );
 
     this.#ledger(sessionId, {
       usd: input.budget?.usd ?? this.config.policy.defaultBudget.usd,
@@ -1921,7 +1944,10 @@ export class SessionManager {
     revisorId: string,
   ): Promise<ValidationOutcome> {
     const adapter = this.registry.get(revisorId);
-    const diff = await captureDiff(session.workdir);
+    const diff = await captureDiff(
+      session.workdir,
+      await loadBaseline(this.config.artifactRoot, session.id),
+    );
     // Sem o que o agente disse, o revisor não vê a discrepância entre o
     // relato e o resultado — que foi exatamente o caso que motivou isto.
     const resumoDoAgente = this.#summarize(session.id, task.id);
@@ -2034,7 +2060,10 @@ export class SessionManager {
    * sempre vem primeiro.
    */
   async #capturarMudancas(session: Session, task: Task): Promise<string[]> {
-    const capture = await captureDiff(session.workdir);
+    const capture = await captureDiff(
+      session.workdir,
+      await loadBaseline(this.config.artifactRoot, session.id),
+    );
     if (!capture || capture.empty) return [];
 
     const arquivo = await persistDiff(this.config.artifactRoot, session.id, capture);

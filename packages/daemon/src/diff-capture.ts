@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -81,7 +81,134 @@ function contarLinhasAdicionadas(patches: string[]): number {
   );
 }
 
-export async function captureDiff(worktreePath: string): Promise<DiffCapture | null> {
+/**
+ * Impressão do que já estava sujo antes do agente começar.
+ *
+ * Sem isto, `isolation: none` credita ao agente tudo que estivesse pendente na
+ * árvore de trabalho. Medido numa sessão real em modo somente-leitura: o Hub
+ * anunciou "2 arquivo(s), +510 −0" para um agente que não tocou em nada — as
+ * duas mudanças eram de horas antes, de outra pessoa.
+ *
+ * A mentira não fica só na timeline. Esse mesmo diff alimenta o portão de
+ * revisão cruzada, então o revisor analisaria trabalho alheio como se fosse do
+ * agente, e o veredito dele valeria para a tarefa errada.
+ *
+ * O worktree isolado não sofre disso porque nasce limpo — mas depender do modo
+ * de isolamento para a atribuição estar certa é frágil, então a linha de base é
+ * tirada sempre.
+ */
+export interface DiffBaseline {
+  /** Caminho relativo -> hash do conteúdo, para tudo que já estava alterado. */
+  sujos: Record<string, string>;
+}
+
+/**
+ * Fotografa a árvore de trabalho antes de o agente começar.
+ *
+ * Usa `git status --porcelain` para achar o que está sujo e `git hash-object`
+ * para o conteúdo. O hash importa: um arquivo que já estava modificado e que o
+ * agente modificou DE NOVO precisa aparecer no diff final, e só o conteúdo
+ * distingue esses dois casos.
+ */
+export async function captureBaseline(worktreePath: string): Promise<DiffBaseline> {
+  try {
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd: worktreePath,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+
+    const arquivos = stdout
+      .split(QUEBRA_DE_LINHA)
+      .map((l) => l.slice(3).trim())
+      .filter((l) => l.length > 0)
+      // Renomeação vem como "antigo -> novo"; o que interessa é o destino.
+      .map((l) => (l.includes(' -> ') ? (l.split(' -> ')[1] ?? l) : l))
+      .map((l) => l.replace(/^"|"$/g, ''));
+
+    const sujos: Record<string, string> = {};
+    await Promise.all(
+      arquivos.slice(0, MAX_ARQUIVOS_BASELINE).map(async (arquivo) => {
+        const hash = await hashDoArquivo(worktreePath, arquivo);
+        if (hash !== null) sujos[arquivo] = hash;
+      }),
+    );
+
+    return { sujos };
+  } catch {
+    // Sem git, ou diretório inexistente: sem linha de base. O comportamento
+    // volta a ser o antigo, que é impreciso mas não quebra a sessão.
+    return { sujos: {} };
+  }
+}
+
+/** Teto para não travar a criação da sessão num repo com milhares de pendências. */
+const MAX_ARQUIVOS_BASELINE = 500;
+
+async function hashDoArquivo(worktreePath: string, arquivo: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['hash-object', '--', arquivo], {
+      cwd: worktreePath,
+      maxBuffer: 1024 * 1024,
+    });
+    return stdout.trim();
+  } catch {
+    // Arquivo apagado entre o `status` e o `hash-object`, ou ilegível.
+    return null;
+  }
+}
+
+/** O arquivo mudou em relação à linha de base? */
+async function mudouDesdeBaseline(
+  worktreePath: string,
+  arquivo: string,
+  baseline: DiffBaseline,
+): Promise<boolean> {
+  const anterior = baseline.sujos[arquivo];
+  if (anterior === undefined) return true; // não estava sujo antes: é do agente
+  const agora = await hashDoArquivo(worktreePath, arquivo);
+  return agora !== anterior;
+}
+
+/**
+ * Guarda a linha de base junto dos artefatos da sessão.
+ *
+ * Em memória ela se perderia num reinício do daemon, e a atribuição errada
+ * voltaria em silêncio — o pior desfecho possível para uma correção de
+ * atribuição. Em disco custa um arquivo pequeno e sobrevive.
+ */
+export async function saveBaseline(
+  artifactRoot: string,
+  sessionId: string,
+  baseline: DiffBaseline,
+): Promise<void> {
+  try {
+    const dir = path.join(artifactRoot, sessionId);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'baseline.json'), JSON.stringify(baseline), 'utf8');
+  } catch {
+    // Falhar aqui não pode impedir a sessão de começar. O custo é voltar à
+    // atribuição imprecisa, não perder o trabalho.
+  }
+}
+
+/** Lê a linha de base; `undefined` quando não há (sessão anterior à correção). */
+export async function loadBaseline(
+  artifactRoot: string,
+  sessionId: string,
+): Promise<DiffBaseline | undefined> {
+  try {
+    const bruto = await readFile(path.join(artifactRoot, sessionId, 'baseline.json'), 'utf8');
+    const lido = JSON.parse(bruto) as DiffBaseline;
+    return lido.sujos !== undefined && typeof lido.sujos === 'object' ? lido : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function captureDiff(
+  worktreePath: string,
+  baseline?: DiffBaseline,
+): Promise<DiffCapture | null> {
   try {
     // Worktree recém-criado sem commits ainda: `git diff HEAD` sai com código
     // 128 porque HEAD não existe. Verificar antes evita lançar exceção em caso
@@ -95,17 +222,54 @@ export async function captureDiff(worktreePath: string): Promise<DiffCapture | n
       return { empty: true, filesChanged: 0, insertions: 0, deletions: 0, patch: '', untracked: [] };
     }
 
+    // Quais arquivos rastreados mudaram DESDE A LINHA DE BASE.
+    //
     // `diff HEAD` pega staged e unstaged de uma vez, sem alterar o índice —
     // rodar `git add` aqui mudaria o estado do trabalho que estamos observando.
-    const { stdout: patch } = await execFileAsync('git', ['diff', 'HEAD'], {
-      cwd: worktreePath,
-      maxBuffer: 32 * 1024 * 1024,
-    });
-
-    const { stdout: numstat } = await execFileAsync('git', ['diff', '--numstat', 'HEAD'], {
+    // Mas ele pega TUDO que está pendente, e numa sessão com `isolation: none`
+    // isso inclui o que já estava lá antes do agente começar.
+    const { stdout: nomesCrus } = await execFileAsync('git', ['diff', '--name-only', 'HEAD'], {
       cwd: worktreePath,
       maxBuffer: 8 * 1024 * 1024,
     });
+    const rastreados = nomesCrus
+      .split(QUEBRA_DE_LINHA)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    const doAgente =
+      baseline === undefined
+        ? rastreados
+        : (
+            await Promise.all(
+              rastreados.map(async (arquivo) => ({
+                arquivo,
+                mudou: await mudouDesdeBaseline(worktreePath, arquivo, baseline),
+              })),
+            )
+          )
+            .filter((r) => r.mudou)
+            .map((r) => r.arquivo);
+
+    // Sem `--`, um `git diff` com lista vazia de caminhos devolveria a árvore
+    // inteira — exatamente o que estamos evitando. Por isso o caminho de "nada
+    // mudou" é explícito.
+    const semMudancaRastreada = baseline !== undefined && doAgente.length === 0;
+    const escopo = doAgente.length > 0 ? ['--', ...doAgente] : [];
+
+    const { stdout: patch } = semMudancaRastreada
+      ? { stdout: '' }
+      : await execFileAsync('git', ['diff', 'HEAD', ...escopo], {
+          cwd: worktreePath,
+          maxBuffer: 32 * 1024 * 1024,
+        });
+
+    const { stdout: numstat } = semMudancaRastreada
+      ? { stdout: '' }
+      : await execFileAsync('git', ['diff', '--numstat', 'HEAD', ...escopo], {
+          cwd: worktreePath,
+          maxBuffer: 8 * 1024 * 1024,
+        });
 
     const { stdout: untrackedRaw } = await execFileAsync(
       'git',
@@ -114,9 +278,13 @@ export async function captureDiff(worktreePath: string): Promise<DiffCapture | n
     );
 
     const untracked = untrackedRaw
-      .split(/\r?\n/)
+      .split(QUEBRA_DE_LINHA)
       .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+      .filter((l) => l.length > 0)
+      // Arquivo que já existia sem ser rastreado antes da sessão não é criação
+      // do agente. Era assim que um documento escrito na véspera aparecia como
+      // "arquivo novo" de um agente que rodou em somente-leitura.
+      .filter((l) => baseline === undefined || baseline.sujos[l] === undefined);
 
     // Arquivo NOVO não aparece em `git diff HEAD` — e criar arquivo é a ação
     // mais comum de um agente. Sem isto, o diff de uma sessão que criou três
