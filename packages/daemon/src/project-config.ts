@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { PolicyDocument } from '@agents-hub/core';
+import type { ContextoDoProjeto, PolicyDocument } from '@agents-hub/core';
 
 /**
  * Configuração por projeto (ADR 05.2).
@@ -70,6 +70,86 @@ export function loadProjectOverrides(projectPath: string): ProjectPolicyOverride
     cache.set(file, null);
     return {};
   }
+}
+
+/**
+ * Contexto do projeto: memória e instruções por agente.
+ *
+ * Mora aqui, e não no navegador, porque precisa valer nos três caminhos que
+ * abrem sessão — interface, CLI e **delegação de um agente para outro**. Uma
+ * configuração guardada em `localStorage` só existe para quem abriu aquela aba;
+ * o agente que recebeu a tarefa delegada não a veria, e é justamente ele quem
+ * mais precisa saber as regras da casa.
+ *
+ * Formato em `<repo>/.agents-hub/config.yaml`:
+ *
+ * ```yaml
+ * memory: |
+ *   Este repositório usa npm workspaces. Nunca comite em main.
+ * prompts:
+ *   codex: "Prefira mudanças pequenas e testáveis."
+ *   claude: "Explique a decisão antes de aplicar."
+ * ```
+ */
+export interface ProjectContext {
+  memory?: string;
+  /** Instruções por `agentId`. */
+  prompts?: Record<string, string>;
+}
+
+const contextCache = new Map<string, { mtimeMs: number; ctx: ProjectContext } | null>();
+
+/**
+ * Lê memória e prompts do projeto, com o mesmo cache por mtime da política.
+ *
+ * Devolve `{}` em qualquer falha — YAML quebrado não pode derrubar o daemon, e
+ * aqui nem sequer há risco de afrouxar política: contexto é texto que vai no
+ * prompt, não permissão.
+ */
+export function loadProjectContext(projectPath: string): ProjectContext {
+  const file = projectConfigPath(projectPath);
+
+  if (!existsSync(file)) {
+    contextCache.set(file, null);
+    return {};
+  }
+
+  const mtimeMs = statSync(file).mtimeMs;
+  const cached = contextCache.get(file);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.ctx;
+
+  try {
+    const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
+    const ctx: ProjectContext = {};
+
+    const memory = parsed['memory'];
+    if (typeof memory === 'string' && memory.trim().length > 0) ctx.memory = memory;
+
+    const prompts = parsed['prompts'];
+    if (prompts !== null && typeof prompts === 'object' && !Array.isArray(prompts)) {
+      const limpos: Record<string, string> = {};
+      for (const [agentId, valor] of Object.entries(prompts as Record<string, unknown>)) {
+        // Só string entra. Um número ou objeto aqui viraria "[object Object]"
+        // no prompt do agente, que é ruído sem nenhum sinal.
+        if (typeof valor === 'string' && valor.trim().length > 0) limpos[agentId] = valor;
+      }
+      if (Object.keys(limpos).length > 0) ctx.prompts = limpos;
+    }
+
+    contextCache.set(file, { mtimeMs, ctx });
+    return ctx;
+  } catch {
+    contextCache.set(file, null);
+    return {};
+  }
+}
+
+/** O contexto que este agente deve receber neste projeto. */
+export function contextForAgent(ctx: ProjectContext, agentId: string): ContextoDoProjeto {
+  return {
+    memoria: ctx.memory,
+    instrucoesDoAgente: ctx.prompts?.[agentId],
+  };
 }
 
 /**

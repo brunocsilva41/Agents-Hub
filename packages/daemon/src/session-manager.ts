@@ -21,6 +21,7 @@ import {
   pathKey,
   rebuildConversation,
   renderBriefAsPrompt,
+  type ContextoDoProjeto,
   resolveEventCost,
   watchForMode,
   type Approval,
@@ -55,7 +56,12 @@ import type {
 } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
-import { loadProjectOverrides, mergeProjectPolicy } from './project-config.js';
+import {
+  contextForAgent,
+  loadProjectContext,
+  loadProjectOverrides,
+  mergeProjectPolicy,
+} from './project-config.js';
 import { captureDiff, persistDiff } from './diff-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
 import { actionsOfToolCall, combineVerdicts } from './pretool-gate.js';
@@ -228,6 +234,21 @@ export class SessionManager {
 
   listProjects(): Project[] {
     return this.store.projects.list();
+  }
+
+  /**
+   * Memória e instruções do projeto para o agente desta sessão.
+   *
+   * Resolvido aqui, no daemon, e não na interface: assim vale igual para a
+   * sessão que você abre no painel, para a que a CLI abre, e para a que um
+   * agente delega a outro. O agente que recebeu a tarefa delegada é justamente
+   * quem mais precisa das regras da casa — e é quem uma configuração guardada
+   * no navegador nunca alcançaria.
+   */
+  #contextoDoProjeto(session: Session): ContextoDoProjeto {
+    const project = this.store.projects.get(session.projectId);
+    if (!project) return {};
+    return contextForAgent(loadProjectContext(project.path), session.agentId);
   }
 
   /** Projeto por id, ou erro — nunca `null` seguindo adiante em silêncio. */
@@ -477,7 +498,7 @@ export class SessionManager {
       }
     }
 
-    await this.#launch(session, task, renderBriefAsPrompt(brief), null);
+    await this.#launch(session, task, renderBriefAsPrompt(brief, this.#contextoDoProjeto(session)), null);
 
     return { session, task, budget: ledger.snapshot() };
   }
@@ -719,7 +740,7 @@ export class SessionManager {
     if (isDelegation && task) {
       // A sessão nem chegou a subir: agora sobe.
       this.store.tasks.update(task.id, { state: 'working' });
-      await this.#launch(session, task, renderBriefAsPrompt(task.brief), null);
+      await this.#launch(session, task, renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(session)), null);
       return resolved;
     }
 
@@ -1497,7 +1518,7 @@ export class SessionManager {
     await this.#launch(
       fresh,
       updated,
-      canResume ? feedback : `${renderBriefAsPrompt(task.brief)}\n\n${feedback}`,
+      canResume ? feedback : `${renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(fresh))}\n\n${feedback}`,
       canResume ? fresh.nativeSessionId : null,
     );
   }
@@ -1578,7 +1599,12 @@ export class SessionManager {
 
     // O histórico de falhas vai junto: sem ele o substituto recomeça cego e
     // tende a cair no mesmo buraco.
-    const prompt = [renderBriefAsPrompt(task.brief), failureContext(updated.attempts)]
+    // `replacement`, nao a sessao que falhou: o substituto e OUTRO agente, e
+    // quem tem instrucoes proprias no projeto e ele.
+    const prompt = [
+      renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(replacement)),
+      failureContext(updated.attempts),
+    ]
       .filter((part) => part.length > 0)
       .join('\n\n');
 

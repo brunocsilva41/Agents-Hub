@@ -67,12 +67,48 @@ export function parseBrief(input: unknown): Brief {
 }
 
 /**
+ * Contexto que vem do projeto, não da tarefa.
+ *
+ * Existe separado do Brief de propósito. A tentação é concatenar essas
+ * diretrizes no `objective`, e a interface chegou a fazer isso — mas o
+ * `objective` alimenta `objectiveHash`, que é como o CallGraph detecta ciclo
+ * semântico. Misturar diretriz com objetivo faz duas tarefas iguais parecerem
+ * diferentes, e a detecção de ciclo passa a deixar passar o que deveria barrar.
+ */
+export interface ContextoDoProjeto {
+  /** Diretrizes que valem para todo agente que trabalha neste projeto. */
+  memoria?: string | undefined;
+  /** Instruções específicas do agente que vai executar esta tarefa. */
+  instrucoesDoAgente?: string | undefined;
+}
+
+/**
  * Renderiza o Brief como prompt para o agente. É a única tradução
  * Brief → texto no sistema; mantê-la em um lugar só garante que todos os
- * oito agentes recebam a tarefa exatamente com a mesma estrutura.
+ * nove agentes recebam a tarefa exatamente com a mesma estrutura.
+ *
+ * O contexto do projeto entra ANTES da tarefa: é enquadramento, e enquadramento
+ * lido depois da instrução já não enquadra nada. Como todos os caminhos de
+ * lançamento passam por aqui — sessão nova, delegação, retry e fallback —, as
+ * diretrizes chegam também ao agente que recebeu a tarefa de outro agente, que
+ * é justamente onde uma configuração guardada no navegador não chegaria.
  */
-export function renderBriefAsPrompt(brief: Brief): string {
-  const lines: string[] = [`# Tarefa`, ``, brief.objective, ``];
+export function renderBriefAsPrompt(brief: Brief, contexto?: ContextoDoProjeto): string {
+  const lines: string[] = [];
+
+  const memoria = contexto?.memoria?.trim();
+  const instrucoes = contexto?.instrucoesDoAgente?.trim();
+
+  if (memoria || instrucoes) {
+    lines.push(`# Diretrizes do projeto`, ``);
+    if (memoria) lines.push(memoria, ``);
+    if (instrucoes) {
+      lines.push(`## Instruções para você especificamente`, ``, instrucoes, ``);
+    }
+    lines.push(`---`, ``);
+  }
+
+  lines.push(`# Tarefa`, ``, brief.objective, ``);
 
   if (brief.acceptanceCriteria.length > 0) {
     lines.push(`## Critérios de aceite`, ``);
