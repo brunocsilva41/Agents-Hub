@@ -1,376 +1,486 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import type { BudgetSummary, SessionSummary } from '@agents-hub/client';
 import { Approvals } from './components/Approvals';
 import { Composer } from './components/Composer';
 import { FlowList } from './components/FlowList';
 import { SessionModal } from './components/SessionModal';
+import { ProjectModal } from './components/ProjectModal';
+import { SettingsView } from './components/SettingsView';
 import { SidePanel } from './components/SidePanel';
 import { Timeline } from './components/Timeline';
 import { Toasts } from './components/Toasts';
-import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
-import {
-  mergeEvents,
-  mergeFlowEvents,
-  useBudget,
-  useFlowHistories,
-  useHubState,
-  useSessionHistory,
-} from './useHubState';
+import { CommandPalette } from './components/CommandPalette';
+import { AgentSwarmView } from './components/AgentSwarmView';
+import { DagCanvasView } from './components/DagCanvasView';
+import { TelemetryView } from './components/TelemetryView';
+import { agentColor, formatAgo, isLiveState, STATE_LABEL, hub } from './hub';
+import { useHubState } from './useHubState';
 
-type Filter = 'ativos' | 'todos';
+type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'settings';
 
 export function App() {
   const state = useHubState();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scope, setScope] = useState<'session' | 'flow'>('session');
   const [verbose, setVerbose] = useState(false);
-  const [filter, setFilter] = useState<Filter>('ativos');
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [flowsOpen, setFlowsOpen] = useState(false);
-  const [modal, setModal] = useState<null | {
-    delegateFrom: { sessionId: string; agentId: string } | null;
-  }>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [budget, setBudget] = useState<BudgetSummary | null>(null);
 
-  const selected = useMemo(
-    () => state.sessions.find((s) => s.id === selectedId) ?? null,
-    [state.sessions, selectedId],
+  const [modal, setModal] = useState<{ delegateFrom: { sessionId: string; agentId: string } | null; defaultAgentId?: string } | null>(null);
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('timeline');
+  const [flowFilter, setFlowFilter] = useState<'active' | 'all'>('active');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [flowsOpen, setFlowsOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const selected: SessionSummary | null = useMemo(
+    () => (selectedId ? state.sessions.find((s) => s.id === selectedId) ?? null : null),
+    [selectedId, state.sessions],
   );
 
-  /**
-   * Sem seleção, abre o que pede atenção.
-   *
-   * A sessão mais recente não é a mais interessante: se uma sessão está parada
-   * esperando decisão, é ela que a pessoa veio ver.
-   */
-  useEffect(() => {
-    if (selectedId !== null || state.sessions.length === 0) return;
-    const urgent =
-      state.sessions.find((s) => s.state === 'waiting_approval') ??
-      state.sessions.find((s) => isLiveState(s.state)) ??
-      state.sessions[0];
-    setSelectedId(urgent?.id ?? null);
-  }, [state.sessions, selectedId]);
+  const events = useMemo(() => {
+    if (!selected) return [];
+    if (scope === 'session') return state.eventsOf(selected.id);
+    const rootId = selected.rootId ?? selected.id;
+    const siblings = state.sessions.filter((s) => s.rootId === rootId || s.id === rootId);
+    const merged = siblings.flatMap((s) => state.eventsOf(s.id));
+    return merged.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+  }, [selected, scope, state]);
 
-  const { history, loading: historyLoading } = useSessionHistory(selectedId);
-  const budget = useBudget(selected?.rootId ?? null, state.revision);
+  // Carrega orçamento da sessão ativa
+  React.useEffect(() => {
+    if (!selected) {
+      setBudget(null);
+      return;
+    }
+    let cancel = false;
+    hub.budget(selected.id).then((b) => {
+      if (!cancel) setBudget(b.budget);
+    }).catch(() => {
+      if (!cancel) setBudget(null);
+    });
+    return () => { cancel = true; };
+  }, [selected?.id, state.revision]);
 
-  /**
-   * Só os fluxos que interessam agora.
-   *
-   * A lista tinha 29 blocos abertos, quase todos de sessões encerradas há dias.
-   * O filtro padrão é "ativos" porque um plano de controle responde à pergunta
-   * "o que está acontecendo", não "o que já aconteceu".
-   */
-  const flows = useMemo(() => {
-    if (filter === 'todos') return state.flows;
-    const visible = state.flows.filter(
-      (f) => f.live || f.sessions.some((s) => s.id === selectedId),
-    );
-    return visible;
-  }, [state.flows, filter, selectedId]);
-
-  const liveCount = useMemo(() => state.flows.filter((f) => f.live).length, [state.flows]);
-
-  // As gavetas cobrem a tela numa janela estreita; Esc as fecha, como qualquer
-  // sobreposição.
-  useEffect(() => {
-    if (!panelOpen && !flowsOpen) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return;
-      setPanelOpen(false);
-      setFlowsOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [panelOpen, flowsOpen]);
-
-  // Escolher uma sessão na gaveta é o fim da tarefa dela: deixá-la aberta
-  // esconderia justamente a timeline que a pessoa acabou de pedir.
-  const selectSession = useCallback((sessionId: string) => {
-    setSelectedId(sessionId);
-    setFlowsOpen(false);
-  }, []);
-
-  const toggleFlow = useCallback((rootId: string) => {
-    setExpanded((current) => {
-      const next = new Set(current);
+  const toggleFlow = (rootId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
       if (next.has(rootId)) next.delete(rootId);
       else next.add(rootId);
       return next;
     });
-  }, []);
+  };
 
-  /** Sessões incluídas na timeline: só a atual, ou o fluxo inteiro. */
-  const timelineSessions = useMemo(() => {
-    if (!selected) return [];
-    if (scope === 'session') return [selected.id];
-    return state.sessions.filter((s) => s.rootId === selected.rootId).map((s) => s.id);
-  }, [selected, scope, state.sessions]);
+  const selectSession = (id: string) => {
+    setSelectedId(id);
+    setFlowsOpen(false);
+  };
 
-  const flowHistories = useFlowHistories(timelineSessions, scope === 'flow');
+  // Filtragem dos fluxos (por projeto, por status e por busca)
+  const filteredFlows = useMemo(() => {
+    return state.flows.filter((flow) => {
+      // Filtro por projeto
+      if (selectedProjectId !== 'all') {
+        const matchesProject = flow.sessions.some((s) => s.projectId === selectedProjectId);
+        if (!matchesProject) return false;
+      }
 
-  // Depende de `eventsOf`, e não do objeto de estado inteiro: qualquer outra
-  // mudança do Hub — uma aprovação resolvida, um agente sondado — não pode
-  // custar um recálculo da timeline.
-  const eventsOf = state.eventsOf;
-  const events = useMemo(() => {
-    if (!selected) return [];
-    if (scope === 'session') return mergeEvents(history, eventsOf(selected.id));
-    return mergeFlowEvents([...timelineSessions.map(eventsOf), ...flowHistories, history]);
-  }, [selected, scope, history, eventsOf, timelineSessions, flowHistories]);
+      if (flowFilter === 'active') {
+        const hasLive = flow.sessions.some((s) => isLiveState(s.state));
+        if (!hasLive) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesAgent = flow.agents.some((a) => a.toLowerCase().includes(q));
+        const matchesTitle = flow.sessions.some((s) => (s.title ?? '').toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+        if (!matchesAgent && !matchesTitle) return false;
+      }
+      return true;
+    });
+  }, [state.flows, selectedProjectId, flowFilter, searchQuery]);
 
-  /** Sessão terminada não aceita mais mensagem — o daemon recusa, e com razão. */
-  const encerrada =
-    selected !== null &&
-    (selected.state === 'completed' || selected.state === 'failed' || selected.state === 'killed');
+  const activeSessionsCount = state.sessions.filter((s) => isLiveState(s.state)).length;
 
   return (
     <div className={`app${panelOpen ? ' panel-open' : ''}${flowsOpen ? ' flows-open' : ''}`}>
+      {/* 1. Header / Command Bar */}
       <header className="topbar">
-        <button
-          className="drawer-toggle flows-toggle"
-          aria-expanded={flowsOpen}
-          onClick={() => setFlowsOpen((v) => !v)}
-        >
-          Fluxos
-        </button>
+        <div className="topbar-left">
+          <button
+            className="drawer-toggle flows-toggle"
+            aria-expanded={flowsOpen}
+            onClick={() => setFlowsOpen((v) => !v)}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
 
-        <div className="brand">
-          Agents<span>-Hub</span>
+          <div className="brand" onClick={() => setActiveTab('timeline')}>
+            <div className="brand-logo-icon">⚡</div>
+            <div className="brand-text">
+              <span className="brand-badge">AGENTS</span>
+              <span className="brand-hub">HUB</span>
+            </div>
+            <span className="brand-version">v0.1</span>
+          </div>
+
+          {/* Navigation Tabs */}
+          <nav className="nav-tabs" role="tablist">
+            <button
+              className={`nav-tab ${activeTab === 'timeline' ? 'active' : ''}`}
+              onClick={() => setActiveTab('timeline')}
+            >
+              <span className="tab-icon">💬</span>
+              <span>Timeline</span>
+            </button>
+            <button
+              className={`nav-tab ${activeTab === 'dag' ? 'active' : ''}`}
+              onClick={() => setActiveTab('dag')}
+            >
+              <span className="tab-icon">🕸</span>
+              <span>Grafo DAG</span>
+            </button>
+            <button
+              className={`nav-tab ${activeTab === 'swarm' ? 'active' : ''}`}
+              onClick={() => setActiveTab('swarm')}
+            >
+              <span className="tab-icon">🤖</span>
+              <span>Swarm ({state.agents.length})</span>
+            </button>
+            <button
+              className={`nav-tab ${activeTab === 'telemetry' ? 'active' : ''}`}
+              onClick={() => setActiveTab('telemetry')}
+            >
+              <span className="tab-icon">📊</span>
+              <span>Telemetria</span>
+            </button>
+            <button
+              className={`nav-tab ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => setActiveTab('settings')}
+            >
+              <span className="tab-icon">⚙️</span>
+              <span>Configurações</span>
+            </button>
+          </nav>
         </div>
 
-        <div className="agent-pills" aria-label="Agentes conhecidos">
-          {state.agents.map((agent) => {
-            const running = state.sessions.filter(
-              (s) => s.agentId === agent.id && isLiveState(s.state),
-            ).length;
-            const off = agent.probe?.installed !== true;
-            return (
-              <span
-                key={agent.id}
-                className={`pill${off ? ' off' : ''}${running > 0 ? ' busy' : ''}`}
-                title={
-                  off
-                    ? `${agent.name} — não instalado`
-                    : `${agent.name} ${agent.probe?.version ?? ''} — ${running} sessão(ões) em curso`
-                }
-              >
-                <span
-                  className="dot"
-                  aria-hidden="true"
-                  style={{ background: off ? 'var(--text-faint)' : agentColor(agent.id) }}
-                />
-                {agent.id}
-                {/* O número de sessões vivas é a única informação operacional
-                    que esta barra pode dar: "instalado" a pessoa já sabe. */}
-                {running > 0 && <span className="pill-count">{running}</span>}
-              </span>
-            );
-          })}
-        </div>
-
-        <span
-          className={`pill status ${state.connected ? 'on' : 'off-air'}`}
-          role="status"
-          aria-live="polite"
-          title={state.connected ? 'stream ao vivo conectado' : 'reconectando ao daemon'}
-        >
-          <span className={`dot ${state.connected ? 'running' : 'failed'}`} aria-hidden="true" />
-          {state.connected ? 'ao vivo' : 'desconectado'}
-        </span>
-
-        <button
-          className="drawer-toggle panel-toggle"
-          aria-expanded={panelOpen}
-          onClick={() => setPanelOpen((v) => !v)}
-        >
-          Custo e controles
-        </button>
-
-        <button className="primary" onClick={() => setModal({ delegateFrom: null })}>
-          Nova sessão
-        </button>
-      </header>
-
-      {/* Falar com o daemon é pré-requisito de tudo o que a tela mostra: o erro
-          é global e fica no topo, não escondido dentro da coluna de fluxos. */}
-      {state.error && (
-        <div className="global-error" role="alert">
-          <strong>Sem contato com o Hub.</strong> {state.error}
-          <button className="linkish" onClick={() => void state.refresh()}>
-            tentar de novo
+        <div className="topbar-center">
+          <button className="spotlight-btn" onClick={() => setCmdOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span>Buscar sessões, agentes, comandos…</span>
+            <kbd className="kbd-shortcut">⌘K</kbd>
           </button>
         </div>
-      )}
 
+        <div className="topbar-right">
+          {/* Status Indicator */}
+          <div className={`pill status ${state.connected ? 'on' : 'off-air'}`}>
+            <span className={`radar-dot ${state.connected ? 'running' : 'failed'}`}>
+              <span className="radar-pulse" />
+            </span>
+            <span className="status-text">{state.connected ? `${activeSessionsCount} Ao Vivo` : 'Desconectado'}</span>
+          </div>
+
+          <button
+            className="drawer-toggle panel-toggle"
+            aria-expanded={panelOpen}
+            onClick={() => setPanelOpen((v) => !v)}
+          >
+            Painel
+          </button>
+
+          <button
+            className="primary btn-hero-new"
+            onClick={() => setModal({ delegateFrom: null })}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>Nova Sessão</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Pending Approvals */}
       <Approvals
         approvals={state.approvals}
         sessions={state.sessions}
-        onResolved={() => void state.refresh()}
         onSelectSession={selectSession}
+        onResolved={() => state.refresh()}
       />
 
-      <div className="columns">
-        <aside className="col col-left" aria-label="Fluxos">
-          <div className="col-header">
-            <span>Fluxos</span>
-            <span className="seg" role="group" aria-label="Filtrar fluxos">
-              <button
-                className={filter === 'ativos' ? 'on' : ''}
-                aria-pressed={filter === 'ativos'}
-                onClick={() => setFilter('ativos')}
-              >
-                ativos {liveCount > 0 && <span className="seg-count">{liveCount}</span>}
-              </button>
-              <button
-                className={filter === 'todos' ? 'on' : ''}
-                aria-pressed={filter === 'todos'}
-                onClick={() => setFilter('todos')}
-              >
-                todos <span className="seg-count">{state.flows.length}</span>
-              </button>
-            </span>
-          </div>
-
-          <div className="scroll">
-            {!state.ready && (
-              <div className="empty" role="status">
-                carregando fluxos…
-              </div>
-            )}
-
-            {state.ready && flows.length === 0 && (
-              <div className="empty">
-                {state.flows.length === 0 ? (
-                  <>
-                    nenhuma sessão ainda.
-                    <br />
-                    <span className="empty-hint">comece uma para ver o grafo aqui.</span>
-                  </>
-                ) : (
-                  <>
-                    nenhum fluxo em andamento.
-                    <br />
-                    <button className="linkish" onClick={() => setFilter('todos')}>
-                      ver os {state.flows.length} fluxos encerrados
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            <FlowList
-              flows={flows}
-              selectedId={selectedId}
-              selectedRootId={selected?.rootId ?? null}
-              expanded={expanded}
-              onToggle={toggleFlow}
-              onSelect={selectSession}
-              revision={state.revision}
-            />
-          </div>
-        </aside>
-
-        <main className="col col-center" aria-label="Timeline">
-          <div className="col-header">
-            {selected ? (
-              <span className="session-head">
-                <span className={`dot ${selected.state}`} aria-hidden="true" />
-                <span className="session-agent" style={{ color: agentColor(selected.agentId) }}>
-                  {selected.agentId}
-                </span>
-                <span className="session-state">
-                  {STATE_LABEL[selected.state] ?? selected.state}
-                </span>
-                <span className="session-title" title={selected.title ?? undefined}>
-                  {selected.title}
-                </span>
-                <span className="session-when">{formatAgo(selected.updatedAt)}</span>
-              </span>
-            ) : (
-              <span>Timeline</span>
-            )}
-
-            <span className="head-actions">
-              <span className="seg" role="group" aria-label="Abrangência da timeline">
-                <button
-                  className={scope === 'session' ? 'on' : ''}
-                  aria-pressed={scope === 'session'}
-                  onClick={() => setScope('session')}
-                >
-                  esta sessão
-                </button>
-                <button
-                  className={scope === 'flow' ? 'on' : ''}
-                  aria-pressed={scope === 'flow'}
-                  onClick={() => setScope('flow')}
-                  title="junta as timelines de todos os agentes do fluxo"
-                >
-                  fluxo inteiro
-                </button>
-              </span>
-              <span className="seg" role="group" aria-label="Nível de detalhe">
-                <button
-                  className={!verbose ? 'on' : ''}
-                  aria-pressed={!verbose}
-                  onClick={() => setVerbose(false)}
-                >
-                  resumido
-                </button>
-                <button
-                  className={verbose ? 'on' : ''}
-                  aria-pressed={verbose}
-                  onClick={() => setVerbose(true)}
-                  title="mostra raciocínio, deltas e logs internos"
-                >
-                  detalhado
-                </button>
-              </span>
-            </span>
-          </div>
-
-          {selected ? (
-            <Timeline
-              events={events}
-              showVerbose={verbose}
-              showAgent={scope === 'flow'}
-              loading={historyLoading && events.length === 0}
-            />
-          ) : (
-            <div className="empty">
-              selecione uma sessão à esquerda
-              <br />
-              <span className="empty-hint">
-                o grafo é a navegação: clicar num nó abre a timeline daquele agente.
-              </span>
-            </div>
-          )}
-
-          {selected && <Composer session={selected} encerrada={encerrada} />}
+      {/* 2. Main Body Content Area */}
+      {activeTab === 'settings' ? (
+        <main className="tab-view-container">
+          <SettingsView agents={state.agents} projects={state.projects} />
         </main>
-
-        <aside className="col col-right" aria-label="Custo e controles">
-          <SidePanel
-            session={selected}
-            budget={budget}
+      ) : activeTab === 'swarm' ? (
+        <main className="tab-view-container">
+          <AgentSwarmView
             agents={state.agents}
-            onDelegate={() =>
-              selected &&
-              setModal({ delegateFrom: { sessionId: selected.id, agentId: selected.agentId } })
-            }
-            onChanged={() => void state.refresh()}
+            onNewSession={(agentId) => setModal({ delegateFrom: null, defaultAgentId: agentId })}
           />
-        </aside>
-      </div>
+        </main>
+      ) : activeTab === 'dag' ? (
+        <main className="tab-view-container">
+          <DagCanvasView
+            flows={state.flows}
+            selectedId={selectedId}
+            onSelectSession={(id) => {
+              selectSession(id);
+              setActiveTab('timeline');
+            }}
+            onNewSession={() => setModal({ delegateFrom: null })}
+          />
+        </main>
+      ) : activeTab === 'telemetry' ? (
+        <main className="tab-view-container">
+          <TelemetryView
+            sessions={state.sessions}
+            flows={state.flows}
+            agents={state.agents}
+          />
+        </main>
+      ) : (
+        /* Timeline 3-Column Layout */
+        <div className="columns">
+          {/* Coluna Esquerda: Fluxos */}
+          <aside className="col col-left" aria-label="Navegação de fluxos">
+            {/* Seletor de Projetos */}
+            <div className="sidebar-project-selector">
+              <div className="project-select-header">
+                <span className="project-select-label">📁 PROJETO</span>
+                <button
+                  type="button"
+                  className="linkish btn-add-project"
+                  onClick={() => setProjectModalOpen(true)}
+                  title="Vincular nova pasta como projeto"
+                >
+                  + Nova Pasta
+                </button>
+              </div>
+              <select
+                className="project-dropdown"
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+              >
+                <option value="all">Todos os Projetos ({state.projects.length})</option>
+                {state.projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
+            <div className="col-header flow-sidebar-header">
+              <div className="seg">
+                <button
+                  className={flowFilter === 'active' ? 'on' : ''}
+                  onClick={() => setFlowFilter('active')}
+                >
+                  Ativos <span className="seg-count">{filteredFlows.filter((f) => f.sessions.some((s) => isLiveState(s.state))).length}</span>
+                </button>
+                <button
+                  className={flowFilter === 'all' ? 'on' : ''}
+                  onClick={() => setFlowFilter('all')}
+                >
+                  Todos <span className="seg-count">{filteredFlows.length}</span>
+                </button>
+              </div>
+
+              <div className="sidebar-quick-actions">
+                <button
+                  className="btn-icon-subtle"
+                  title="Nova Sessão"
+                  onClick={() => setModal({ delegateFrom: null })}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="sidebar-search-wrap">
+              <input
+                type="text"
+                className="sidebar-search-input"
+                placeholder="Filtrar fluxos ou agentes…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="scroll">
+              <FlowList
+                flows={filteredFlows}
+                selectedId={selectedId}
+                selectedRootId={selected?.rootId ?? null}
+                expanded={expanded}
+                onToggle={toggleFlow}
+                onSelect={selectSession}
+                revision={state.revision}
+              />
+            </div>
+          </aside>
+
+          {/* Coluna Central: Timeline */}
+          <main className="col col-center" aria-label="Timeline">
+            <div className="col-header timeline-header">
+              {selected ? (
+                <div className="session-head">
+                  <div
+                    className="session-avatar-dot"
+                    style={{ background: agentColor(selected.agentId) }}
+                  >
+                    {selected.agentId.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="session-meta-stack">
+                    <div className="session-title-line">
+                      <span className="session-agent-pill" style={{ color: agentColor(selected.agentId) }}>
+                        {selected.agentId}
+                      </span>
+                      <span className={`session-state-pill state-${selected.state}`}>
+                        {STATE_LABEL[selected.state] ?? selected.state}
+                      </span>
+                      <span className="session-title" title={selected.title ?? undefined}>
+                        {selected.title}
+                      </span>
+                    </div>
+                    <div className="session-sub-line">
+                      <span className="session-id-mono">{selected.id}</span>
+                      <span>·</span>
+                      <span className="session-when">{formatAgo(selected.updatedAt)}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="session-head">
+                  <span className="timeline-title-empty">Selecione uma sessão ao lado</span>
+                </div>
+              )}
+
+              <div className="head-actions">
+                <div className="seg" role="group" aria-label="Abrangência da timeline">
+                  <button
+                    className={scope === 'session' ? 'on' : ''}
+                    aria-pressed={scope === 'session'}
+                    onClick={() => setScope('session')}
+                  >
+                    Esta sessão
+                  </button>
+                  <button
+                    className={scope === 'flow' ? 'on' : ''}
+                    aria-pressed={scope === 'flow'}
+                    onClick={() => setScope('flow')}
+                  >
+                    Fluxo inteiro
+                  </button>
+                </div>
+
+                <div className="seg" role="group" aria-label="Nível de detalhe">
+                  <button
+                    className={!verbose ? 'on' : ''}
+                    aria-pressed={!verbose}
+                    onClick={() => setVerbose(false)}
+                  >
+                    Resumido
+                  </button>
+                  <button
+                    className={verbose ? 'on' : ''}
+                    aria-pressed={verbose}
+                    onClick={() => setVerbose(true)}
+                  >
+                    Detalhado
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="timeline-wrap">
+              <Timeline
+                events={events}
+                showVerbose={verbose}
+                showAgent={scope === 'flow'}
+                loading={!state.ready}
+              />
+
+              {selected && (
+                <Composer session={selected} encerrada={!isLiveState(selected.state)} />
+              )}
+            </div>
+          </main>
+
+          {/* Coluna Direita: Controles e Custo */}
+          <aside className="col col-right" aria-label="Controles e telemetria">
+            <SidePanel
+              session={selected}
+              budget={budget}
+              agents={state.agents}
+              onDelegate={() => {
+                if (selected) {
+                  setModal({
+                    delegateFrom: { sessionId: selected.id, agentId: selected.agentId },
+                  });
+                }
+              }}
+              onChanged={() => state.refresh()}
+            />
+          </aside>
+        </div>
+      )}
+
+      {/* Modais */}
       {modal && (
         <SessionModal
           agents={state.agents}
           delegateFrom={modal.delegateFrom}
+          defaultAgentId={modal.defaultAgentId}
           onClose={() => setModal(null)}
           onCreated={(sessionId) => {
+            setModal(null);
             setSelectedId(sessionId);
+            setActiveTab('timeline');
             void state.refresh();
+          }}
+          onNewProject={() => {
+            setProjectModalOpen(true);
+          }}
+        />
+      )}
+
+      {projectModalOpen && (
+        <ProjectModal
+          onClose={() => setProjectModalOpen(false)}
+          onCreated={(projectId) => {
+            setProjectModalOpen(false);
+            setSelectedProjectId(projectId);
+            void state.refresh();
+          }}
+        />
+      )}
+
+      {cmdOpen && (
+        <CommandPalette
+          isOpen={cmdOpen}
+          onClose={() => setCmdOpen(false)}
+          sessions={state.sessions}
+          agents={state.agents}
+          onSelectSession={(id) => {
+            selectSession(id);
+            setActiveTab('timeline');
+          }}
+          onNewSession={(agentId) => {
+            setModal({ delegateFrom: null, defaultAgentId: agentId });
           }}
         />
       )}

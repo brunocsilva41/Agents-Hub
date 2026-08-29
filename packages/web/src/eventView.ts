@@ -68,6 +68,13 @@ export function describeEvent(event: EventEnvelope): EventView {
     case 'session.ended':
       return { text: `▪ encerrada — ${str(p['reason'])}`, kind: 'lifecycle', verbose: false };
 
+    case 'session.handoff':
+      return {
+        text: `🔄 controle transferido: ${str(p['fromAgentId'])} → ${str(p['toAgentId'])}${p['reason'] ? ` (${str(p['reason'])})` : ''}`,
+        kind: 'handoff',
+        verbose: false,
+      };
+
     case 'turn.started':
       return { text: '… turno iniciado', kind: 'lifecycle', verbose: true };
 
@@ -127,6 +134,9 @@ export function describeEvent(event: EventEnvelope): EventView {
 
     case 'approval.requested':
       return { text: `⏸ aguardando aprovação: ${str(p['action'])}`, kind: 'error', verbose: false };
+
+    case 'budget.warning':
+      return { text: '⚠️ alerta: consumo atingiu mais de 80% do orçamento', kind: 'warn', verbose: false };
 
     case 'budget.exceeded':
       return { text: '✗ orçamento do fluxo esgotado', kind: 'error', verbose: false };

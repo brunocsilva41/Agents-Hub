@@ -79,20 +79,17 @@ const FlowItem = memo(function FlowItem({
   onSelect: (sessionId: string) => void;
   revision: number;
 }) {
-  // `null` enquanto fechado: o hook não busca nada de um fluxo que ninguém vê.
   const graph = useFlowGraph(open ? flow.rootId : null, revision);
   const contains = flow.sessions.some((s) => s.id === selectedId);
 
   return (
-    <div className={`flow${contains ? ' flow-selected' : ''}`}>
+    <div className={`flow${contains ? ' flow-selected' : ''}${open ? ' flow-open' : ''}`}>
       <button
         className="flow-head"
         data-nav
         aria-expanded={open}
         onClick={() => {
           onToggle(flow.rootId);
-          // Abrir um fluxo é quase sempre querer ver o que ele fez: leva junto
-          // a sessão que pede atenção, ou a mais recente.
           if (!contains) {
             const target =
               flow.sessions.find((s) => isLiveState(s.state)) ?? flow.sessions[0];
@@ -101,34 +98,40 @@ const FlowItem = memo(function FlowItem({
         }}
       >
         <span className={`dot ${flow.state}`} aria-hidden="true" />
-        <span className="flow-head-body">
-          <span className="flow-line">
-            <span className="flow-agents">
+        <div className="flow-head-body">
+          <div className="flow-line">
+            <div className="flow-agents">
               {flow.agents.map((id) => (
-                <span key={id} style={{ color: agentColor(id) }}>
+                <span key={id} className="flow-agent-tag" style={{ color: agentColor(id) }}>
                   {id}
                 </span>
               ))}
               {flow.sessions.length > flow.agents.length && (
-                <span className="flow-count">{flow.sessions.length} sessões</span>
+                <span className="flow-count">· {flow.sessions.length} sessões</span>
               )}
-            </span>
+            </div>
             <span className="flow-when">{formatAgo(flow.updatedAt)}</span>
-          </span>
-          <span className="flow-title" title={flow.title}>
+          </div>
+          <div className="flow-title" title={flow.title}>
             {flow.title}
-          </span>
-          <span className="flow-state">{STATE_LABEL[flow.state] ?? flow.state}</span>
-        </span>
-        <span className="chevron" aria-hidden="true">
-          {open ? '▾' : '▸'}
+          </div>
+          <div className="flow-meta-line">
+            <span className={`flow-state-badge state-${flow.state}`}>
+              {STATE_LABEL[flow.state] ?? flow.state}
+            </span>
+          </div>
+        </div>
+        <span className={`chevron-icon${open ? ' rotated' : ''}`} aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
         </span>
       </button>
 
       {open &&
         (graph === null ? (
           <div className="flow-loading" role="status">
-            carregando o grafo…
+            <span className="spinner-small" /> Carregando árvore do fluxo…
           </div>
         ) : (
           <div className="flow-tree">

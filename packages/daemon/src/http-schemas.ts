@@ -50,6 +50,13 @@ export const ProjectContextSchema = z
     // Teto por agente: um prompt gigante entra em TODA tarefa do projeto e
     // consome o contexto que deveria ser da tarefa.
     prompts: z.record(z.string().max(64), z.string().max(8_000)).optional(),
+    // Ambiente por agente. O filtro por lista de permissão acontece no
+    // `project-config`, não aqui: o schema garante forma, a lista garante
+    // segurança, e misturar as duas responsabilidades faria a regra de
+    // segurança viver em dois lugares que podem divergir.
+    env: z
+      .record(z.string().max(64), z.record(z.string().max(128), z.string().max(2_000)))
+      .optional(),
   })
   .strict();
 

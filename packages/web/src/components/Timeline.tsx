@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EventEnvelope } from '@agents-hub/core';
 import { viewOf } from '../eventView';
 import { agentColor, timeOf } from '../hub';
@@ -6,27 +6,13 @@ import { agentColor, timeOf } from '../hub';
 interface Props {
   events: EventEnvelope[];
   showVerbose: boolean;
-  /** Numa visão de fluxo, vários agentes escrevem na mesma timeline. */
   showAgent: boolean;
   loading: boolean;
 }
 
-/**
- * Quantos eventos ficam no DOM.
- *
- * Não há virtualização porque as linhas têm altura variável (o texto quebra), e
- * medir cada uma custaria mais do que se ganha. A janela resolve o mesmo
- * problema de forma direta: o DOM fica limitado a algumas centenas de nós por
- * mais falante que a sessão seja, e quem quiser o começo pede.
- */
 const WINDOW = 400;
 const WINDOW_STEP = 800;
 
-/**
- * Timeline unificada: os oito agentes aparecem no mesmo formato, na mesma
- * ordem, com a cor do agente como única distinção. É o que permite ler um
- * fluxo com três agentes como se fosse uma conversa só.
- */
 export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
@@ -41,19 +27,12 @@ export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
     [events, showVerbose],
   );
 
-  // Trocar de sessão ou de escopo recomeça a janela: herdar o "carregar mais"
-  // da sessão anterior deixaria o DOM crescendo sessão após sessão.
   const first = visible[0]?.id;
   useEffect(() => setWindow(WINDOW), [showVerbose, first]);
 
   const hidden = Math.max(0, visible.length - window_);
   const shown = hidden > 0 ? visible.slice(hidden) : visible;
 
-  // Auto-scroll só enquanto você está no fim. Se rolou para cima para ler algo,
-  // a chegada de eventos novos não pode arrancar a página de baixo de você.
-  //
-  // `scrollTop` direto, e não `scrollIntoView`: aquele rola também os
-  // contêineres acima e força um layout síncrono a cada evento que chega.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (pinned && el) el.scrollTop = el.scrollHeight;
@@ -68,23 +47,25 @@ export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
 
   if (loading) {
     return (
-      <div className="empty" role="status">
-        carregando a timeline…
+      <div className="timeline-loading-skeleton" role="status" aria-label="Carregando timeline">
+        <div className="skeleton-item" style={{ width: '40%' }} />
+        <div className="skeleton-item" style={{ width: '85%' }} />
+        <div className="skeleton-item" style={{ width: '65%' }} />
+        <div className="skeleton-item" style={{ width: '90%' }} />
+        <div className="skeleton-item" style={{ width: '50%' }} />
       </div>
     );
   }
 
   if (visible.length === 0) {
     return (
-      <div className="empty">
-        nenhum evento {showVerbose ? '' : 'visível '}nesta sessão.
+      <div className="empty timeline-empty-state">
+        <div className="empty-icon">💬</div>
+        <div className="empty-title">Nenhum evento {showVerbose ? '' : 'visível '}nesta sessão</div>
         {!showVerbose && (
-          <>
-            <br />
-            <span className="empty-hint">
-              raciocínio e logs internos estão ocultos — troque para “detalhado”.
-            </span>
-          </>
+          <span className="empty-hint">
+            Raciocínio, deltas e logs internos estão ocultos — ative a opção <strong>“detalhado”</strong> no topo.
+          </span>
         )}
       </div>
     );
@@ -92,10 +73,7 @@ export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
 
   return (
     <div className="timeline-wrap">
-      <div className="scroll" ref={scrollRef} onScroll={onScroll}>
-        {/* aria-live desligado de propósito: um agente falante emitiria centenas
-            de anúncios por minuto. `role="log"` mantém a navegação por leitor de
-            tela sem transformar a timeline em ruído. */}
+      <div className="scroll timeline-scroll-container" ref={scrollRef} onScroll={onScroll}>
         <div
           className={`timeline${showAgent ? ' with-agent' : ''}`}
           role="log"
@@ -104,15 +82,15 @@ export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
         >
           {hidden > 0 && (
             <div className="timeline-more">
-              <button onClick={() => setWindow((n) => n + WINDOW_STEP)}>
-                carregar {Math.min(hidden, WINDOW_STEP)} eventos anteriores
+              <button className="btn-load-more" onClick={() => setWindow((n) => n + WINDOW_STEP)}>
+                ↑ Carregar {Math.min(hidden, WINDOW_STEP)} eventos anteriores
               </button>
               <span className="empty-hint">{hidden} ocultos acima</span>
             </div>
           )}
 
           {shown.map((event) => (
-            <Row key={event.id} event={event} showAgent={showAgent} />
+            <EventRow key={event.id} event={event} showAgent={showAgent} />
           ))}
         </div>
       </div>
@@ -126,21 +104,18 @@ export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
             setPinned(true);
           }}
         >
-          ↓ acompanhar o fim
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <polyline points="19 12 12 19 5 12"></polyline>
+          </svg>
+          <span>Ir para o fim</span>
         </button>
       )}
     </div>
   );
 }
 
-/**
- * Linha memoizada.
- *
- * O envelope nunca muda depois de criado, então uma linha já renderizada nunca
- * precisa render de novo — nem quando chega evento novo, nem quando se digita
- * no campo de mensagem logo abaixo.
- */
-const Row = memo(function Row({
+const EventRow = memo(function EventRow({
   event,
   showAgent,
 }: {
@@ -148,15 +123,85 @@ const Row = memo(function Row({
   showAgent: boolean;
 }) {
   const view = viewOf(event);
+  const color = agentColor(event.agentId);
+  const [expandedCoT, setExpandedCoT] = useState(false);
+
+  // 1. Bloco de Raciocínio (Chain of Thought)
+  if (view.kind === 'reasoning') {
+    return (
+      <div className="ev-bubble ev-reasoning-bubble">
+        <div className="ev-reasoning-header" onClick={() => setExpandedCoT((v) => !v)}>
+          <span className="ev-reasoning-icon">🧠</span>
+          <span className="ev-reasoning-title">Raciocínio Interno ({event.agentId})</span>
+          <span className="ev-time">{timeOf(event.ts)}</span>
+          <span className={`ev-chevron ${expandedCoT ? 'rotated' : ''}`}>▸</span>
+        </div>
+        {expandedCoT && (
+          <div className="ev-reasoning-body">
+            <pre className="ev-text">{view.text}</pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 2. Bloco de Tool Call / Command / File
+  if (view.kind === 'tool' || view.kind === 'command' || view.kind === 'file') {
+    return (
+      <div className={`ev-bubble ev-tool-card ev-card-${view.kind}`}>
+        <div className="ev-tool-header">
+          <div className="ev-tool-title-wrap">
+            <span className="ev-tool-badge">
+              {view.kind === 'command' ? 'TERMINAL' : view.kind === 'file' ? 'FILE_OP' : 'TOOL_CALL'}
+            </span>
+            {showAgent && (
+              <span className="ev-agent-pill" style={{ color }}>{event.agentId}</span>
+            )}
+          </div>
+          <span className="ev-time">{timeOf(event.ts)}</span>
+        </div>
+        <div className="ev-tool-body">
+          <pre className="ev-text">{view.text}</pre>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Handoff Banner
+  if (view.kind === 'handoff') {
+    return (
+      <div className="ev-bubble ev-handoff-banner">
+        <div className="ev-handoff-icon">🔄</div>
+        <div className="ev-handoff-content">
+          <div className="ev-handoff-title">Transferência de Controle (Handoff)</div>
+          <div className="ev-text">{view.text}</div>
+        </div>
+        <span className="ev-time">{timeOf(event.ts)}</span>
+      </div>
+    );
+  }
+
+  // 4. Mensagem Normal / Resposta do Agente
   return (
-    <div className={`ev ev-${view.kind}`}>
-      <span className="ev-time">{timeOf(event.ts)}</span>
-      {showAgent && (
-        <span className="ev-agent" style={{ color: agentColor(event.agentId) }}>
-          {event.agentId}
-        </span>
-      )}
-      <span className="ev-text">{view.text}</span>
+    <div className={`ev-bubble ev-message-bubble ${event.agentId ? 'from-agent' : 'from-user'}`}>
+      <div className="ev-bubble-avatar-col">
+        <div
+          className="ev-avatar"
+          style={{ background: color }}
+        >
+          {event.agentId.slice(0, 2).toUpperCase()}
+        </div>
+      </div>
+
+      <div className="ev-bubble-main">
+        <div className="ev-bubble-header">
+          <span className="ev-bubble-author" style={{ color }}>{event.agentId}</span>
+          <span className="ev-time">{timeOf(event.ts)}</span>
+        </div>
+        <div className="ev-bubble-content">
+          <span className="ev-text">{view.text}</span>
+        </div>
+      </div>
     </div>
   );
 });

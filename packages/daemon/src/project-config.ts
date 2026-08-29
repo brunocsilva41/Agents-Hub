@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseDocument, parse as parseYaml, type Document } from 'yaml';
-import { HubError, type ContextoDoProjeto, type PolicyDocument } from '@agents-hub/core';
+import {
+  filtrarEnvDeProjeto,
+  HubError,
+  type ContextoDoProjeto,
+  type PolicyDocument,
+} from '@agents-hub/core';
 
 /**
  * Configuração por projeto (ADR 05.2).
@@ -95,6 +100,16 @@ export interface ProjectContext {
   memory?: string;
   /** Instruções por `agentId`. */
   prompts?: Record<string, string>;
+  /**
+   * Variáveis de ambiente por `agentId`, filtradas por lista de permissão.
+   *
+   * É o que torna "modelo local" real: cada CLI descobre o provedor pelo
+   * ambiente, então apontar `OPENAI_BASE_URL` para o Ollama funciona para
+   * todos sem adaptação individual. O filtro vive em `core/agent-env.ts` e
+   * existe porque este arquivo é versionado — um repositório clonado não pode
+   * injetar `NODE_OPTIONS` na máquina de quem clonou.
+   */
+  env?: Record<string, Record<string, string>>;
 }
 
 const contextCache = new Map<string, { mtimeMs: number; ctx: ProjectContext } | null>();
@@ -134,6 +149,17 @@ export function loadProjectContext(projectPath: string): ProjectContext {
         if (typeof valor === 'string' && valor.trim().length > 0) limpos[agentId] = valor;
       }
       if (Object.keys(limpos).length > 0) ctx.prompts = limpos;
+    }
+
+    const env = parsed['env'];
+    if (env !== null && typeof env === 'object' && !Array.isArray(env)) {
+      const porAgente: Record<string, Record<string, string>> = {};
+      for (const [agentId, bloco] of Object.entries(env as Record<string, unknown>)) {
+        if (bloco === null || typeof bloco !== 'object' || Array.isArray(bloco)) continue;
+        const { aceitas } = filtrarEnvDeProjeto(bloco as Record<string, unknown>);
+        if (Object.keys(aceitas).length > 0) porAgente[agentId] = aceitas;
+      }
+      if (Object.keys(porAgente).length > 0) ctx.env = porAgente;
     }
 
     contextCache.set(file, { mtimeMs, ctx });
@@ -196,6 +222,18 @@ export function saveProjectContext(projectPath: string, ctx: ProjectContext): vo
   if (Object.keys(limpos).length > 0) doc.set('prompts', limpos);
   else doc.delete('prompts');
 
+  // O ambiente também passa pelo filtro na GRAVAÇÃO, não só na leitura. Salvar
+  // o que será recusado depois deixaria a interface mostrando uma configuração
+  // que nunca teve efeito — a fachada que este trabalho todo veio desfazer.
+  const env = ctx.env ?? {};
+  const envLimpo: Record<string, Record<string, string>> = {};
+  for (const [agentId, bloco] of Object.entries(env)) {
+    const { aceitas } = filtrarEnvDeProjeto(bloco);
+    if (Object.keys(aceitas).length > 0) envLimpo[agentId] = aceitas;
+  }
+  if (Object.keys(envLimpo).length > 0) doc.set('env', envLimpo);
+  else doc.delete('env');
+
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, String(doc), 'utf8');
 
@@ -203,6 +241,11 @@ export function saveProjectContext(projectPath: string, ctx: ProjectContext): vo
   // valor velho. Invalidar explicitamente evita esse ponto cego.
   contextCache.delete(file);
   cache.delete(file);
+}
+
+/** As variáveis de ambiente que este agente recebe neste projeto. */
+export function envForAgent(ctx: ProjectContext, agentId: string): Record<string, string> {
+  return ctx.env?.[agentId] ?? {};
 }
 
 /** O contexto que este agente deve receber neste projeto. */

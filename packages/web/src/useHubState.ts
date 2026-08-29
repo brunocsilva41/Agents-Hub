@@ -5,6 +5,7 @@ import type {
   ApprovalSummary,
   BudgetSummary,
   GraphSummary,
+  ProjectSummary,
   SessionSummary,
 } from '@agents-hub/client';
 import { hub, isLiveState, mostUrgentState } from './hub';
@@ -48,6 +49,7 @@ export interface HubState {
   /** Primeira carga concluída: distingue "nada aqui" de "ainda não sei". */
   ready: boolean;
   agents: AgentSummary[];
+  projects: ProjectSummary[];
   sessions: SessionSummary[];
   flows: FlowSummary[];
   approvals: ApprovalSummary[];
@@ -78,6 +80,7 @@ export function useHubState(): HubState {
   const [connected, setConnected] = useState(false);
   const [ready, setReady] = useState(false);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [approvals, setApprovals] = useState<ApprovalSummary[]>([]);
   const [events, setEvents] = useState<Record<string, EventEnvelope[]>>({});
@@ -88,11 +91,12 @@ export function useHubState(): HubState {
 
   const refresh = useCallback(async () => {
     try {
-      const [{ sessions: list }, { agents: agentList }, { approvals: pending }] =
-        await Promise.all([hub.sessions(), hub.agents(), hub.approvals()]);
+      const [{ sessions: list }, { agents: agentList }, { approvals: pending }, { projects: projectList }] =
+        await Promise.all([hub.sessions(), hub.agents(), hub.approvals(), hub.projects()]);
       setSessions(list);
       setAgents(agentList);
       setApprovals(pending);
+      setProjects(projectList);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -158,7 +162,20 @@ export function useHubState(): HubState {
     };
   }, [scheduleReload]);
 
-  const eventsOf = useCallback((sessionId: string) => events[sessionId] ?? [], [events]);
+  const requestedRef = useRef<Set<string>>(new Set());
+
+  const eventsOf = useCallback((sessionId: string) => {
+    if (!sessionId) return [];
+    if (!events[sessionId] && !requestedRef.current.has(sessionId)) {
+      requestedRef.current.add(sessionId);
+      hub.events(sessionId).then(({ events: list }) => {
+        setEvents((prev) => ({ ...prev, [sessionId]: list }));
+      }).catch(() => {
+        // Ignora erro de rede temporário
+      });
+    }
+    return events[sessionId] ?? [];
+  }, [events]);
 
   /**
    * Um fluxo por `rootId` DISTINTO, não por `parentId === null`.
@@ -205,6 +222,7 @@ export function useHubState(): HubState {
       connected,
       ready,
       agents,
+      projects,
       sessions,
       flows,
       approvals,
@@ -213,7 +231,7 @@ export function useHubState(): HubState {
       refresh,
       error,
     }),
-    [connected, ready, agents, sessions, flows, approvals, eventsOf, revision, refresh, error],
+    [connected, ready, agents, projects, sessions, flows, approvals, eventsOf, revision, refresh, error],
   );
 }
 

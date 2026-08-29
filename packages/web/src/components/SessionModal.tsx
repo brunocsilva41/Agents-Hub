@@ -1,82 +1,57 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { AgentSummary, BriefInput, ProjectSummary } from '@agents-hub/client';
 import { useAction } from '../actions';
-import { hub } from '../hub';
-
-/**
- * Diálogo modal com o mínimo que o navegador não dá de graça: Esc fecha, o foco
- * entra, fica preso enquanto está aberto e volta para onde estava ao sair.
- *
- * Sem isto, Tab passeia pela página atrás do modal e Esc não faz nada — quem
- * navega por teclado fica preso num formulário que não sabe fechar.
- */
-function useDialog(onClose: () => void) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    ref.current?.querySelector<HTMLElement>('select, input, textarea, button')?.focus();
-
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      const focusables = [
-        ...(ref.current?.querySelectorAll<HTMLElement>(
-          'button, select, input, textarea, [href], [tabindex]:not([tabindex="-1"])',
-        ) ?? []),
-      ].filter((el) => !el.hasAttribute('disabled'));
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      previous?.focus();
-    };
-  }, [onClose]);
-
-  return ref;
-}
+import { agentColor, hub } from '../hub';
 
 interface Props {
   agents: AgentSummary[];
-  /** Quando presente, é uma delegação a partir desta sessão. */
   delegateFrom: { sessionId: string; agentId: string } | null;
+  defaultAgentId?: string;
   onClose: () => void;
   onCreated: (sessionId: string) => void;
+  onNewProject: () => void;
 }
 
-/**
- * Abrir sessão ou delegar — o mesmo formulário, porque no domínio é a mesma
- * operação (ADR 04.1): só muda se existe um chamador.
- *
- * O agente é obrigatório e sem padrão: você escolhe o principal a cada vez.
- */
-export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props) {
+const TASK_TEMPLATES = [
+  {
+    label: '✨ Nova Feature',
+    objective: 'Implementar a funcionalidade: ',
+    criteria: '- Código coberto por testes unitários\n- Sem regressões nas rotas existentes',
+  },
+  {
+    label: '🐛 Corrigir Bug',
+    objective: 'Investigar e corrigir o bug onde: ',
+    criteria: '- Reproduzir com teste antes de alterar\n- Validar com build e testes verdes',
+  },
+  {
+    label: '♻️ Refatoração',
+    objective: 'Refatorar o módulo para melhorar legibilidade e modularidade: ',
+    criteria: '- Manter compatibilidade com a interface pública\n- Reduzir duplicações',
+  },
+  {
+    label: '🧪 Criar Testes',
+    objective: 'Escrever suíte de testes de integração e unidade para: ',
+    criteria: '- Cobertura para casos de sucesso e de borda\n- 100% dos testes passando',
+  },
+];
+
+export function SessionModal({
+  agents,
+  delegateFrom,
+  defaultAgentId,
+  onClose,
+  onCreated,
+  onNewProject,
+}: Props): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectId, setProjectId] = useState('');
-  const [agent, setAgent] = useState('');
+  const [agent, setAgent] = useState(defaultAgentId || agents[0]?.id || '');
   const [objective, setObjective] = useState('');
   const [criteria, setCriteria] = useState('');
   const [budgetUsd, setBudgetUsd] = useState(delegateFrom ? '0.50' : '2.00');
   const [supervision, setSupervision] = useState<'supervised' | 'semi' | 'autonomous'>('semi');
   const [isolation, setIsolation] = useState<'worktree' | 'none'>('worktree');
-  const [projectsError, setProjectsError] = useState<string | null>(null);
   const action = useAction();
-  const dialogRef = useDialog(onClose);
 
   useEffect(() => {
     if (delegateFrom) return;
@@ -84,17 +59,28 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
       .projects()
       .then(({ projects: list }) => {
         setProjects(list);
-        setProjectId((current) => current || (list[0]?.id ?? ''));
+        setProjectId((current) => current || list[0]?.id || '');
       })
-      // Sem projeto não há sessão: falhar em silêncio deixaria o formulário
-      // parecendo apenas vazio, e a pessoa procurando o erro no lugar errado.
-      .catch((err: Error) => setProjectsError(err.message));
+      .catch(() => {});
   }, [delegateFrom]);
 
-  const installed = agents.filter((a) => a.probe?.installed === true);
-  const submitting = action.busy !== null;
+  const applyTemplate = (tpl: (typeof TASK_TEMPLATES)[0]) => {
+    setObjective(tpl.objective);
+    setCriteria(tpl.criteria);
+  };
 
-  const submit = async (): Promise<void> => {
+  const submit = async () => {
+    // O objetivo vai LIMPO, exatamente como você escreveu.
+    //
+    // Antes, memória e prompts do `localStorage` eram concatenados aqui. Além
+    // de não alcançarem a CLI nem as sessões delegadas, isso contaminava o
+    // objetivo — que é o que o Hub usa para detectar um agente pedindo de volta
+    // o que já pediu. Duas tarefas iguais com diretrizes diferentes passavam a
+    // parecer tarefas diferentes, e a detecção deixava passar o que deveria
+    // barrar.
+    //
+    // Agora o daemon anexa o contexto do projeto no prompt, fora do objetivo,
+    // em todos os caminhos: sessão nova, delegação, retentativa e substituição.
     const brief: BriefInput = {
       agent,
       objective: objective.trim(),
@@ -107,7 +93,7 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
       budget: budgetUsd ? { usd: Number(budgetUsd) } : undefined,
     };
 
-    const ok = await action.run(
+    await action.run(
       'submit',
       async () => {
         if (delegateFrom) {
@@ -118,29 +104,31 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
           onCreated(result.session.id);
         }
       },
-      delegateFrom ? 'Delegação criada.' : 'Sessão iniciada.',
+      delegateFrom ? 'Delegação iniciada.' : 'Sessão iniciada com sucesso.',
     );
-    if (ok) onClose();
   };
 
-  const valid = agent.length > 0 && objective.trim().length >= 8 && (delegateFrom || projectId);
+  const isValid = agent.length > 0 && objective.trim().length >= 6 && (delegateFrom || projectId);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal"
-        ref={dialogRef}
+        className="modal wizard-modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="modal-title">{delegateFrom ? 'Delegar tarefa' : 'Nova sessão'}</h2>
-        <p className="hint">
-          {delegateFrom
-            ? `${delegateFrom.agentId} vai pedir isto a outro agente. O orçamento sai do fluxo atual.`
-            : 'O agente principal é escolhido a cada sessão — não existe padrão implícito.'}
-        </p>
+        <div className="modal-header-banner">
+          <div className="modal-icon-badge">{delegateFrom ? '🔄' : '⚡'}</div>
+          <div>
+            <h2>{delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}</h2>
+            <p className="hint">
+              {delegateFrom
+                ? 'Transfere uma sub-tarefa para outro agente especialista.'
+                : 'Selecione o projeto, agente e defina os objetivos da execução.'}
+            </p>
+          </div>
+        </div>
 
         {action.error && (
           <div className="error-banner" role="alert">
@@ -148,123 +136,168 @@ export function SessionModal({ agents, delegateFrom, onClose, onCreated }: Props
           </div>
         )}
 
+        {/* 1. Seleção de Projeto */}
         {!delegateFrom && (
           <div className="field">
-            <label htmlFor="project">Projeto</label>
-            <select id="project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-              {projects.length === 0 && <option value="">nenhum projeto registrado</option>}
+            <div className="field-label-row">
+              <label htmlFor="modal-project">Projeto & Pasta</label>
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  onClose();
+                  onNewProject();
+                }}
+              >
+                + Registrar nova pasta
+              </button>
+            </div>
+            <select
+              id="modal-project"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+            >
+              {projects.length === 0 && <option value="">Nenhum projeto registrado</option>}
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name} — {p.path}
                 </option>
               ))}
             </select>
-            {projectsError && (
-              <div className="help danger-text">
-                não foi possível listar os projetos: {projectsError}
-              </div>
-            )}
-            {!projectsError && projects.length === 0 && (
-              <div className="help">registre um com: hub project add [caminho]</div>
-            )}
           </div>
         )}
 
+        {/* 2. Seleção Visual de Agente */}
         <div className="field">
-          <label htmlFor="agent">Agente</label>
-          <select id="agent" value={agent} onChange={(e) => setAgent(e.target.value)}>
-            <option value="">escolha um agente…</option>
-            {installed.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.id} — {a.name}
-              </option>
-            ))}
-            {installed.length > 0 && <option disabled>──────────</option>}
-            {[...new Set(installed.flatMap((a) => a.capabilities))].sort().map((cap) => (
-              <option key={`cap:${cap}`} value={`cap:${cap}`}>
-                cap:{cap} — o Hub escolhe
-              </option>
-            ))}
-          </select>
-          <div className="help">
-            {agents.length - installed.length > 0
-              ? `${agents.length - installed.length} agente(s) fora da lista por não estarem instalados`
-              : 'todos os agentes conhecidos estão instalados'}
+          <label>Agente Especialista</label>
+          <div className="agent-selection-grid">
+            {agents.map((a) => {
+              const isSelected = agent === a.id;
+              const color = agentColor(a.id);
+              return (
+                <div
+                  key={a.id}
+                  className={`agent-card-select ${isSelected ? 'selected' : ''}`}
+                  style={{ '--agent-color': color } as React.CSSProperties}
+                  onClick={() => setAgent(a.id)}
+                >
+                  <div className="agent-card-avatar" style={{ background: color }}>
+                    {a.id.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="agent-card-meta">
+                    <div className="agent-card-name">{a.name}</div>
+                    <div className="agent-card-vendor">{a.vendor}</div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
+        {/* 3. Templates Rápidos */}
+        <div className="template-chips-row">
+          <span className="template-label">Templates:</span>
+          {TASK_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.label}
+              type="button"
+              className="template-chip-btn"
+              onClick={() => applyTemplate(tpl)}
+            >
+              {tpl.label}
+            </button>
+          ))}
+        </div>
+
+        {/* 4. Objetivo e Critérios */}
         <div className="field">
-          <label htmlFor="objective">Objetivo</label>
+          <label htmlFor="objective">Objetivo da Tarefa</label>
           <textarea
             id="objective"
-            rows={4}
+            rows={3}
+            placeholder="Descreva claramente o que o agente deve realizar..."
             value={objective}
             onChange={(e) => setObjective(e.target.value)}
-            placeholder="Refatore o módulo de pagamentos para separar cálculo de imposto da emissão de nota."
           />
-          <div className="help">
-            Um objetivo por sessão. O agente começa com contexto limpo: escreva de forma
-            autossuficiente.
-            {objective.trim().length > 0 && objective.trim().length < 8 && (
-              <> Faltam {8 - objective.trim().length} caracteres.</>
-            )}
-          </div>
         </div>
 
         <div className="field">
-          <label htmlFor="criteria">Critérios de aceite (um por linha)</label>
+          <label htmlFor="criteria">Critérios de Aceite (Opcional)</label>
           <textarea
             id="criteria"
-            rows={3}
+            rows={2}
+            placeholder="- Um critério por linha (ex: passar em npm test)..."
             value={criteria}
             onChange={(e) => setCriteria(e.target.value)}
-            placeholder={'os testes existentes continuam passando\nnenhuma migration alterada'}
           />
         </div>
 
+        {/* 5. Parâmetros e Orçamento */}
         <div className="field-row">
           <div className="field">
-            <label htmlFor="budget">Teto (US$)</label>
-            <input
-              id="budget"
-              type="number"
-              step="0.10"
-              min="0"
-              value={budgetUsd}
-              onChange={(e) => setBudgetUsd(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="supervision">Supervisão</label>
+            <label>Supervisão</label>
             <select
-              id="supervision"
               value={supervision}
-              onChange={(e) => setSupervision(e.target.value as typeof supervision)}
+              onChange={(e) => setSupervision(e.target.value as any)}
             >
-              <option value="supervised">supervisionada</option>
-              <option value="semi">semi</option>
-              <option value="autonomous">autônoma</option>
+              <option value="semi">Semi-Autônomo (Pausa em irreversíveis)</option>
+              <option value="supervised">Supervisionado (Aprova todo comando)</option>
+              <option value="autonomous">Autônomo (Sem atrito)</option>
             </select>
           </div>
+
           <div className="field">
-            <label htmlFor="isolation">Isolamento</label>
+            <label>Isolamento</label>
             <select
-              id="isolation"
               value={isolation}
-              onChange={(e) => setIsolation(e.target.value as typeof isolation)}
+              onChange={(e) => setIsolation(e.target.value as any)}
             >
-              <option value="worktree">worktree</option>
-              <option value="none">nenhum</option>
+              <option value="worktree">Git Worktree (Seguro e isolado)</option>
+              <option value="none">Direto no diretório principal</option>
             </select>
           </div>
+
+          <div className="field">
+            <label>Teto Orçamentário (USD)</label>
+            <div className="budget-input-wrap">
+              <input
+                type="number"
+                step="0.50"
+                min="0.10"
+                max="50.00"
+                value={budgetUsd}
+                onChange={(e) => setBudgetUsd(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/*
+          O interruptor de "incluir memórias" saiu daqui.
+
+          Ele ligava e desligava uma leitura do `localStorage` desta aba. Agora
+          a memória do projeto é aplicada pelo daemon em toda sessão dele —
+          inclusive nas delegadas, que a aba nunca alcançou —, então o controle
+          não teria como desligar coisa alguma. Um interruptor que não desliga
+          nada é pior do que nenhum: ele afirma que existe uma escolha.
+        */}
+        <div className="memory-toggle-row">
+          <span className="help">
+            As diretrizes deste projeto entram automaticamente. Edite-as em Configurações.
+          </span>
         </div>
 
         <div className="modal-actions">
-          <button onClick={onClose} disabled={submitting}>
+          <button type="button" onClick={onClose} disabled={action.busy !== null}>
             Cancelar
           </button>
-          <button className="primary" onClick={() => void submit()} disabled={!valid || submitting}>
-            {submitting ? 'iniciando…' : delegateFrom ? 'Delegar' : 'Iniciar sessão'}
+          <button
+            type="button"
+            className="primary"
+            onClick={submit}
+            disabled={!isValid || action.busy !== null}
+          >
+            {action.busy !== null ? 'Iniciando…' : 'Iniciar Sessão'}
           </button>
         </div>
       </div>

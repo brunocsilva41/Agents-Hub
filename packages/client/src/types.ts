@@ -148,4 +148,6 @@ export interface ProjectFolder {
 export interface ProjectContextDto {
   memory?: string;
   prompts?: Record<string, string>;
+  /** Variáveis de ambiente por agente — é como "modelo local" chega ao CLI. */
+  env?: Record<string, Record<string, string>>;
 }

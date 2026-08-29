@@ -58,6 +58,7 @@ import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import {
   contextForAgent,
+  envForAgent,
   loadProjectContext,
   loadProjectOverrides,
   mergeProjectPolicy,
@@ -268,6 +269,19 @@ export class SessionManager {
     const project = this.store.projects.get(session.projectId);
     if (!project) return {};
     return contextForAgent(loadProjectContext(project.path), session.agentId);
+  }
+
+  /**
+   * Ambiente que o projeto define para o agente desta sessão.
+   *
+   * É o caminho que torna "modelo local" real: apontar `OPENAI_BASE_URL` para
+   * um Ollama local vale igual para sessão do painel, da CLI e de delegação.
+   * O filtro por lista de permissão acontece na leitura da configuração.
+   */
+  #envDoProjeto(session: Session): Record<string, string> {
+    const project = this.store.projects.get(session.projectId);
+    if (!project) return {};
+    return envForAgent(loadProjectContext(project.path), session.agentId);
   }
 
   /** Projeto por id, ou erro — nunca `null` seguindo adiante em silêncio. */
@@ -1207,7 +1221,7 @@ export class SessionManager {
       agentId: session.agentId,
       workdir: session.workdir,
       mode: session.mode,
-      env: {},
+      env: this.#envDoProjeto(session),
       timeoutSeconds: Math.min(
         manifest.defaults.timeoutSeconds,
         this.config.policy.taskTimeoutSeconds,
@@ -1965,7 +1979,8 @@ export class SessionManager {
       agentId: revisorId,
       workdir: session.workdir,
       mode: session.mode,
-      env: {},
+      // O revisor é outro agente: o ambiente que ele recebe é o DELE.
+      env: this.#envDoProjeto({ ...session, agentId: revisorId }),
       timeoutSeconds: Math.min(600, this.config.policy.taskTimeoutSeconds),
       heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
     };
