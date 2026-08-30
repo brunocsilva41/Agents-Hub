@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { parseWorkflow, validateWorkflow } from './workflow.js';
+import {
+  parseWorkflow,
+  runWorkflow,
+  validateWorkflow,
+  type WorkflowRunDeps,
+} from './workflow.js';
+import type { UpstreamResult } from './brief.js';
 
 describe('Workflow DAG Validation & Execution Ordering', () => {
   test('valida workflow linear simples e ordena topologicamente', () => {
@@ -106,5 +112,178 @@ describe('Workflow DAG Validation & Execution Ordering', () => {
     const res = validateWorkflow(wf);
     assert.equal(res.valid, false);
     assert.match(res.errors[0] ?? '', /depende de step inexistente/);
+  });
+});
+
+describe('execução do workflow', () => {
+  /**
+   * Agente falso: registra a ordem real dos acontecimentos e o que recebeu de
+   * fan-in. É o suficiente para provar as garantias do executor sem daemon.
+   */
+  function fabrica(
+    desfechos: Record<string, { state?: 'completed' | 'failed' | 'blocked'; usd?: number; summary?: string }> = {},
+  ) {
+    const linhaDoTempo: string[] = [];
+    const recebido = new Map<string, UpstreamResult[]>();
+    const tetos = new Map<string, number | null>();
+    let n = 0;
+
+    const deps: WorkflowRunDeps = {
+      start: async ({ step, upstream, capUsd }) => {
+        linhaDoTempo.push(`start:${step.id}`);
+        recebido.set(step.id, upstream);
+        tetos.set(step.id, capUsd);
+        n += 1;
+        return { sessionId: `ses_${n}`, taskId: `tsk_${n}` };
+      },
+      settle: async ({ step }) => {
+        // Um tick de event loop: sem isto, um `start` que não espera nada
+        // passaria no teste de ordem por acidente.
+        await new Promise((r) => setTimeout(r, 5));
+        linhaDoTempo.push(`fim:${step.id}`);
+        const d = desfechos[step.id] ?? {};
+        return {
+          state: d.state ?? 'completed',
+          summary: d.summary ?? `resumo de ${step.id}`,
+          detail: d.state && d.state !== 'completed' ? `falhou em ${step.id}` : null,
+          usd: d.usd ?? 0,
+        };
+      },
+    };
+
+    return { deps, linhaDoTempo, recebido, tetos };
+  }
+
+  const linear = parseWorkflow({
+    name: 'Linear',
+    steps: [
+      { id: 'plan', agent: 'claude', objective: 'Planejar a refatoração' },
+      { id: 'refactor', agent: 'codex', objective: 'Refatorar conforme o plano', dependsOn: ['plan'] },
+    ],
+  });
+
+  test('o passo dependente só COMEÇA depois de o anterior TERMINAR', async () => {
+    const { deps, linhaDoTempo } = fabrica();
+    const ordem = validateWorkflow(linear).executionOrder;
+
+    const res = await runWorkflow(linear, ordem, deps);
+
+    // O defeito que isto tranca: antes, o `await` era sobre `startSession`,
+    // que devolve quando a sessão nasce. A linha do tempo saía
+    // start,start,fim,fim — o refactor começava antes de o plano existir.
+    assert.deepEqual(linhaDoTempo, ['start:plan', 'fim:plan', 'start:refactor', 'fim:refactor']);
+    assert.equal(res.ok, true);
+  });
+
+  test('o resultado do passo anterior chega ao brief do seguinte (fan-in)', async () => {
+    const { deps, recebido } = fabrica({ plan: { summary: 'O plano é extrair o módulo de billing' } });
+    const ordem = validateWorkflow(linear).executionOrder;
+
+    await runWorkflow(linear, ordem, deps);
+
+    assert.deepEqual(recebido.get('plan'), []);
+    assert.deepEqual(recebido.get('refactor'), [
+      {
+        step: 'plan',
+        agent: 'claude',
+        summary: 'O plano é extrair o módulo de billing',
+        sessionRef: 'session:ses_1',
+      },
+    ]);
+  });
+
+  test('dependência que falha pula o dependente, e o efeito é transitivo', async () => {
+    const wf = parseWorkflow({
+      name: 'Cadeia',
+      steps: [
+        { id: 'a', agent: 'claude', objective: 'Primeiro passo da cadeia' },
+        { id: 'b', agent: 'codex', objective: 'Segundo passo da cadeia', dependsOn: ['a'] },
+        { id: 'c', agent: 'opencode', objective: 'Terceiro passo da cadeia', dependsOn: ['b'] },
+      ],
+    });
+    const { deps, linhaDoTempo } = fabrica({ a: { state: 'failed' } });
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps);
+
+    assert.equal(res.ok, false);
+    assert.equal(linhaDoTempo.filter((l) => l.startsWith('start')).length, 1);
+    const estados = Object.fromEntries(res.steps.map((s) => [s.stepId, s.state]));
+    assert.deepEqual(estados, { a: 'failed', b: 'skipped', c: 'skipped' });
+    // `c` nunca viu `a`: quem o pulou foi `b`, que também não concluiu.
+    assert.match(res.steps[2]!.detail!, /b \(skipped\)/);
+  });
+
+  test('passo bloqueado em aprovação não libera quem depende dele', async () => {
+    const { deps } = fabrica({ plan: { state: 'blocked' } });
+
+    const res = await runWorkflow(linear, validateWorkflow(linear).executionOrder, deps);
+
+    assert.equal(res.ok, false);
+    assert.equal(res.steps[0]!.state, 'blocked');
+    assert.equal(res.steps[1]!.state, 'skipped');
+  });
+
+  test('a soma dos tetos de um lote paralelo não passa do saldo do workflow', async () => {
+    const wf = parseWorkflow({
+      name: 'Fan-out',
+      steps: [
+        { id: 'x', agent: 'claude', objective: 'Um dos dois passos paralelos' },
+        { id: 'y', agent: 'codex', objective: 'O outro passo paralelo' },
+      ],
+    });
+    const { deps, tetos } = fabrica();
+
+    await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps, { budgetUsd: 3 });
+
+    // Antes, `--budget-usd` era documentado no `--help` e nunca lido: cada
+    // passo era uma raiz com ledger próprio e o teto global não existia.
+    const soma = (tetos.get('x') ?? 0) + (tetos.get('y') ?? 0);
+    assert.equal(soma, 3);
+  });
+
+  test('o orçamento global esgotado pula o que ainda não rodou', async () => {
+    const wf = parseWorkflow({
+      name: 'Sequência cara',
+      steps: [
+        { id: 'caro', agent: 'claude', objective: 'Gastar o orçamento inteiro' },
+        { id: 'depois', agent: 'codex', objective: 'Passo que não deveria rodar', dependsOn: ['caro'] },
+      ],
+    });
+    const { deps, linhaDoTempo } = fabrica({ caro: { usd: 2 } });
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps, { budgetUsd: 2 });
+
+    assert.equal(linhaDoTempo.includes('start:depois'), false);
+    assert.equal(res.steps[1]!.state, 'skipped');
+    assert.match(res.steps[1]!.detail!, /orçamento do workflow esgotado/);
+    assert.equal(res.totalUsd, 2);
+  });
+
+  test('sem --budget-usd nenhum teto é imposto ao passo', async () => {
+    const { deps, tetos } = fabrica();
+    await runWorkflow(linear, validateWorkflow(linear).executionOrder, deps);
+    assert.equal(tetos.get('plan'), null);
+  });
+
+  test('falha ao iniciar não derruba o workflow inteiro, mas reprova o passo', async () => {
+    const wf = parseWorkflow({
+      name: 'Agente ausente',
+      steps: [
+        { id: 'p', agent: 'fantasma', objective: 'Passo com agente que não existe' },
+        { id: 'q', agent: 'codex', objective: 'Passo independente do anterior' },
+      ],
+    });
+    const { deps } = fabrica();
+    const original = deps.start;
+    deps.start = async (input) => {
+      if (input.step.id === 'p') throw new Error('AGENT_NOT_FOUND: fantasma');
+      return original(input);
+    };
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps);
+
+    assert.equal(res.steps[0]!.state, 'failed');
+    assert.match(res.steps[0]!.detail!, /AGENT_NOT_FOUND/);
+    assert.equal(res.steps[1]!.state, 'completed');
   });
 });

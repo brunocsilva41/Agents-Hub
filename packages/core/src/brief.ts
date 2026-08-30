@@ -20,6 +20,26 @@ export const BudgetRequestSchema = z.object({
   seconds: z.number().int().positive().optional(),
 });
 
+/**
+ * Resultado de um passo anterior de workflow, entregue ao passo que depende dele.
+ *
+ * É o canal de fan-in, e ele existe separado do `objective` pelo mesmo motivo
+ * que `ContextoDoProjeto`: o objetivo alimenta `objectiveHash`, que é como o
+ * CallGraph detecta ciclo semântico. Concatenar aqui o resultado do passo
+ * anterior faria duas execuções do mesmo passo parecerem tarefas diferentes, e
+ * a detecção de ciclo passaria a deixar passar o que deveria barrar.
+ *
+ * Viaja o **resumo**, nunca o transcript (ADR 03.4). Quem precisar do detalhe
+ * segue o `sessionRef` por `hub_context_fetch`.
+ */
+export const UpstreamResultSchema = z.object({
+  step: z.string().min(1).max(64),
+  agent: z.string().min(1).max(64),
+  summary: z.string().max(20_000),
+  /** Ponteiro `session:<id>` para quem quiser ir além do resumo. */
+  sessionRef: z.string().min(1).max(200).optional(),
+});
+
 export const BriefSchema = z.object({
   /**
    * Alvo da delegação: id de agente (`"codex"`) ou capability (`"cap:test-writing"`).
@@ -40,6 +60,9 @@ export const BriefSchema = z.object({
   /** Ponteiros (`session:<id>#event:<seq>`), nunca conteúdo embutido. */
   contextRefs: z.array(z.string().min(1)).default([]),
 
+  /** Fan-in de workflow: o que os passos dos quais este depende entregaram. */
+  upstream: z.array(UpstreamResultSchema).default([]),
+
   budget: BudgetRequestSchema.default({}),
 
   isolation: z.enum(['none', 'worktree', 'container']).default('worktree'),
@@ -53,6 +76,7 @@ export const BriefSchema = z.object({
 });
 
 export type Brief = z.infer<typeof BriefSchema>;
+export type UpstreamResult = z.infer<typeof UpstreamResultSchema>;
 export type ArtifactRef = z.infer<typeof ArtifactRefSchema>;
 export type BudgetRequest = z.infer<typeof BudgetRequestSchema>;
 
@@ -110,6 +134,19 @@ export function renderBriefAsPrompt(brief: Brief, contexto?: ContextoDoProjeto):
 
   lines.push(`# Tarefa`, ``, brief.objective, ``);
 
+  // Vem antes dos critérios porque um objetivo como "refatorar conforme o
+  // plano" é ininteligível sem o plano. Antes desta seção existir, o passo
+  // dependente de um workflow começava sem saber o que o anterior tinha feito.
+  if (brief.upstream.length > 0) {
+    lines.push(`## O que os passos anteriores entregaram`, ``);
+    for (const u of brief.upstream) {
+      lines.push(`### ${u.step} (${u.agent})`, ``, u.summary.trim(), ``);
+      if (u.sessionRef) {
+        lines.push(dimRef(u.sessionRef), ``);
+      }
+    }
+  }
+
   if (brief.acceptanceCriteria.length > 0) {
     lines.push(`## Critérios de aceite`, ``);
     for (const c of brief.acceptanceCriteria) lines.push(`- ${c}`);
@@ -148,4 +185,9 @@ export function renderBriefAsPrompt(brief: Brief, contexto?: ContextoDoProjeto):
   );
 
   return lines.join('\n');
+}
+
+/** Ponteiro para o detalhe, para quem tiver a tool de contexto do Hub. */
+function dimRef(ref: string): string {
+  return `_Detalhe completo em \`${ref}\` (tool \`hub_context_fetch\`)._`;
 }

@@ -23,6 +23,8 @@ export interface BriefInput {
   constraints?: string[];
   artifacts?: Array<{ path: string; mode?: 'read' | 'write'; note?: string }>;
   contextRefs?: string[];
+  /** Fan-in de workflow: o que os passos dos quais este depende entregaram. */
+  upstream?: Array<{ step: string; agent: string; summary: string; sessionRef?: string }>;
   budget?: { usd?: number; tokens?: number; seconds?: number };
   isolation?: 'none' | 'worktree' | 'container';
   supervision?: 'supervised' | 'semi' | 'autonomous';

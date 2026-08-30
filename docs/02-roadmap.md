@@ -214,14 +214,23 @@ errados**, dois deles de forma que quebraria a invocação:
       traz `capabilities` como array de strings e o SSE carrega `EventEnvelope` do Hub,
       não eventos de task do protocolo. **Um peer que fale A2A de verdade não conversa
       com isto.** Decidir: implementar JSON-RPC ou renomear para o que é
-- [~] **Motor de workflows declarativos em YAML** — a validação é real, a execução não:
-      `packages/core/src/workflow.ts` faz Kahn corretamente e produz os lotes
-      topológicos certos. Mas `packages/cli/src/workflow-cmd.ts` dá `await` em
-      `startSession`, que é **assíncrono por contrato** (o `#launch` termina em
-      `void this.#pump(...)`): o `await` espera a sessão *nascer*, não o passo
-      *terminar*. Todos os passos disparam praticamente juntos e o `dependsOn` é
-      decorativo. Derivados: **não há fan-in** (`stepSessions` é preenchido e nunca
-      lido) e **`--budget-usd` está no `--help` e nunca é lido**
+- [x] **Motor de workflows declarativos em YAML** — validação E execução.
+      A execução era o defeito mais grave da vistoria: o laço dava `await` em
+      `startSession`, que é assíncrona por contrato, então esperava a sessão
+      *nascer* e não o passo *terminar*; tudo disparava junto e o `dependsOn` era
+      decorativo. Agora `runWorkflow` vive em `packages/core/src/workflow.ts`, em
+      forma pura com dependências injetadas (mesmo remédio de `resilience.ts`), e
+      garante:
+      - o lote inteiro chega a **estado terminal** antes de o próximo começar;
+      - **fan-in real** pelo campo `upstream` do Brief — o resumo do passo anterior
+        entra no prompt do seguinte, e **não** no `objective`, que alimenta o
+        `objectiveHash` da detecção de ciclo;
+      - dependência que não conclui **pula** o dependente, transitivamente;
+      - **`--budget-usd` passou a ser lido**: o saldo é repartido entre os passos de
+        um lote antes do despacho, então a soma dos tetos nunca passa do que sobrou;
+      - aprovação pendente e estouro de espera são desfechos próprios (`blocked`,
+        `timeout`) — a sessão continua viva no daemon e o relatório diz onde ela está.
+      11 testes novos; verificado também contra o daemon real
 - [x] **Handoff de sessão**: transferência de controle em tempo de execução entre
       agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI
       `hub handoff` e MCP tool `hub_session_handoff`. **Ressalva: nunca executado fora
