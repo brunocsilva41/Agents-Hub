@@ -637,13 +637,43 @@ export class SessionManager {
    * agente pergunta, nós respondemos, e a ferramenta só roda se deixarmos.
    * A vigilância reativa continua existindo para os agentes que não têm hook.
    */
-  gateToolCall(input: {
+  /**
+   * Portão PRÉ-execução: o agente pergunta antes de agir, e o Hub responde.
+   *
+   * Quando a decisão é `approve`, a resposta depende de um humano — e é aqui
+   * que estava o buraco: o gate emitia um evento `approval.requested` e
+   * NÃO chamava `#requestApproval`. A timeline mostrava "aprovação solicitada",
+   * mas nenhuma linha entrava na tabela, nada aparecia em `GET /approvals`,
+   * `hub approve` não tinha id para receber e a sessão não ia para
+   * `waiting_approval`. A decisão ficava inteiramente com o `escalate` dentro
+   * do agente — que, num `-p` headless, é onde não existe humano para
+   * responder. O nível de controle que a documentação chama de "o mais forte"
+   * era o único sem como ser respondido.
+   *
+   * Agora a aprovação é real e a chamada BLOQUEIA esperando por ela. Bloquear é
+   * a única forma de um portão pré-execução valer alguma coisa: devolver
+   * "escalate" e seguir deixaria a ferramenta rodar antes da decisão.
+   *
+   * Como o hook do agente tem timeout próprio, a espera é limitada, e o que
+   * acontece quando ela estoura é **negar** — não permitir. Um portão de
+   * segurança que falha aberto no silêncio não é portão. A negação por tempo
+   * diz ao agente que foi falta de resposta, não proibição, para ele não
+   * concluir que a ação é impossível e tentar contorná-la.
+   */
+  async gateToolCall(input: {
     sessionId?: string | undefined;
     nativeSessionId?: string | undefined;
     cwd?: string | undefined;
     toolName: string;
     toolInput?: Record<string, unknown> | undefined;
-  }): { decision: Decision; risk: RiskLevel; reason: string; session: Session | null } {
+  }): Promise<{
+    decision: Decision;
+    risk: RiskLevel;
+    reason: string;
+    session: Session | null;
+    approvalId?: string;
+    explanation?: string;
+  }> {
     const session = this.#localizarSessao(input);
 
     // Sem sessão conhecida o Hub não tem política de quem aplicar. Barrar aqui
@@ -672,25 +702,103 @@ export class SessionManager {
 
     const combinado = combineVerdicts(vereditos);
 
-    // O agente perguntou: registrar na timeline é o que torna a decisão
-    // auditável depois, inclusive quando foi "allow".
-    if (combinado.decision !== 'allow') {
+    // Proibido pela política: não há o que perguntar a ninguém. Registrar na
+    // timeline é o que torna a decisão auditável depois.
+    if (combinado.decision === 'deny') {
       this.#emit({
         sessionId: session.id,
         taskId: null,
         agentId: session.agentId,
-        type: 'approval.requested',
+        type: 'log',
         payload: {
+          level: 'warn',
           gate: 'pre-execution',
           tool: input.toolName,
           risk: combinado.risk,
-          decision: combinado.decision,
-          reason: combinado.reason,
+          text: `portão pré-execução negou ${input.toolName}: ${combinado.reason}`,
         },
       });
+      return { ...combinado, session };
     }
 
-    return { ...combinado, session };
+    if (combinado.decision === 'allow') return { ...combinado, session };
+
+    // `approve` = precisa de gente. A partir daqui a chamada do hook fica
+    // parada, o que é exatamente o ponto: a ferramenta não roda enquanto a
+    // decisão não sai.
+    const task = this.#latestTaskOrNull(session.id);
+    const approval = this.#requestApproval({
+      session,
+      taskId: task?.id ?? null,
+      risk: combinado.risk,
+      action: `${input.toolName}: ${resumoDaChamada(input.toolName, input.toolInput ?? {})}`,
+      detail: {
+        kind: 'tool-call',
+        tool: input.toolName,
+        toolInput: input.toolInput ?? {},
+        reason: combinado.reason,
+      },
+    });
+
+    const desfecho = await this.#aguardarDecisao(approval.id, this.gateWaitMs);
+
+    if (desfecho === 'approved') {
+      return {
+        ...combinado,
+        decision: 'allow',
+        session,
+        approvalId: approval.id,
+        explanation: `Liberado por decisão humana no Agents-Hub (${approval.id}).`,
+      };
+    }
+
+    const porTempo = desfecho === 'timeout';
+    return {
+      ...combinado,
+      decision: 'deny',
+      session,
+      approvalId: approval.id,
+      explanation: porTempo
+        ? `Agents-Hub classificou esta ação como "${combinado.risk}": ${combinado.reason}. ` +
+          `Ela precisava de aprovação humana e ninguém respondeu em ` +
+          `${Math.round(this.gateWaitMs / 1000)}s, então foi negada por falta de resposta — ` +
+          `não por proibição. Siga com o resto da tarefa e diga ao usuário que esta ação ` +
+          `ficou pendente (aprovação ${approval.id}).`
+        : `Agents-Hub classificou esta ação como "${combinado.risk}": ${combinado.reason}. ` +
+          `Um humano negou explicitamente. Não tente contornar — explique ao usuário o que ` +
+          `você precisava fazer e por quê.`,
+    };
+  }
+
+  /**
+   * Espera a decisão humana sobre uma aprovação, com teto.
+   *
+   * Poll em vez de evento porque a resolução pode vir de qualquer processo — a
+   * CLI, o painel, o MCP —, e todos escrevem no mesmo banco. Um emissor em
+   * memória só enxergaria quem resolvesse dentro deste processo.
+   */
+  async #aguardarDecisao(
+    approvalId: string,
+    tetoMs: number,
+  ): Promise<'approved' | 'denied' | 'timeout'> {
+    const limite = Date.now() + tetoMs;
+
+    while (Date.now() < limite) {
+      const atual = this.store.approvals.get(approvalId);
+      if (atual && atual.state !== 'pending') {
+        return atual.state === 'approved' ? 'approved' : 'denied';
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    // Deixar a aprovação pendente para sempre travaria a sessão em
+    // `waiting_approval` enquanto o agente já teria seguido em frente. Fechar
+    // aqui mantém banco e realidade de acordo.
+    const ainda = this.store.approvals.get(approvalId);
+    if (ainda && ainda.state === 'pending') {
+      await this.resolveApproval(approvalId, 'denied', 'tempo esgotado').catch(() => undefined);
+    }
+    return 'timeout';
   }
 
   /**
