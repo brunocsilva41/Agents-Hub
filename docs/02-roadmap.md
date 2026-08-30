@@ -2,6 +2,11 @@
 
 Ordem derivada do ADR 04.4: **vertical fina primeiro**. Cada fase termina com algo que roda de verdade.
 
+> **Leia junto:** [07 — Progresso real](07-progresso-real.md) confere cada caixa deste
+> arquivo contra o código, o binário e o banco. Onde os dois discordarem, o 07 é a
+> fonte — ele foi verificado, este aqui foi declarado. As caixas da Fase 3 abaixo já
+> foram corrigidas a partir dele.
+
 ## Fase 1 — Vertical fina ✅ concluída e validada em 2026-08-26
 
 Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o contrato antes de multiplicar por oito.
@@ -15,7 +20,7 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 - [x] Contrato de adapter + registry dirigido por manifesto + cache de probe em disco
 - [x] Adapter genérico de CLI (spawn, JSONL, timeout, heartbeat, kill de árvore no Windows)
 - [x] Mappers dedicados: Claude Code e Codex
-- [x] Manifestos dos 8 agentes
+- [x] Manifestos dos agentes — eram 8 no plano; hoje são **9** (`openclaude` entrou depois)
 - [x] `WorktreeManager`: isolamento por git worktree, branch preservado ao encerrar
 - [x] Daemon HTTP + SSE com replay de eventos
 - [x] CLI: `daemon`, `doctor`, `agents`, `project`, `start`, `watch`, `send`, `delegate`, `graph`, `budget`, `cancel`
@@ -37,7 +42,7 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 
 ### Concluído e validado em 2026-08-27
 
-- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial; validado com um agente
+- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial (hoje são **12**, com `hub_session_handoff`); validado com um agente
       externo simulado delegando ao Codex e recebendo o resultado
 - [x] **Adoção de agente externo**: quando o principal roda fora do Hub, o MCP server
       adota uma sessão-raiz na primeira chamada que precise de identidade
@@ -202,13 +207,97 @@ errados**, dois deles de forma que quebraria a invocação:
 
 ## Fase 3 — Plataforma
 
-- [x] **A2A server**: Agent Card em `/.well-known/agent-card.json`, endpoints `/a2a/tasks`, `/a2a/tasks/:id`, `/a2a/tasks/:id/cancel` e SSE streaming em `/a2a/tasks/:id/events`
-- [x] **Motor de workflows declarativos em YAML**: DAG com validação de ciclo (Kahn), ordenação topológica em lotes paralelos (fan-out/fan-in) (`packages/core/src/workflow.ts`) e CLI `hub workflow validate/run`
-- [x] **Handoff de sessão**: transferência de controle em tempo de execução entre agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI `hub handoff` e MCP tool `hub_session_handoff`
+- [~] **"A2A server" — o nome está errado**: existe e funciona, mas é uma API REST
+      desenhada em torno dos tipos do Hub, servida em caminhos com nome A2A. Não há
+      superfície JSON-RPC 2.0, nem `message/send`, `tasks/get` ou `tasks/resubscribe`,
+      que o [ADR 02.1](decisoes/02-orquestracao.md) cita nominalmente. O Agent Card
+      traz `capabilities` como array de strings e o SSE carrega `EventEnvelope` do Hub,
+      não eventos de task do protocolo. **Um peer que fale A2A de verdade não conversa
+      com isto.** Decidir: implementar JSON-RPC ou renomear para o que é
+- [~] **Motor de workflows declarativos em YAML** — a validação é real, a execução não:
+      `packages/core/src/workflow.ts` faz Kahn corretamente e produz os lotes
+      topológicos certos. Mas `packages/cli/src/workflow-cmd.ts` dá `await` em
+      `startSession`, que é **assíncrono por contrato** (o `#launch` termina em
+      `void this.#pump(...)`): o `await` espera a sessão *nascer*, não o passo
+      *terminar*. Todos os passos disparam praticamente juntos e o `dependsOn` é
+      decorativo. Derivados: **não há fan-in** (`stepSessions` é preenchido e nunca
+      lido) e **`--budget-usd` está no `--help` e nunca é lido**
+- [x] **Handoff de sessão**: transferência de controle em tempo de execução entre
+      agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI
+      `hub handoff` e MCP tool `hub_session_handoff`. **Ressalva: nunca executado fora
+      do teste unitário** — zero eventos `session.handoff` no banco
 - [x] **Validação por revisão cruzada** (segundo agente revisa o resultado do primeiro) — implementada na fase 2
-- [x] **Painel de custos com projeção e alertas de orçamento**: cálculo de burn rate (`project()`), disparador de limiar (`isWarning`), evento `budget.warning`
+- [~] **Painel de custos com projeção e alertas de orçamento**: `project()` e
+      `isWarning` existem, e o painel mostra taxa de queima e aviso de 80%. Mas
+      `projectedUsd`/`projectedTokens` **não são exibidos**, o evento `budget.warning`
+      é o **único tipo do vocabulário sem emissor**, e a projeção usa
+      `consumed.seconds`, que só é liquidado no `settle()` do fim da run — ou seja,
+      ela não existe enquanto seria útil
 - [ ] Isolamento por container como modo opcional (`isolation: container`)
 - [ ] ACP: expor o Hub como agente dentro de Zed/JetBrains/Neovim
+
+## Fase 4 — Cobertura da frota
+
+O que o usuário pediu desde o primeiro dia e **nunca virou item de plano**. Não é
+funcionalidade nova: é provar, agente por agente, o que o código já permite em tese. A
+[§5 do doc 07](07-progresso-real.md) mede isto e a foto é dura — 2 de 9 agentes com
+supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
+
+- [ ] **`hub doctor --smoke`**: abre uma sessão trivial com cada agente instalado e
+      registra o resultado. **6 dos 9 agentes nunca executaram nada pelo Hub**, e a
+      pergunta "qualquer um pode ser o principal?" só tem hoje resposta por ausência
+- [ ] **`modeArgs` para os 7 agentes que não têm**: existe só em `claude.yaml` e
+      `codex.yaml`. Nos outros, `supervised` não restringe nada no próprio agente — e
+      copilot, kimi, mimo e antigravity declaram `supervised` como padrão. Onde o CLI
+      não oferecer equivalente, a UI precisa dizer isso, não silenciar
+- [ ] **`session.idFrom` é declarado no schema e lido por ninguém**: Cursor e MiMo
+      prometem `session.strategy: native` que o mapper genérico nunca cumpre — todo
+      turno seguinte cai em replay. Ou o adapter passa a ler `idFrom`, ou a promessa
+      sai do manifesto
+- [ ] **`openclaude` como cidadão pleno**: fora de `MCP_TARGETS` (logo, não pode ser
+      orquestrador externo), fora de `HOOK_TARGETS` e fora das cadeias de fallback
+- [ ] **Provar profundidade 2** (A→B→C): `maxDepth` é 3 e a profundidade máxima já
+      atingida na vida do repositório é **1**. Detecção de ciclo e herança de política
+      em segundo nível nunca foram exercidas num fluxo real
+- [ ] **Matriz de pares A→B** para os pares que importam: todo destino já delegado foi
+      o Codex, e 3 dos 4 chamadores eram sessões adotadas do harness de fumaça
+- [ ] **Verificar os caminhos de config de MCP**: 5 dos 8 são palpite (`hub mcp` já os
+      marca como não confirmados). É o mesmo trabalho que a verificação de manifestos
+      fez em `470a605` e que revelou 3 erros em 3
+- [ ] **Dono para a tabela de preços** (`core/pricing.ts`): dependência externa que
+      muda sozinha e sustenta todo o orçamento em dólares dos agentes que só reportam
+      tokens. Hoje ninguém a mantém
+
+## Incorporado ao produto sem passar pelo plano
+
+Construído, testado e em uso — o plano é que ficou para trás. Fica registrado para que
+nada aqui seja tratado como acidente na próxima vistoria.
+
+| O que existe | Onde |
+|---|---|
+| `openclaude`, o 9º agente | `manifests/openclaude.yaml`, mapper do Claude reusado |
+| `hub_agent_wait`, a 12ª tool MCP | `packages/mcp/src/server.ts` |
+| Daemon que sobe sozinho, `hub` no PATH e **reconciliação de estado na subida** | `661db71`; 5 testes |
+| Captura de diff + artefatos persistidos | o que fez `TaskResult.artifacts` deixar de ser sempre `[]` |
+| Precificação estimada por tabela de modelos | `core/pricing.ts` (929 linhas) |
+| `conversation.ts` / `rebuildConversation` | sustenta handoff e todo agente sem id nativo |
+| `hub hooks` como comando | o plano falava do gate, não de quem o instala |
+| `review-verdict.ts` | leitura do veredito com acento, caixa e ambiguidade |
+| Projetos multipasta, memória e prompts por projeto, modelo local por agente | `1d27378`, `1568988`, `f8727e9`, `32eb1be` |
+
+## Dívida conhecida, ainda não atacada
+
+- [ ] **`session-manager.ts` tem 2258 linhas** — quase o dobro do segundo maior arquivo.
+      Acumula sessões, tarefas, orçamento, portão de política, vigilância, resiliência,
+      revisão, diff, projetos, pastas e contexto. Não é bug; é onde os bugs se escondem.
+      Os três esquecimentos do invariante de estado terminal (`3f40028`) aconteceram
+      exatamente por isso
+- [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
+- [ ] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
+      `settle`) e o teto de sessões simultâneas nunca foram testados com chamadas
+      concorrentes
+- [ ] `pause` tem rota HTTP e não tem comando na CLI
+- [ ] O painel não expõe `workflow`, `prune`, `mcp` nem `hooks`
 
 ## Decisões ainda em aberto
 
