@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { HubError, newId, nowIso } from '@agents-hub/core';
 import { AsyncQueue } from '../async-queue.js';
-import { resolveBin } from '../bin-resolver.js';
+import { quoteForShell, resolveBin } from '../bin-resolver.js';
 import type {
   AgentAdapter,
   AgentManifest,
@@ -202,10 +203,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     this.#ownServer = null;
     if (!server || server.killed) return;
 
-    server.kill();
-    if (process.platform === 'win32' && server.pid !== undefined) {
-      spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], { windowsHide: true });
-    }
+    await killServerTree(server);
   }
 
   // ------------------------------------------------------------------- run
@@ -441,14 +439,35 @@ export class OpenCodeAdapter implements AgentAdapter {
     // Sempre 127.0.0.1: o servidor avisa no boot que roda sem senha, e expor
     // isso na rede seria entregar execução de código a quem alcançar a porta.
     const args = ['serve', '--port', String(this.#port), '--hostname', '127.0.0.1'];
-    const child = spawn(resolved.path, args, {
-      shell: resolved.needsShell,
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
-      detached: false,
-    });
+    // Sem isto, `shell: true` concatena o caminho e os args SEM escapar — e
+    // `resolveBin` resolve `.cmd` do npm em `%APPDATA%\npm\...`, que no
+    // Windows quase sempre tem espaço (`C:\Users\Nome Sobrenome\...`). Medido
+    // contra o binário real desta máquina: sem `quoteForShell`, o cmd.exe lia
+    // "C:\Users\Bruno" como comando e o resto como argumento solto, e o
+    // "opencode serve" nunca chegava a existir — o autostart do OpenCode
+    // falhava sempre que o perfil do usuário tivesse espaço no caminho.
+    const child = spawn(
+      resolved.needsShell ? quoteForShell(resolved.path) : resolved.path,
+      resolved.needsShell ? args.map(quoteForShell) : args,
+      {
+        shell: resolved.needsShell,
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        detached: false,
+      },
+    );
 
     this.#ownServer = child;
+
+    // `pipe` sem leitor enche o buffer do SO (~64 KB) e o "opencode serve"
+    // BLOQUEIA na escrita em stderr — o processo congela, e leva junto toda
+    // sessão OpenCode que o Hub estiver rodando. Drenar não é conveniência de
+    // diagnóstico aqui, é o que impede o travamento.
+    if (child.stderr) {
+      createInterface({ input: child.stderr, crlfDelay: Infinity }).on('line', (line) => {
+        if (line.trim().length > 0) console.error(`[opencode serve] ${line}`);
+      });
+    }
 
     const limite = Date.now() + SERVER_BOOT_TIMEOUT_MS;
     while (Date.now() < limite) {
@@ -521,6 +540,56 @@ export function createOpenCodeAdapter(
   options: OpenCodeAdapterOptions = {},
 ): OpenCodeAdapter {
   return new OpenCodeAdapter(manifest, options);
+}
+
+/**
+ * `server.kill()` sozinho só derruba o `cmd.exe` do shim no Windows — o
+ * `node.exe` real do "opencode serve" sobrevive, reparentado, e continua
+ * servindo na porta. Mesma classe de achado já corrigida em
+ * `process-adapter.ts` (`killTree`), aqui para o servidor que este adapter
+ * sobe. Medido matando na ordem errada: `server.kill()` primeiro derruba o
+ * `cmd.exe` na hora, e quando o `taskkill /T` roda em seguida o pai já não
+ * existe mais para o Windows andar a árvore a partir dele — o `node.exe`
+ * fica órfão e vivo. `/T /F` precisa ser o ÚNICO mecanismo, com o pai ainda
+ * de pé, e espera-se a saída em vez de disparar e esquecer — senão o
+ * chamador segue achando que a porta está livre antes de ela realmente
+ * estar.
+ */
+function killServerTree(server: ChildProcess): Promise<void> {
+  if (server.pid === undefined) return Promise.resolve();
+
+  if (process.platform !== 'win32') {
+    server.kill('SIGKILL');
+    return Promise.resolve();
+  }
+
+  // `server.kill()` ANTES do `taskkill` mataria o `cmd.exe` do shim na hora,
+  // e o `node.exe` real do "opencode serve" já teria sido reparentado quando
+  // o `/T` fosse rodar — `taskkill` precisa do pai ainda vivo para achar os
+  // filhos. Por isso `/T /F` é o ÚNICO mecanismo aqui, não um reforço depois
+  // de já ter matado o topo da árvore.
+  return new Promise((resolve) => {
+    const matador = spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], {
+      windowsHide: true,
+    });
+
+    let resolvido = false;
+    const encerrar = (): void => {
+      if (resolvido) return;
+      resolvido = true;
+      resolve();
+    };
+
+    matador.on('error', () => {
+      server.kill();
+      encerrar();
+    });
+    matador.on('exit', encerrar);
+
+    // Teto: o desligamento não pode ficar preso num `taskkill` que não volta.
+    const limite = setTimeout(encerrar, 5_000);
+    limite.unref?.();
+  });
 }
 
 function describeErrorPayload(payload: Record<string, unknown>): string {

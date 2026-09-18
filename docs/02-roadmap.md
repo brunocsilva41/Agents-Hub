@@ -340,9 +340,29 @@ repositório do zero antes de aceitar mudança.
 
 Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
 
-- [ ] **Drenar o stderr do `opencode serve`** — hoje é `pipe` sem leitor: quando
-      o buffer do SO encher, o servidor congela e leva junto todas as sessões
-      OpenCode. É o único item aqui que causa parada total
+- [x] **Drenar o stderr do `opencode serve`** — `createInterface` sobre
+      `child.stderr`, ecoado como `[opencode serve] <linha>`. Achou dois
+      problemas a mais no caminho, os dois verificados contra o binário real
+      (`opencode.cmd` desta máquina, cujo caminho tem espaço — `C:\Users\Bruno
+      Silva\...`):
+      - **`#bootServer` nunca quotava o caminho pro `shell: true`**: o
+        autostart do OpenCode FALHAVA SEMPRE em qualquer máquina com espaço
+        no perfil do usuário — não era um caso raro, era o caso comum no
+        Windows. Reproduzido isolado contra o `opencode.cmd` real antes da
+        correção (`'C:\Users\Bruno' não é reconhecido...`), corrigido com o
+        mesmo `quoteForShell` que `process-adapter.ts` já usa;
+      - **`close()` matava o `cmd.exe` antes do `taskkill /T`**: a ordem
+        errada deixava o `node.exe` real do servidor reparentado e vivo — o
+        `/T` precisa do pai ainda de pé pra andar a árvore. Mesma classe de
+        achado do `killTree` já corrigido em `process-adapter.ts`, replicada
+        aqui como `killServerTree`.
+      Teste de integração cobrindo o dreno (`packages/adapters/src/opencode/adapter.test.ts`,
+      binário falso — o bloqueio em si não reproduziu de forma determinística
+      neste Windows, então o teste prova o que É determinístico: que o Hub
+      drena de verdade, não só declara `pipe`). **Exercido contra o binário
+      real**: `hub start --agent opencode` de ponta a ponta nesta máquina —
+      autostart do `opencode serve` real, sessão completa, turno concluído
+      ("teste ok", US$0, 3.5k tokens), `close()` sem processo órfão depois
 - [ ] **Retenção de eventos**: a tabela cresce para sempre com `payload_json` e
       `raw_json`, sem `DELETE` nem `VACUUM`, enquanto reaper e reconciliação
       fazem full scan. O ADR 06.3 decidiu "eventos para sempre" — e essa decisão
