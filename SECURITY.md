@@ -52,12 +52,19 @@ São **três níveis com garantias diferentes**:
 
 | Nível | Como funciona | Cobertura hoje |
 |---|---|---|
-| **Gate pré-execução** | O agente pergunta ao Hub *antes* de rodar a ferramenta e obedece à resposta. Prevenção real | **Claude Code** apenas |
+| **Gate pré-execução** | O agente pergunta ao Hub *antes* de rodar a ferramenta e obedece à resposta. Prevenção real | **Claude Code** e **Codex** |
 | **Portão** | Ação que passa por dentro do Hub (delegação, reserva de orçamento). Retida antes de acontecer | Todos |
 | **Vigilância** | Evento do que **já aconteceu**; para a *próxima* ação | Todos |
 
 Chamar vigilância de "aprovação prévia" seria mentira. Para os agentes sem gate,
 o Hub vê o comando depois que ele rodou.
+
+O Codex é um caso à parte, e vale ser preciso sobre o que a cobertura acima
+garante: hook não confiável é **ignorado em silêncio** pelo binário — sem
+`--dangerously-bypass-hook-trust` (ligado por `hub hooks install codex --write`,
+escolha explícita do usuário nesta máquina), não há prevenção nenhuma, e o Hub
+recusa abrir uma sessão `--mode supervised` do Codex sem essa garantia, em vez
+de fingir que ela existe.
 
 ### O worktree não é sandbox
 

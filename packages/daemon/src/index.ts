@@ -3,10 +3,20 @@ export {
   saveConfig,
   defaultHome,
   baseUrl,
+  cliHookEntrypoint,
   DEFAULT_RETENTION,
+  DEFAULT_CODEX_GATE,
   type HubConfig,
   type RetentionPolicy,
+  type CodexGateConfig,
 } from './config.js';
+export {
+  montarConfigDoGate,
+  modoExigeGate,
+  TIMEOUT_PADRAO_SEC,
+  type AlvoDoGate,
+  type ConfigDoGate,
+} from './codex-gate.js';
 export { InMemoryEventBus } from './bus.js';
 export { WorktreeManager, type WorktreeInfo } from './worktree.js';
 export { SessionManager, type StartSessionInput, type StartSessionResult } from './session-manager.js';

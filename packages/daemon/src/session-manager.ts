@@ -57,6 +57,8 @@ import type {
 } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
+import { cliHookEntrypoint } from './config.js';
+import { montarConfigDoGate, modoExigeGate, TIMEOUT_PADRAO_SEC } from './codex-gate.js';
 import {
   contextForAgent,
   envForAgent,
@@ -1443,6 +1445,7 @@ export class SessionManager {
   ): Promise<void> {
     const adapter = this.registry.get(session.agentId);
     const manifest = adapter.manifest;
+    const gate = this.#codexGate(session.agentId, session.mode);
 
     const ctx: RunContext = {
       sessionId: session.id,
@@ -1456,7 +1459,18 @@ export class SessionManager {
         this.config.policy.taskTimeoutSeconds,
       ),
       heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
+      extraArgs: gate.extraArgs,
     };
+
+    if (gate.aviso) {
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'log',
+        payload: { stream: 'gate', level: 'warn', text: gate.aviso },
+      });
+    }
 
     // O vínculo sessão→raiz vive em memória no barramento. Depois de um
     // restart do daemon, retomar uma sessão sem reidratá-lo deixaria o
@@ -1488,6 +1502,35 @@ export class SessionManager {
       this.#pumps.delete(drenando);
     });
     this.#pumps.add(drenando);
+  }
+
+  /**
+   * Config do gate pré-execução para esta invocação — hoje só o Codex precisa
+   * disto, porque só ele exige argumento novo a cada spawn (ver
+   * `codex-gate.ts`). Todo outro agente devolve `extraArgs: []` sem efeito.
+   *
+   * Lança quando o modo promete prevenção (`supervised`) e o gate não pode ser
+   * garantido: seguir em frente sem avisar deixaria a sessão rodar sem a
+   * proteção que o próprio modo prometeu, silenciosamente.
+   */
+  #codexGate(agentId: string, mode: SessionMode): { extraArgs: string[]; aviso?: string } {
+    if (agentId !== 'codex') return { extraArgs: [] };
+
+    const comando = `"${process.execPath}" "${cliHookEntrypoint()}" hook --dialect codex`;
+    const config = montarConfigDoGate(
+      { comando, timeoutSec: TIMEOUT_PADRAO_SEC },
+      this.config.codexGate.bypassHookTrust,
+    );
+
+    if (!config.garantido && modoExigeGate(mode)) {
+      throw new HubError(
+        'CODEX_GATE_NOT_GUARANTEED',
+        `Sessão em modo "supervised", mas o gate pré-execução do Codex não está garantido: ${config.aviso}`,
+        { agentId, mode },
+      );
+    }
+
+    return config.aviso ? { extraArgs: config.args, aviso: config.aviso } : { extraArgs: config.args };
   }
 
   async #pump(session: Session, task: Task, handle: RunHandle): Promise<void> {
@@ -2248,6 +2291,18 @@ export class SessionManager {
     };
 
     try {
+      const gate = this.#codexGate(revisorId, session.mode);
+      ctx.extraArgs = gate.extraArgs;
+      if (gate.aviso) {
+        this.#emit({
+          sessionId: session.id,
+          taskId: task.id,
+          agentId: revisorId,
+          type: 'log',
+          payload: { stream: 'gate', level: 'warn', text: gate.aviso },
+        });
+      }
+
       const handle = await adapter.start(ctx, prompt);
       const textos: string[] = [];
 

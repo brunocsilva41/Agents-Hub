@@ -20,6 +20,7 @@ describe('A2A Protocol & Agent Card', () => {
     retention: { worktreeDays: 7, sweepIntervalMinutes: 60 },
     opencodePort: 4096,
     policy: DEFAULT_POLICY,
+    codexGate: { bypassHookTrust: false },
   };
 
   test('generateAgentCard produz Agent Card compatível com A2A v1.0', () => {

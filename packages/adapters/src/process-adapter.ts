@@ -181,6 +181,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
       ...argsTemplate,
       ...this.manifest.invoke.modeArgs[ctx.mode],
       ...this.manifest.invoke.extraArgs,
+      ...(ctx.extraArgs ?? []),
     ]
       .map((arg) => applyTemplate(arg, vars))
       // Um placeholder vazio (ex.: `{{model}}` sem modelo definido) some do

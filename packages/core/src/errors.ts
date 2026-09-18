@@ -24,7 +24,8 @@ export type HubErrorCode =
   | 'TIMEOUT'
   | 'ADAPTER_FAILURE'
   | 'CAPABILITY_UNRESOLVED'
-  | 'ILLEGAL_STATE';
+  | 'ILLEGAL_STATE'
+  | 'CODEX_GATE_NOT_GUARANTEED';
 
 export class HubError extends Error {
   readonly code: HubErrorCode;
