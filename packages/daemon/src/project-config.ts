@@ -4,6 +4,7 @@ import { parseDocument, parse as parseYaml, type Document } from 'yaml';
 import {
   filtrarEnvDeProjeto,
   HubError,
+  mergePolicyLayer,
   type ContextoDoProjeto,
   type PolicyDocument,
 } from '@agents-hub/core';
@@ -22,9 +23,21 @@ import {
  */
 export const PROJECT_CONFIG_RELATIVE = path.join('.agents-hub', 'config.yaml');
 
-/** Só um subconjunto da política é ajustável por projeto — veja a nota abaixo. */
+/**
+ * Só um subconjunto da política é ajustável por projeto — veja a nota abaixo.
+ *
+ * `validation` é parcial DOIS níveis, não um: `Partial<PolicyDocument['validation']>`
+ * deixaria `review` opcional no topo, mas ainda exigiria `{enabled, agent}`
+ * completo se declarado — o mesmo formato raso que causava o bug de
+ * `mergeProjectPolicy` apagar `review.agent` quando o YAML só declarava
+ * `review.enabled`.
+ */
 export interface ProjectPolicyOverrides {
-  validation?: Partial<PolicyDocument['validation']>;
+  validation?: {
+    command?: PolicyDocument['validation']['command'];
+    commandTimeoutSeconds?: number;
+    review?: Partial<PolicyDocument['validation']['review']>;
+  };
   commands?: Partial<PolicyDocument['commands']>;
   watch?: Partial<PolicyDocument['watch']>;
   retries?: Partial<PolicyDocument['retries']>;
@@ -269,28 +282,10 @@ export function mergeProjectPolicy(
   global: PolicyDocument,
   overrides: ProjectPolicyOverrides,
 ): PolicyDocument {
-  return {
-    ...global,
-    maxDepth: Math.min(global.maxDepth, overrides.maxDepth ?? global.maxDepth),
-    maxConcurrency: Math.min(
-      global.maxConcurrency,
-      overrides.maxConcurrency ?? global.maxConcurrency,
-    ),
-    defaultBudget: { ...global.defaultBudget, ...(overrides.defaultBudget ?? {}) },
-    retries: { ...global.retries, ...(overrides.retries ?? {}) },
-    fallback: { ...global.fallback, ...(overrides.fallback ?? {}) },
-    commands: {
-      allow: overrides.commands?.allow
-        ? overrides.commands.allow.filter((c) => global.commands.allow.includes(c))
-        : global.commands.allow,
-      deny: [...new Set([...global.commands.deny, ...(overrides.commands?.deny ?? [])])],
-    },
-    watch: {
-      pauseOn: [...new Set([...global.watch.pauseOn, ...(overrides.watch?.pauseOn ?? [])])],
-      flagOn: [...new Set([...global.watch.flagOn, ...(overrides.watch?.flagOn ?? [])])],
-    },
-    validation: { ...global.validation, ...(overrides.validation ?? {}) },
-  };
+  // `mergePolicyLayer` com `clampToBase` é o mesmo merge campo a campo (inclusive
+  // aninhado, como `validation.review`) que a config global usa, só que com o
+  // travamento de segurança: o projeto pode apertar, nunca afrouxar.
+  return mergePolicyLayer(global, overrides, { clampToBase: true });
 }
 
 export function clearProjectConfigCache(): void {

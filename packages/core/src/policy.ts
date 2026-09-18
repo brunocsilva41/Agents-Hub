@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { z } from 'zod';
 import type { BudgetLimits } from './budget.js';
 import { type SessionMode, MODE_RANK, narrowestMode } from './domain.js';
 
@@ -107,6 +108,185 @@ export interface WatchPolicy {
   pauseOn: RiskLevel[];
   /** Níveis que só viram evento de alerta na timeline. */
   flagOn: RiskLevel[];
+}
+
+/**
+ * Espelha `PolicyDocument` para validar o que vem de disco (config global e
+ * config de projeto). Sem isto, um `config.json` com `port` como string ou um
+ * `validation` mal formado só se manifestava como `NaN`/`undefined` silencioso
+ * bem depois, longe de onde o arquivo foi lido.
+ */
+const RiskLevelSchema = z.enum(['read', 'write', 'exec', 'escalate', 'irreversible', 'budget']);
+const DecisionSchema = z.enum(['allow', 'approve', 'deny']);
+
+const BudgetLimitsSchema = z.object({
+  usd: z.number(),
+  tokens: z.number(),
+  seconds: z.number(),
+});
+
+const ValidationPolicySchema = z.object({
+  command: z.string().nullable(),
+  commandTimeoutSeconds: z.number(),
+  review: z.object({
+    enabled: z.boolean(),
+    agent: z.string().nullable(),
+  }),
+});
+
+const WatchPolicySchema = z.object({
+  pauseOn: z.array(RiskLevelSchema),
+  flagOn: z.array(RiskLevelSchema),
+});
+
+export const PolicyDocumentSchema = z.object({
+  maxDepth: z.number(),
+  maxConcurrency: z.number(),
+  maxConcurrencyPerAgent: z.number(),
+  taskTimeoutSeconds: z.number(),
+  sessionTimeoutSeconds: z.number(),
+  heartbeatTimeoutSeconds: z.number(),
+  defaultBudget: BudgetLimitsSchema,
+  risk: z.record(RiskLevelSchema, DecisionSchema),
+  commands: z.object({
+    allow: z.array(z.string()),
+    deny: z.array(z.string()),
+  }),
+  paths: z.object({
+    allowWriteOutsideWorkdir: z.boolean(),
+    denyFragments: z.array(z.string()),
+  }),
+  network: z.object({
+    allowDomains: z.array(z.string()),
+  }),
+  retries: z.object({
+    max: z.number(),
+    backoffMs: z.number(),
+  }),
+  fallback: z.record(z.string(), z.array(z.string())),
+  watch: WatchPolicySchema,
+  validation: ValidationPolicySchema,
+});
+
+/**
+ * Versão parcial, campo a campo (inclusive nos objetos aninhados), para
+ * validar overrides — o que vem de `config.json`/`config.yaml` nunca precisa
+ * declarar a política inteira.
+ */
+export const PartialPolicyDocumentSchema = PolicyDocumentSchema.deepPartial();
+
+export type PartialPolicyDocument = z.infer<typeof PartialPolicyDocumentSchema>;
+
+/**
+ * Funde uma camada parcial de política sobre uma base, campo a campo —
+ * inclusive dentro de objetos aninhados como `validation.review`.
+ *
+ * O bug que isto substitui: `{ ...base, ...layer }` (ou pior, só no nível de
+ * `validation`) troca o objeto aninhado INTEIRO quando `layer` declara
+ * qualquer campo dele. Gravar `{"validation":{"review":{"enabled":true}}}`
+ * apagava `command` e `commandTimeoutSeconds` do padrão — o merge tinha que
+ * descer um nível a mais do que parecia.
+ *
+ * `opts.clampToBase` é o comportamento de `mergeProjectPolicy`: a config de
+ * projeto só pode APERTAR a política global, nunca afrouxar (ver o comentário
+ * lá). Sem a opção, a config global funde livre — não há "mais restritivo que
+ * o quê" no topo da hierarquia.
+ */
+export function mergePolicyLayer(
+  base: PolicyDocument,
+  layer: PartialPolicyDocument,
+  opts: { clampToBase?: boolean } = {},
+): PolicyDocument {
+  const clamp = opts.clampToBase ?? false;
+
+  const maxDepth = clamp
+    ? Math.min(base.maxDepth, layer.maxDepth ?? base.maxDepth)
+    : (layer.maxDepth ?? base.maxDepth);
+  const maxConcurrency = clamp
+    ? Math.min(base.maxConcurrency, layer.maxConcurrency ?? base.maxConcurrency)
+    : (layer.maxConcurrency ?? base.maxConcurrency);
+  const maxConcurrencyPerAgent = clamp
+    ? Math.min(
+        base.maxConcurrencyPerAgent,
+        layer.maxConcurrencyPerAgent ?? base.maxConcurrencyPerAgent,
+      )
+    : (layer.maxConcurrencyPerAgent ?? base.maxConcurrencyPerAgent);
+
+  const commandsAllow =
+    layer.commands?.allow !== undefined
+      ? clamp
+        ? layer.commands.allow.filter((c) => base.commands.allow.includes(c))
+        : layer.commands.allow
+      : base.commands.allow;
+  const commandsDeny = clamp
+    ? [...new Set([...base.commands.deny, ...(layer.commands?.deny ?? [])])]
+    : (layer.commands?.deny ?? base.commands.deny);
+
+  const watchPauseOn = clamp
+    ? [...new Set([...base.watch.pauseOn, ...(layer.watch?.pauseOn ?? [])])]
+    : (layer.watch?.pauseOn ?? base.watch.pauseOn);
+  const watchFlagOn = clamp
+    ? [...new Set([...base.watch.flagOn, ...(layer.watch?.flagOn ?? [])])]
+    : (layer.watch?.flagOn ?? base.watch.flagOn);
+
+  return {
+    ...base,
+    maxDepth,
+    maxConcurrency,
+    maxConcurrencyPerAgent,
+    taskTimeoutSeconds: layer.taskTimeoutSeconds ?? base.taskTimeoutSeconds,
+    sessionTimeoutSeconds: layer.sessionTimeoutSeconds ?? base.sessionTimeoutSeconds,
+    heartbeatTimeoutSeconds: layer.heartbeatTimeoutSeconds ?? base.heartbeatTimeoutSeconds,
+    defaultBudget: { ...base.defaultBudget, ...(layer.defaultBudget ?? {}) },
+    risk: { ...base.risk, ...(layer.risk ?? {}) } as Record<RiskLevel, Decision>,
+    commands: {
+      allow: commandsAllow,
+      deny: commandsDeny,
+    },
+    paths: {
+      allowWriteOutsideWorkdir:
+        layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir,
+      denyFragments: clamp
+        ? [...new Set([...base.paths.denyFragments, ...(layer.paths?.denyFragments ?? [])])]
+        : (layer.paths?.denyFragments ?? base.paths.denyFragments),
+    },
+    network: {
+      allowDomains:
+        layer.network?.allowDomains !== undefined
+          ? clamp
+            ? layer.network.allowDomains.filter((d) => base.network.allowDomains.includes(d))
+            : layer.network.allowDomains
+          : base.network.allowDomains,
+    },
+    retries: { ...base.retries, ...(layer.retries ?? {}) },
+    fallback: { ...base.fallback, ...(layer.fallback ?? {}) } as Record<string, string[]>,
+    watch: {
+      pauseOn: watchPauseOn as RiskLevel[],
+      flagOn: watchFlagOn as RiskLevel[],
+    },
+    validation: {
+      command: clamp
+        ? (base.validation.command ?? layer.validation?.command ?? null)
+        : (layer.validation?.command !== undefined
+            ? layer.validation.command
+            : base.validation.command),
+      commandTimeoutSeconds: clamp
+        ? Math.min(
+            base.validation.commandTimeoutSeconds,
+            layer.validation?.commandTimeoutSeconds ?? base.validation.commandTimeoutSeconds,
+          )
+        : (layer.validation?.commandTimeoutSeconds ?? base.validation.commandTimeoutSeconds),
+      review: {
+        enabled: clamp
+          ? base.validation.review.enabled || (layer.validation?.review?.enabled ?? false)
+          : (layer.validation?.review?.enabled ?? base.validation.review.enabled),
+        agent:
+          layer.validation?.review?.agent !== undefined
+            ? layer.validation.review.agent
+            : base.validation.review.agent,
+      },
+    },
+  };
 }
 
 export const DEFAULT_POLICY: PolicyDocument = {

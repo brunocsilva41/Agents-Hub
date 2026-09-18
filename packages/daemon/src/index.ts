@@ -10,6 +10,7 @@ export {
   type RetentionPolicy,
   type CodexGateConfig,
 } from './config.js';
+export { readHubEnv, type HubEnv } from './env.js';
 export {
   montarConfigDoGate,
   modoExigeGate,

@@ -55,6 +55,32 @@ describe('config por projeto', () => {
     );
   });
 
+  test('validation.review.enabled isolado no YAML do projeto preserva review.agent do global', () => {
+    // O merge raso anterior (`{ ...global.validation, ...overrides.validation }`)
+    // trocava `validation` inteiro quando o projeto só declarava `review`, e
+    // dentro dele trocava `review` inteiro quando só `enabled` era declarado —
+    // apagando `review.agent` do global mesmo sem o projeto ter dito nada sobre
+    // ele.
+    const global = {
+      ...DEFAULT_POLICY,
+      validation: {
+        ...DEFAULT_POLICY.validation,
+        review: { enabled: false, agent: 'claude' },
+      },
+    };
+
+    const merged = mergeProjectPolicy(global, {
+      validation: { review: { enabled: true } },
+    });
+
+    assert.equal(merged.validation.review.enabled, true);
+    assert.equal(
+      merged.validation.review.agent,
+      'claude',
+      'o projeto não declarou agent — não pode apagar o que o global definiu',
+    );
+  });
+
   test('overrides vazios devolvem exatamente a política global', () => {
     const merged = mergeProjectPolicy(DEFAULT_POLICY, {});
     assert.deepEqual(merged.commands.allow, DEFAULT_POLICY.commands.allow);
