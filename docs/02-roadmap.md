@@ -2,6 +2,30 @@
 
 Ordem derivada do ADR 04.4: **vertical fina primeiro**. Cada fase termina com algo que roda de verdade.
 
+> **Leia junto:** [07 — Progresso real](07-progresso-real.md) confere cada caixa deste
+> arquivo contra o código, o binário e o banco. Onde os dois discordarem, o 07 é a
+> fonte — ele foi verificado, este aqui foi declarado. As caixas da Fase 3 abaixo já
+> foram corrigidas a partir dele. [08 — Endurecimento](08-endurecimento.md) faz o
+> mesmo pelo processo e pela operação: o que impede o repositório de quebrar sem
+> ninguém perceber, e o que quebra quando o daemon roda por dias.
+
+## O que cada marca significa
+
+Este roadmap já marcou como `[x]` coisas que não estavam prontas — um "A2A server" que
+nenhum peer A2A conversa, um motor de workflows que validava o DAG e o ignorava na
+execução, um evento de alerta de orçamento sem nenhum emissor. Enquanto o plano mentir,
+toda decisão tomada em cima dele nasce errada. Por isso as marcas passaram a ter
+definição, e o critério completo mora em [`CONTRIBUTING.md`](../CONTRIBUTING.md):
+
+| Marca | Significado |
+|---|---|
+| `[x]` | compila do zero, tem teste que falharia sem a mudança, tem consumidor, foi exercido fora do teste, e a frase descreve o que existe |
+| `[~]` | existe e funciona, mas entrega **menos** do que a frase sugere — e a frase diz o quê |
+| `🕳️` | código escrito, nunca exercitado fora do teste unitário |
+| `[ ]` | não começou |
+
+`🕳️` é informação legítima, não confissão. O que não é legítimo é `[x]` sem ter rodado.
+
 ## Fase 1 — Vertical fina ✅ concluída e validada em 2026-08-26
 
 Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o contrato antes de multiplicar por oito.
@@ -15,7 +39,7 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 - [x] Contrato de adapter + registry dirigido por manifesto + cache de probe em disco
 - [x] Adapter genérico de CLI (spawn, JSONL, timeout, heartbeat, kill de árvore no Windows)
 - [x] Mappers dedicados: Claude Code e Codex
-- [x] Manifestos dos 8 agentes
+- [x] Manifestos dos agentes — eram 8 no plano; hoje são **9** (`openclaude` entrou depois)
 - [x] `WorktreeManager`: isolamento por git worktree, branch preservado ao encerrar
 - [x] Daemon HTTP + SSE com replay de eventos
 - [x] CLI: `daemon`, `doctor`, `agents`, `project`, `start`, `watch`, `send`, `delegate`, `graph`, `budget`, `cancel`
@@ -37,7 +61,7 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 
 ### Concluído e validado em 2026-08-27
 
-- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial; validado com um agente
+- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial (hoje são **12**, com `hub_session_handoff`); validado com um agente
       externo simulado delegando ao Codex e recebendo o resultado
 - [x] **Adoção de agente externo**: quando o principal roda fora do Hub, o MCP server
       adota uma sessão-raiz na primeira chamada que precise de identidade
@@ -179,54 +203,234 @@ errados**, dois deles de forma que quebraria a invocação:
       binário, não deduzido: a decisão de perguntar é `escalate` (não `ask`), e
       `AGENTS_HUB_SESSION_ID` chega no hook, o que resolve a correlação de sessão.
       Validado com o agente real: `git push` barrado antes de executar
-- [x] **Gate pré-execução para o Codex** — fechado em 2026-09-18. Contrato
-      VERIFICADO contra o binário real (0.149.1), sondando com um hook próprio
-      em diretório isolado. O Codex tem sistema de hooks completo e vocabulário
-      compatível com o do Claude (`PreToolUse`, `hook_event_name`,
-      `hookSpecificOutput`, `tool_name: "Bash"`), então `actionsOfToolCall`
-      serve sem mudança. Mas o **dialeto de resposta é oposto**:
-      - permitir é **não escrever nada** — `permissionDecision: "allow"` faz o
-        Codex marcar `hook: PreToolUse Failed`, o que quebraria justamente o
-        caminho feliz;
-      - **não existe `ask`**: a decisão `approve` do Hub vira `deny` com
-        motivo que manda o agente falar com o humano;
-      - `deny` exige motivo não vazio.
-      Também exige confiança persistida no hook (ou
-      `--dangerously-bypass-hook-trust`), e **não recebe variável de ambiente
-      do Hub** — a correlação de sessão sai do `cwd` do payload
-      (`#localizarSessao`, já preferia sessão viva sobre a mais recente desde a
-      vistoria #5 — o "falta" desta linha estava desatualizado, a correlação já
-      funcionava).
-      O que fechou de verdade: `RunContext.extraArgs` (novo, em
-      `@agents-hub/adapters`) deixa o `ProcessAgentAdapter` genérico enquanto
-      o `SessionManager` monta, só para o Codex, a config de
-      `montarConfigDoGate` a cada `#launch` — a mesma função pura que já
-      existia, testada, e que nada em produção chamava. `codexGate.bypassHookTrust`
-      é config GLOBAL (`~/.agents-hub/config.json`, nunca
-      `<repo>/.agents-hub/config.yaml` — é bypass de revisão de hook, não
-      política a apertar), ligada por `hub hooks install codex --write`. Sessão
-      `supervised` sem o bypass ligado é RECUSADA ao iniciar
-      (`CODEX_GATE_NOT_GUARANTEED`) em vez de rodar calada sem a prevenção que
-      o modo promete; `semi`/`autonomous` rodam sem o bypass mas com aviso
-      `log`/`stream:"gate"` na timeline, porque um Codex sem hook confiável
-      ignora o hook em silêncio — não avisar seria repetir o erro que a
-      vistoria #3 já tinha corrigido para outro caminho.
-      3 testes existentes (`toCodexHookOutput`/`montarConfigDoGate`/`modoExigeGate`)
-      + 3 novos de integração fim a fim com um binário `codex` falso, cobrindo
+- 🕳️ **Gate pré-execução para o Codex** — contrato verificado contra o binário
+      real (0.149.1): sistema de hooks compatível com o do Claude
+      (`PreToolUse`, `hookSpecificOutput`), mas **dialeto de resposta oposto**
+      (permitir é não escrever nada; não existe `ask`, `approve` vira `deny`
+      com motivo obrigatório) — isso já estava em `toCodexHookOutput` + 3
+      testes puros. O que fechou agora: `RunContext.extraArgs` (novo, em
+      `@agents-hub/adapters`) deixa o `ProcessAgentAdapter` agnóstico de
+      agente enquanto o `SessionManager` monta, só para o Codex, a config de
+      `montarConfigDoGate` a cada `#launch` — a função pura já existia,
+      testada, e nada em produção a chamava. `codexGate.bypassHookTrust` é
+      config GLOBAL (`~/.agents-hub/config.json`, nunca config de projeto —
+      é bypass de revisão de hook, não política a apertar), ligada por
+      `hub hooks install codex --write`. Sessão `supervised` sem o bypass é
+      RECUSADA ao iniciar (`CODEX_GATE_NOT_GUARANTEED`) em vez de rodar
+      calada sem a prevenção que o modo promete; `semi`/`autonomous` rodam
+      sem o bypass mas com aviso `log`/`stream:"gate"` na timeline — o Codex
+      ignora hook não confiável em silêncio, e não avisar repetiria o erro
+      que a vistoria (doc 05, achado 3) já corrigiu para outro caminho. A
+      correlação de sessão por `cwd` (`#localizarSessao`) já preferia sessão
+      viva sobre a mais recente desde a vistoria #5 — o "falta" que esta linha
+      dizia antes estava desatualizado.
+      3 testes novos de integração fim a fim, mas contra um binário `codex`
+      **falso** (script Node que grava os argumentos recebidos), cobrindo
       recusa em `supervised`, aviso em `semi` e os argumentos reais de spawn
-      com e sem bypass.
+      com e sem bypass. **O que falta para virar `[x]`**: rodar contra o
+      `codex` de verdade instalado nesta máquina (0.154.0) e confirmar que
+      `git push` é barrado de ponta a ponta, como já foi feito para o Claude
 - [ ] Gate pré-execução para os demais agentes
 - [ ] TUI (a Web UI cobriu a necessidade; virou conveniência, não bloqueio)
 
 ## Fase 3 — Plataforma
 
-- [x] **A2A server**: Agent Card em `/.well-known/agent-card.json`, endpoints `/a2a/tasks`, `/a2a/tasks/:id`, `/a2a/tasks/:id/cancel` e SSE streaming em `/a2a/tasks/:id/events`
-- [x] **Motor de workflows declarativos em YAML**: DAG com validação de ciclo (Kahn), ordenação topológica em lotes paralelos (fan-out/fan-in) (`packages/core/src/workflow.ts`) e CLI `hub workflow validate/run`
-- [x] **Handoff de sessão**: transferência de controle em tempo de execução entre agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI `hub handoff` e MCP tool `hub_session_handoff`
+- [~] **"A2A server" — o nome está errado**: existe e funciona, mas é uma API REST
+      desenhada em torno dos tipos do Hub, servida em caminhos com nome A2A. Não há
+      superfície JSON-RPC 2.0, nem `message/send`, `tasks/get` ou `tasks/resubscribe`,
+      que o [ADR 02.1](decisoes/02-orquestracao.md) cita nominalmente. O Agent Card
+      traz `capabilities` como array de strings e o SSE carrega `EventEnvelope` do Hub,
+      não eventos de task do protocolo. **Um peer que fale A2A de verdade não conversa
+      com isto.** Decidir: implementar JSON-RPC ou renomear para o que é
+- [x] **Motor de workflows declarativos em YAML** — validação E execução.
+      A execução era o defeito mais grave da vistoria: o laço dava `await` em
+      `startSession`, que é assíncrona por contrato, então esperava a sessão
+      *nascer* e não o passo *terminar*; tudo disparava junto e o `dependsOn` era
+      decorativo. Agora `runWorkflow` vive em `packages/core/src/workflow.ts`, em
+      forma pura com dependências injetadas (mesmo remédio de `resilience.ts`), e
+      garante:
+      - o lote inteiro chega a **estado terminal** antes de o próximo começar;
+      - **fan-in real** pelo campo `upstream` do Brief — o resumo do passo anterior
+        entra no prompt do seguinte, e **não** no `objective`, que alimenta o
+        `objectiveHash` da detecção de ciclo;
+      - dependência que não conclui **pula** o dependente, transitivamente;
+      - **`--budget-usd` passou a ser lido**: o saldo é repartido entre os passos de
+        um lote antes do despacho, então a soma dos tetos nunca passa do que sobrou;
+      - aprovação pendente e estouro de espera são desfechos próprios (`blocked`,
+        `timeout`) — a sessão continua viva no daemon e o relatório diz onde ela está.
+      11 testes novos; verificado também contra o daemon real
+- [x] **Handoff de sessão**: transferência de controle em tempo de execução entre
+      agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI
+      `hub handoff` e MCP tool `hub_session_handoff`. **Ressalva: nunca executado fora
+      do teste unitário** — zero eventos `session.handoff` no banco
 - [x] **Validação por revisão cruzada** (segundo agente revisa o resultado do primeiro) — implementada na fase 2
-- [x] **Painel de custos com projeção e alertas de orçamento**: cálculo de burn rate (`project()`), disparador de limiar (`isWarning`), evento `budget.warning`
+- [~] **Painel de custos com projeção e alertas de orçamento**: `project()` e
+      `isWarning` existem, e o painel mostra taxa de queima e aviso de 80%. Mas
+      `projectedUsd`/`projectedTokens` **não são exibidos**, o evento `budget.warning`
+      é o **único tipo do vocabulário sem emissor**, e a projeção usa
+      `consumed.seconds`, que só é liquidado no `settle()` do fim da run — ou seja,
+      ela não existe enquanto seria útil
 - [ ] Isolamento por container como modo opcional (`isolation: container`)
 - [ ] ACP: expor o Hub como agente dentro de Zed/JetBrains/Neovim
+
+## Fase 4 — Cobertura da frota
+
+O que o usuário pediu desde o primeiro dia e **nunca virou item de plano**. Não é
+funcionalidade nova: é provar, agente por agente, o que o código já permite em tese. A
+[§5 do doc 07](07-progresso-real.md) mede isto e a foto é dura — 2 de 9 agentes com
+supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
+
+- [ ] **`hub doctor --smoke`**: abre uma sessão trivial com cada agente instalado e
+      registra o resultado. **6 dos 9 agentes nunca executaram nada pelo Hub**, e a
+      pergunta "qualquer um pode ser o principal?" só tem hoje resposta por ausência
+- [ ] **`modeArgs` para os 7 agentes que não têm**: existe só em `claude.yaml` e
+      `codex.yaml`. Nos outros, `supervised` não restringe nada no próprio agente — e
+      copilot, kimi, mimo e antigravity declaram `supervised` como padrão. Onde o CLI
+      não oferecer equivalente, a UI precisa dizer isso, não silenciar
+- [ ] **`session.idFrom` é declarado no schema e lido por ninguém**: Cursor e MiMo
+      prometem `session.strategy: native` que o mapper genérico nunca cumpre — todo
+      turno seguinte cai em replay. Ou o adapter passa a ler `idFrom`, ou a promessa
+      sai do manifesto
+- [ ] **`openclaude` como cidadão pleno**: fora de `MCP_TARGETS` (logo, não pode ser
+      orquestrador externo), fora de `HOOK_TARGETS` e fora das cadeias de fallback
+- [ ] **Provar profundidade 2** (A→B→C): `maxDepth` é 3 e a profundidade máxima já
+      atingida na vida do repositório é **1**. Detecção de ciclo e herança de política
+      em segundo nível nunca foram exercidas num fluxo real
+- [ ] **Matriz de pares A→B** para os pares que importam: todo destino já delegado foi
+      o Codex, e 3 dos 4 chamadores eram sessões adotadas do harness de fumaça
+- [ ] **Verificar os caminhos de config de MCP**: 5 dos 8 são palpite (`hub mcp` já os
+      marca como não confirmados). É o mesmo trabalho que a verificação de manifestos
+      fez em `470a605` e que revelou 3 erros em 3
+- [ ] **Dono para a tabela de preços** (`core/pricing.ts`): dependência externa que
+      muda sozinha e sustenta todo o orçamento em dólares dos agentes que só reportam
+      tokens. Hoje ninguém a mantém
+
+## Fase 5 — Endurecimento operacional
+
+O que quebra quando o daemon roda por dias em vez de por trinta segundos. A
+vistoria está em [`08-endurecimento.md`](08-endurecimento.md), que também
+registra o achado que organiza todos os outros: **o commit de topo de `main` não
+compilava**, e o `npm test` coletava 3 dos 30 arquivos de teste quando rodado em
+bash. Nenhuma das duas coisas era sabida, porque nenhuma máquina compilava o
+repositório do zero antes de aceitar mudança.
+
+### Concluído em 2026-09-18
+
+- [x] **Portão de qualidade**: `scripts/run-tests.mjs` (descoberta em JavaScript,
+      idêntica em todo shell), CI no GitHub Actions com `npm ci` + build limpo +
+      suíte em Windows/Node 22.5 e 24, e `npm run verify` como espelho local.
+      Linux entra como job **informativo** — o Hub nunca rodou nessa plataforma
+- [x] **Critério de pronto** em [`CONTRIBUTING.md`](../CONTRIBUTING.md), com o
+      vocabulário `[x] / [~] / 🕳️ / [ ]` que o doc 07 inaugurou
+- [x] **Build consertado**: três identificadores nunca escritos e um `await`
+      esquecido que fazia o gate pré-execução **falhar aberto**
+- [x] **Lock de instância pela porta**: `hub.start()` liga a porta antes de
+      reconciliar. Um segundo daemon declarava mortas as sessões vivas do
+      primeiro e só depois descobria que a porta estava ocupada
+- [x] **Rede de segurança de processo** (`safety-net.ts`): `unhandledRejection`
+      registra sem derrubar, `uncaughtException` derruba de forma ordenada
+- [x] **Desligamento confiável**: `killTree` esperado (era fire-and-forget antes
+      do `process.exit`, deixando a árvore do agente gastando token),
+      `allSettled` em vez de `all`, e espera dos pumps antes de fechar o banco
+- [x] **Vazamento de memória** em `#ledgers` / `#seeded` / `#models`
+- [x] **Daemon deixou de ser cego**: o autostart escreve em
+      `~/.agents-hub/logs/`, que a config criava vazio desde sempre
+
+### Restante
+
+Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
+
+- [x] **Drenar o stderr do `opencode serve`** — `createInterface` sobre
+      `child.stderr`, ecoado como `[opencode serve] <linha>`. Achou dois
+      problemas a mais no caminho, os dois verificados contra o binário real
+      (`opencode.cmd` desta máquina, cujo caminho tem espaço — `C:\Users\Bruno
+      Silva\...`):
+      - **`#bootServer` nunca quotava o caminho pro `shell: true`**: o
+        autostart do OpenCode FALHAVA SEMPRE em qualquer máquina com espaço
+        no perfil do usuário — não era um caso raro, era o caso comum no
+        Windows. Reproduzido isolado contra o `opencode.cmd` real antes da
+        correção (`'C:\Users\Bruno' não é reconhecido...`), corrigido com o
+        mesmo `quoteForShell` que `process-adapter.ts` já usa;
+      - **`close()` matava o `cmd.exe` antes do `taskkill /T`**: a ordem
+        errada deixava o `node.exe` real do servidor reparentado e vivo — o
+        `/T` precisa do pai ainda de pé pra andar a árvore. Mesma classe de
+        achado do `killTree` já corrigido em `process-adapter.ts`, replicada
+        aqui como `killServerTree`.
+      Teste de integração cobrindo o dreno (`packages/adapters/src/opencode/adapter.test.ts`,
+      binário falso — o bloqueio em si não reproduziu de forma determinística
+      neste Windows, então o teste prova o que É determinístico: que o Hub
+      drena de verdade, não só declara `pipe`). **Exercido contra o binário
+      real**: `hub start --agent opencode` de ponta a ponta nesta máquina —
+      autostart do `opencode serve` real, sessão completa, turno concluído
+      ("teste ok", US$0, 3.5k tokens), `close()` sem processo órfão depois
+- [ ] **Retenção de eventos**: a tabela cresce para sempre com `payload_json` e
+      `raw_json`, sem `DELETE` nem `VACUUM`, enquanto reaper e reconciliação
+      fazem full scan. O ADR 06.3 decidiu "eventos para sempre" — e essa decisão
+      precisa ser reexaminada ou ganhar compactação do `raw`
+- [ ] **Matar a árvore no portão de validação**: `child.kill()` com `shell: true`
+      deixa o `npm`/`node` filho vivo a cada timeout
+- [ ] **Validar a config com Zod** (o projeto já usa em todo o resto) e trocar o
+      merge raso de `policy` por profundo — hoje ligar a revisão no arquivo
+      global apaga `command` do default
+- [ ] **Validar as variáveis de ambiente** e documentar as cinco que não estão em
+      lugar nenhum. `AGENTS_HUB_PORT=abc` faz o Node escutar numa porta aleatória
+- [ ] **`.on('error')` nos quatro `spawn`** que não têm, e callback no
+      `stdin.write` (EPIPE quando o CLI sai antes de consumir)
+- [ ] **PID por sessão no schema**: a reconciliação corrige o registro na subida
+      e não mata os processos que sobreviveram ao crash, porque não sabe quais são
+- [ ] **Keep-alive e `id:` no SSE do A2A**, try/catch no keep-alive do `/events`,
+      e teto de conexões com backpressure
+- [ ] **`since` inválido no SSE** devolvendo 200 com zero linhas; truncamento de
+      replay em 500 eventos sem sinal de que truncou
+- [ ] **Emissor para `budget.warning`** — único tipo do vocabulário sem nenhum — e
+      projeção que funcione **durante** a run (hoje `elapsedSeconds` só é liquidado
+      no fim, então o burn rate nunca aparece com a sessão viva)
+- [ ] **Limpar os prompts em `tmpdir`** (um arquivo por spawn, para sempre) e pôr
+      `maxBuffer` nos `execFileAsync` de `worktree.ts`
+- [ ] **Sinalizar o que hoje é engolido em silêncio**: YAML de projeto quebrado
+      caindo na política global, `git worktree remove` que falhou virando "kept"
+      implícito, junction de `node_modules` não criado
+- [ ] **Teto no `AsyncQueue`**, que hoje cresce sem limite contra um consumidor
+      que faz escrita SQLite síncrona por evento
+
+### Decidido aqui
+
+| Tema | Decisão | Por quê |
+|---|---|---|
+| Lock de instância | **A porta**, não pidfile | O sistema operacional já garante exclusividade em `127.0.0.1:4747`. Arquivo de lock traz problema próprio (lock órfão após crash) sem resolver nada que a porta não resolva |
+| `unhandledRejection` | **Não derruba** | A origem é quase sempre uma sessão específica; matar o daemon inteiro é o dano que se quer evitar. `uncaughtException` derruba, porque ali o estado do processo é suspeito de verdade |
+| Linux | **Informativo até provar** | O Hub nunca rodou nessa plataforma. Marcar suporte antes de ter prova é o mesmo erro que este documento trata |
+
+## Incorporado ao produto sem passar pelo plano
+
+Construído, testado e em uso — o plano é que ficou para trás. Fica registrado para que
+nada aqui seja tratado como acidente na próxima vistoria.
+
+| O que existe | Onde |
+|---|---|
+| `openclaude`, o 9º agente | `manifests/openclaude.yaml`, mapper do Claude reusado |
+| `hub_agent_wait`, a 12ª tool MCP | `packages/mcp/src/server.ts` |
+| Daemon que sobe sozinho, `hub` no PATH e **reconciliação de estado na subida** | `661db71`; 5 testes |
+| Captura de diff + artefatos persistidos | o que fez `TaskResult.artifacts` deixar de ser sempre `[]` |
+| Precificação estimada por tabela de modelos | `core/pricing.ts` (929 linhas) |
+| `conversation.ts` / `rebuildConversation` | sustenta handoff e todo agente sem id nativo |
+| `hub hooks` como comando | o plano falava do gate, não de quem o instala |
+| `review-verdict.ts` | leitura do veredito com acento, caixa e ambiguidade |
+| Projetos multipasta, memória e prompts por projeto, modelo local por agente | `1d27378`, `1568988`, `f8727e9`, `32eb1be` |
+
+## Dívida conhecida, ainda não atacada
+
+- [ ] **`session-manager.ts` tem 2258 linhas** — quase o dobro do segundo maior arquivo.
+      Acumula sessões, tarefas, orçamento, portão de política, vigilância, resiliência,
+      revisão, diff, projetos, pastas e contexto. Não é bug; é onde os bugs se escondem.
+      Os três esquecimentos do invariante de estado terminal (`3f40028`) aconteceram
+      exatamente por isso
+- [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
+- [ ] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
+      `settle`) e o teto de sessões simultâneas nunca foram testados com chamadas
+      concorrentes
+- [ ] `pause` tem rota HTTP e não tem comando na CLI
+- [ ] O painel não expõe `workflow`, `prune`, `mcp` nem `hooks`
 
 ## Decisões ainda em aberto
 

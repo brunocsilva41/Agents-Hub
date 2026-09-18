@@ -17,6 +17,11 @@ export interface Hub {
   sessions: SessionManager;
   reaper: WorktreeReaper;
   server: HubServer;
+  /**
+   * Coloca o daemon no ar: liga a porta, reconcilia o que ficou para trás e
+   * começa a recolher worktree. Nesta ordem, e a ordem é a razão de existir.
+   */
+  start(): Promise<{ host: string; port: number }>;
   shutdown(): Promise<void>;
 }
 
@@ -48,20 +53,6 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const reaper = new WorktreeReaper(store, worktrees, config.retention);
   const server = new HubServer(config, sessions, registry, bus, reaper);
 
-  // Antes de qualquer coisa: o que ficou marcado como vivo por um daemon que
-  // já morreu não está vivo. Sem isto, sessão zumbi se acumula para sempre.
-  const reconciliado = sessions.reconcileOnStartup();
-  if (reconciliado.encerradas > 0) {
-    console.error(
-      `reconciliação: ${reconciliado.encerradas} sessão(ões) órfã(s) de daemon anterior encerrada(s)` +
-        (reconciliado.revividas > 0
-          ? `, ${reconciliado.revividas} mantida(s) aguardando sua aprovação`
-          : ''),
-    );
-  }
-
-  reaper.start();
-
   const hub: Hub = {
     config,
     store,
@@ -70,6 +61,47 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
     sessions,
     reaper,
     server,
+
+    /**
+     * A porta É o lock de instância — e por isso ela vem primeiro.
+     *
+     * Reconciliar antes de ligar a porta era o bug mais destrutivo do daemon.
+     * `reconcileOnStartup` marca como `killed` toda sessão que o banco diz
+     * `running`, partindo da premissa de que "quem as rodava morreu". Rodando
+     * ANTES do `listen`, essa premissa é falsa sempre que já existe um daemon
+     * vivo: bastava um `hub daemon` a mais — ou uma corrida do autostart —
+     * para o segundo processo abrir o mesmo banco, declarar mortas as sessões
+     * que o primeiro estava rodando normalmente, e só então descobrir, no
+     * `listen`, que a porta estava ocupada. Ele morria; o estrago ficava. O
+     * painel mostrava sessões mortas, o reaper passava a considerar os
+     * worktrees delas recolhíveis, e os processos seguiam gastando token sem
+     * dono.
+     *
+     * Ligar a porta primeiro resolve sem inventar arquivo de lock nem PID: o
+     * sistema operacional já garante que só um processo segura 127.0.0.1:4747.
+     * Quem perde a disputa falha em `listen` e sai sem ter tocado no banco.
+     */
+    async start() {
+      const endereco = await server.listen();
+
+      const reconciliado = sessions.reconcileOnStartup();
+      if (reconciliado.encerradas > 0) {
+        console.error(
+          `reconciliação: ${reconciliado.encerradas} sessão(ões) órfã(s) de daemon anterior encerrada(s)` +
+            (reconciliado.revividas > 0
+              ? `, ${reconciliado.revividas} mantida(s) aguardando sua aprovação`
+              : ''),
+        );
+      }
+
+      // Depois da reconciliação, nunca antes: o reaper decide o que recolher
+      // olhando `endedAt`, e recolher worktree de sessão que ainda não foi
+      // classificada seria apagar trabalho vivo.
+      reaper.start();
+
+      return endereco;
+    },
+
     async shutdown() {
       reaper.stop();
       await sessions.shutdown();

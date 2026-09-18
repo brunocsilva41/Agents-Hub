@@ -159,6 +159,7 @@ não houvesse gate nenhum, e o Hub não finge o contrário. Por isso uma sessão
 `--mode supervised` do Codex é **recusada ao iniciar** se o bypass não estiver
 ligado nesta máquina, em vez de rodar sem a prevenção que o modo promete;
 `semi`/`autonomous` rodam sem o bypass, mas com aviso explícito na timeline.
+Detalhes do modelo de ameaça em [SECURITY.md](SECURITY.md).
 
 Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) interrompe; sair da allow list vira alerta na timeline. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero.
 
@@ -187,12 +188,24 @@ O projeto só pode **apertar** a política global, nunca afrouxar — senão um 
 
 Cada escolha estrutural está registrada como ADR em [docs/decisoes/](docs/decisoes/), com a consequência que ela impõe. A pesquisa de mercado que embasou o desenho está em [docs/00-pesquisa-mercado.md](docs/00-pesquisa-mercado.md).
 
-## Testes
+## Testes e portão de qualidade
 
 ```bash
-node --test packages/core/dist/*.test.js   # domínio: 28 testes
-python scripts/mcp-smoke.py                # MCP, só leitura, sem custo
-python scripts/mcp-smoke.py --delegate codex   # delega de verdade (gasta tokens)
+npm run verify     # o que o CI roda: build completo + a suíte inteira
+npm test           # só a suíte — 273 testes em 30 arquivos
 ```
 
+`npm run verify` é o mesmo comando que o CI executa em Windows com Node 22.5 e 24. Se passa na sua máquina e falha lá, é bug do portão e tem prioridade.
+
+A descoberta dos arquivos de teste é feita em JavaScript (`scripts/run-tests.mjs`), não por glob de shell — a forma anterior coletava 30 arquivos no PowerShell e **3** no bash, saindo verde nos dois casos. Um portão que protege menos do que diz proteger é pior que nenhum. A história está em [docs/08-endurecimento.md](docs/08-endurecimento.md).
+
 Os testes de domínio cobrem o que não pode quebrar em silêncio: não-escalação de privilégio, herança de orçamento e detecção de ciclo no grafo de delegação.
+
+Contra os agentes de verdade, que gastam tokens:
+
+```bash
+python scripts/mcp-smoke.py                    # MCP, só leitura, sem custo
+python scripts/mcp-smoke.py --delegate codex   # delega de verdade
+```
+
+Como contribuir, e o que precisa ser verdade para um item do roadmap receber `[x]`: [CONTRIBUTING.md](CONTRIBUTING.md). Modelo de ameaça e o que o Hub explicitamente **não** garante: [SECURITY.md](SECURITY.md).

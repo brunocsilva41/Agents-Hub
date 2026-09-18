@@ -139,7 +139,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
     const internal = this.#handles.get(handle.id);
     if (!internal) return;
     internal.canceled = true;
-    killTree(internal.child);
+    // Espera de verdade: quem chama `cancel` no desligamento do daemon precisa
+    // que a árvore esteja morta antes de o processo sair.
+    await killTree(internal.child);
   }
 
   async #spawnRun(
@@ -252,7 +254,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
         nativeSessionId: discoveredNativeId,
         tail: tail.join('\n'),
       });
-      killTree(child);
+      // `void` deliberado: o turno já foi liquidado acima, e quem estourou o
+      // timeout não espera o kill terminar para seguir.
+      void killTree(child);
     }, ctx.timeoutSeconds * 1000);
 
     const armHeartbeat = (): void => {
@@ -266,7 +270,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
           nativeSessionId: discoveredNativeId,
           tail: tail.join('\n'),
         });
-        killTree(child);
+        void killTree(child);
       }, ctx.heartbeatSeconds * 1000);
     };
 
@@ -371,15 +375,53 @@ function applyTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => vars[key] ?? '');
 }
 
-function killTree(child: ChildProcessWithoutNullStreams): void {
-  if (child.killed || child.pid === undefined) return;
-  if (process.platform === 'win32') {
-    // O CLI costuma ser um shim que abre um processo filho; sem /T o agente
-    // real sobrevive ao "cancelamento" e continua gastando tokens.
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-  } else {
+/**
+ * Mata a árvore de processos do agente — e **espera** ela morrer.
+ *
+ * O `await` não é zelo: no Windows o kill é um processo externo (`taskkill`), e
+ * quem chamava isto no desligamento do daemon seguia direto para
+ * `process.exit(0)`. O `taskkill` podia nem ter sido agendado. Resultado: o
+ * daemon morria, a árvore do agente sobrevivia, continuava gastando token e
+ * escrevendo no worktree — e não restava nada no sistema capaz de pará-la,
+ * porque o Hub não guarda PID em lugar nenhum.
+ *
+ * Resolve com o que houver: se `taskkill` não estiver no PATH, o `'error'`
+ * seria emitido num ChildProcess sem listener, o que no Node é exceção não
+ * tratada. Cair para `SIGKILL` é pior que `/T` (só mata o shim) e melhor que
+ * derrubar o daemon.
+ */
+function killTree(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.killed || child.pid === undefined) return Promise.resolve();
+
+  if (process.platform !== 'win32') {
     child.kill('SIGKILL');
+    return Promise.resolve();
   }
+
+  // O CLI costuma ser um shim que abre um processo filho; sem /T o agente
+  // real sobrevive ao "cancelamento" e continua gastando tokens.
+  return new Promise((resolve) => {
+    const matador = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+    });
+
+    let resolvido = false;
+    const encerrar = (): void => {
+      if (resolvido) return;
+      resolvido = true;
+      resolve();
+    };
+
+    matador.on('error', () => {
+      child.kill('SIGKILL');
+      encerrar();
+    });
+    matador.on('exit', encerrar);
+
+    // Teto: o desligamento não pode ficar preso num `taskkill` que não volta.
+    const limite = setTimeout(encerrar, 5_000);
+    limite.unref();
+  });
 }
 
 async function runToCompletion(
