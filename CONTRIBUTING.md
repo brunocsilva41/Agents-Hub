@@ -140,7 +140,12 @@ Quando o commit conserta algo, o corpo diz **como aquilo passava despercebido**.
 - [ ] Nenhum item de roadmap marcado `[x]` sem as cinco linhas do critério de pronto
 - [ ] Se mudou comportamento documentado, o documento mudou junto
 
-O CI roda Windows (Node 22.5 e 24) como portão. O job de Linux é
-**informativo** — o Hub nunca foi executado nessa plataforma, e ele existe para
-descobrir o que falta, não para bloquear. Ele deixa de ser informativo no dia em
-que passar de forma consistente.
+O CI roda Windows (Node 22.5 e 24) como portão, com um job
+`portão-de-qualidade` que agrega as duas combinações — é ele, e só ele, que a
+proteção de branch deve exigir (checks nomeados por combinação de matriz
+quebram silenciosamente toda vez que a matriz muda). Os jobs de Linux e de
+auditoria de dependências são **informativos** — o Hub nunca foi executado no
+Linux, e a auditoria de CVE em dependência transitiva ainda não tem uma
+política decidida sobre o que bloqueia e o que espera — e existem para
+descobrir o que falta, não para bloquear. Cada um deixa de ser informativo no
+dia em que passar de forma consistente / a política for decidida.

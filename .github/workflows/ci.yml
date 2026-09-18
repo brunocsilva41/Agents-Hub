@@ -8,7 +8,18 @@
 #
 # A regra que este arquivo institui é uma só: nenhuma mudança entra em `main`
 # sem que uma máquina que não é a sua tenha compilado do zero e rodado a suíte
-# inteira.
+# inteira — nas DUAS versões de Node que o projeto declara suportar. A segunda
+# parte importa tanto quanto a primeira: em 2026-09-18 esta suíte ficou verde
+# no Node 24 (usado no dia a dia) e vermelha no Node 22.5 (o piso declarado em
+# `engines`) por um bug real do `node:sqlite` — `.get()` sem nenhuma linha
+# casando devolvia uma linha fantasma em vez de `undefined`, só corrigido em
+# versão posterior do runtime. Testar um único Node teria deixado o piso virar
+# ficção, exatamente o erro que este comentário já advertia antes de acontecer.
+#
+# ATENÇÃO: um job vermelho aqui só protege `main` se a branch tiver proteção
+# exigindo o check `portão de qualidade` antes de aceitar merge. O workflow
+# sozinho não bloqueia nada — quem clona este repositório e configura
+# `Settings > Branches > Branch protection rules` é quem liga a trava.
 name: CI
 
 on:
@@ -28,7 +39,9 @@ jobs:
   # Windows é a plataforma onde este projeto foi desenvolvido e validado contra
   # os binários reais dos agentes, e onde moram as partes que mais dependem do
   # sistema (junction em vez de symlink, `taskkill` para matar árvore de
-  # processo). É por isso que ele é o job bloqueante.
+  # processo, quoting de linha de comando do `cmd.exe`). É por isso que ele é
+  # o job bloqueante, e por isso as duas versões de Node rodam em paralelo,
+  # sem `fail-fast`: uma quebrar não deve esconder o resultado da outra.
   verificar:
     name: build + testes (Windows, Node ${{ matrix.node }})
     runs-on: windows-latest
@@ -36,8 +49,9 @@ jobs:
       fail-fast: false
       matrix:
         # 22.5 é o piso declarado em `engines` — é onde `node:sqlite` ainda
-        # exige `--experimental-sqlite`. 24 é o que se usa no dia a dia.
-        # Testar os dois é o que impede o piso de virar ficção.
+        # exige `--experimental-sqlite` e onde bugs da API experimental (como
+        # o de `.get()` acima) aparecem primeiro. 24 é o que se usa no dia a
+        # dia. Testar os dois é o que impede o piso de virar ficção.
         node: ['22.5', '24']
     steps:
       - uses: actions/checkout@v4
@@ -53,22 +67,46 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      # Checkout limpo, sem `dist/` nem `.tsbuildinfo` — que é exatamente a
+      # Separado de "compilar a Web UI": um erro de tipo num pacote do
+      # backend e um erro do `vite build` no frontend são causas diferentes,
+      # e um checkout limpo (sem `dist/` nem `.tsbuildinfo`) é exatamente a
       # condição em que o build quebrado passou despercebido na máquina de
       # quem o escreveu, onde o cache incremental do `tsc -b` escondia o erro.
-      - name: Compilar (pacotes + Web UI)
-        run: npm run build
+      - name: Compilar pacotes (typecheck real, checkout limpo)
+        run: npm run build:packages
 
+      - name: Compilar Web UI
+        run: npm run build --workspace @agents-hub/web
+
+      # Depois do build, não antes: os testes importam `dist/*.test.js`
+      # compilado, não os fontes — rodar isolado do passo de build garante que
+      # o veredito de "testes" nunca mascara um build que já tinha falhado.
       - name: Testes
         run: npm test
 
+      # `npm ci`, `build` e `test` não deveriam sujar nada que o git rastreia
+      # — se sujaram, ou um artefato deixou de estar no `.gitignore`, ou um
+      # script está escrevendo onde não devia. Barato de checar, caro de
+      # descobrir manualmente depois.
+      - name: Checkout continua limpo depois do build e dos testes
+        shell: bash
+        run: |
+          sujeira="$(git status --porcelain)"
+          if [ -n "$sujeira" ]; then
+            echo "::error::build/test alterou arquivos rastreados pelo git — artefato sem .gitignore ou script escrevendo fora de dist/"
+            echo "$sujeira"
+            exit 1
+          fi
+
   # ------------------------------------------------------- informativo, ainda
   # O Hub nunca foi executado no Linux. Este job existe para descobrir o que
-  # falta, não para bloquear quem trabalha — por isso `continue-on-error`.
+  # falta, não para bloquear quem trabalha — por isso `continue-on-error` e
+  # por isso ele NÃO entra na lista de checks que `portao-de-qualidade` exige.
   #
   # Ele deixa de ser informativo no dia em que passar de forma consistente:
-  # aí `continue-on-error` sai daqui e o Linux vira plataforma suportada de
-  # verdade. Marcar como suportado antes disso seria promessa sem lastro.
+  # aí `continue-on-error` sai daqui, ele entra em `needs` do portão, e o
+  # Linux vira plataforma suportada de verdade. Marcar como suportado antes
+  # disso seria promessa sem lastro.
   explorar-linux:
     name: build + testes (Linux, informativo)
     runs-on: ubuntu-latest
@@ -82,3 +120,49 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  # --------------------------------------------------- informativo, de novo
+  # Dependência transitiva com CVE conhecido é dívida que se acumula em
+  # silêncio se ninguém olhar. Não bloqueia: subir a severidade para
+  # bloqueante exige decidir uma política (que CVE aceita esperar, qual não)
+  # que este workflow não tem autoridade para decidir sozinho — mas reportar
+  # a cada push é o que impede a dívida de ficar invisível.
+  auditoria-dependencias:
+    name: auditoria de dependências (informativo)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev
+
+  # ------------------------------------------------------------ o único gate
+  # Branch protection no GitHub exige checks pelo NOME — e o nome de cada
+  # combinação da matriz de `verificar` muda se alguém adicionar ou remover
+  # uma versão de Node (`build + testes (Windows, Node 23)`, por exemplo).
+  # Exigir cada combinação por nome quebraria silenciosamente toda vez que a
+  # matriz mudasse, deixando novas combinações sem proteção até alguém
+  # lembrar de reconfigurar `Settings > Branches`.
+  #
+  # Este job resolve isso: é o ÚNICO check que a proteção de branch precisa
+  # exigir. Ele espera a matriz inteira (`needs: verificar`, que no GitHub
+  # Actions significa TODAS as combinações, não uma) e falha se qualquer uma
+  # falhou — `explorar-linux` e `auditoria-dependencias` ficam de fora de
+  # propósito, porque são informativos, não bloqueantes.
+  portao-de-qualidade:
+    name: portão de qualidade
+    if: always()
+    needs: [verificar]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Falhar se alguma combinação de "verificar" falhou
+        run: |
+          if [ "${{ needs.verificar.result }}" != "success" ]; then
+            echo "::error::build+testes falhou em pelo menos uma combinação de Node — ver o job 'verificar' acima"
+            exit 1
+          fi
+          echo "todas as combinações de build+testes passaram"
