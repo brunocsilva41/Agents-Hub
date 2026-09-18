@@ -280,9 +280,18 @@ funcionalidade nova: é provar, agente por agente, o que o código já permite e
 [§5 do doc 07](07-progresso-real.md) mede isto e a foto é dura — 2 de 9 agentes com
 supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
 
-- [ ] **`hub doctor --smoke`**: abre uma sessão trivial com cada agente instalado e
-      registra o resultado. **6 dos 9 agentes nunca executaram nada pelo Hub**, e a
-      pergunta "qualquer um pode ser o principal?" só tem hoje resposta por ausência
+- 🕳️ **`hub doctor --smoke`**: abre uma sessão trivial com cada agente instalado e
+      registra (processo subiu, `turn.completed` chegou, custo e `nativeSessionId`
+      foram capturados). Implementado em `packages/cli/src/doctor-smoke.ts`
+      (`smokeTestAgent`/`smokeTestAll`, concorrência 2 — mesma justificativa de
+      `Registry.probeAll`) e ligado à CLI em `hub doctor --smoke`
+      (`packages/cli/src/main.ts`), com aviso de custo real antes de rodar
+      (Copilot fatura em créditos, os demais em USD estimado). Coberto por 4 testes
+      unitários contra um daemon HTTP falso (`doctor-smoke.test.ts`) — **nunca
+      rodado contra um binário real nesta tarefa**, de propósito: gasta
+      tokens/créditos reais de até 9 provedores e exigiria autorização explícita
+      por execução, não por implementação. Continua **6 dos 9 agentes nunca
+      executaram nada pelo Hub** até alguém rodar o comando de verdade
 - [ ] **`modeArgs` para os 7 agentes que não têm**: existe só em `claude.yaml` e
       `codex.yaml`. Nos outros, `supervised` não restringe nada no próprio agente — e
       copilot, kimi, mimo e antigravity declaram `supervised` como padrão. Onde o CLI
@@ -291,8 +300,19 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
       prometem `session.strategy: native` que o mapper genérico nunca cumpre — todo
       turno seguinte cai em replay. Ou o adapter passa a ler `idFrom`, ou a promessa
       sai do manifesto
-- [ ] **`openclaude` como cidadão pleno**: fora de `MCP_TARGETS` (logo, não pode ser
-      orquestrador externo), fora de `HOOK_TARGETS` e fora das cadeias de fallback
+- [~] **`openclaude` como cidadão pleno**: entrou em `MCP_TARGETS`
+      (`packages/cli/src/mcp-install.ts`), `HOOK_TARGETS`
+      (`packages/cli/src/hooks-install.ts`) e nas cadeias de fallback por
+      capability que o Claude já tinha (`DEFAULT_POLICY.fallback`,
+      `packages/core/src/policy.ts`) — por herança das mesmas capabilities do
+      manifesto (`code-edit`, `refactor`, `test-writing`, `code-review`, `debug`,
+      `shell`), sempre depois dos agentes já comprovados na cadeia. **Entrega
+      menos do que "pleno" sugere**: as três entradas nascem com `verified: false`
+      e comentário explícito — caminho de config (`.mcp.json`, `~/.openclaude/settings.json`)
+      e formato de hook são palpite por ser fork do Claude Code, nunca confirmado
+      contra o binário do `openclaude`. Confirmar isso é o mesmo trabalho que a
+      verificação de manifestos já fez para os outros 8 (ver item de "verificar
+      caminhos de config de MCP" abaixo) — só depois disso o item vira `[x]`
 - [ ] **Provar profundidade 2** (A→B→C): `maxDepth` é 3 e a profundidade máxima já
       atingida na vida do repositório é **1**. Detecção de ciclo e herança de política
       em segundo nível nunca foram exercidas num fluxo real

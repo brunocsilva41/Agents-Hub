@@ -42,6 +42,7 @@ import {
   writeConfig,
 } from './mcp-install.js';
 import { workflowCommand } from './workflow-cmd.js';
+import { smokeTestAll, type SmokeOutcome } from './doctor-smoke.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
 const NEWLINE = String.fromCharCode(10);
@@ -57,7 +58,7 @@ interface Args {
  * consome o objetivo como valor de `--detach` e o comando falha dizendo que
  * faltou o objetivo — que estava lá o tempo todo.
  */
-const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write']);
+const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke']);
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -113,6 +114,7 @@ ${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar
 
 ${bold('Agentes')}
   hub doctor                        checa quais agentes estão instalados
+  hub doctor --smoke                abre sessão real em cada agente instalado (GASTA TOKENS/CRÉDITOS)
   hub agents                        lista agentes, capabilities e limitações
 
 ${bold('Projetos')}
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
         console.log(JSON.stringify(await client.health(), null, 2));
       });
     case 'doctor':
-      return withDaemon(() => doctor(client));
+      return withDaemon(() => doctor(client, args));
     case 'agents':
       return withDaemon(() => listAgents(client));
     case 'projects':
@@ -458,7 +460,7 @@ async function withDaemon(fn: () => Promise<void>): Promise<void> {
 
 // ---------------------------------------------------------------- comandos
 
-async function doctor(client: HubClient): Promise<void> {
+async function doctor(client: HubClient, args: Args): Promise<void> {
   console.log(dim('checando agentes…\n'));
   const { probes } = await client.probeAgents();
   const { agents } = await client.agents();
@@ -483,6 +485,58 @@ async function doctor(client: HubClient): Promise<void> {
       'Autenticação não é verificada aqui: checar custaria uma chamada real ao provedor.',
     )}`,
   );
+
+  if (args.flags['smoke'] === true) {
+    await doctorSmoke(client, args, probes);
+  }
+}
+
+/**
+ * `hub doctor --smoke`: abre uma sessão real com cada agente instalado, em
+ * vez de só localizar o binário. A flag já é opt-in explícito — isto NUNCA
+ * roda de graça dentro do `doctor` normal, e não deve entrar em CI.
+ */
+async function doctorSmoke(client: HubClient, args: Args, probes: ProbeSummary[]): Promise<void> {
+  const ids = probes.filter((p) => p.installed).map((p) => p.agentId);
+  if (ids.length === 0) {
+    console.log(`\n${dim('nenhum agente instalado — nada para testar com --smoke.')}`);
+    return;
+  }
+
+  console.log(
+    `\n${bold(yellow('⚠ --smoke abre sessões REAIS'))} com ${ids.length} agente(s): ${ids.join(', ')}.`,
+  );
+  console.log(
+    dim(
+      'Isto gasta tokens/créditos de verdade em cada provedor a cada execução ' +
+        '(o Copilot fatura em créditos, não em dólares — confira seu plano). ' +
+        'Rodando com concorrência 2 para não atropelar antivírus/binários no Windows.',
+    ),
+  );
+  console.log();
+
+  const projectId = await resolveProjectId(client, args.flags['project']);
+  const outcomes = await smokeTestAll(client, ids, { projectId }, 2);
+
+  for (const outcome of outcomes) {
+    console.log(renderSmokeOutcome(outcome));
+  }
+
+  const ok = outcomes.filter((o) => o.finalState === 'completed').length;
+  console.log(`\n${ok} de ${outcomes.length} agentes completaram uma sessão real com sucesso.`);
+}
+
+function renderSmokeOutcome(outcome: SmokeOutcome): string {
+  const icon = outcome.finalState === 'completed' ? green('✓') : red('✗');
+  const flag = (v: boolean) => (v ? green('sim') : red('não'));
+  const linhas = [
+    `${icon} ${bold(outcome.agentId.padEnd(13))} processo:${flag(outcome.processStarted)}  ` +
+      `turn.completed:${flag(outcome.turnCompleted)}  custo:${flag(outcome.costCaptured)}  ` +
+      `nativeSessionId:${flag(outcome.nativeSessionIdCaptured)}`,
+  ];
+  if (outcome.finalState) linhas.push(`   ${dim(`estado final: ${outcome.finalState}`)}`);
+  if (outcome.error) linhas.push(`   ${yellow(outcome.error)}`);
+  return linhas.join(NEWLINE);
 }
 
 function statusIcon(probe: ProbeSummary): string {
