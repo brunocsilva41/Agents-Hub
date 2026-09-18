@@ -68,7 +68,10 @@ import {
 } from './project-config.js';
 import { captureBaseline, captureDiff, loadBaseline, persistDiff, saveBaseline } from './diff-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
-import { actionsOfToolCall, combineVerdicts } from './pretool-gate.js';
+import { actionsOfToolCall, combineVerdicts, resumoDaChamada } from './pretool-gate.js';
+
+/** Ver `SessionManager.gateWaitMs` — o porquê deste número mora lá. */
+const ESPERA_PADRAO_DO_GATE_MS = 60_000;
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
 
@@ -192,6 +195,28 @@ export class SessionManager {
   readonly #seeded = new Set<string>();
   /** Modelo declarado por sessão, para precificar os eventos que não o repetem. */
   readonly #models = new Map<string, string>();
+
+  /**
+   * Pumps em andamento. Cada um escreve no banco até drenar, então o
+   * desligamento precisa esperá-los antes de `store.close()`.
+   */
+  readonly #pumps = new Set<Promise<void>>();
+
+  /**
+   * Teto da espera do gate pré-execução por uma decisão humana.
+   *
+   * Existe porque o hook do agente tem timeout próprio e **mais curto**:
+   * esperar além dele não ganha nada — o agente já desistiu do nosso lado da
+   * conversa — e deixa a sessão presa em `waiting_approval` por uma resposta
+   * que não vai mais ser lida. 60s é o timeout padrão de hook do Claude Code,
+   * que é o único agente com o gate ligado hoje.
+   *
+   * Público e mutável de propósito: é o único jeito de um teste exercitar o
+   * caminho de timeout sem esperar um minuto. Ainda não é campo de config
+   * porque não existe caso de uso real para afrouxá-lo — quem precisa de mais
+   * tempo precisa, na verdade, de um modo de supervisão diferente.
+   */
+  gateWaitMs = ESPERA_PADRAO_DO_GATE_MS;
 
   constructor(
     private readonly config: HubConfig,
@@ -1368,9 +1393,44 @@ export class SessionManager {
   }
 
   /** Encerra tudo com ordem, para o daemon não deixar processo órfão. */
+  /**
+   * Encerra todas as runs vivas.
+   *
+   * `allSettled`, nunca `all`: com `all`, um único `cancel` que rejeitasse
+   * abortava o desligamento inteiro — e o que vem depois dele, na ordem do
+   * `hub.shutdown()`, é fechar o banco. Uma sessão problemática deixava o
+   * SQLite sem fechar e TODOS os outros filhos órfãos. O cancelamento de cada
+   * sessão é independente por natureza; tratá-lo como tudo-ou-nada só
+   * transformava uma falha pequena numa grande.
+   */
   async shutdown(): Promise<void> {
     const sessions = [...this.#runs.keys()];
-    await Promise.all(sessions.map((id) => this.cancel(id, 'daemon encerrando')));
+    const desfechos = await Promise.allSettled(
+      sessions.map((id) => this.cancel(id, 'daemon encerrando')),
+    );
+
+    for (const [i, desfecho] of desfechos.entries()) {
+      if (desfecho.status === 'rejected') {
+        console.error(
+          `[agents-hub] falha ao encerrar a sessão ${sessions[i]} no desligamento: ` +
+            `${desfecho.reason instanceof Error ? desfecho.reason.message : String(desfecho.reason)}`,
+        );
+      }
+    }
+
+    // Cancelar a run não encerra o pump: ele ainda drena o que restou do stream
+    // e escreve o desfecho no banco. Quem chama `shutdown()` fecha o store logo
+    // depois, então sair daqui antes disso deixaria escritas em voo contra um
+    // banco fechado — perdendo justamente o registro de como a sessão terminou.
+    //
+    // Com teto: um adapter cujo stream não fecha não pode segurar o
+    // desligamento para sempre. Perder o último evento é ruim; não desligar é pior.
+    if (this.#pumps.size > 0) {
+      await Promise.race([
+        Promise.allSettled([...this.#pumps]),
+        new Promise((r) => setTimeout(r, 5_000).unref()),
+      ]);
+    }
   }
 
   // ---------------------------------------------------------------- internos
@@ -1418,7 +1478,16 @@ export class SessionManager {
     });
 
     // O pump roda solto: quem chamou `start` não deve esperar o agente terminar.
-    void this.#pump(session, task, handle);
+    //
+    // Mas "solto" não é "esquecido": guardamos a promessa para que o
+    // desligamento consiga esperar o pump drenar antes de fechar o banco. Sem
+    // isto, `store.close()` acontecia com pumps ainda vivos, e a escrita
+    // seguinte falhava com "database is not open" — erro que, sem handler de
+    // `unhandledRejection`, derrubava o processo em vez de aparecer.
+    const drenando = this.#pump(session, task, handle).finally(() => {
+      this.#pumps.delete(drenando);
+    });
+    this.#pumps.add(drenando);
   }
 
   async #pump(session: Session, task: Task, handle: RunHandle): Promise<void> {
@@ -2010,6 +2079,27 @@ export class SessionManager {
     this.store.sessions.update(sessionId, { state, endedAt: nowIso() });
     this.bus.forgetSession(sessionId);
 
+    // Caches por sessão: sem isto, cada sessão encerrada deixava três entradas
+    // para sempre. O daemon é um processo de vida longa — é justamente onde um
+    // crescimento monotônico discreto termina em heap estourada depois de dias.
+    //
+    // Todos os três são cache, não estado: `#ledgers` se remonta do banco em
+    // `#ledger()`, `#seeded` volta a semear o `seq` na primeira emissão, e
+    // `#models` é reposto pelo próximo evento que declare modelo. Descartar é
+    // seguro; o que não é seguro é descartar cedo demais.
+    this.#seeded.delete(sessionId);
+    this.#models.delete(sessionId);
+
+    // `#ledgers` é chaveado pela RAIZ, não pela sessão: o orçamento é do fluxo
+    // inteiro (ADR 03) e os descendentes consomem do mesmo saldo. Só dá para
+    // esquecê-lo quando o fluxo todo acabou — soltar no fim de uma sessão
+    // qualquer faria os irmãos ainda vivos remontarem o ledger do banco no meio
+    // do consumo, perdendo a reserva que ainda não foi liquidada.
+    const irmaosVivos = this.store.sessions
+      .list({ rootId: session.rootId })
+      .some((s) => s.id !== sessionId && !isTerminalSessionState(s.state));
+    if (!irmaosVivos) this.#ledgers.delete(session.rootId);
+
     // O worktree DELIBERADAMENTE sobrevive ao fim da sessão (ADR 06.3): é a
     // janela em que você consegue abrir o diretório e ver o que o agente fez.
     // Quem recolhe é o WorktreeReaper, depois do prazo de retenção.
@@ -2328,6 +2418,20 @@ export class SessionManager {
       throw new HubError('TASK_NOT_FOUND', `Nenhuma task na sessão ${sessionId}`, { sessionId });
     }
     return task;
+  }
+
+  /**
+   * Como `#latestTask`, mas para quem não pode lançar.
+   *
+   * O gate pré-execução é o caso: o hook pode chegar antes de a primeira task
+   * existir (o agente já subiu e já quer rodar algo), e ali lançar
+   * `TASK_NOT_FOUND` transformaria uma aprovação legítima num erro de hook —
+   * que, dependendo do agente, **libera a ferramenta**. A aprovação sem task
+   * é menos informativa e continua barrando, que é o que importa.
+   */
+  #latestTaskOrNull(sessionId: string): Task | null {
+    const [task] = this.store.tasks.list({ sessionId });
+    return task ?? null;
   }
 
   /**

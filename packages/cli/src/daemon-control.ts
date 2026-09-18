@@ -1,6 +1,19 @@
 import { spawn } from 'node:child_process';
+import { closeSync, mkdirSync, openSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HubClient } from '@agents-hub/client';
+import { loadConfig } from '@agents-hub/daemon';
+
+/**
+ * Onde o daemon autostartado escreve.
+ *
+ * Mesma pasta que a config do daemon já declara (`~/.agents-hub/logs`) — o
+ * ponto é não inventar um segundo lugar para procurar quando algo quebra.
+ */
+function daemonLogDir(): string {
+  return loadConfig().logDir;
+}
 
 /**
  * Sobe o daemon sozinho quando ele não está no ar.
@@ -33,12 +46,40 @@ export async function ensureDaemon(
   // de instalação global ou de o `hub` estar no PATH.
   const entrada = fileURLToPath(new URL('./main.js', import.meta.url));
 
+  // A saída do daemon vai para arquivo, não para o vazio.
+  //
+  // Com `stdio: 'ignore'` — que é como isto nasceu — o daemon autostartado era
+  // completamente cego: nenhum `console.error`, nenhuma exceção, nenhuma falha
+  // de migração deixava rastro em lugar nenhum. E este É o caminho normal de
+  // uso, já que o daemon nasce sozinho. Quando algo dava errado, a única coisa
+  // que sobrava era "o daemon não respondeu a tempo", sem nenhuma pista do
+  // porquê. A pasta `~/.agents-hub/logs` já existia e era criada vazia desde
+  // sempre; agora ela tem conteúdo.
+  //
+  // Append, num arquivo por dia: o daemon é reiniciado com frequência (o
+  // autostart o ressuscita), e truncar a cada subida apagaria justamente o
+  // registro da queda anterior — que é o que se quer ler.
+  const logDir = daemonLogDir();
+  mkdirSync(logDir, { recursive: true });
+  const arquivoDeLog = path.join(logDir, `daemon-${new Date().toISOString().slice(0, 10)}.log`);
+  const log = openSync(arquivoDeLog, 'a');
+
   const filho = spawn(process.execPath, [entrada, 'daemon'], {
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', log, log],
     windowsHide: true,
   });
   filho.unref();
+
+  // O descritor foi duplicado para o filho no spawn; manter aberto aqui
+  // seguraria o arquivo pelo tempo de vida do comando da CLI sem necessidade.
+  closeSync(log);
+
+  // Se o próprio spawn falhar (execPath inválido, permissão), o ChildProcess
+  // emite `'error'` — sem listener, isso é exceção não tratada na CLI.
+  filho.on('error', (err) => {
+    process.stderr.write(`não foi possível subir o daemon: ${err.message}\n`);
+  });
 
   const limite = Date.now() + (options.timeoutMs ?? 30_000);
   while (Date.now() < limite) {
@@ -47,7 +88,8 @@ export async function ensureDaemon(
   }
 
   throw new Error(
-    'o daemon não respondeu a tempo. Rode `hub daemon` num terminal para ver o erro.',
+    `o daemon não respondeu a tempo. O que ele escreveu está em ${arquivoDeLog} — ` +
+      'ou rode `hub daemon` num terminal para ver ao vivo.',
   );
 }
 

@@ -34,3 +34,4 @@ export {
 } from './pretool-gate.js';
 export { guardRequest, type GuardVerdict } from './guard.js';
 export { createHub, type Hub } from './hub.js';
+export { instalarRedeDeSeguranca } from './safety-net.js';

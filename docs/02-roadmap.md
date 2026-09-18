@@ -5,7 +5,26 @@ Ordem derivada do ADR 04.4: **vertical fina primeiro**. Cada fase termina com al
 > **Leia junto:** [07 — Progresso real](07-progresso-real.md) confere cada caixa deste
 > arquivo contra o código, o binário e o banco. Onde os dois discordarem, o 07 é a
 > fonte — ele foi verificado, este aqui foi declarado. As caixas da Fase 3 abaixo já
-> foram corrigidas a partir dele.
+> foram corrigidas a partir dele. [08 — Endurecimento](08-endurecimento.md) faz o
+> mesmo pelo processo e pela operação: o que impede o repositório de quebrar sem
+> ninguém perceber, e o que quebra quando o daemon roda por dias.
+
+## O que cada marca significa
+
+Este roadmap já marcou como `[x]` coisas que não estavam prontas — um "A2A server" que
+nenhum peer A2A conversa, um motor de workflows que validava o DAG e o ignorava na
+execução, um evento de alerta de orçamento sem nenhum emissor. Enquanto o plano mentir,
+toda decisão tomada em cima dele nasce errada. Por isso as marcas passaram a ter
+definição, e o critério completo mora em [`CONTRIBUTING.md`](../CONTRIBUTING.md):
+
+| Marca | Significado |
+|---|---|
+| `[x]` | compila do zero, tem teste que falharia sem a mudança, tem consumidor, foi exercido fora do teste, e a frase descreve o que existe |
+| `[~]` | existe e funciona, mas entrega **menos** do que a frase sugere — e a frase diz o quê |
+| `🕳️` | código escrito, nunca exercitado fora do teste unitário |
+| `[ ]` | não começou |
+
+`🕳️` é informação legítima, não confissão. O que não é legítimo é `[x]` sem ter rodado.
 
 ## Fase 1 — Vertical fina ✅ concluída e validada em 2026-08-26
 
@@ -276,6 +295,82 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
 - [ ] **Dono para a tabela de preços** (`core/pricing.ts`): dependência externa que
       muda sozinha e sustenta todo o orçamento em dólares dos agentes que só reportam
       tokens. Hoje ninguém a mantém
+
+## Fase 5 — Endurecimento operacional
+
+O que quebra quando o daemon roda por dias em vez de por trinta segundos. A
+vistoria está em [`08-endurecimento.md`](08-endurecimento.md), que também
+registra o achado que organiza todos os outros: **o commit de topo de `main` não
+compilava**, e o `npm test` coletava 3 dos 30 arquivos de teste quando rodado em
+bash. Nenhuma das duas coisas era sabida, porque nenhuma máquina compilava o
+repositório do zero antes de aceitar mudança.
+
+### Concluído em 2026-09-18
+
+- [x] **Portão de qualidade**: `scripts/run-tests.mjs` (descoberta em JavaScript,
+      idêntica em todo shell), CI no GitHub Actions com `npm ci` + build limpo +
+      suíte em Windows/Node 22.5 e 24, e `npm run verify` como espelho local.
+      Linux entra como job **informativo** — o Hub nunca rodou nessa plataforma
+- [x] **Critério de pronto** em [`CONTRIBUTING.md`](../CONTRIBUTING.md), com o
+      vocabulário `[x] / [~] / 🕳️ / [ ]` que o doc 07 inaugurou
+- [x] **Build consertado**: três identificadores nunca escritos e um `await`
+      esquecido que fazia o gate pré-execução **falhar aberto**
+- [x] **Lock de instância pela porta**: `hub.start()` liga a porta antes de
+      reconciliar. Um segundo daemon declarava mortas as sessões vivas do
+      primeiro e só depois descobria que a porta estava ocupada
+- [x] **Rede de segurança de processo** (`safety-net.ts`): `unhandledRejection`
+      registra sem derrubar, `uncaughtException` derruba de forma ordenada
+- [x] **Desligamento confiável**: `killTree` esperado (era fire-and-forget antes
+      do `process.exit`, deixando a árvore do agente gastando token),
+      `allSettled` em vez de `all`, e espera dos pumps antes de fechar o banco
+- [x] **Vazamento de memória** em `#ledgers` / `#seeded` / `#models`
+- [x] **Daemon deixou de ser cego**: o autostart escreve em
+      `~/.agents-hub/logs/`, que a config criava vazio desde sempre
+
+### Restante
+
+Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
+
+- [ ] **Drenar o stderr do `opencode serve`** — hoje é `pipe` sem leitor: quando
+      o buffer do SO encher, o servidor congela e leva junto todas as sessões
+      OpenCode. É o único item aqui que causa parada total
+- [ ] **Retenção de eventos**: a tabela cresce para sempre com `payload_json` e
+      `raw_json`, sem `DELETE` nem `VACUUM`, enquanto reaper e reconciliação
+      fazem full scan. O ADR 06.3 decidiu "eventos para sempre" — e essa decisão
+      precisa ser reexaminada ou ganhar compactação do `raw`
+- [ ] **Matar a árvore no portão de validação**: `child.kill()` com `shell: true`
+      deixa o `npm`/`node` filho vivo a cada timeout
+- [ ] **Validar a config com Zod** (o projeto já usa em todo o resto) e trocar o
+      merge raso de `policy` por profundo — hoje ligar a revisão no arquivo
+      global apaga `command` do default
+- [ ] **Validar as variáveis de ambiente** e documentar as cinco que não estão em
+      lugar nenhum. `AGENTS_HUB_PORT=abc` faz o Node escutar numa porta aleatória
+- [ ] **`.on('error')` nos quatro `spawn`** que não têm, e callback no
+      `stdin.write` (EPIPE quando o CLI sai antes de consumir)
+- [ ] **PID por sessão no schema**: a reconciliação corrige o registro na subida
+      e não mata os processos que sobreviveram ao crash, porque não sabe quais são
+- [ ] **Keep-alive e `id:` no SSE do A2A**, try/catch no keep-alive do `/events`,
+      e teto de conexões com backpressure
+- [ ] **`since` inválido no SSE** devolvendo 200 com zero linhas; truncamento de
+      replay em 500 eventos sem sinal de que truncou
+- [ ] **Emissor para `budget.warning`** — único tipo do vocabulário sem nenhum — e
+      projeção que funcione **durante** a run (hoje `elapsedSeconds` só é liquidado
+      no fim, então o burn rate nunca aparece com a sessão viva)
+- [ ] **Limpar os prompts em `tmpdir`** (um arquivo por spawn, para sempre) e pôr
+      `maxBuffer` nos `execFileAsync` de `worktree.ts`
+- [ ] **Sinalizar o que hoje é engolido em silêncio**: YAML de projeto quebrado
+      caindo na política global, `git worktree remove` que falhou virando "kept"
+      implícito, junction de `node_modules` não criado
+- [ ] **Teto no `AsyncQueue`**, que hoje cresce sem limite contra um consumidor
+      que faz escrita SQLite síncrona por evento
+
+### Decidido aqui
+
+| Tema | Decisão | Por quê |
+|---|---|---|
+| Lock de instância | **A porta**, não pidfile | O sistema operacional já garante exclusividade em `127.0.0.1:4747`. Arquivo de lock traz problema próprio (lock órfão após crash) sem resolver nada que a porta não resolva |
+| `unhandledRejection` | **Não derruba** | A origem é quase sempre uma sessão específica; matar o daemon inteiro é o dano que se quer evitar. `uncaughtException` derruba, porque ali o estado do processo é suspeito de verdade |
+| Linux | **Informativo até provar** | O Hub nunca rodou nessa plataforma. Marcar suporte antes de ter prova é o mesmo erro que este documento trata |
 
 ## Incorporado ao produto sem passar pelo plano
 

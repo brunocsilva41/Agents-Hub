@@ -538,7 +538,11 @@ export class HubServer {
      */
     this.#route('POST', '/hooks/pretooluse', async (req, res) => {
       const body = await readBody(req, PreToolGateSchema);
-      const verdict = this.sessions.gateToolCall(body);
+      // `await` obrigatório: `gateToolCall` bloqueia esperando a decisão humana
+      // quando a política manda aprovar. Responder sem esperar devolveria uma
+      // Promise serializada como `{}` e o hook leria "sem permissão declarada"
+      // — o gate falharia ABERTO, exatamente no caso que ele existe para pegar.
+      const verdict = await this.sessions.gateToolCall(body);
 
       sendJson(res, 200, {
         permission: toHookPermission(verdict.decision),

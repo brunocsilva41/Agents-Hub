@@ -6,11 +6,53 @@ import {
   actionsOfToolCall,
   combineVerdicts,
   explainToAgent,
+  resumoDaChamada,
   toCodexHookOutput,
   toHookPermission,
 } from './pretool-gate.js';
 
 const workdir = path.resolve('/tmp/hub/worktree');
+
+describe('resumo da chamada para a fila de aprovações', () => {
+  test('shell mostra o comando, que é o que decide a aprovação', () => {
+    assert.equal(
+      resumoDaChamada('Bash', { command: 'git push origin main' }),
+      'git push origin main',
+    );
+  });
+
+  test('escrita mostra o caminho', () => {
+    assert.equal(resumoDaChamada('Write', { file_path: 'src/a.ts', content: '...' }), 'src/a.ts');
+  });
+
+  test('corta pelo fim: a intenção de um comando está no começo', () => {
+    const longo = `rm -rf /alvo/importante ${'x'.repeat(300)}`;
+    const resumo = resumoDaChamada('Bash', { command: longo }, 40);
+    assert.equal(resumo.length, 40);
+    assert.ok(resumo.startsWith('rm -rf /alvo/importante'));
+    assert.ok(resumo.endsWith('…'));
+  });
+
+  test('quebra de linha vira espaço — a fila mostra uma linha só', () => {
+    assert.equal(resumoDaChamada('Bash', { command: 'a\n  b\n\tc' }), 'a b c');
+  });
+
+  test('ferramenta desconhecida lista os campos em vez de ficar muda', () => {
+    // Uma aprovação que não diz o que está aprovando é uma aprovação dada no
+    // automático. Os nomes dos campos são pouco, mas não são nada.
+    assert.equal(resumoDaChamada('FerramentaNova', { alvo: 'x', modo: 'y' }), 'campos: alvo, modo');
+  });
+
+  test('sem argumento nenhum ainda diz algo', () => {
+    assert.equal(resumoDaChamada('FerramentaNova', {}), '(sem argumentos)');
+    assert.equal(resumoDaChamada('Bash', {}), '(comando vazio)');
+    assert.equal(resumoDaChamada('Write', {}), '(caminho não informado)');
+  });
+
+  test('não é sensível a caixa, como o resto do gate', () => {
+    assert.equal(resumoDaChamada('bash', { command: 'ls' }), 'ls');
+  });
+});
 
 describe('tradução de chamada de ferramenta', () => {
   test('shell vira comando', () => {

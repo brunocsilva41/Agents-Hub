@@ -17,9 +17,10 @@
     "typecheck": "tsc -b && npm run typecheck --workspace @agents-hub/web",
     "daemon": "node --experimental-sqlite packages/daemon/dist/main.js",
     "hub": "node packages/cli/dist/main.js",
-    "test": "node --test --experimental-sqlite packages/*/dist/**/*.test.js",
+    "test": "node scripts/run-tests.mjs",
     "build:packages": "tsc -b",
-    "web:dev": "npm run dev --workspace @agents-hub/web"
+    "web:dev": "npm run dev --workspace @agents-hub/web",
+    "verify": "npm run build && npm test"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

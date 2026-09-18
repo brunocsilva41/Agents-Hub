@@ -67,6 +67,62 @@ export function actionsOfToolCall(call: ToolCall, workdir: string): GuardedActio
 }
 
 /**
+ * Frase curta que descreve a chamada na fila de aprovações.
+ *
+ * Quem lê isto está decidindo se libera ou não, quase sempre de relance — na
+ * CLI, numa linha só. Então o que importa é o **argumento perigoso**, não o
+ * nome da ferramenta: "Bash" não diz nada, `git push origin main` decide a
+ * questão sozinho. Por isso cada família devolve o campo que carrega o risco.
+ *
+ * Ferramenta desconhecida não vira "sem detalhe": devolve as chaves do input.
+ * Saber que a chamada mexe em `file_path` e `content` é pouco, mas é mais do
+ * que uma linha muda — e uma aprovação que não diz o que está aprovando é uma
+ * aprovação que a pessoa dá no automático.
+ *
+ * O corte é por caracteres, pelo fim: comando longo tem o alvo no começo
+ * (`rm -rf /caminho/...`), e é o começo que revela a intenção.
+ */
+export function resumoDaChamada(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  limite = 160,
+): string {
+  const nome = toolName.toLowerCase();
+
+  if (nome === 'bash' || nome === 'powershell' || nome === 'shell' || nome === 'terminal') {
+    return cortar(texto(toolInput['command']) ?? '(comando vazio)', limite);
+  }
+
+  if (nome === 'write' || nome === 'edit' || nome === 'notebookedit' || nome === 'multiedit') {
+    const alvo =
+      texto(toolInput['file_path']) ??
+      texto(toolInput['path']) ??
+      texto(toolInput['notebook_path']);
+    return cortar(alvo ?? '(caminho não informado)', limite);
+  }
+
+  if (nome === 'read' || nome === 'glob' || nome === 'grep') {
+    const alvo =
+      texto(toolInput['file_path']) ?? texto(toolInput['path']) ?? texto(toolInput['pattern']);
+    return cortar(alvo ?? '(alvo não informado)', limite);
+  }
+
+  if (nome === 'webfetch' || nome === 'websearch') {
+    return cortar(texto(toolInput['url']) ?? texto(toolInput['query']) ?? '(url não informada)', limite);
+  }
+
+  const chaves = Object.keys(toolInput);
+  if (chaves.length === 0) return '(sem argumentos)';
+  return cortar(`campos: ${chaves.join(', ')}`, limite);
+}
+
+function cortar(valor: string, limite: number): string {
+  const limpo = valor.replace(/\s+/g, ' ').trim();
+  if (limpo.length === 0) return '(vazio)';
+  return limpo.length <= limite ? limpo : `${limpo.slice(0, limite - 1)}…`;
+}
+
+/**
  * Combina os vereditos das ações de uma chamada.
  *
  * A decisão mais restritiva vence: uma chamada que escreve em dois arquivos,
