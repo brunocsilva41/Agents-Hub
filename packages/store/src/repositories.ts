@@ -29,9 +29,33 @@ import {
   type UnitOfWork,
 } from '@agents-hub/core';
 import type { Brief } from '@agents-hub/core';
-import { fromJson, nullableJson, toJson, type Db } from './db.js';
+import { fromJson, nullableJson, toJson, type Db, type SqlValue } from './db.js';
 
 type Row = Record<string, unknown>;
+
+/**
+ * Uma linha ou nenhuma, nunca via `.get()` puro.
+ *
+ * Medido contra o piso declarado em `engines` (Node 22.5.0, onde `node:sqlite`
+ * ainda exige `--experimental-sqlite`): `.get()` sem nenhuma linha casando
+ * devolve `{ coluna: null, ... }` em vez de `undefined` — só corrigido em
+ * versão posterior do runtime. Todo `row ? mapX(row) : null` deste arquivo
+ * lia esse objeto fantasma como "encontrado": `getByPath` de um projeto
+ * inexistente virava "achado", e `registerProject` retornava sem nunca
+ * inserir a linha real — a origem do `FOREIGN KEY constraint failed` que
+ * a suíte via CI expôs (o Node 24 desta máquina não reproduz; o CI, rodando
+ * os dois pisos, pegou).
+ *
+ * `.all()` não tem esse bug em nenhuma das duas versões — devolve `[]` de
+ * verdade para zero linhas. Por isso todo lookup de "uma linha ou nenhuma"
+ * passa por aqui.
+ */
+function one<T extends Row>(
+  stmt: { all: (...params: SqlValue[]) => unknown[] },
+  ...params: SqlValue[]
+): T | undefined {
+  return (stmt.all(...params) as T[])[0];
+}
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : String(v ?? ''));
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
@@ -51,12 +75,12 @@ class SqliteProjectRepository implements ProjectRepository {
   }
 
   get(id: string): Project | null {
-    const row = this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM projects WHERE id = ?'), id);
     return row ? mapProject(row) : null;
   }
 
   getByPath(p: string): Project | null {
-    const row = this.db.prepare('SELECT * FROM projects WHERE path = ?').get(p) as Row | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM projects WHERE path = ?'), p);
     return row ? mapProject(row) : null;
   }
 
@@ -99,9 +123,7 @@ class SqliteProjectRepository implements ProjectRepository {
   }
 
   findFolderByPath(p: string): ProjectFolder | null {
-    const row = this.db.prepare('SELECT * FROM project_folders WHERE path = ?').get(p) as
-      | Row
-      | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM project_folders WHERE path = ?'), p);
     return row ? mapProjectFolder(row) : null;
   }
 
@@ -143,7 +165,7 @@ class SqliteSessionRepository implements SessionRepository {
   }
 
   get(id: string): Session | null {
-    const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Row | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM sessions WHERE id = ?'), id);
     return row ? mapSession(row) : null;
   }
 
@@ -278,7 +300,7 @@ class SqliteTaskRepository implements TaskRepository {
   }
 
   get(id: string): Task | null {
-    const row = this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Row | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM tasks WHERE id = ?'), id);
     return row ? mapTask(row) : null;
   }
 
@@ -431,7 +453,7 @@ class SqliteApprovalRepository implements ApprovalRepository {
   }
 
   get(id: string): Approval | null {
-    const row = this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(id) as Row | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM approvals WHERE id = ?'), id);
     return row ? mapApproval(row) : null;
   }
 
@@ -524,9 +546,7 @@ class SqliteBudgetRepository implements BudgetRepository {
   }
 
   get(rootId: string): BudgetRecord | null {
-    const row = this.db.prepare('SELECT * FROM budgets WHERE root_id = ?').get(rootId) as
-      | Row
-      | undefined;
+    const row = one<Row>(this.db.prepare('SELECT * FROM budgets WHERE root_id = ?'), rootId);
     if (!row) return null;
     return {
       rootId: str(row['root_id']),
