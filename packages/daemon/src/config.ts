@@ -2,7 +2,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_POLICY, type PolicyDocument } from '@agents-hub/core';
+import { z } from 'zod';
+import {
+  DEFAULT_POLICY,
+  HubError,
+  mergePolicyLayer,
+  PartialPolicyDocumentSchema,
+  type PolicyDocument,
+} from '@agents-hub/core';
+import { readHubEnv } from './env.js';
 
 export interface HubConfig {
   /** Raiz do estado global do Hub. Multiprojeto vive aqui (ADR 05.2). */
@@ -65,7 +73,7 @@ export const DEFAULT_RETENTION: RetentionPolicy = {
 };
 
 export function defaultHome(): string {
-  return process.env['AGENTS_HUB_HOME'] ?? path.join(os.homedir(), '.agents-hub');
+  return readHubEnv().AGENTS_HUB_HOME ?? path.join(os.homedir(), '.agents-hub');
 }
 
 function repoRoot(): string {
@@ -95,13 +103,74 @@ export function cliHookEntrypoint(): string {
   return path.join(repoRoot(), 'packages', 'cli', 'dist', 'main.js');
 }
 
+/**
+ * Valida `config.json` ANTES do merge com os padrões.
+ *
+ * Sem `.strict()` no nível superior de propósito: um `config.json` gravado por
+ * uma versão anterior do Hub pode ter chaves que esta versão não conhece mais,
+ * e recusar a subida do daemon por isso quebraria o upgrade. `policy` valida
+ * campo a campo via `PartialPolicyDocumentSchema` pelo mesmo motivo.
+ */
+const HubConfigOnDiskSchema = z
+  .object({
+    home: z.string().min(1).optional(),
+    dbFile: z.string().min(1).optional(),
+    worktreeRoot: z.string().min(1).optional(),
+    artifactRoot: z.string().min(1).optional(),
+    logDir: z.string().min(1).optional(),
+    manifestsDir: z.string().min(1).optional(),
+    host: z.string().min(1).optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    webRoot: z.string().min(1).optional(),
+    opencodePort: z.number().int().min(1).max(65535).optional(),
+    policy: PartialPolicyDocumentSchema.optional(),
+    retention: z
+      .object({
+        worktreeDays: z.number().optional(),
+        sweepIntervalMinutes: z.number().optional(),
+      })
+      .optional(),
+    codexGate: z
+      .object({
+        bypassHookTrust: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+type HubConfigOnDisk = z.infer<typeof HubConfigOnDiskSchema>;
+
+function readOnDiskConfig(configFile: string): HubConfigOnDisk {
+  if (!existsSync(configFile)) return {};
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(configFile, 'utf8'));
+  } catch (err) {
+    throw new HubError(
+      'HUB_CONFIG_INVALID',
+      `${configFile} não é JSON válido: ${(err as Error).message}`,
+      { path: configFile },
+    );
+  }
+
+  const parsed = HubConfigOnDiskSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(raiz)'}: ${i.message}`);
+    throw new HubError(
+      'HUB_CONFIG_INVALID',
+      `${configFile} é inválido — ${issues.join('; ')}`,
+      { path: configFile, issues },
+    );
+  }
+  return parsed.data;
+}
+
 export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
   const home = overrides.home ?? defaultHome();
   const configFile = path.join(home, 'config.json');
 
-  const onDisk = existsSync(configFile)
-    ? (JSON.parse(readFileSync(configFile, 'utf8')) as Partial<HubConfig>)
-    : {};
+  const onDisk = readOnDiskConfig(configFile);
 
   const userManifests = path.join(home, 'manifests');
   const config: HubConfig = {
@@ -118,8 +187,12 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
     ...onDisk,
     ...overrides,
     // A política nunca é substituída inteira por acidente: campos ausentes no
-    // arquivo do usuário caem no padrão, que é o lado seguro.
-    policy: { ...DEFAULT_POLICY, ...(onDisk.policy ?? {}), ...(overrides.policy ?? {}) },
+    // arquivo do usuário (ou nos overrides) caem no padrão, que é o lado
+    // seguro — inclusive dentro de objetos aninhados como `validation.review`.
+    policy: mergePolicyLayer(
+      mergePolicyLayer(DEFAULT_POLICY, onDisk.policy ?? {}),
+      overrides.policy ?? {},
+    ),
     retention: {
       ...DEFAULT_RETENTION,
       ...(onDisk.retention ?? {}),

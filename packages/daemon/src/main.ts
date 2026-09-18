@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { baseUrl } from './config.js';
+import { readHubEnv } from './env.js';
 import { createHub } from './hub.js';
 import { instalarRedeDeSeguranca } from './safety-net.js';
 
-const port = process.env['AGENTS_HUB_PORT'];
-const hub = createHub(port ? { port: Number(port) } : {});
+const env = readHubEnv();
+const hub = createHub(env.AGENTS_HUB_PORT !== undefined ? { port: env.AGENTS_HUB_PORT } : {});
 
 // `start()` e não `server.listen()`: a porta precisa estar ligada ANTES de a
 // reconciliação tocar no banco. Ver o comentário em `hub.ts`.

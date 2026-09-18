@@ -1,16 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import {
-  baseUrl,
-  createHub,
-  instalarRedeDeSeguranca,
-  loadConfig,
-  saveConfig,
-  modoExigeGate,
-} from '@agents-hub/daemon';
+import { baseUrl, loadConfig, saveConfig, modoExigeGate } from '@agents-hub/daemon';
 import { HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
+import { runDaemon } from './daemon-run.js';
 import { decideToolCall, lerStdin, type HookInput } from './hook.js';
 import {
   HOOK_TARGETS,
@@ -393,37 +387,6 @@ async function installCodexGate(args: Args, config: ReturnType<typeof loadConfig
         'e Bash/Write/Edit passam pela política do Hub antes de rodar.',
     ),
   );
-}
-
-// ---------------------------------------------------------------- daemon
-
-async function runDaemon(): Promise<void> {
-  const hub = createHub();
-  // `start()` e não `server.listen()`: ligar a porta é o que impede um segundo
-  // daemon de reconciliar o banco e declarar mortas as sessões do primeiro.
-  // Este é o caminho que o autostart executa, então é o que mais precisa disto.
-  const { host, port } = await hub.start();
-  const url = baseUrl({ host, port });
-  console.log(green(`daemon ouvindo em ${url}`));
-  console.log(`painel: ${bold(url)}`);
-  console.log(dim(`home: ${hub.config.home}`));
-  console.log(dim(`agentes: ${hub.registry.ids().join(', ')}`));
-
-  // A guarda de reentrância existia só no outro entrypoint — e é este aqui que
-  // o autostart usa. Dois Ctrl-C rodavam dois desligamentos concorrentes sobre
-  // o mesmo banco.
-  let encerrando = false;
-  const stop = async (): Promise<void> => {
-    if (encerrando) return;
-    encerrando = true;
-    console.log(dim('\nencerrando sessões vivas…'));
-    await hub.shutdown();
-    process.exit(0);
-  };
-  process.on('SIGINT', () => void stop());
-  process.on('SIGTERM', () => void stop());
-
-  instalarRedeDeSeguranca(stop);
 }
 
 /**
