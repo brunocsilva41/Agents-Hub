@@ -87,6 +87,20 @@ export const MCP_TARGETS: McpTarget[] = [
     configPath: path.join(home, '.antigravity', 'mcp.json'),
     verified: false,
   },
+  {
+    agentId: 'openclaude',
+    label: 'OpenClaude (fork do Claude Code)',
+    format: 'json-mcp-servers',
+    // ADICIONADO, NÃO VERIFICADO: por ser fork do Claude Code, supomos o
+    // mesmo padrão de config por projeto (`.mcp.json`, chave "mcpServers").
+    // Nunca foi confirmado contra o binário real — só a entrada `claude`
+    // acima tem esse selo. Fase 2 já marcou 3 entradas como certas por
+    // dedução e errou 3 de 3; aqui o palpite fica explícito.
+    configPath: null,
+    projectRelativePath: '.mcp.json',
+    verified: false,
+    note: 'suposição por ser fork do Claude Code — nunca confirmado contra o binário do openclaude',
+  },
 ];
 
 export interface ServerSpec {

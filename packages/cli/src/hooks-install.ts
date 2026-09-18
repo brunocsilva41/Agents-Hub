@@ -38,6 +38,16 @@ export const HOOK_TARGETS: AlvoDeHook[] = [
     configProjeto: (p) => path.join(p, '.claude', 'settings.json'),
     nota: 'o hook é consultado antes de cada Bash/Write/Edit e pode bloquear a chamada',
   },
+  {
+    id: 'openclaude',
+    nome: 'OpenClaude (fork do Claude Code)',
+    configUsuario: path.join(os.homedir(), '.openclaude', 'settings.json'),
+    configProjeto: (p) => path.join(p, '.openclaude', 'settings.json'),
+    // ADICIONADO, NÃO VERIFICADO: mesmo formato de hooks do Claude Code é
+    // suposição por ser fork — nunca confirmado contra o binário do
+    // openclaude (nem o diretório de config, nem o schema de PreToolUse).
+    nota: 'suposição por herança do Claude Code — nunca confirmado contra o binário do openclaude',
+  },
 ];
 
 /** Caminho absoluto do `main.js` desta CLI — não depende de `hub` estar no PATH. */

@@ -170,14 +170,20 @@ export const DEFAULT_POLICY: PolicyDocument = {
   // Cadeia curta de propósito (ADR 06.2): se claude, codex e opencode falharem
   // na mesma tarefa, o problema está no brief — insistir em mais agentes só
   // queima orçamento. Os demais continuam disponíveis por chamada explícita.
+  //
+  // `openclaude` foi ACRESCENTADO por dedução (é fork do Claude Code, mesmas
+  // capabilities) e NUNCA foi exercitado como fallback contra o binário real
+  // — entra por último em cada cadeia, depois dos agentes já comprovados, para
+  // que a promoção a "cidadão pleno" não force ninguém a depender dele antes
+  // da hora.
   fallback: {
-    'code-edit': ['claude', 'codex', 'opencode'],
-    refactor: ['claude', 'codex', 'opencode'],
-    'test-writing': ['claude', 'codex', 'opencode'],
-    'code-review': ['claude', 'codex'],
-    debug: ['claude', 'codex'],
+    'code-edit': ['claude', 'codex', 'opencode', 'openclaude'],
+    refactor: ['claude', 'codex', 'opencode', 'openclaude'],
+    'test-writing': ['claude', 'codex', 'opencode', 'openclaude'],
+    'code-review': ['claude', 'codex', 'openclaude'],
+    debug: ['claude', 'codex', 'openclaude'],
     planning: ['claude', 'codex'],
-    shell: ['codex', 'opencode'],
+    shell: ['codex', 'opencode', 'openclaude'],
   },
   watch: {
     pauseOn: ['irreversible'],
