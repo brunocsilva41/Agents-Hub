@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import {
   modoExigeGate,
   montarConfigDoGate,
+  segmentoDeComando,
   TIMEOUT_PADRAO_SEC,
   type AlvoDoGate,
 } from './codex-gate.js';
@@ -49,6 +50,23 @@ describe('configuração do gate do Codex', () => {
     const config = montarConfigDoGate({ comando: '   ', timeoutSec: 10 }, true);
     assert.equal(config.garantido, false);
     assert.deepEqual(config.args, []);
+  });
+
+  test('segmentoDeComando não embuti aspas em caminho sem espaço', () => {
+    assert.equal(segmentoDeComando('C:\\bin\\node.exe'), 'C:\\bin\\node.exe');
+  });
+
+  test('segmentoDeComando embuti aspas só quando o caminho resolvido tem espaço', () => {
+    // Fora do Windows, ou sem 8.3 disponível, `caminhoCurto` devolve o
+    // original — o teste real de que 8.3 elimina o espaço é de integração
+    // (só faz sentido contra o volume real) e não roda aqui; o que este
+    // teste garante é o contrato: espaço no resultado final SEMPRE vem entre
+    // aspas, nunca cru — a causa raiz do achado #4 era exatamente aspas
+    // aninhadas demais, não a ausência delas.
+    const valor = segmentoDeComando('C:\\um caminho\\sem 8.3 possível\\node.exe');
+    if (valor.includes(' ')) {
+      assert.ok(valor.startsWith('"') && valor.endsWith('"'));
+    }
   });
 
   test('supervised exige gate; os outros modos não', () => {

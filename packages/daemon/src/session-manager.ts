@@ -58,7 +58,12 @@ import type {
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { cliHookEntrypoint } from './config.js';
-import { montarConfigDoGate, modoExigeGate, TIMEOUT_PADRAO_SEC } from './codex-gate.js';
+import {
+  montarConfigDoGate,
+  modoExigeGate,
+  segmentoDeComando,
+  TIMEOUT_PADRAO_SEC,
+} from './codex-gate.js';
 import {
   contextForAgent,
   envForAgent,
@@ -1516,7 +1521,7 @@ export class SessionManager {
   #codexGate(agentId: string, mode: SessionMode): { extraArgs: string[]; aviso?: string } {
     if (agentId !== 'codex') return { extraArgs: [] };
 
-    const comando = `"${process.execPath}" "${cliHookEntrypoint()}" hook --dialect codex`;
+    const comando = `${segmentoDeComando(process.execPath)} ${segmentoDeComando(cliHookEntrypoint())} hook --dialect codex`;
     const config = montarConfigDoGate(
       { comando, timeoutSec: TIMEOUT_PADRAO_SEC },
       this.config.codexGate.bypassHookTrust,

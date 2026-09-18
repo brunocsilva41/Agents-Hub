@@ -79,12 +79,44 @@ function lookupFallback(bin: string, isWindows: boolean): ResolvedBin | null {
 }
 
 /**
- * Aspas para linha de comando do Windows. Só é usada para o CAMINHO do binário
- * e para flags simples — o prompt do usuário nunca passa por aqui: vai por
- * stdin (`stdinPrompt`), justamente para não depender de escaping.
+ * Aspas para linha de comando do Windows. Usada para o CAMINHO do binário, para
+ * flags simples e para valores compostos (como o `-c hooks={...}` do gate do
+ * Codex, que embute caminhos com espaço dentro de aspas já escapadas) — o
+ * prompt do usuário nunca passa por aqui: vai por stdin (`stdinPrompt`),
+ * justamente para não depender de escaping.
+ *
+ * `shell: true` no Windows roda via `cmd.exe /d /s /c`, e quem monta a linha
+ * de comando é o Node concatenando `file` + `args` com espaço — sem
+ * re-escapar nada. Cabe a quem chama produzir, para cada argumento, a forma
+ * que o parser de argv do processo filho (regra do `CommandLineToArgvW`, que
+ * todo binário C/C++ e a maioria dos runtimes seguem) reconstrói de volta no
+ * valor original.
+ *
+ * A troca ingênua de `"` por `\"` quebra sempre que uma barra invertida
+ * antecede uma aspas — exatamente o caso do TOML já escapado do gate do
+ * Codex (`\"C:\\Program Files\\...\"`), medido contra o binário real: a
+ * barra "absorve" a aspas seguinte em vez de escapá-la, e o argumento parte
+ * no primeiro espaço dali pra frente. A regra certa dobra as barras que
+ * antecedem uma aspas (e só essas) antes de escapá-la.
  */
 export function quoteForShell(value: string): string {
   if (process.platform !== 'win32') return value;
-  if (/^[A-Za-z0-9_\-.:\\/=]+$/.test(value)) return value;
-  return `"${value.replaceAll('"', '\\"')}"`;
+  if (!/[\s"]/.test(value)) return value;
+
+  let result = '"';
+  let backslashes = 0;
+  for (const ch of value) {
+    if (ch === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (ch === '"') {
+      result += '\\'.repeat(backslashes * 2 + 1) + '"';
+    } else {
+      result += '\\'.repeat(backslashes) + ch;
+    }
+    backslashes = 0;
+  }
+  result += '\\'.repeat(backslashes * 2) + '"';
+  return result;
 }

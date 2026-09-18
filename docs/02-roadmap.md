@@ -203,14 +203,15 @@ errados**, dois deles de forma que quebraria a invocação:
       binário, não deduzido: a decisão de perguntar é `escalate` (não `ask`), e
       `AGENTS_HUB_SESSION_ID` chega no hook, o que resolve a correlação de sessão.
       Validado com o agente real: `git push` barrado antes de executar
-- 🕳️ **Gate pré-execução para o Codex** — contrato verificado contra o binário
-      real (0.149.1): sistema de hooks compatível com o do Claude
-      (`PreToolUse`, `hookSpecificOutput`), mas **dialeto de resposta oposto**
-      (permitir é não escrever nada; não existe `ask`, `approve` vira `deny`
-      com motivo obrigatório) — isso já estava em `toCodexHookOutput` + 3
-      testes puros. O que fechou agora: `RunContext.extraArgs` (novo, em
-      `@agents-hub/adapters`) deixa o `ProcessAgentAdapter` agnóstico de
-      agente enquanto o `SessionManager` monta, só para o Codex, a config de
+- [x] **Gate pré-execução para o Codex** — fechado em 2026-09-18, verificado
+      contra o binário real (0.155.0) nesta máquina, não só contra o falso.
+      Contrato: sistema de hooks compatível com o do Claude (`PreToolUse`,
+      `hookSpecificOutput`), mas **dialeto de resposta oposto** (permitir é
+      não escrever nada; não existe `ask`, `approve` vira `deny` com motivo
+      obrigatório) — isso já estava em `toCodexHookOutput` + 3 testes puros.
+      O que fechou antes: `RunContext.extraArgs` (em `@agents-hub/adapters`)
+      deixa o `ProcessAgentAdapter` agnóstico de agente enquanto o
+      `SessionManager` monta, só para o Codex, a config de
       `montarConfigDoGate` a cada `#launch` — a função pura já existia,
       testada, e nada em produção a chamava. `codexGate.bypassHookTrust` é
       config GLOBAL (`~/.agents-hub/config.json`, nunca config de projeto —
@@ -224,12 +225,39 @@ errados**, dois deles de forma que quebraria a invocação:
       correlação de sessão por `cwd` (`#localizarSessao`) já preferia sessão
       viva sobre a mais recente desde a vistoria #5 — o "falta" que esta linha
       dizia antes estava desatualizado.
-      3 testes novos de integração fim a fim, mas contra um binário `codex`
-      **falso** (script Node que grava os argumentos recebidos), cobrindo
-      recusa em `supervised`, aviso em `semi` e os argumentos reais de spawn
-      com e sem bypass. **O que falta para virar `[x]`**: rodar contra o
-      `codex` de verdade instalado nesta máquina (0.154.0) e confirmar que
-      `git push` é barrado de ponta a ponta, como já foi feito para o Claude
+      **O que a primeira tentativa contra o binário real revelou** (por isso
+      o item ficou `🕳️` até hoje, e por isso valeu a pena rodar de verdade em
+      vez de confiar só no teste com binário falso): `codex.cmd`, como todo
+      shim que o npm instala no Windows, repassa argumentos com `%*` — uma
+      SEGUNDA passada do tokenizer do `cmd.exe` sobre a mesma linha, que não
+      entende `\"` como aspas escapadas (só alterna dentro/fora de aspas a
+      cada `"` literal). O valor de `-c hooks=...` embutia dois caminhos
+      entre aspas (`Program Files`, o perfil do usuário — ambos com espaço),
+      e se partia num espaço que essa segunda passada achava "fora de aspas":
+      `codex` recusava com `unexpected argument`, ANTES de sequer tentar
+      registrar o hook — falha aberta, silenciosa em qualquer sessão que não
+      fosse `supervised` (que ao menos recusa ao iniciar quando o gate não
+      fica garantido). Corrigido em duas partes: `quoteForShell`
+      (`packages/adapters/src/bin-resolver.ts`) trocava `"` por `\"` sem
+      dobrar as barras que já vinham antes de uma aspas — quebra sempre que
+      um valor já escapado (como o TOML do gate) tem barra colada em aspas;
+      agora segue a regra de quoting do `CommandLineToArgvW` (contagem de
+      barras, não substituição ingênua). Isso não bastava sozinho: o
+      `codex.cmd` reprocessa a linha de novo via `%*`, e nenhuma quantidade de
+      escape sobrevive a duas aspas aninhadas nessa segunda passada. A
+      correção que fechou de verdade foi não precisar de aspas: os caminhos
+      do comando do hook agora viram o nome curto 8.3 do Windows
+      (`C:\PROGRA~1\...`, sem espaço) quando disponível — ver achado #4 em
+      `codex-gate.ts`. Sem 8.3 no volume (raro fora de servidor endurecido),
+      cai no caminho original, mesmo risco de antes desta correção.
+      3 testes de integração contra um binário `codex` falso (recusa em
+      `supervised`, aviso em `semi`, argumentos reais de spawn com e sem
+      bypass) + testes novos para o quoting (`bin-resolver.test.ts`) e para o
+      nome curto (`codex-gate.test.ts`). **Exercido contra o binário real**:
+      sessão `codex --mode supervised` instruída a rodar `git push origin
+      main` — o Hub pausou a sessão em `waiting_approval` ANTES da execução
+      (`hub approve`/`hub deny`), `deny` confirmado, `origin/main` confirmado
+      intocado depois. Mesmo critério já usado para o Claude
 - [ ] Gate pré-execução para os demais agentes
 - [ ] TUI (a Web UI cobriu a necessidade; virou conveniência, não bloqueio)
 
