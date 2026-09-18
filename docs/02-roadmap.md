@@ -420,11 +420,23 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       precisa ser reexaminada ou ganhar compactação do `raw`
 - [ ] **Matar a árvore no portão de validação**: `child.kill()` com `shell: true`
       deixa o `npm`/`node` filho vivo a cada timeout
-- [ ] **Validar a config com Zod** (o projeto já usa em todo o resto) e trocar o
-      merge raso de `policy` por profundo — hoje ligar a revisão no arquivo
-      global apaga `command` do default
-- [ ] **Validar as variáveis de ambiente** e documentar as cinco que não estão em
-      lugar nenhum. `AGENTS_HUB_PORT=abc` faz o Node escutar numa porta aleatória
+- [x] **Validar a config com Zod** e merge profundo de `policy`. `HubConfigOnDiskSchema`
+      valida `config.json` antes do merge (`packages/daemon/src/config.ts`), com
+      `HUB_CONFIG_INVALID` legível em vez de `NaN` silencioso. `mergePolicyLayer`
+      (`packages/core/src/policy.ts`) substitui o spread raso por merge campo a
+      campo, corrigindo tanto a config global quanto `mergeProjectPolicy`
+      (`project-config.ts`) — o mesmo bug existia um nível abaixo: só
+      `validation.review.enabled` no YAML do projeto apagava `review.agent` do
+      global. Testado em `config.test.ts` e `project-config.test.ts`
+- [x] **Validar as variáveis de ambiente** e documentar as seis que não estavam
+      em lugar nenhum (`packages/daemon/src/env.ts`,
+      [`docs/09-variaveis-de-ambiente.md`](09-variaveis-de-ambiente.md)).
+      Achado no caminho: `AGENTS_HUB_PORT` só era lido pelo entrypoint
+      alternativo (`daemon/src/main.ts`) — o caminho normal do autostart
+      (`runDaemon()`, `packages/cli/src/daemon-run.ts`) não lia a variável
+      nenhuma vez, então `AGENTS_HUB_PORT=abc` fazia o Node escutar numa porta
+      aleatória só nesse caminho. Corrigido nos dois. `env.test.ts` +
+      `daemon-run.test.ts` cobrem os dois entrypoints
 - [ ] **`.on('error')` nos quatro `spawn`** que não têm, e callback no
       `stdin.write` (EPIPE quando o CLI sai antes de consumir)
 - [ ] **PID por sessão no schema**: a reconciliação corrige o registro na subida
