@@ -107,6 +107,14 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                   ⚡ ${(budget.projection.burnRateUsdPerSec * 60).toFixed(3)}/min
                 </span>
               )}
+              {budget.projection && budget.projection.burnRateUsdPerSec > 0 && (
+                <span
+                  className="burn-rate-chip"
+                  title="Projeção de custo e tokens ao fim do orçamento, no ritmo atual"
+                >
+                  📈 {formatUsd(budget.projection.projectedUsd)} · {formatTokens(budget.projection.projectedTokens)}
+                </span>
+              )}
             </div>
 
             <div className={`budget-head level-${level}`}>
