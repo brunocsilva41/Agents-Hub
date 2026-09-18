@@ -20,6 +20,7 @@ const STRUCTURAL = new Set([
   'approval.resolved',
   'turn.completed',
   'budget.exceeded',
+  'budget.warning',
   'error',
 ]);
 

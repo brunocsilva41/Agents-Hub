@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { generateAgentCard, formatA2aTask } from './a2a.js';
-import { A2aCreateTaskSchema } from './http-schemas.js';
+import { generateApiDescriptor, formatTaskResponse } from './api-tasks.js';
+import { CreateTaskSchema } from './http-schemas.js';
 import { AgentRegistry } from '@agents-hub/adapters';
 import { DEFAULT_POLICY, parseBrief, type Task } from '@agents-hub/core';
 import type { HubConfig } from './config.js';
 
-describe('A2A Protocol & Agent Card', () => {
+describe('API REST de tasks (/api/tasks) — automação externa', () => {
   const dummyConfig: HubConfig = {
     home: '/home',
     dbFile: '/home/hub.sqlite',
@@ -23,20 +23,20 @@ describe('A2A Protocol & Agent Card', () => {
     codexGate: { bypassHookTrust: false },
   };
 
-  test('generateAgentCard produz Agent Card compatível com A2A v1.0', () => {
+  test('generateApiDescriptor descreve a API REST, sem alegar compatibilidade A2A', () => {
     const registry = new AgentRegistry();
-    const card = generateAgentCard(dummyConfig, registry, 'http://127.0.0.1:4747');
+    const descriptor = generateApiDescriptor(dummyConfig, registry, 'http://127.0.0.1:4747');
 
-    assert.equal(card.name, 'Agents-Hub');
-    assert.equal(card.protocolVersion, '1.0');
-    assert.equal(card.endpoints.tasks, 'http://127.0.0.1:4747/a2a/tasks');
-    assert.equal(card.endpoints.taskStatus, 'http://127.0.0.1:4747/a2a/tasks/:id');
-    assert.equal(card.endpoints.taskCancel, 'http://127.0.0.1:4747/a2a/tasks/:id/cancel');
-    assert.equal(card.endpoints.taskEvents, 'http://127.0.0.1:4747/a2a/tasks/:id/events');
-    assert.equal(card.authentication.mode, 'none');
+    assert.equal(descriptor.name, 'Agents-Hub');
+    assert.equal(descriptor.apiVersion, '1.0');
+    assert.equal(descriptor.endpoints.tasks, 'http://127.0.0.1:4747/api/tasks');
+    assert.equal(descriptor.endpoints.taskStatus, 'http://127.0.0.1:4747/api/tasks/:id');
+    assert.equal(descriptor.endpoints.taskCancel, 'http://127.0.0.1:4747/api/tasks/:id/cancel');
+    assert.equal(descriptor.endpoints.taskEvents, 'http://127.0.0.1:4747/api/tasks/:id/events');
+    assert.equal(descriptor.authentication.mode, 'none');
   });
 
-  test('formatA2aTask formata a task no padrão A2A', () => {
+  test('formatTaskResponse formata a task para a resposta HTTP', () => {
     const task: Task = {
       id: 'tsk_123456',
       sessionId: 'ses_123456',
@@ -61,7 +61,7 @@ describe('A2A Protocol & Agent Card', () => {
       updatedAt: '2026-08-28T00:01:00Z',
     };
 
-    const formatted = formatA2aTask(task, 'completed');
+    const formatted = formatTaskResponse(task, 'completed');
     assert.equal(formatted['id'], 'tsk_123456');
     assert.equal(formatted['state'], 'completed');
     assert.equal(formatted['sessionState'], 'completed');
@@ -69,8 +69,8 @@ describe('A2A Protocol & Agent Card', () => {
     assert.equal((formatted['result'] as any).summary, 'Refatoração concluída');
   });
 
-  test('A2aCreateTaskSchema valida payload de criação', () => {
-    const valid = A2aCreateTaskSchema.safeParse({
+  test('CreateTaskSchema valida payload de criação', () => {
+    const valid = CreateTaskSchema.safeParse({
       objective: 'Construir pipeline',
       agent: 'codex',
       acceptanceCriteria: ['100% testes'],
@@ -78,7 +78,7 @@ describe('A2A Protocol & Agent Card', () => {
     });
     assert.equal(valid.success, true);
 
-    const semObjetivo = A2aCreateTaskSchema.safeParse({
+    const semObjetivo = CreateTaskSchema.safeParse({
       agent: 'codex',
     });
     assert.equal(semObjetivo.success, false);

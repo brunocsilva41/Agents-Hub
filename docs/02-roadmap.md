@@ -263,13 +263,16 @@ errados**, dois deles de forma que quebraria a invocação:
 
 ## Fase 3 — Plataforma
 
-- [~] **"A2A server" — o nome está errado**: existe e funciona, mas é uma API REST
-      desenhada em torno dos tipos do Hub, servida em caminhos com nome A2A. Não há
-      superfície JSON-RPC 2.0, nem `message/send`, `tasks/get` ou `tasks/resubscribe`,
-      que o [ADR 02.1](decisoes/02-orquestracao.md) cita nominalmente. O Agent Card
-      traz `capabilities` como array de strings e o SSE carrega `EventEnvelope` do Hub,
-      não eventos de task do protocolo. **Um peer que fale A2A de verdade não conversa
-      com isto.** Decidir: implementar JSON-RPC ou renomear para o que é
+- [x] **"A2A server" renomeado para o que é: API REST de tasks**. Era uma API REST
+      simples em torno dos tipos do Hub, servida em caminhos com nome A2A
+      (`/a2a/tasks`, `/.well-known/agent-card.json`) sem nunca ter implementado
+      JSON-RPC 2.0, `message/send`, `tasks/get` ou `tasks/resubscribe` — um scanner de
+      descoberta automática que achasse `/.well-known/agent-card.json` assumiria
+      compatibilidade que não existia. Optou-se pela Opção B: renomear em vez de
+      implementar o protocolo de verdade. Agora é `/api/tasks/*` (`packages/daemon/src/api-tasks.ts`),
+      a rota `/.well-known/agent-card.json` foi removida, e o descritor da API vive em
+      `GET /api/descriptor.json`. "A2A de verdade" (JSON-RPC 2.0 completo) continua em
+      aberto no [ADR 02.3](decisoes/02-orquestracao.md), gated por um consumidor real
 - [x] **Motor de workflows declarativos em YAML** — validação E execução.
       A execução era o defeito mais grave da vistoria: o laço dava `await` em
       `startSession`, que é assíncrona por contrato, então esperava a sessão
@@ -426,13 +429,18 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       `stdin.write` (EPIPE quando o CLI sai antes de consumir)
 - [ ] **PID por sessão no schema**: a reconciliação corrige o registro na subida
       e não mata os processos que sobreviveram ao crash, porque não sabe quais são
-- [ ] **Keep-alive e `id:` no SSE do A2A**, try/catch no keep-alive do `/events`,
-      e teto de conexões com backpressure
+- [ ] **Keep-alive e `id:` no SSE de `/api/tasks/*`**, try/catch no keep-alive do
+      `/events`, e teto de conexões com backpressure
 - [ ] **`since` inválido no SSE** devolvendo 200 com zero linhas; truncamento de
       replay em 500 eventos sem sinal de que truncou
-- [ ] **Emissor para `budget.warning`** — único tipo do vocabulário sem nenhum — e
-      projeção que funcione **durante** a run (hoje `elapsedSeconds` só é liquidado
-      no fim, então o burn rate nunca aparece com a sessão viva)
+- [x] **Emissor para `budget.warning`** e projeção que funciona **durante** a run.
+      `SessionManager.budget()` usava `consumed.seconds`, só liquidado em
+      `ledger.settle()` no FIM da run — a projeção nunca aparecia com a sessão viva.
+      Agora usa o tempo de parede da sessão-raiz (`Date.now() - createdAt`), com a
+      ressalva de que mede o fluxo inteiro, não só a execução ativa. O emissor
+      dispara na transição false→true da pressão de 80% (`SessionManager#checkBudgetWarning`),
+      rearma em `raiseLimits()` e no fim do fluxo raiz. Painel mostra a projeção
+      (`SidePanel.tsx`) e reage ao vivo (`useHubState.ts`)
 - [ ] **Limpar os prompts em `tmpdir`** (um arquivo por spawn, para sempre) e pôr
       `maxBuffer` nos `execFileAsync` de `worktree.ts`
 - [ ] **Sinalizar o que hoje é engolido em silêncio**: YAML de projeto quebrado

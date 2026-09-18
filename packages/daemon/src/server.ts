@@ -7,9 +7,9 @@ import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { guardRequest } from './guard.js';
 import { explainToAgent, toHookPermission } from './pretool-gate.js';
-import { generateAgentCard, formatA2aTask } from './a2a.js';
+import { generateApiDescriptor, formatTaskResponse } from './api-tasks.js';
 import {
-  A2aCreateTaskSchema,
+  CreateTaskSchema,
   AdoptSessionSchema,
   ApprovalIdSchema,
   CancelSchema,
@@ -49,8 +49,8 @@ interface Route {
  *
  * CLI, TUI e Web UI consomem exatamente estas rotas (ADR 01.2): nenhuma lógica
  * mora no cliente, então os três têm a mesma capacidade por construção. O MCP
- * server e o A2A server da fase 2 são tradutores para cá, não caminhos
- * paralelos.
+ * server e a API REST de automação externa (`/api/tasks/*`, ver `api-tasks.ts`)
+ * são tradutores para cá, não caminhos paralelos.
  */
 export class HubServer {
   readonly #routes: Route[] = [];
@@ -176,22 +176,28 @@ export class HubServer {
       sendJson(res, 200, { probes: await this.registry.probeAll(true) });
     });
 
-    // ------------------------------------------------------------- A2A Protocol
+    // ------------------------------------------------------- API REST de tasks
+    //
+    // Isto NÃO é o protocolo A2A (JSON-RPC 2.0, `message/send`, `tasks/get`,
+    // `tasks/resubscribe`) — é uma API REST simples em torno dos tipos do Hub,
+    // para automação externa (scripts, CI, peers que só falam HTTP+SSE). Ver
+    // `docs/decisoes/02-orquestracao.md` (ADR 02.3) para o porquê de "A2A de
+    // verdade" continuar em aberto, e `api-tasks.ts` para o descritor da API.
+    //
+    // Não existe rota de descoberta em `/.well-known/agent-card.json`: esse
+    // caminho é reservado pela spec A2A para descoberta automática, e um
+    // scanner que o encontrasse assumiria compatibilidade que não existe.
     const getBaseUrl = (req: IncomingMessage): string => {
       const host = req.headers.host ?? `${this.config.host}:${this.config.port}`;
       return `http://${host}`;
     };
 
-    this.#route('GET', '/.well-known/agent-card.json', (req, res) => {
-      sendJson(res, 200, generateAgentCard(this.config, this.registry, getBaseUrl(req)));
+    this.#route('GET', '/api/descriptor.json', (req, res) => {
+      sendJson(res, 200, generateApiDescriptor(this.config, this.registry, getBaseUrl(req)));
     });
 
-    this.#route('GET', '/a2a/agent-card.json', (req, res) => {
-      sendJson(res, 200, generateAgentCard(this.config, this.registry, getBaseUrl(req)));
-    });
-
-    this.#route('POST', '/a2a/tasks', async (req, res) => {
-      const body = await readBody(req, A2aCreateTaskSchema);
+    this.#route('POST', '/api/tasks', async (req, res) => {
+      const body = await readBody(req, CreateTaskSchema);
       const projectId =
         body.projectId ??
         this.sessions.registerProject(body.projectPath ?? process.cwd()).id;
@@ -212,34 +218,34 @@ export class HubServer {
       });
 
       sendJson(res, 201, {
-        task: formatA2aTask(result.task, result.session.state),
+        task: formatTaskResponse(result.task, result.session.state),
         session: result.session,
         budget: result.budget,
         approval: result.approval ?? null,
       });
     });
 
-    this.#route('GET', '/a2a/tasks/:id', (_req, res, params) => {
+    this.#route('GET', '/api/tasks/:id', (_req, res, params) => {
       const taskId = param(params['id'], TaskIdSchema, 'id');
       const task = this.sessions.getTask(taskId);
       const session = this.sessions.getSession(task.sessionId);
       sendJson(res, 200, {
-        task: formatA2aTask(task, session.state),
+        task: formatTaskResponse(task, session.state),
       });
     });
 
-    this.#route('POST', '/a2a/tasks/:id/cancel', async (_req, res, params) => {
+    this.#route('POST', '/api/tasks/:id/cancel', async (_req, res, params) => {
       const taskId = param(params['id'], TaskIdSchema, 'id');
       const task = this.sessions.getTask(taskId);
-      await this.sessions.cancel(task.sessionId, 'cancelado via A2A');
+      await this.sessions.cancel(task.sessionId, 'cancelado via API de tasks');
       const updatedTask = this.sessions.getTask(taskId);
       const session = this.sessions.getSession(task.sessionId);
       sendJson(res, 200, {
-        task: formatA2aTask(updatedTask, session.state),
+        task: formatTaskResponse(updatedTask, session.state),
       });
     });
 
-    this.#route('GET', '/a2a/tasks/:id/events', (req, res, params) => {
+    this.#route('GET', '/api/tasks/:id/events', (req, res, params) => {
       const taskId = param(params['id'], TaskIdSchema, 'id');
       const task = this.sessions.getTask(taskId);
 
@@ -249,7 +255,7 @@ export class HubServer {
         Connection: 'keep-alive',
         'X-Accel-Buffering': 'no',
       });
-      res.write(`: conectado ao stream A2A da task ${taskId}\n\n`);
+      res.write(`: conectado ao stream de eventos da task ${taskId}\n\n`);
 
       for (const event of this.sessions.listEvents(task.sessionId)) {
         res.write(`data: ${JSON.stringify(event)}\n\n`);

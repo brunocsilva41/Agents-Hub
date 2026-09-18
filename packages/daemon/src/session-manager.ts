@@ -202,6 +202,15 @@ export class SessionManager {
   readonly #seeded = new Set<string>();
   /** Modelo declarado por sessão, para precificar os eventos que não o repetem. */
   readonly #models = new Map<string, string>();
+  /**
+   * Raízes que já emitiram `budget.warning` nesta passagem pelos 80%.
+   *
+   * Detecção de BORDA (false→true), não de nível: sem isto, todo evento de
+   * custo depois de cruzar o limiar reemitiria o aviso — uma sessão comum
+   * cobra dezenas de vezes por turno. Limpa em `raiseLimits()` (o teto mudou,
+   * então a próxima passagem pelos 80% é nova) e no fim do fluxo raiz.
+   */
+  readonly #warned = new Set<string>();
 
   /**
    * Pumps em andamento. Cada um escreve no banco até drenar, então o
@@ -947,6 +956,10 @@ export class SessionManager {
       const snapshot = ledger.raiseLimits(incremento ?? {});
       this.#persistLedger(ledger);
 
+      // Teto mudou: a próxima vez que a pressão cruzar 80% é uma passagem
+      // nova, não a mesma que acabou de ser resolvida.
+      this.#warned.delete(session.rootId);
+
       this.#emit({
         sessionId: session.id,
         taskId: approval.taskId,
@@ -1386,7 +1399,21 @@ export class SessionManager {
   budget(rootId: string): BudgetSnapshot & { projection?: BudgetProjection } {
     const ledger = this.#ledger(rootId);
     const snap = ledger.snapshot();
-    const elapsedSeconds = snap.consumed.seconds;
+
+    // `consumed.seconds` só é alimentado em `ledger.settle()`, chamado DEPOIS
+    // que uma run termina — durante toda a sessão viva ele fica em zero, e a
+    // projeção nunca aparecia justamente enquanto haveria alguém olhando.
+    //
+    // Em vez disso, usamos o tempo de parede real do FLUXO INTEIRO: da criação
+    // da sessão-raiz até agora. Ressalva: isto mede o relógio de parede do
+    // fluxo inteiro, não a soma dos tempos de execução ativa — se houver uma
+    // aprovação pendente no meio, o burn rate cai artificialmente durante a
+    // espera, porque o relógio não pausa. É uma simplificação aceitável, e
+    // mais correta que o zero de hoje.
+    const rootSession = this.store.sessions.get(rootId);
+    const elapsedSeconds = rootSession
+      ? (Date.now() - Date.parse(rootSession.createdAt)) / 1000
+      : snap.consumed.seconds;
     const projection = elapsedSeconds > 0 ? ledger.project(elapsedSeconds) : undefined;
     return { ...snap, projection };
   }
@@ -1567,6 +1594,7 @@ export class SessionManager {
             seconds: 0,
           });
           this.#persistLedger(ledger);
+          this.#checkBudgetWarning(session, task.id, snapshot);
 
           if (snapshot.exhausted) {
             this.#emit({
@@ -2146,7 +2174,10 @@ export class SessionManager {
     const irmaosVivos = this.store.sessions
       .list({ rootId: session.rootId })
       .some((s) => s.id !== sessionId && !isTerminalSessionState(s.state));
-    if (!irmaosVivos) this.#ledgers.delete(session.rootId);
+    if (!irmaosVivos) {
+      this.#ledgers.delete(session.rootId);
+      this.#warned.delete(session.rootId);
+    }
 
     // O worktree DELIBERADAMENTE sobrevive ao fim da sessão (ADR 06.3): é a
     // janela em que você consegue abrir o diretório e ver o que o agente fez.
@@ -2319,11 +2350,12 @@ export class SessionManager {
         // O custo da revisão é do fluxo como qualquer outro: sai do mesmo
         // orçamento, senão ligar a revisão furaria o teto em silêncio.
         if (evento.cost) {
-          this.#ledger(session.rootId).charge({
+          const snapshot = this.#ledger(session.rootId).charge({
             usd: evento.cost.usd ?? 0,
             tokens: (evento.cost.inputTokens ?? 0) + (evento.cost.outputTokens ?? 0),
             seconds: 0,
           });
+          this.#checkBudgetWarning(session, task.id, snapshot);
         }
       }
 
@@ -2451,6 +2483,27 @@ export class SessionManager {
     const ledger = new BudgetLedger(rootId, record.limits, record.consumed, ZERO_USAGE);
     this.#ledgers.set(rootId, ledger);
     return ledger;
+  }
+
+  /**
+   * Emite `budget.warning` na transição false→true da pressão de alerta.
+   *
+   * Nível, não borda, dispararia a cada evento de custo depois de cruzar o
+   * limiar — por isso o `#warned` guarda quem já foi avisado desde a última
+   * vez que o teto mudou (`raiseLimits`) ou o fluxo terminou.
+   */
+  #checkBudgetWarning(session: Session, taskId: string | null, snapshot: BudgetSnapshot): void {
+    if (!snapshot.isWarning || snapshot.exhausted) return;
+    if (this.#warned.has(session.rootId)) return;
+    this.#warned.add(session.rootId);
+
+    this.#emit({
+      sessionId: session.id,
+      taskId,
+      agentId: session.agentId,
+      type: 'budget.warning',
+      payload: { snapshot },
+    });
   }
 
   #persistLedger(ledger: BudgetLedger): void {

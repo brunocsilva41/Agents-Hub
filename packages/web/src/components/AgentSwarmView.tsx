@@ -14,7 +14,7 @@ export function AgentSwarmView({ agents, onNewSession }: Props): React.JSX.Eleme
         <div>
           <h2 className="swarm-title">Swarm de Agentes Conectados</h2>
           <p className="swarm-subtitle">
-            8 de 9 agentes de IA integrados e prontos para orquestração autônoma e colaborativa via A2A Protocol.
+            8 de 9 agentes de IA integrados e prontos para orquestração autônoma e colaborativa pelo Agents-Hub.
           </p>
         </div>
       </div>
