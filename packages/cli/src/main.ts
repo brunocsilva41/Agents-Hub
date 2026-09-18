@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { baseUrl, createHub, loadConfig } from '@agents-hub/daemon';
+import { baseUrl, createHub, loadConfig, saveConfig, modoExigeGate } from '@agents-hub/daemon';
 import { HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
 import { decideToolCall, lerStdin, type HookInput } from './hook.js';
@@ -100,6 +100,7 @@ ${bold('Daemon')} ${dim('(sobe sozinho quando algum comando precisa)')}
 
 ${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar)')}
   hub hooks install claude --write   registra o hook PreToolUse no Claude Code
+  hub hooks install codex --write    liga o bypass de confiança do hook no Codex
   hub hooks                          mostra onde o gate está instalado
   hub hook [--dialect codex]         uso interno: o agente chama, não você
 
@@ -165,7 +166,7 @@ async function main(): Promise<void> {
       return runHook(config, args);
     case 'hooks':
       // Offline como o `mcp`: mexer em config não precisa do daemon.
-      return hooksCommand(args);
+      return hooksCommand(args, config);
     case 'stop':
       return stopDaemon(client);
     case 'status':
@@ -278,19 +279,30 @@ async function runHook(
 
 // ------------------------------------------------------ gate pré-execução
 
-async function hooksCommand(args: Args): Promise<void> {
+async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): Promise<void> {
   const [sub, alvoId] = args.positional;
 
   if (sub === undefined) {
     for (const alvo of HOOK_TARGETS) {
-      const config = lerConfig(alvo.configUsuario);
-      const instalado = hookInstalado(config);
+      const alvoConfig = lerConfig(alvo.configUsuario);
+      const instalado = hookInstalado(alvoConfig);
       console.log(`${instalado ? green('●') : dim('○')} ${bold(alvo.id)} ${dim(alvo.nome)}`);
       console.log(`   ${dim(alvo.configUsuario)}`);
       console.log(`   ${dim(alvo.nota)}`);
     }
+    const codexLigado = config.codexGate.bypassHookTrust;
+    console.log(`${codexLigado ? green('●') : dim('○')} ${bold('codex')} ${dim('Codex CLI')}`);
+    console.log(`   ${dim(path.join(config.home, 'config.json'))} (codexGate.bypassHookTrust)`);
     console.log(
-      `${NEWLINE}${dim('instale com:')} ${bold('hub hooks install claude --write')}`,
+      `   ${dim('config inline por invocação, não arquivo do agente — ver `hub hooks install codex`')}`,
+    );
+    if (!codexLigado && modoExigeGate('supervised')) {
+      console.log(
+        `   ${yellow('sem isto, sessões --mode supervised do Codex são recusadas ao iniciar')}`,
+      );
+    }
+    console.log(
+      `${NEWLINE}${dim('instale com:')} ${bold('hub hooks install claude --write')} ${dim('ou')} ${bold('hub hooks install codex --write')}`,
     );
     console.log(
       dim(`o gate cobre ${MATCHER_DE_RISCO.split('|').length} ferramentas de risco; leitura passa direto`),
@@ -304,11 +316,15 @@ async function hooksCommand(args: Args): Promise<void> {
     return;
   }
 
+  if (alvoId === 'codex') {
+    return installCodexGate(args, config);
+  }
+
   const alvo = HOOK_TARGETS.find((t) => t.id === (alvoId ?? 'claude'));
   if (!alvo) {
     console.error(
       red(`agente "${String(alvoId)}" não suporta gate pré-execução`),
-      dim(`(disponíveis: ${HOOK_TARGETS.map((t) => t.id).join(', ')})`),
+      dim(`(disponíveis: ${HOOK_TARGETS.map((t) => t.id).join(', ')}, codex)`),
     );
     process.exitCode = 1;
     return;
@@ -334,6 +350,38 @@ async function hooksCommand(args: Args): Promise<void> {
   console.log(
     dim(
       'a partir da próxima sessão, Bash/Write/Edit passam pela política do Hub antes de rodar.',
+    ),
+  );
+}
+
+/**
+ * O gate do Codex não se instala numa config do agente (ver `hub hooks` para
+ * o porquê): o Hub monta `-c hooks={...}` a cada invocação. "Instalar" aqui
+ * significa uma coisa só — gravar a escolha explícita do usuário em
+ * `~/.agents-hub/config.json`, nunca em config de projeto versionada, porque
+ * um repositório clonado não pode ligar sozinho um bypass de revisão de hook.
+ */
+async function installCodexGate(args: Args, config: ReturnType<typeof loadConfig>): Promise<void> {
+  const destino = path.join(config.home, 'config.json');
+
+  if (args.flags['write'] !== true) {
+    console.log(dim(`destino: ${destino}${NEWLINE}`));
+    console.log('O Codex ignora hook não confiável EM SILÊNCIO: a ferramenta roda como se');
+    console.log('não houvesse gate nenhum. Só existe um jeito comprovado de evitar isso — a');
+    console.log('flag `--dangerously-bypass-hook-trust` em toda invocação, que o Hub passa a');
+    console.log('acrescentar depois deste comando.');
+    console.log(`${NEWLINE}A flag dispensa a revisão do SCRIPT do hook (que é o próprio Hub, não`);
+    console.log('algo escrito no seu projeto) — nunca permissão do agente: o hook só sabe NEGAR.');
+    console.log(`${NEWLINE}${dim('para gravar:')} ${bold('hub hooks install codex --write')}`);
+    return;
+  }
+
+  saveConfig({ ...config, codexGate: { ...config.codexGate, bypassHookTrust: true } });
+  console.log(`${green('gate do Codex ligado')} — gravado em ${bold(destino)}`);
+  console.log(
+    dim(
+      'a partir da próxima sessão do Codex, cada invocação leva --dangerously-bypass-hook-trust ' +
+        'e Bash/Write/Edit passam pela política do Hub antes de rodar.',
     ),
   );
 }

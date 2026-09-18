@@ -25,7 +25,25 @@ export interface HubConfig {
    */
   opencodePort: number;
   policy: PolicyDocument;
+  codexGate: CodexGateConfig;
 }
+
+export interface CodexGateConfig {
+  /**
+   * Liga o gate pré-execução do Codex. Sem isto o Codex roda sem prevenção —
+   * ver `packages/daemon/src/codex-gate.ts` para o porquê de não haver padrão.
+   *
+   * Precisa ser escolha explícita do usuário nesta máquina: por isso mora
+   * SÓ na config global (`~/.agents-hub/config.json`), nunca em
+   * `<repo>/.agents-hub/config.yaml` — um repositório clonado não pode ligar
+   * sozinho um bypass de revisão de hook.
+   */
+  bypassHookTrust: boolean;
+}
+
+export const DEFAULT_CODEX_GATE: CodexGateConfig = {
+  bypassHookTrust: false,
+};
 
 export interface RetentionPolicy {
   /**
@@ -65,6 +83,18 @@ function bundledWebRoot(): string {
   return path.join(repoRoot(), 'packages', 'web', 'dist');
 }
 
+/**
+ * `main.js` da CLI — mesmo binário que `hub hooks install claude` já registra.
+ *
+ * O gate do Codex não se instala numa config de usuário (ADR: ver
+ * `codex-gate.ts`); o Hub monta o comando do hook a cada invocação, e para
+ * isso precisa saber onde a própria CLI mora, do mesmo jeito que já sabe onde
+ * moram os manifestos e a Web UI.
+ */
+export function cliHookEntrypoint(): string {
+  return path.join(repoRoot(), 'packages', 'cli', 'dist', 'main.js');
+}
+
 export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
   const home = overrides.home ?? defaultHome();
   const configFile = path.join(home, 'config.json');
@@ -94,6 +124,11 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
       ...DEFAULT_RETENTION,
       ...(onDisk.retention ?? {}),
       ...(overrides.retention ?? {}),
+    },
+    codexGate: {
+      ...DEFAULT_CODEX_GATE,
+      ...(onDisk.codexGate ?? {}),
+      ...(overrides.codexGate ?? {}),
     },
   };
 

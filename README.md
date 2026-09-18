@@ -140,17 +140,25 @@ Detalhes e níveis de risco em [docs/decisoes/03-seguranca-limites.md](docs/deci
 
 | Nível | Como funciona | Cobertura |
 |---|---|---|
-| **Gate pré-execução** | O agente pergunta ao Hub *antes* de rodar a ferramenta e obedece à resposta. Prevenção real | Claude Code |
+| **Gate pré-execução** | O agente pergunta ao Hub *antes* de rodar a ferramenta e obedece à resposta. Prevenção real | Claude Code, Codex |
 | **Portão** | Ação que passa por dentro do Hub: delegação, reserva de orçamento. Retida antes de acontecer | Todos |
 | **Vigilância** | Evento do que já aconteceu; para a *próxima* ação. Chamar isso de aprovação prévia seria mentira | Todos |
 
 Ligue o gate pré-execução:
 
 ```bash
-hub hooks install claude --write
+hub hooks install claude --write   # registra o hook na config do Claude Code
+hub hooks install codex --write    # liga o bypass de confiança que o hook do Codex exige
 ```
 
 Validado com o Claude Code de verdade: mandado a rodar `git push origin main`, o comando foi **barrado antes de executar** e o Hub registrou o evento de auditoria.
+
+O Codex é um caso à parte: ele **ignora hook não confiável em silêncio** — sem
+`--dangerously-bypass-hook-trust` a cada invocação, a ferramenta roda como se
+não houvesse gate nenhum, e o Hub não finge o contrário. Por isso uma sessão
+`--mode supervised` do Codex é **recusada ao iniciar** se o bypass não estiver
+ligado nesta máquina, em vez de rodar sem a prevenção que o modo promete;
+`semi`/`autonomous` rodam sem o bypass, mas com aviso explícito na timeline.
 
 Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) interrompe; sair da allow list vira alerta na timeline. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero.
 

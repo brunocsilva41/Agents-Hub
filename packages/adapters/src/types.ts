@@ -131,6 +131,12 @@ export interface RunContext {
   /** Sem nenhum evento por este tempo, a run é considerada travada. */
   heartbeatSeconds: number;
   model?: string;
+  /**
+   * Argumentos extra a acrescentar na invocação, calculados por sessão — ex.:
+   * a config do gate pré-execução do Codex, que depende do modo e de uma
+   * escolha explícita do usuário e por isso não cabe no manifesto estático.
+   */
+  extraArgs?: string[];
 }
 
 /** Evento já mapeado pelo adapter, antes de ganhar `seq` e `id` no domínio. */

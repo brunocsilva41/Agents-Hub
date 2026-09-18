@@ -545,6 +545,8 @@ function explainDelegationFailure(err: unknown): string {
       return `${err.message}\nUse hub_agent_list para ver quem está realmente disponível.`;
     case 'AGENT_NOT_INSTALLED':
       return `${err.message}\nEste agente não está instalado nesta máquina. Escolha outro.`;
+    case 'CODEX_GATE_NOT_GUARANTEED':
+      return `${err.message}\nPeça ao seu usuário para rodar "hub hooks install codex --write" nesta máquina, ou delegue com --mode semi/autonomous.`;
     default:
       return err.message;
   }

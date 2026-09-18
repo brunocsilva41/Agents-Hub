@@ -681,6 +681,7 @@ function statusFor(code: string): number {
     case 'AGENT_NOT_INSTALLED':
     case 'AGENT_NOT_AUTHENTICATED':
     case 'CAPABILITY_UNRESOLVED':
+    case 'CODEX_GATE_NOT_GUARANTEED':
       return 424;
     default:
       return 400;

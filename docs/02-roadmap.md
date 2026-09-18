@@ -179,24 +179,42 @@ errados**, dois deles de forma que quebraria a invocação:
       binário, não deduzido: a decisão de perguntar é `escalate` (não `ask`), e
       `AGENTS_HUB_SESSION_ID` chega no hook, o que resolve a correlação de sessão.
       Validado com o agente real: `git push` barrado antes de executar
-- [~] **Gate pré-execução para o Codex** — contrato VERIFICADO contra o binário
-      real (0.149.1), sondando com um hook próprio em diretório isolado. O
-      Codex tem sistema de hooks completo e vocabulário compatível com o do
-      Claude (`PreToolUse`, `hook_event_name`, `hookSpecificOutput`,
-      `tool_name: "Bash"`), então `actionsOfToolCall` serve sem mudança. Mas o
-      **dialeto de resposta é oposto**:
+- [x] **Gate pré-execução para o Codex** — fechado em 2026-09-18. Contrato
+      VERIFICADO contra o binário real (0.149.1), sondando com um hook próprio
+      em diretório isolado. O Codex tem sistema de hooks completo e vocabulário
+      compatível com o do Claude (`PreToolUse`, `hook_event_name`,
+      `hookSpecificOutput`, `tool_name: "Bash"`), então `actionsOfToolCall`
+      serve sem mudança. Mas o **dialeto de resposta é oposto**:
       - permitir é **não escrever nada** — `permissionDecision: "allow"` faz o
         Codex marcar `hook: PreToolUse Failed`, o que quebraria justamente o
         caminho feliz;
-      - **não existe `ask`**: a decisão `approve` do Hub precisa virar `deny`
-        com motivo que mande o agente falar com o humano;
+      - **não existe `ask`**: a decisão `approve` do Hub vira `deny` com
+        motivo que manda o agente falar com o humano;
       - `deny` exige motivo não vazio.
       Também exige confiança persistida no hook (ou
       `--dangerously-bypass-hook-trust`), e **não recebe variável de ambiente
-      do Hub** — a correlação de sessão terá de sair do `cwd` do payload, que
-      no Hub é o worktree da sessão.
-      Implementado: `toCodexHookOutput` + 3 testes. **Falta**: emitir a config
-      de hook na invocação e correlacionar sessão por `cwd`.
+      do Hub** — a correlação de sessão sai do `cwd` do payload
+      (`#localizarSessao`, já preferia sessão viva sobre a mais recente desde a
+      vistoria #5 — o "falta" desta linha estava desatualizado, a correlação já
+      funcionava).
+      O que fechou de verdade: `RunContext.extraArgs` (novo, em
+      `@agents-hub/adapters`) deixa o `ProcessAgentAdapter` genérico enquanto
+      o `SessionManager` monta, só para o Codex, a config de
+      `montarConfigDoGate` a cada `#launch` — a mesma função pura que já
+      existia, testada, e que nada em produção chamava. `codexGate.bypassHookTrust`
+      é config GLOBAL (`~/.agents-hub/config.json`, nunca
+      `<repo>/.agents-hub/config.yaml` — é bypass de revisão de hook, não
+      política a apertar), ligada por `hub hooks install codex --write`. Sessão
+      `supervised` sem o bypass ligado é RECUSADA ao iniciar
+      (`CODEX_GATE_NOT_GUARANTEED`) em vez de rodar calada sem a prevenção que
+      o modo promete; `semi`/`autonomous` rodam sem o bypass mas com aviso
+      `log`/`stream:"gate"` na timeline, porque um Codex sem hook confiável
+      ignora o hook em silêncio — não avisar seria repetir o erro que a
+      vistoria #3 já tinha corrigido para outro caminho.
+      3 testes existentes (`toCodexHookOutput`/`montarConfigDoGate`/`modoExigeGate`)
+      + 3 novos de integração fim a fim com um binário `codex` falso, cobrindo
+      recusa em `supervised`, aviso em `semi` e os argumentos reais de spawn
+      com e sem bypass.
 - [ ] Gate pré-execução para os demais agentes
 - [ ] TUI (a Web UI cobriu a necessidade; virou conveniência, não bloqueio)
 
