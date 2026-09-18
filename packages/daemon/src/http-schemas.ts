@@ -132,7 +132,8 @@ export const PreToolGateSchema = z
   })
   .strict();
 
-export const A2aCreateTaskSchema = z
+/** Payload de criação de task pela API REST de automação externa (`POST /api/tasks`). */
+export const CreateTaskSchema = z
   .object({
     projectId: ProjectIdSchema.optional(),
     projectPath: z.string().max(4096).optional(),

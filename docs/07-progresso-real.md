@@ -34,7 +34,7 @@ diz) · **❌ não confere** · **🕳️ código escrito, nunca exercitado**.
 | Item do plano | Declarado | Real | Evidência |
 |---|---|---|---|
 | Monorepo + tipos do domínio | `[x]` | ✅ | `npx tsc -b` verde; 8 workspaces em `packages/` |
-| `EventEnvelope` + vocabulário | `[x]` | ⚠️ | 21 tipos em `packages/core/src/events.ts`; **20 são emitidos**, `budget.warning` não é emitido em lugar nenhum (ver §2.5) |
+| `EventEnvelope` + vocabulário | `[x]` | ✅ **corrigido** | 21 tipos em `packages/core/src/events.ts`; os 21 agora são emitidos — `budget.warning` ganhou emissor em `SessionManager#checkBudgetWarning` (ver §2.8) |
 | `PolicyEngine` (risco, overlay, interseção) | `[x]` | ✅ | `packages/core/src/policy.ts`; `intersect()` estreita risco, comandos, paths, rede, timeouts; testes `policy.test.ts` |
 | `BudgetLedger` (raiz consumida por descendentes) | `[x]` | ✅ | `packages/core/src/budget.ts`; reserva por task filha, `charge` incremental, `raiseLimits` na aprovação |
 | `CallGraph` (profundidade + ciclo semântico) | `[x]` | ✅ | `packages/core/src/graph.ts`, `checkDelegation` com `(agent, objective_hash)` no `path[]` |
@@ -86,11 +86,11 @@ não está nos itens — está na palavra **"plena"** do título da fase (§3).
 
 | Item do plano | Declarado | Real | Evidência |
 |---|---|---|---|
-| **A2A server** | `[x]` | ⚠️ **grave** | É uma API REST com forma do Hub servida em caminhos com nome A2A. Ver §2.3 |
+| **A2A server** | `[x]` | ✅ **corrigido** | Era uma API REST com forma do Hub servida em caminhos com nome A2A. Renomeada para `/api/tasks/*` (Opção B do §2.3: renomear em vez de implementar JSON-RPC 2.0), com `/.well-known/agent-card.json` removida. Ver §2.3 |
 | **Motor de workflows YAML** (fan-out/fan-in) | `[x]` | ❌ **o mais grave** | A validação do DAG é real; a **execução ignora as dependências**. Ver §2.4 |
 | **Handoff de sessão** | `[x]` | 🕳️ | Código completo e correto (`session-manager.ts:809-873`), rota, CLI, tool MCP e botão no painel. **Zero eventos `session.handoff` no banco**: nunca foi executado fora do teste unitário |
 | **Validação por revisão cruzada** | `[x]` | ✅ | `#revisar`/`#executarRevisao`; revisor nunca é o próprio autor, custo debitado do mesmo orçamento, diff vazio não aprova sozinho. Desligado por padrão (deliberado) |
-| **Painel de custos com projeção e alertas** | `[x]` | ⚠️ | `project()` e `isWarning` existem e o painel mostra taxa de queima e aviso de 80%. Mas `projectedUsd`/`projectedTokens` **não são exibidos**, o evento `budget.warning` **nunca é emitido**, e a projeção usa `consumed.seconds`, que só é liquidado no **fim** da run — ou seja, a projeção não existe enquanto ela seria útil |
+| **Painel de custos com projeção e alertas** | `[x]` | ✅ **corrigido** | `projectedUsd`/`projectedTokens` agora são exibidos no painel, o evento `budget.warning` é emitido na transição para 80% de pressão (detecção de borda, com rearme em `raiseLimits()`), e a projeção passou a usar o tempo de parede da sessão-raiz em vez de `consumed.seconds` — que só era liquidado no fim da run. Ver §2.8 |
 | Isolamento por container | `[ ]` | ✅ honesto | `worktree.ts:68` recusa explicitamente com `ILLEGAL_STATE`. Não finge |
 | ACP | `[ ]` | — | corretamente aberto |
 
@@ -166,30 +166,46 @@ instale com: hub hooks install claude --write
 Ou seja: o único nível de controle verdadeiramente preventivo sobre ações de ferramenta
 não está ativo em nenhum agente desta máquina.
 
-### 2.3 🔴 Grave — o "A2A server" não é A2A
+### 2.3 🔴 Grave (corrigido) — o "A2A server" não era A2A
 
-O ADR 02.3 escolheu A2A como "a porta por onde peers externos falam com o Hub", e o
-ADR 02.1 cita nominalmente os métodos `tasks/get` e `tasks/resubscribe`. O que existe
-em `packages/daemon/src/a2a.ts` + rotas é uma API REST desenhada em torno dos tipos do
-Hub:
+**Status: corrigido nesta passagem.** O ADR 02.3 escolhera A2A como "a porta por onde
+peers externos falam com o Hub", e o ADR 02.1 citava nominalmente os métodos
+`tasks/get` e `tasks/resubscribe`. O que existia em `packages/daemon/src/a2a.ts` +
+rotas era uma API REST desenhada em torno dos tipos do Hub:
 
-- não há superfície JSON-RPC 2.0 — nem `message/send`, nem `tasks/get`, nem
-  `tasks/resubscribe`; são `POST /a2a/tasks`, `GET /a2a/tasks/:id`, `.../cancel`,
+- não havia superfície JSON-RPC 2.0 — nem `message/send`, nem `tasks/get`, nem
+  `tasks/resubscribe`; eram `POST /a2a/tasks`, `GET /a2a/tasks/:id`, `.../cancel`,
   `.../events`;
-- o Agent Card tem `capabilities` como **array de strings** (os capabilities dos
+- o Agent Card tinha `capabilities` como **array de strings** (os capabilities dos
   manifestos), um objeto `endpoints` próprio e `authentication: { mode: 'none' }`;
-- o corpo de task devolvido é o `Task` do Hub achatado (`brief`, `attempts`,
+- o corpo de task devolvido era o `Task` do Hub achatado (`brief`, `attempts`,
   `result`), com o vocabulário de estados do Hub;
-- o SSE é `data: <EventEnvelope do Hub>`, não eventos de task do protocolo.
+- o SSE era `data: <EventEnvelope do Hub>`, não eventos de task do protocolo;
+- pior ainda: `GET /.well-known/agent-card.json` respondia — esse caminho é
+  **reservado pela spec A2A para descoberta automática**, e um scanner que o
+  encontrasse assumiria compatibilidade que não existia.
 
-Um peer que fale A2A de verdade não conversa com isto. **Não é fraude — é uma boa API
-REST com o nome errado**, e a divergência parece pressa, não decisão: nenhum comentário
-no código assume o desvio, ao contrário do que o repositório faz em toda parte quando
-degrada algo de propósito (`container`, `interrupt` no Windows, `acceptance_criteria`).
+Um peer que fale A2A de verdade não conversava com isto. Não era fraude — era uma boa
+API REST com o nome errado —, mas a divergência não estava assumida em comentário
+nenhum, ao contrário do que o repositório faz em toda parte quando degrada algo de
+propósito (`container`, `interrupt` no Windows, `acceptance_criteria`).
 
-> Ressalva honesta: comparei a implementação com o que os ADRs deste repositório
-> afirmam sobre A2A v1.0 e com a forma canônica do protocolo. **Não testei contra um
-> cliente A2A real** — ver §5.
+**A correção escolheu a Opção B do plano**: renomear em vez de implementar JSON-RPC
+2.0. Hoje:
+
+- as rotas moraram para `/api/tasks/*` (`packages/daemon/src/api-tasks.ts`, antes
+  `a2a.ts`);
+- `GET /.well-known/agent-card.json` foi **removida por completo**;
+- o descritor da API (antes "Agent Card") vive em `GET /api/descriptor.json` e se
+  chama `ApiDescriptor`, sem alegar `protocolVersion` de coisa nenhuma;
+- `A2aCreateTaskSchema` virou `CreateTaskSchema` em `http-schemas.ts`;
+- o ADR 02.3 registra explicitamente que "A2A de verdade" continua em aberto,
+  gated por aparecer um consumidor real que precise do protocolo canônico.
+
+> Ressalva honesta, ainda válida: comparei a implementação com o que os ADRs deste
+> repositório afirmavam sobre A2A v1.0 e com a forma canônica do protocolo. **Não
+> testei contra um cliente A2A real** — ver §5. A correção não muda essa ressalva:
+> ela renomeia uma API REST, não implementa o protocolo.
 
 ### 2.4 🔴 O mais grave — o motor de workflows valida o DAG e depois o ignora
 
@@ -270,10 +286,14 @@ Mas:
 Parece esquecimento puro: ele entrou depois (`2e228b1`) e as duas listas não foram
 atualizadas.
 
-### 2.8 🟢 Menor — inconsistências de contagem e um evento morto
+### 2.8 🟢 Menor — inconsistências de contagem e um evento que ganhou emissor
 
-- `budget.warning` está no `EventType` e **nunca é emitido**. É o único tipo do
-  vocabulário sem emissor. O roadmap o cita nominalmente como entregue.
+- ~~`budget.warning` está no `EventType` e **nunca é emitido**~~ **Corrigido**:
+  `SessionManager#checkBudgetWarning` agora o emite na transição false→true de
+  `snapshot.isWarning`, com detecção de borda (não repete a cada evento de custo
+  acima de 80%) e rearme em `raiseLimits()`. A projeção de `budget()` também deixou
+  de depender de `consumed.seconds` (só liquidado no fim da run) e passou a usar o
+  tempo de parede da sessão-raiz, então aparece com a sessão ainda viva.
 - Doc 03 diz "as 11 tools"; são 12.
 - Roadmap Fase 1 diz "Manifestos dos 8 agentes"; são 9.
 - `MCP_TARGETS` marca `verified: true` só para claude, codex e cursor — e **cursor não
