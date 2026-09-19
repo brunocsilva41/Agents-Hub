@@ -4,6 +4,7 @@ import { createStore } from '@agents-hub/store';
 import type { UnitOfWork } from '@agents-hub/core';
 import { InMemoryEventBus } from './bus.js';
 import { loadConfig, type HubConfig } from './config.js';
+import { EventRetentionCompactor } from './event-retention.js';
 import { WorktreeReaper } from './reaper.js';
 import { HubServer } from './server.js';
 import { SessionManager } from './session-manager.js';
@@ -16,6 +17,7 @@ export interface Hub {
   bus: InMemoryEventBus;
   sessions: SessionManager;
   reaper: WorktreeReaper;
+  eventRetention: EventRetentionCompactor;
   server: HubServer;
   /**
    * Coloca o daemon no ar: liga a porta, reconcilia o que ficou para trás e
@@ -51,6 +53,7 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const worktrees = new WorktreeManager(config.worktreeRoot);
   const sessions = new SessionManager(config, store, registry, bus, worktrees);
   const reaper = new WorktreeReaper(store, worktrees, config.retention);
+  const eventRetention = new EventRetentionCompactor(store, config.retention);
   const server = new HubServer(config, sessions, registry, bus, reaper);
 
   const hub: Hub = {
@@ -60,6 +63,7 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
     bus,
     sessions,
     reaper,
+    eventRetention,
     server,
 
     /**
@@ -96,13 +100,16 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
 
       // Depois da reconciliação, nunca antes: o reaper decide o que recolher
       // olhando `endedAt`, e recolher worktree de sessão que ainda não foi
-      // classificada seria apagar trabalho vivo.
+      // classificada seria apagar trabalho vivo. Mesma razão vale para a
+      // compactação de eventos: ela também filtra por `ended_at`.
       reaper.start();
+      eventRetention.start();
 
       return endereco;
     },
 
     async shutdown() {
+      eventRetention.stop();
       reaper.stop();
       await sessions.shutdown();
       // Derruba o `opencode serve` que o Hub subiu — nunca um que já existia.

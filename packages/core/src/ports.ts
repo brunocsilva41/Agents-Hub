@@ -65,6 +65,12 @@ export interface EventRepository {
   lastSeq(sessionId: string): number;
   /** Custo acumulado de uma sessão, somando o `cost` dos eventos. */
   costOf(sessionId: string): BudgetUsage;
+  /**
+   * Compacta (zera) `raw_json` de eventos cuja sessão terminou antes de
+   * `cutoffIso` — nunca deleta a linha, nunca toca `payload_json` (ADR 06.3:
+   * eventos para sempre). Devolve quantas linhas foram afetadas.
+   */
+  compactRawBefore(cutoffIso: string): number;
 }
 
 export interface ApprovalRepository {

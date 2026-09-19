@@ -428,6 +428,26 @@ class SqliteEventRepository implements EventRepository {
       .get(sessionId) as Row | undefined;
     return { usd: num(row?.['usd']), tokens: num(row?.['tokens']), seconds: 0 };
   }
+
+  /**
+   * Compacta `raw_json` de eventos de sessões encerradas há tempo suficiente.
+   *
+   * Nunca `DELETE`, nunca toca `payload_json` — o ADR 06.3 decidiu "eventos
+   * para sempre", e essa decisão vale para o que sustenta replay/timeline/
+   * auditoria. `raw_json` só serve para depurar mapper errado: não é lido no
+   * dia a dia, e é o que cresce sem limite junto com `payload_json` na mesma
+   * tabela.
+   */
+  compactRawBefore(cutoffIso: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE events SET raw_json = NULL
+         WHERE raw_json IS NOT NULL
+           AND session_id IN (SELECT id FROM sessions WHERE ended_at IS NOT NULL AND ended_at < ?)`,
+      )
+      .run(cutoffIso);
+    return num(result.changes);
+  }
 }
 
 class SqliteApprovalRepository implements ApprovalRepository {

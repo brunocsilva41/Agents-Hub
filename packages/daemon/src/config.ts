@@ -65,11 +65,24 @@ export interface RetentionPolicy {
   worktreeDays: number;
   /** Intervalo entre passadas do coletor, em minutos. */
   sweepIntervalMinutes: number;
+  /**
+   * Dias que `events.raw_json` sobrevive depois de a sessão dona do evento
+   * terminar, antes de ser compactado (`NULL`) — não deletado.
+   *
+   * O ADR 06.3 decidiu "eventos para sempre", e essa decisão continua valendo
+   * para `payload_json`: é o que sustenta replay, timeline e auditoria.
+   * `raw_json` existe só para debugar mapper errado — não é lido no dia a
+   * dia — e por isso pode ser comprimido sem violar a decisão do ADR. Mesmo
+   * padrão de `worktreeDays` por default: 7 dias é tempo de sobra para
+   * investigar um bug de mapper antes de o bruto sumir.
+   */
+  rawEventDays: number;
 }
 
 export const DEFAULT_RETENTION: RetentionPolicy = {
   worktreeDays: 7,
   sweepIntervalMinutes: 60,
+  rawEventDays: 7,
 };
 
 export function defaultHome(): string {
@@ -128,6 +141,7 @@ const HubConfigOnDiskSchema = z
       .object({
         worktreeDays: z.number().optional(),
         sweepIntervalMinutes: z.number().optional(),
+        rawEventDays: z.number().optional(),
       })
       .optional(),
     codexGate: z

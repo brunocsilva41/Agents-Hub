@@ -17,7 +17,7 @@ describe('API REST de tasks (/api/tasks) — automação externa', () => {
     host: '127.0.0.1',
     port: 4747,
     webRoot: '/web',
-    retention: { worktreeDays: 7, sweepIntervalMinutes: 60 },
+    retention: { worktreeDays: 7, sweepIntervalMinutes: 60, rawEventDays: 7 },
     opencodePort: 4096,
     policy: DEFAULT_POLICY,
     codexGate: { bypassHookTrust: false },
