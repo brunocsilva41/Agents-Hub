@@ -660,6 +660,56 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       git; falha de `symlink` injetada loga e aparece em `dependencyWarnings`)
 - [ ] **Teto no `AsyncQueue`**, que hoje cresce sem limite contra um consumidor
       que faz escrita SQLite síncrona por evento
+- [x] **TOCTOU no teto de concorrência por agente** (`session-manager.ts`).
+      `#assertConcurrency` só lia `this.#runs` (tamanho do `Map`), e a escrita
+      que registra a run (`#runs.set`) só acontecia dentro de `#launch`, depois
+      de vários `await` (worktree, baseline, possível portão de aprovação de
+      delegação, e só então `adapter.start()` — já com processo real de pé). Um
+      fan-out (`Promise.all`) para o mesmo agente fazia todas as tentativas
+      lerem o mesmo `#runs` vazio antes de qualquer uma escrever nele,
+      furando `maxConcurrencyPerAgent` de verdade, com custo já gasto (worktree
+      + processo) antes de qualquer coisa perceber o excesso. Corrigido
+      transformando checagem-e-reserva numa única operação síncrona: novo
+      `#reserved` (`Map<sessionId, agentId>`), somado a `#runs` em
+      `#assertConcurrency`, e `#reserveSlot`/`#releaseSlot` chamados sem
+      `await` entre a checagem e o registro em `start()`, `#retry()`,
+      `#fallback()` e `handoff()` — cada um envolvendo o trecho até e incluindo
+      o `await this.#launch(...)` num `try/finally` que libera a reserva em
+      todo caminho de saída (negado, retido para aprovação, erro no meio,
+      ou run nascida de verdade). Testado em
+      `packages/daemon/src/session-manager-audit.test.ts` (achado 1): cinco
+      chamadas de `start()` disparadas com `Promise.allSettled` sem esperar
+      uma pela outra, teto por agente em 1 — só uma vaga concedida, as outras
+      quatro recusadas com `CONCURRENCY_EXCEEDED`, contra o daemon real (agente
+      de teste que de fato sobe como processo via `node`, worktree real).
+      Isto resolve a metade "teto de sessões simultâneas" do item de dívida
+      "Concorrência sob corrida" — a reserva de orçamento
+      (`BudgetLedger.reserve`/`settle`) continua sem teste de concorrência.
+- [x] **`resolveApproval` ressuscitava sessão terminal** (`session-manager.ts`).
+      No ramo de aprovação não-delegação, o código escrevia
+      `state: 'running'` incondicionalmente e só DEPOIS relia a sessão do banco
+      para checar se ela já era terminal — checagem morta por construção, já
+      que sempre lia de volta o próprio `'running'` recém-escrito. Cenário real:
+      uma sessão-filha em `waiting_approval` (estouro de orçamento ou
+      vigilância) cujo pai é cancelado antes de a aprovação ser resolvida —
+      `cancel()` mata filhos `running` OU `waiting_approval`, mas `#finish` não
+      tocava a tabela de aprovações, deixando a `Approval` `pending` e órfã;
+      aprová-la depois reescrevia a sessão morta de volta para `running` e
+      chamava `send()`, lançando um processo de agente novo para uma sessão que
+      o resto do sistema já tratava como encerrada — e o mesmo buraco existia,
+      pior ainda, no ramo de delegação (`#launch` direto, sem checagem
+      nenhuma). Corrigido em duas frentes: (a) a checagem de terminalidade
+      (`isTerminalSessionState`, relendo o banco) agora vem ANTES de qualquer
+      escrita ou `#launch`, cobrindo os dois ramos; (b) `#finish` agora nega
+      toda aprovação `pending` da sessão que está sendo encerrada — fecha a
+      causa-raiz, não só o sintoma, porque `resolveApproval` passa a barrar na
+      própria checagem de `state !== 'pending'` do topo da função antes de
+      chegar perto de reviver algo. Testado em
+      `packages/daemon/src/session-manager-audit.test.ts` (achados 2a e 2b):
+      sessão forçada a `killed` com aprovação ainda `pending` não volta a
+      `running` nem gera run nova; cancelar uma sessão em `waiting_approval`
+      nega a aprovação pendente automaticamente, e resolvê-la depois é
+      recusado de cara.
 
 ### Decidido aqui
 
@@ -695,8 +745,9 @@ nada aqui seja tratado como acidente na próxima vistoria.
       exatamente por isso
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
 - [ ] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
-      `settle`) e o teto de sessões simultâneas nunca foram testados com chamadas
-      concorrentes
+      `settle`) nunca foi testada com chamadas concorrentes. A outra metade
+      deste item — o teto de sessões simultâneas por agente — foi corrigida e
+      testada (fase 5, "TOCTOU no teto de concorrência por agente")
 - [ ] `pause` tem rota HTTP e não tem comando na CLI
 - [ ] O painel não expõe `workflow`, `prune`, `mcp` nem `hooks`
 
