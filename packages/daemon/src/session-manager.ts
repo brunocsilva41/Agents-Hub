@@ -201,6 +201,21 @@ export class SessionManager {
   readonly #seq: SequenceCounter;
   readonly #ledgers = new Map<string, BudgetLedger>();
   readonly #runs = new Map<string, LiveRun>();
+  /**
+   * Reservas de concorrência: sessão → agente, entre o instante em que
+   * `#reserveSlot` aceitou a vaga e o instante em que a run de verdade nasce
+   * em `#runs` (ou a tentativa desiste antes disso).
+   *
+   * Existe para fechar a janela TOCTOU entre `#assertConcurrency` e
+   * `#runs.set(...)`: como o registro de verdade só acontece dentro de
+   * `#launch`, depois de vários `await` (worktree, baseline, possível gate de
+   * aprovação, e só então `adapter.start()`), um fan-out de tarefas para o
+   * mesmo agente furava o teto de verdade — todas liam o mesmo `#runs` vazio
+   * antes de qualquer uma escrever nele. Contando esta reserva junto de
+   * `#runs` em `#assertConcurrency`, a checagem-e-reserva vira uma única
+   * operação síncrona, sem brecha para outra tentativa entrar no meio.
+   */
+  readonly #reserved = new Map<string, string>();
   /** Sessões cujo `seq` já foi reconciliado com o banco nesta instância. */
   readonly #seeded = new Set<string>();
   /** Modelo declarado por sessão, para precificar os eventos que não o repetem. */
@@ -462,25 +477,34 @@ export class SessionManager {
 
     const agentId = this.registry.resolveTarget(brief.agent, this.config.policy.fallback);
     const manifest = this.registry.get(agentId).manifest;
-
-    this.#assertConcurrency(agentId);
-
-    // --- grafo: profundidade e ciclo (ADR 03) -------------------------------
-    const graph = parent
-      ? checkDelegation({
-          parentPath: parent.path,
-          parentDepth: parent.depth,
-          maxDepth: this.config.policy.maxDepth,
-          target: { agentId, objective: brief.objective },
-        })
-      : { depth: 0, path: [pathKey(agentId, brief.objective)], key: '' };
-
-    // --- modo: nunca escala em relação ao pai -------------------------------
-    const parentMode: SessionMode = parent?.mode ?? manifest.defaults.supervision;
-    const mode = inheritMode(parentMode, brief.supervision);
-
     const sessionId = newId('ses');
-    const rootId = parent ? parent.rootId : sessionId;
+
+    // Checagem-e-reserva como UMA operação síncrona (sem `await` entre elas):
+    // é o que fecha a janela TOCTOU entre "ainda cabe" e "já registrei". A
+    // reserva já conta para a concorrência a partir de agora — mesmo a run de
+    // verdade só nascer bem mais adiante, depois de worktree, baseline e
+    // possível portão de aprovação — e por isso todo caminho de saída que não
+    // chegar a `#launch` (negado, retido para aprovação, ou erro no meio do
+    // caminho) precisa liberá-la explicitamente. O `finally` abaixo garante
+    // isso sem precisar espalhar a liberação por cada `return`/`throw`.
+    this.#reserveSlot(sessionId, agentId);
+
+    try {
+      // --- grafo: profundidade e ciclo (ADR 03) -----------------------------
+      const graph = parent
+        ? checkDelegation({
+            parentPath: parent.path,
+            parentDepth: parent.depth,
+            maxDepth: this.config.policy.maxDepth,
+            target: { agentId, objective: brief.objective },
+          })
+        : { depth: 0, path: [pathKey(agentId, brief.objective)], key: '' };
+
+      // --- modo: nunca escala em relação ao pai -----------------------------
+      const parentMode: SessionMode = parent?.mode ?? manifest.defaults.supervision;
+      const mode = inheritMode(parentMode, brief.supervision);
+
+      const rootId = parent ? parent.rootId : sessionId;
 
     // --- orçamento ----------------------------------------------------------
     // Na raiz, o budget do Brief DEFINE o teto do fluxo inteiro.
@@ -629,9 +653,19 @@ export class SessionManager {
       }
     }
 
-    await this.#launch(session, task, renderBriefAsPrompt(brief, this.#contextoDoProjeto(session)), null);
+      await this.#launch(session, task, renderBriefAsPrompt(brief, this.#contextoDoProjeto(session)), null);
 
-    return { session, task, budget: ledger.snapshot() };
+      return { session, task, budget: ledger.snapshot() };
+    } finally {
+      // Se `#launch` chegou a rodar, a run real já está em `#runs` — liberar a
+      // reserva aqui não abre brecha nenhuma porque não existe `await` entre o
+      // `#runs.set(...)` (dentro de `#launch`) e o retorno desta função: nada
+      // mais roda no meio para explorar a janela. Nos caminhos que saíram sem
+      // chegar a `#launch` (negado, retido para aprovação, erro no meio),
+      // libera uma reserva que nunca virou run — sem isto o teto ficaria
+      // preso para sempre por uma vaga órfã.
+      this.#releaseSlot(sessionId);
+    }
   }
 
   /**
@@ -1041,6 +1075,29 @@ export class SessionManager {
     const isDelegation = approval.detail['kind'] === 'delegation';
     const task = approval.taskId ? this.store.tasks.get(approval.taskId) : null;
 
+    // A sessão pode ter morrido enquanto a aprovação esperava — timeout do
+    // daemon, cancelamento do pai, `hub stop`, reconciliação. A checagem
+    // precisa vir ANTES de qualquer escrita ou `#launch`: a versão anterior
+    // escrevia `state: 'running'` incondicionalmente e só DEPOIS relia a
+    // sessão para checar terminalidade — o que sempre lia de volta o próprio
+    // "running" que acabara de escrever, e a checagem nunca disparava de
+    // verdade. Aprovar uma sessão morta ressuscitava um processo de agente
+    // novo para algo que o resto do sistema já tratava como encerrado.
+    const viva = this.store.sessions.get(session.id);
+    if (!viva || isTerminalSessionState(viva.state)) {
+      this.#emit({
+        sessionId: session.id,
+        taskId: approval.taskId,
+        agentId: session.agentId,
+        type: 'log',
+        payload: {
+          level: 'warn',
+          text: `aprovação liberada, mas a sessão já havia terminado (${viva?.state ?? 'inexistente'}) — nada a retomar`,
+        },
+      });
+      return resolved;
+    }
+
     // Liberar um bloqueio de orçamento sem aumentar o teto faria a sessão
     // retomar e estourar de novo na primeira chamada — um ciclo de aprovações
     // que nunca sai do lugar.
@@ -1077,28 +1134,10 @@ export class SessionManager {
     }
 
     // Vigilância: a run foi morta ao pausar, então continuamos por uma mensagem
-    // nova, dizendo ao agente o que exatamente foi liberado.
+    // nova, dizendo ao agente o que exatamente foi liberado. A terminalidade
+    // já foi checada acima, antes desta escrita — não depois dela.
     if (task) this.store.tasks.update(task.id, { state: 'working' });
     this.store.sessions.update(session.id, { state: 'running' });
-
-    // A sessão pode ter morrido enquanto a aprovação esperava — timeout do
-    // daemon, `hub stop`, reconciliação. Aprovar continua sendo registrado,
-    // mas não há para onde retomar, e dizer isso é melhor que estourar um erro
-    // que parece culpa de quem aprovou.
-    const viva = this.store.sessions.get(session.id);
-    if (!viva || viva.state === 'killed' || viva.state === 'failed' || viva.state === 'completed') {
-      this.#emit({
-        sessionId: session.id,
-        taskId: approval.taskId,
-        agentId: session.agentId,
-        type: 'log',
-        payload: {
-          level: 'warn',
-          text: `aprovação liberada, mas a sessão já havia terminado (${viva?.state ?? 'inexistente'}) — nada a retomar`,
-        },
-      });
-      return resolved;
-    }
 
     await this.send(
       session.id,
@@ -1290,44 +1329,50 @@ export class SessionManager {
       );
     }
 
-    this.#assertConcurrency(resolvedTarget);
+    // Mesma correção de `start()`/`#retry()`/`#fallback()`: checa e reserva
+    // numa única operação síncrona, antes de qualquer `await` desta função.
+    this.#reserveSlot(sessionId, resolvedTarget);
 
-    // Interrompe a execução atual se houver
-    const live = this.#runs.get(sessionId);
-    if (live) {
-      await this.registry.get(session.agentId).cancel(live.handle);
-      this.#runs.delete(sessionId);
+    try {
+      // Interrompe a execução atual se houver
+      const live = this.#runs.get(sessionId);
+      if (live) {
+        await this.registry.get(session.agentId).cancel(live.handle);
+        this.#runs.delete(sessionId);
+      }
+
+      const task = this.#latestTask(sessionId);
+      const fromAgentId = session.agentId;
+
+      this.#emit({
+        sessionId,
+        taskId: task.id,
+        agentId: resolvedTarget,
+        type: 'session.handoff',
+        payload: {
+          fromAgentId,
+          toAgentId: resolvedTarget,
+          reason: reason ?? 'transferência de controle solicitada',
+        },
+      });
+
+      const updatedSession = this.store.sessions.update(sessionId, {
+        agentId: resolvedTarget,
+        nativeSessionId: null,
+        state: 'running',
+      });
+
+      const prompt = rebuildConversation({
+        brief: task.brief,
+        history: this.store.events.list({ sessionId, limit: 400 }),
+        message: `Você está assumindo esta sessão que estava sob responsabilidade de ${fromAgentId}. Motivo da transferência: ${reason ?? 'continuidade de trabalho'}. Continue a tarefa de onde parou.`,
+      });
+
+      await this.#launch(updatedSession, task, prompt, null);
+      return updatedSession;
+    } finally {
+      this.#releaseSlot(sessionId);
     }
-
-    const task = this.#latestTask(sessionId);
-    const fromAgentId = session.agentId;
-
-    this.#emit({
-      sessionId,
-      taskId: task.id,
-      agentId: resolvedTarget,
-      type: 'session.handoff',
-      payload: {
-        fromAgentId,
-        toAgentId: resolvedTarget,
-        reason: reason ?? 'transferência de controle solicitada',
-      },
-    });
-
-    const updatedSession = this.store.sessions.update(sessionId, {
-      agentId: resolvedTarget,
-      nativeSessionId: null,
-      state: 'running',
-    });
-
-    const prompt = rebuildConversation({
-      brief: task.brief,
-      history: this.store.events.list({ sessionId, limit: 400 }),
-      message: `Você está assumindo esta sessão que estava sob responsabilidade de ${fromAgentId}. Motivo da transferência: ${reason ?? 'continuidade de trabalho'}. Continue a tarefa de onde parou.`,
-    });
-
-    await this.#launch(updatedSession, task, prompt, null);
-    return updatedSession;
   }
 
   /**
@@ -1945,10 +1990,12 @@ export class SessionManager {
     const fresh = this.store.sessions.get(session.id);
     if (!fresh || fresh.state === 'killed' || fresh.state === 'waiting_approval') return;
 
-    // Verifica o teto de concorrência antes de criar nova tentativa —
-    // o mesmo controle que #fallback() já faz para o substituto.
+    // Checa o teto e já reserva a vaga na mesma operação síncrona — mesma
+    // correção de `start()`. Sem isto, duas tentativas de retry concorrentes
+    // (ex: dois filhos do mesmo fluxo falhando ao mesmo tempo) liam o mesmo
+    // `#runs` antes de qualquer uma registrar a sua.
     try {
-      this.#assertConcurrency(agentId);
+      this.#reserveSlot(session.id, agentId);
     } catch (err) {
       this.store.tasks.update(task.id, { state: 'failed' });
       this.#emit({
@@ -1961,33 +2008,36 @@ export class SessionManager {
       return;
     }
 
+    try {
+      // Relê do banco: `#settle` acabou de fechar a tentativa anterior com o
+      // desfecho dela. Usar o `task` recebido aqui reescreveria o histórico com
+      // a versão sem desfecho, e a auditoria perderia o motivo de cada falha.
+      const anterior = this.store.tasks.get(task.id) ?? task;
+      const updated = this.store.tasks.update(task.id, {
+        attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
+      });
 
-    // Relê do banco: `#settle` acabou de fechar a tentativa anterior com o
-    // desfecho dela. Usar o `task` recebido aqui reescreveria o histórico com
-    // a versão sem desfecho, e a auditoria perderia o motivo de cada falha.
-    const anterior = this.store.tasks.get(task.id) ?? task;
-    const updated = this.store.tasks.update(task.id, {
-      attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
-    });
+      const feedback = validation
+        ? `A tentativa anterior terminou, mas a validação reprovou:\n${validation.checks
+            .map((c) => `- ${c.name}: ${c.detail ?? 'reprovou'}`)
+            .join('\n')}\n\nCorrija exatamente isso e conclua.`
+        : `A tentativa anterior falhou (${reason}). Continue de onde parou.`;
 
-    const feedback = validation
-      ? `A tentativa anterior terminou, mas a validação reprovou:\n${validation.checks
-          .map((c) => `- ${c.name}: ${c.detail ?? 'reprovou'}`)
-          .join('\n')}\n\nCorrija exatamente isso e conclua.`
-      : `A tentativa anterior falhou (${reason}). Continue de onde parou.`;
+      // Retomar a sessão nativa é bem mais barato que reenviar o brief inteiro,
+      // e o agente já sabe o que tentou.
+      const canResume =
+        this.registry.get(agentId).manifest.session.strategy === 'native' &&
+        fresh.nativeSessionId !== null;
 
-    // Retomar a sessão nativa é bem mais barato que reenviar o brief inteiro,
-    // e o agente já sabe o que tentou.
-    const canResume =
-      this.registry.get(agentId).manifest.session.strategy === 'native' &&
-      fresh.nativeSessionId !== null;
-
-    await this.#launch(
-      fresh,
-      updated,
-      canResume ? feedback : `${renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(fresh))}\n\n${feedback}`,
-      canResume ? fresh.nativeSessionId : null,
-    );
+      await this.#launch(
+        fresh,
+        updated,
+        canResume ? feedback : `${renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(fresh))}\n\n${feedback}`,
+        canResume ? fresh.nativeSessionId : null,
+      );
+    } finally {
+      this.#releaseSlot(session.id);
+    }
   }
 
   /**
@@ -2017,9 +2067,11 @@ export class SessionManager {
     if (!project) return;
 
     // O substituto é um processo novo como qualquer outro: uma cadeia de
-    // fallbacks em paralelo não pode furar o teto de concorrência.
+    // fallbacks em paralelo não pode furar o teto de concorrência. Reserva já
+    // conta a vaga na mesma checagem síncrona — mesma correção de `start()`.
+    const sessionId = newId('ses');
     try {
-      this.#assertConcurrency(agentId);
+      this.#reserveSlot(sessionId, agentId);
     } catch (err) {
       this.store.tasks.update(task.id, { state: 'failed' });
       this.#emit({
@@ -2032,53 +2084,56 @@ export class SessionManager {
       return;
     }
 
-    const sessionId = newId('ses');
-    const worktree = await this.worktrees.create({
-      projectPath: project.path,
-      projectName: project.name,
-      sessionId,
-      isolation: session.isolation,
-    });
+    try {
+      const worktree = await this.worktrees.create({
+        projectPath: project.path,
+        projectName: project.name,
+        sessionId,
+        isolation: session.isolation,
+      });
 
-    const replacement: Session = {
-      ...session,
-      id: sessionId,
-      agentId,
-      nativeSessionId: null,
-      // Mesma posição no grafo: troca de executor, não novo nível.
-      path: [...session.path.slice(0, -1), pathKey(agentId, task.brief.objective)],
-      state: 'running',
-      workdir: worktree.path,
-      title: session.title,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      endedAt: null,
-    };
+      const replacement: Session = {
+        ...session,
+        id: sessionId,
+        agentId,
+        nativeSessionId: null,
+        // Mesma posição no grafo: troca de executor, não novo nível.
+        path: [...session.path.slice(0, -1), pathKey(agentId, task.brief.objective)],
+        state: 'running',
+        workdir: worktree.path,
+        title: session.title,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        endedAt: null,
+      };
 
-    this.store.sessions.create(replacement);
-    this.bus.registerSession(sessionId, replacement.rootId);
+      this.store.sessions.create(replacement);
+      this.bus.registerSession(sessionId, replacement.rootId);
 
-    this.#avisarConfigDoProjetoQuebrada(replacement, task.id, project.path);
-    this.#avisarDependenciasNaoLigadas(replacement, task.id, worktree.dependencyWarnings);
+      this.#avisarConfigDoProjetoQuebrada(replacement, task.id, project.path);
+      this.#avisarDependenciasNaoLigadas(replacement, task.id, worktree.dependencyWarnings);
 
-    const anterior = this.store.tasks.get(task.id) ?? task;
-    const updated = this.store.tasks.update(task.id, {
-      sessionId,
-      attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
-    });
+      const anterior = this.store.tasks.get(task.id) ?? task;
+      const updated = this.store.tasks.update(task.id, {
+        sessionId,
+        attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
+      });
 
-    // O histórico de falhas vai junto: sem ele o substituto recomeça cego e
-    // tende a cair no mesmo buraco.
-    // `replacement`, nao a sessao que falhou: o substituto e OUTRO agente, e
-    // quem tem instrucoes proprias no projeto e ele.
-    const prompt = [
-      renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(replacement)),
-      failureContext(updated.attempts),
-    ]
-      .filter((part) => part.length > 0)
-      .join('\n\n');
+      // O histórico de falhas vai junto: sem ele o substituto recomeça cego e
+      // tende a cair no mesmo buraco.
+      // `replacement`, nao a sessao que falhou: o substituto e OUTRO agente, e
+      // quem tem instrucoes proprias no projeto e ele.
+      const prompt = [
+        renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(replacement)),
+        failureContext(updated.attempts),
+      ]
+        .filter((part) => part.length > 0)
+        .join('\n\n');
 
-    await this.#launch(replacement, updated, prompt, null);
+      await this.#launch(replacement, updated, prompt, null);
+    } finally {
+      this.#releaseSlot(sessionId);
+    }
   }
 
   /** Cadeia de fallback do agente, já filtrando quem não está instalado. */
@@ -2315,6 +2370,36 @@ export class SessionManager {
     // que o SO já reciclou para outro processo qualquer.
     this.store.sessions.update(sessionId, { state, endedAt: nowIso(), pid: null });
     this.bus.forgetSession(sessionId);
+
+    // Nenhuma aprovação pendente pode sobreviver à sessão que a gerou.
+    //
+    // Sem isto, uma aprovação de vigilância ou delegação ficava órfã
+    // (`pending` para sempre) quando a sessão terminava com ela ainda em
+    // aberto — por exemplo, `cancel()` no pai encerra filhos em
+    // `waiting_approval` sem tocar na tabela de aprovações. Resolver essa
+    // aprovação órfã dias depois ressuscitava um processo de agente novo para
+    // uma sessão que todo o resto do sistema já tratava como encerrada — o
+    // mesmo sintoma que a checagem de terminalidade em `resolveApproval`
+    // combate, mas fechando a causa, não só o sintoma: com a aprovação já
+    // `denied` aqui, `resolveApproval` nem chega a rodar — barra na checagem
+    // de `state !== 'pending'` do topo da função.
+    for (const pendente of this.store.approvals.listPending({ sessionId })) {
+      this.store.approvals.update(pendente.id, {
+        state: 'denied',
+        resolvedAt: nowIso(),
+        resolvedBy: `sistema (sessão ${state})`,
+      });
+      this.#emit({
+        sessionId,
+        taskId: pendente.taskId,
+        agentId: session.agentId,
+        type: 'log',
+        payload: {
+          level: 'warn',
+          text: `aprovação ${pendente.id} negada automaticamente: a sessão terminou (${state}) antes de uma decisão`,
+        },
+      });
+    }
 
     // Caches por sessão: sem isto, cada sessão encerrada deixava três entradas
     // para sempre. O daemon é um processo de vida longa — é justamente onde um
@@ -2611,8 +2696,13 @@ export class SessionManager {
     return 'sessão concluída sem resumo textual';
   }
 
+  /**
+   * Checa o teto de concorrência contando runs de verdade (`#runs`) E
+   * reservas em voo (`#reserved`) — sem as duas, uma reserva não impediria
+   * uma segunda checagem concorrente de passar antes de a run nascer.
+   */
   #assertConcurrency(agentId: string): void {
-    const total = this.#runs.size;
+    const total = this.#runs.size + this.#reserved.size;
     if (total >= this.config.policy.maxConcurrency) {
       throw new HubError(
         'CONCURRENCY_EXCEEDED',
@@ -2621,9 +2711,9 @@ export class SessionManager {
       );
     }
 
-    const perAgent = [...this.#runs.values()].filter(
-      (r) => r.ctx.agentId === agentId,
-    ).length;
+    const perAgent =
+      [...this.#runs.values()].filter((r) => r.ctx.agentId === agentId).length +
+      [...this.#reserved.values()].filter((a) => a === agentId).length;
     if (perAgent >= this.config.policy.maxConcurrencyPerAgent) {
       throw new HubError(
         'CONCURRENCY_EXCEEDED',
@@ -2631,6 +2721,23 @@ export class SessionManager {
         { agentId, active: perAgent },
       );
     }
+  }
+
+  /**
+   * Checa o teto E reserva a vaga, na mesma chamada síncrona — o coração da
+   * correção do TOCTOU. Quem chama esta função é responsável por liberar a
+   * reserva (`#releaseSlot`) em TODO caminho de saída que não termine com a
+   * sessão registrada em `#runs`, tipicamente com `try { ... } finally { this.#releaseSlot(sessionId); }`
+   * envolvendo tudo até (e inclusive) o `await this.#launch(...)`.
+   */
+  #reserveSlot(sessionId: string, agentId: string): void {
+    this.#assertConcurrency(agentId);
+    this.#reserved.set(sessionId, agentId);
+  }
+
+  /** Libera uma reserva de concorrência. Idempotente: chave ausente é no-op. */
+  #releaseSlot(sessionId: string): void {
+    this.#reserved.delete(sessionId);
   }
 
   #ledger(rootId: string, initialLimits?: BudgetLimits): BudgetLedger {
