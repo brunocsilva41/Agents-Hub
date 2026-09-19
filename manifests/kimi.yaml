@@ -18,10 +18,20 @@ invoke:
   resume: ["-p", "{{prompt}}", "--session", "{{nativeSessionId}}", "--output-format", "stream-json"]
   stdinPrompt: false
   interactive: false
-  # Sem `--yolo` nem `--auto` de propósito: são o equivalente do Kimi a liberar
-  # tudo sem revisão. Quem concede permissão aqui é a política do Hub.
+  # `--yolo`/`--auto` entram só via `modeArgs`, abaixo — nunca fixos aqui.
   extraArgs: []
   env: {}
+
+  # Verificado contra `kimi --help` (binário real nesta máquina): os únicos
+  # três níveis nativos de permissão são justamente os três modos do Hub.
+  # Sem flag: modo padrão, mais restritivo ("ainda pergunta" por padrão).
+  # `-y`/`--yolo`: "Ask When Needed" — edições e comandos rotineiros rodam
+  # sozinhos; ações arriscadas, perguntas e planos ainda pedem confirmação.
+  # `--auto`: "Never Ask" — nunca interrompe, tudo decidido sozinho.
+  modeArgs:
+    supervised: []
+    semi: ["-y"]
+    autonomous: ["--auto"]
 
 session:
   strategy: native
@@ -47,6 +57,7 @@ defaults:
   supervision: supervised
 
 caveats:
+  - "modeArgs verificado contra `kimi --help`: supervised roda SEM flag (o padrão mais restritivo do binário — 'ainda pergunta'). Mas o Hub roda o Kimi headless via `-p`, sem terminal interativo: uma pergunta real não tem quem responda. Não achamos no --help um modo 'recusa automaticamente o que pediria pergunta' — o binário não oferece esse equivalente, então em supervised uma ação que peça confirmação pode ficar pendurada até o timeout do Hub em vez de ser negada de forma limpa."
   - "O id da sessão só chega no evento final `session.resume_hint`, então o resume nativo só vale a partir do segundo turno."
   - "Não reporta uso de tokens nas execuções observadas: o custo do Hub sai estimado pelo modelo padrão do agente."
   - "Projeto migrando de Python para Bun+TypeScript; o formato do stream-json pode mudar entre versões."

@@ -23,6 +23,21 @@ invoke:
   extraArgs: []
   env: {}
 
+  # Verificado contra `mimo run --help` (binário real): a ÚNICA flag de
+  # permissão disponível no subcomando `run` é `--dangerously-skip-permissions`
+  # (alias `--yolo`) — "auto-approve permissions that are not explicitly
+  # denied". `mimo --help` (raiz) também lista `--never-ask` e `--trust`, mas
+  # nenhum dos dois aparece em `mimo run --help`: são opções do comando
+  # default (TUI), não do modo headless que o Hub usa — não achamos
+  # equivalente real de restrição parcial para `run`.
+  #
+  # Por isso supervised e semi ficam IDÊNTICOS (sem flag nenhuma) — não é
+  # esquecimento, é ausência confirmada de um meio-termo nativo no `run`.
+  modeArgs:
+    supervised: []
+    semi: []
+    autonomous: ["--yolo"]
+
 session:
   strategy: native
   idFrom: "$.sessionID"
@@ -51,6 +66,7 @@ defaults:
   supervision: supervised
 
 caveats:
+  - "modeArgs verificado contra `mimo run --help`: sem meio-termo nativo no comando headless — supervised e semi rodam sem nenhuma flag de permissão (o que o binário pede por padrão em ações sensíveis não foi confirmado além disso), e só autonomous usa `--yolo`/`--dangerously-skip-permissions`. A diferença entre supervised e semi, neste agente, é só a política do Hub por cima — não o próprio MiMo."
   - "É fork do OpenCode, mas expõe a API v1 LEGADA (rotas na raiz, sem /api) — o adapter HTTP do Hub fala só v2, então este agente roda por CLI."
   - "A API v1 não tem custo por passo; o custo do Hub sai estimado pela tabela de preços."
   - "Vocabulário de eventos do `--format json` não confirmado evento a evento: usa o mapper genérico."

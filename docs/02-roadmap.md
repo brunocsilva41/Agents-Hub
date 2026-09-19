@@ -323,10 +323,43 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
       tokens/créditos reais de até 9 provedores e exigiria autorização explícita
       por execução, não por implementação. Continua **6 dos 9 agentes nunca
       executaram nada pelo Hub** até alguém rodar o comando de verdade
-- [ ] **`modeArgs` para os 7 agentes que não têm**: existe só em `claude.yaml` e
-      `codex.yaml`. Nos outros, `supervised` não restringe nada no próprio agente — e
-      copilot, kimi, mimo e antigravity declaram `supervised` como padrão. Onde o CLI
-      não oferecer equivalente, a UI precisa dizer isso, não silenciar
+- [~] **`modeArgs` para os 7 agentes que não têm** — fechado em 2026-09-18 para
+      **6 dos 7** instalados nesta máquina, cada um verificado contra `--help`
+      do binário real, não deduzido:
+      - **copilot** (1.1.17): `--mode plan` restringe de verdade em supervised
+        (analisa, não age); semi/autonomous são IDÊNTICOS (`--allow-all-tools`,
+        que o próprio `--help` documenta como "required for non-interactive
+        mode" — sem ela o CLI trava esperando confirmação que nunca chega).
+        Copilot não tem meio-termo nativo entre os dois
+      - **kimi**: os três modos do Hub batem 1:1 com os três níveis nativos —
+        supervised sem flag (padrão mais restritivo), semi `-y` ("Ask When
+        Needed"), autonomous `--auto` ("Never Ask"). Ressalva: supervised roda
+        headless via `-p`, sem terminal, e o binário não tem "recusa sozinho o
+        que pediria pergunta" — uma ação de risco pode pendurar até o timeout
+        do Hub em vez de ser negada
+      - **mimo**: `mimo run --help` só tem uma flag de permissão
+        (`--dangerously-skip-permissions`/`--yolo`); supervised e semi ficam
+        idênticos (sem flag), só autonomous usa `--yolo` — confirmado que não
+        há meio-termo no subcomando `run`, não é omissão
+      - **antigravity (agy)** (1.1.22): `--mode plan` (supervised) vs
+        `--mode accept-edits` (semi/autonomous), mesmo padrão do Claude/Codex
+      - **openclaude** (0.13.0): `--permission-mode` com o MESMO vocabulário do
+        Claude Code, confirmado no `--help` (não só suposto por ser fork) —
+        `plan`/`acceptEdits`, nunca `bypassPermissions`
+      - **opencode**: **deliberadamente vazio nos três modos**, com comentário
+        no manifesto explicando por quê — este agente roda pelo
+        `OpenCodeAdapter` (HTTP), que nunca lê `invoke.modeArgs`
+        (só `ProcessAgentAdapter` lê). O mecanismo real de restrição existe
+        (`agent` no corpo de `POST /api/session`, confirmado em
+        `docs/referencias/opencode-api.md`), mas o adapter nunca o envia —
+        fechar isso de verdade é mudar código do adapter, não o manifesto.
+        Fica registrado como o que falta, não escondido atrás de flags que
+        não fariam nada
+      - **cursor**: fora desta passagem — binário `cursor-agent` não está
+        instalado nesta máquina, nada para verificar contra
+      Onde não achou equivalente nativo (mimo em supervised/semi, kimi em
+      supervised, opencode nos três), o manifesto deixou `modeArgs` vazio e
+      documentou a ausência em `caveats`, em vez de inventar flag
 - [ ] **`session.idFrom` é declarado no schema e lido por ninguém**: Cursor e MiMo
       prometem `session.strategy: native` que o mapper genérico nunca cumpre — todo
       turno seguinte cai em replay. Ou o adapter passa a ler `idFrom`, ou a promessa
@@ -337,24 +370,69 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
       capability que o Claude já tinha (`DEFAULT_POLICY.fallback`,
       `packages/core/src/policy.ts`) — por herança das mesmas capabilities do
       manifesto (`code-edit`, `refactor`, `test-writing`, `code-review`, `debug`,
-      `shell`), sempre depois dos agentes já comprovados na cadeia. **Entrega
-      menos do que "pleno" sugere**: as três entradas nascem com `verified: false`
-      e comentário explícito — caminho de config (`.mcp.json`, `~/.openclaude/settings.json`)
-      e formato de hook são palpite por ser fork do Claude Code, nunca confirmado
-      contra o binário do `openclaude`. Confirmar isso é o mesmo trabalho que a
-      verificação de manifestos já fez para os outros 8 (ver item de "verificar
-      caminhos de config de MCP" abaixo) — só depois disso o item vira `[x]`
+      `shell`), sempre depois dos agentes já comprovados na cadeia.
+      **Atualizado em 2026-09-18**: `MCP_TARGETS` passou para `verified: true`
+      por round-trip real (`openclaude mcp add --scope project` gravou
+      `.mcp.json` com chave `mcpServers`, igual ao Claude — achado colateral:
+      o escopo PADRÃO da CLI não é "project", é "local", que grava em
+      `~/.openclaude.json`; não afeta a escrita direta do Hub, mas é pegadinha
+      pra quem usar `openclaude mcp add` manualmente). `HOOK_TARGETS` ficou
+      **parcialmente** verificado: `~/.openclaude/settings.json` existe de
+      verdade nesta máquina com `hooks.PreToolUse`/`SessionStart` no mesmo
+      formato do Claude — confirmado por leitura direta do arquivo —, mas o
+      comportamento em runtime (o binário consulta o hook antes de
+      Bash/Write/Edit? propaga `AGENTS_HUB_SESSION_ID`? dialeto de resposta
+      igual ao Claude ou oposto como o Codex?) segue **não exercido**. Ainda
+      não vira `[x]`: falta a mesma vistoria comportamental que o gate do
+      Codex recebeu (ver Fase 2)
 - [ ] **Provar profundidade 2** (A→B→C): `maxDepth` é 3 e a profundidade máxima já
       atingida na vida do repositório é **1**. Detecção de ciclo e herança de política
       em segundo nível nunca foram exercidas num fluxo real
 - [ ] **Matriz de pares A→B** para os pares que importam: todo destino já delegado foi
       o Codex, e 3 dos 4 chamadores eram sessões adotadas do harness de fumaça
-- [ ] **Verificar os caminhos de config de MCP**: 5 dos 8 são palpite (`hub mcp` já os
-      marca como não confirmados). É o mesmo trabalho que a verificação de manifestos
-      fez em `470a605` e que revelou 3 erros em 3
-- [ ] **Dono para a tabela de preços** (`core/pricing.ts`): dependência externa que
-      muda sozinha e sustenta todo o orçamento em dólares dos agentes que só reportam
-      tokens. Hoje ninguém a mantém
+- [~] **Verificar os caminhos de config de MCP** — fechado em 2026-09-18 para os
+      6 agentes marcados `verified: false` e instalados nesta máquina (mesmo
+      trabalho que a verificação de manifestos fez em `470a605`, e o resultado
+      foi na mesma direção: **3 erros reais encontrados, mais 1 bug de código**):
+      - **copilot** → `verified: true`. `copilot mcp --help` documenta
+        `~/.copilot/mcp-config.json` ipsis litteris, e o arquivo já existe no
+        disco com chave `mcpServers`. O palpite anterior estava certo
+      - **antigravity (agy)** → `verified: true`, **caminho corrigido**. O
+        palpite anterior (`~/.antigravity/mcp.json`) estava ERRADO — esse
+        arquivo nem existe. Por round-trip real (`agy mcp add`/`list`/`remove`,
+        entrada de teste removida), o caminho de verdade é
+        `~/.gemini/config/mcp_config.json` (o `agy` é sucessor do Gemini CLI e
+        herda o diretório de config dele), chave `mcpServers`
+      - **opencode** → `verified: true`, **bug de código corrigido**. O
+        caminho estava certo (`~/.config/opencode/opencode.json`, confirmado
+        pela própria mensagem da CLI ao registrar), mas a chave real é `mcp`
+        — **não** `mcpServers`. O código de escrita (`writeJson` em
+        `mcp-install.ts`) gravava sempre sob `mcpServers`: `hub mcp install
+        opencode --write` teria criado uma entrada que o OpenCode
+        simplesmente ignora em silêncio, sem erro nenhum. Corrigido com um
+        formato dedicado (`ConfigFormat: 'json-mcp'`) só pra este agente
+      - **openclaude** → `verified: true` (ver item "cidadão pleno" acima)
+      - **kimi** → continua `verified: false`, mas a nota deixou de ser
+        genérica: `kimi --help` (raiz e subcomandos) não tem NENHUM comando
+        `mcp`, e nenhum arquivo em `~/.kimi-code/` (`config.toml`,
+        `workspaces.json`, `tui.toml`) tem seção de MCP. Não é "não
+        confirmado" — é ausência de mecanismo nesta versão do binário
+      - **mimo** → continua `verified: false`, nota também mais específica:
+        `mimo mcp add <nome> <comando>` (testado com e sem `--`) só reimprime
+        o help fora de terminal interativo — não é scriptável por argumentos.
+        `mimo mcp list` revelou que o MiMo **importa** config de outros
+        agentes (achou o `~/.claude.json` do Claude Code) em vez de manter
+        arquivo próprio previsível; `~/.mimo/mcp.json` (o palpite anterior)
+        não existe no disco
+      - **cursor** já estava `verified: true` desde antes desta vistoria, mas
+        segue **não instalado** nesta máquina (`cursor-agent` ausente do
+        PATH) — fora do escopo desta rodada, que só cobriu instalados
+- [x] **Dono para a tabela de preços** (`core/pricing.ts`) — fechado em
+      2026-09-18 como item de PROCESSO, não de código: proveniência de cada
+      linha (`source`, `collectedAt`), gatilho de revisão (trimestral, por
+      lançamento de modelo novo, ou por reclamação de custo destoante) e regra
+      de dono na ausência de CODEOWNERS, documentados em
+      [`docs/10-manutencao-de-precos.md`](10-manutencao-de-precos.md)
 
 ## Fase 5 — Endurecimento operacional
 

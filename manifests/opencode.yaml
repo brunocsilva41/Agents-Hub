@@ -23,6 +23,30 @@ invoke:
   extraArgs: []
   env: {}
 
+  # NÃO PREENCHIDO DE PROPÓSITO. Este agente roda pelo `OpenCodeAdapter`
+  # (packages/adapters/src/opencode/adapter.ts), que fala HTTP com
+  # `opencode serve` — não passa pelo `ProcessAgentAdapter`, o único lugar do
+  # código que lê `invoke.modeArgs` (packages/adapters/src/process-adapter.ts:182).
+  # `invoke.oneShot`/`invoke.resume` acima só valem no fallback raro em que o
+  # adapter HTTP não está disponível e o Hub cai para spawn de processo — e
+  # mesmo nesse fallback, ninguém testou modeArgs junto.
+  #
+  # O mecanismo real de restrição do OpenCode existe, mas é outro: o corpo de
+  # `POST /api/session` aceita um campo `agent` (ex.: "build"), e
+  # `GET /api/agent` lista agentes com permissões próprias — confirmado em
+  # `docs/referencias/opencode-api.md` §2 e §7. Hoje o `OpenCodeAdapter` nunca
+  # envia esse campo, então toda sessão sobe com o agente padrão do servidor,
+  # e o modo (`ctx.mode`) do Hub não influencia nada no OpenCode.
+  #
+  # Fechar isto de verdade é mudar `OpenCodeAdapter#start`/`#resume` para
+  # mapear `ctx.mode` → `agent` na criação da sessão — trabalho de adapter,
+  # não de manifesto. Deixado como item de código, não como modeArgs de
+  # mentirinha aqui.
+  modeArgs:
+    supervised: []
+    semi: []
+    autonomous: []
+
 session:
   # `GET /api/session/{id}` recupera sessão criada em outro processo do servidor
   # (confirmado contra o binário real), então o id nativo é handle durável.
@@ -54,3 +78,4 @@ caveats:
   - "O servidor roda sem senha (ele avisa no boot); por isso nunca é exposto além de 127.0.0.1."
   - "A rota de replay por sessão (`GET /api/session/{id}/event`) derruba a conexão na 1.17.15, então o stream abre antes do prompt e eventos perdidos não voltam."
   - "Modelo e agente só valem na criação da sessão: passá-los no corpo do prompt é silenciosamente ignorado pelo servidor."
+  - "modeArgs deste manifesto NÃO tem efeito: este agente roda pelo adapter HTTP dedicado, que não lê `invoke.modeArgs`. O modo do Hub (supervised/semi/autonomous) hoje não restringe nada no OpenCode — o mecanismo real seria o campo `agent` de `POST /api/session`, que o adapter nunca envia. Ver comentário em `invoke` acima."

@@ -43,10 +43,18 @@ export const HOOK_TARGETS: AlvoDeHook[] = [
     nome: 'OpenClaude (fork do Claude Code)',
     configUsuario: path.join(os.homedir(), '.openclaude', 'settings.json'),
     configProjeto: (p) => path.join(p, '.openclaude', 'settings.json'),
-    // ADICIONADO, NÃO VERIFICADO: mesmo formato de hooks do Claude Code é
-    // suposição por ser fork — nunca confirmado contra o binário do
-    // openclaude (nem o diretório de config, nem o schema de PreToolUse).
-    nota: 'suposição por herança do Claude Code — nunca confirmado contra o binário do openclaude',
+    // PARCIALMENTE VERIFICADO em 2026-09-18 (verificação de MCP_TARGETS desta
+    // sessão, bônus barato no mesmo caminho): `~/.openclaude/settings.json`
+    // EXISTE de verdade nesta máquina e tem chave `hooks` de nível raiz com
+    // `PreToolUse`/`SessionStart`, cada entrada `{ hooks: [{ type: "command",
+    // command, ... }] }` — o MESMO formato do Claude Code, confirmado por
+    // leitura direta do arquivo, não por suposição. O que NÃO foi verificado
+    // nesta passagem: se o openclaude CONSULTA esse hook antes de cada
+    // Bash/Write/Edit (comportamento em runtime), se `AGENTS_HUB_SESSION_ID`
+    // chega no processo do hook, e se o dialeto de resposta é o do Claude
+    // (`escalate`/`ask`) ou o oposto do Codex (`toCodexHookOutput`) — só o
+    // schema estático do arquivo de config foi conferido.
+    nota: 'caminho e schema (hooks.PreToolUse) confirmados no disco desta máquina; comportamento em runtime (se o binário consulta o hook e com que dialeto) ainda não foi exercido',
   },
 ];
 

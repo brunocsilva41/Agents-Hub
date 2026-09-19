@@ -19,11 +19,33 @@ invoke:
   resume: ["-p", "{{prompt}}", "--resume", "{{nativeSessionId}}", "--output-format", "json", "--no-color"]
   stdinPrompt: false
   interactive: false
-  # DELIBERADAMENTE sem `--allow-all-tools`: essa flag dá ao agente o mesmo poder
-  # que você tem na máquina, sem revisão. Quem concede permissão aqui é a
-  # política do Hub. A consequência assumida está nos caveats.
+  # DELIBERADAMENTE sem `--allow-all-tools` fixo aqui: essa flag dá ao agente o
+  # mesmo poder que você tem na máquina, sem revisão. Ela entra só via
+  # `modeArgs`, abaixo, e só nos modos que precisam dela para não travar.
   extraArgs: []
   env: {}
+
+  # Verificado contra `copilot --help` e `copilot help permissions` (binário
+  # 1.1.17 nesta máquina): o único modo nativo de "só analisar, não agir" é
+  # `--mode plan` (choices: interactive, plan, autopilot) — o agente entra em
+  # modo de plano e não invoca ferramentas de escrita/execução, então não
+  # precisa de `--allow-all-tools` para não travar em modo não-interativo.
+  #
+  # Para `semi`/`autonomous`, `--allow-all-tools` é OBRIGATÓRIO: a própria
+  # descrição da flag no --help diz "required for non-interactive mode" — sem
+  # ela, qualquer ferramenta que peça confirmação trava esperando um humano
+  # que não existe no `-p` headless do Hub, até estourar o heartbeat.
+  #
+  # O Copilot NÃO tem um terceiro nível nativo entre "só planeja" e "libera
+  # tudo": não há sandbox de escrita nem allow-list granular estável o
+  # bastante para diferenciar semi de autonomous sem arriscar travar tarefas
+  # legítimas (as flags `--allow-tool`/`--deny-tool` existem, mas exigem saber
+  # de antemão os nomes exatos de ferramenta que cada tarefa vai precisar).
+  # Por isso os dois modos usam a mesma flag — ver caveat abaixo.
+  modeArgs:
+    supervised: ["--mode", "plan"]
+    semi: ["--allow-all-tools"]
+    autonomous: ["--allow-all-tools"]
 
 session:
   # `--resume=<id>` existe e foi confirmado no help; o id vem no evento `result`,
@@ -51,6 +73,7 @@ defaults:
 
 caveats:
   - "O help diz que `--allow-all-tools` é necessário para modo não-interativo. Sem ele, tarefas que precisem de ferramenta podem parar esperando confirmação e estourar o heartbeat — prefira `--allow-tool=<ferramenta>` em extraArgs a liberar tudo."
+  - "modeArgs verificado contra `copilot --help`/`copilot help permissions` (1.1.17): supervised usa `--mode plan` (analisa, não age — restrição real). semi e autonomous são IDÊNTICOS (`--allow-all-tools`): o Copilot não tem um modo intermediário nativo, e sem essa flag o CLI trava em modo não-interativo (é o que o próprio --help documenta). A diferença entre semi e autonomous, neste agente, fica inteiramente por conta da vigilância reativa e do portão de aprovação do Hub — não do Copilot."
   - "Fatura em créditos, não em dólares, e não reporta uso de entrada: o custo do Hub sai estimado e por baixo."
   - "O modelo é escolhido automaticamente (`session.auto_mode_resolved`); a estimativa de custo usa o que ele escolheu, que muda entre execuções."
   - "O id da sessão só aparece no evento final `result`, então o resume nativo só vale a partir do segundo turno."

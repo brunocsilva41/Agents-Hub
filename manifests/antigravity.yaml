@@ -19,6 +19,16 @@ invoke:
   extraArgs: []
   env: {}
 
+  # Verificado contra `agy --help` (agy.exe real, 1.1.22): `--mode` aceita
+  # "accept-edits" ou "plan" — mesmo par de conceitos do `--permission-mode`
+  # do Claude Code. `--dangerously-skip-permissions` existe e NUNCA é usado
+  # aqui, mesma política do Claude/Codex/OpenClaude: quem concede permissão é
+  # o Hub, não o bypass do agente.
+  modeArgs:
+    supervised: ["--mode", "plan"]
+    semi: ["--mode", "accept-edits"]
+    autonomous: ["--mode", "accept-edits"]
+
 session:
   strategy: native
   idFrom: "$.conversation_id"
@@ -46,4 +56,5 @@ caveats:
   - "VERIFICADO: validado contra o binario real `agy.exe` (v1.1.22)."
   - "Utiliza `--output-format stream-json` com parser de eventos dedicado."
   - "Suporta retomada nativa de sessao via `--conversation <conversation_id>`."
+  - "modeArgs verificado contra `agy --help`: `--mode plan` (supervised) vs `--mode accept-edits` (semi/autonomous). O binario tambem tem `--sandbox` (restringe acesso de terminal) nao usado aqui — nao testado em combinacao com `--mode` nesta verificacao, e por isso fica de fora para nao arriscar quebrar a invocacao com uma combinacao nunca exercitada."
 
