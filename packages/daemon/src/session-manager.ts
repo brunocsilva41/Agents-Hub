@@ -310,7 +310,7 @@ export class SessionManager {
   #contextoDoProjeto(session: Session): ContextoDoProjeto {
     const project = this.store.projects.get(session.projectId);
     if (!project) return {};
-    return contextForAgent(loadProjectContext(project.path), session.agentId);
+    return contextForAgent(loadProjectContext(project.path).ctx, session.agentId);
   }
 
   /**
@@ -323,7 +323,7 @@ export class SessionManager {
   #envDoProjeto(session: Session): Record<string, string> {
     const project = this.store.projects.get(session.projectId);
     if (!project) return {};
-    return envForAgent(loadProjectContext(project.path), session.agentId);
+    return envForAgent(loadProjectContext(project.path).ctx, session.agentId);
   }
 
   /**
@@ -357,14 +357,14 @@ export class SessionManager {
 
   /** Memória e prompts do projeto, como estão no arquivo. */
   getProjectContext(projectId: string): ProjectContext {
-    return loadProjectContext(this.#project(projectId).path);
+    return loadProjectContext(this.#project(projectId).path).ctx;
   }
 
   /** Grava memória e prompts, preservando o bloco de política do arquivo. */
   setProjectContext(projectId: string, ctx: ProjectContext): ProjectContext {
     const project = this.#project(projectId);
     saveProjectContext(project.path, ctx);
-    return loadProjectContext(project.path);
+    return loadProjectContext(project.path).ctx;
   }
 
   listProjectFolders(projectId: string): ProjectFolder[] {
@@ -547,6 +547,9 @@ export class SessionManager {
       this.store.tasks.create(task);
     });
     this.bus.registerSession(sessionId, rootId);
+
+    this.#avisarConfigDoProjetoQuebrada(session, taskId, project.path);
+    this.#avisarDependenciasNaoLigadas(session, taskId, worktree.dependencyWarnings);
 
     // Fotografa o que já estava pendente ANTES de o agente começar.
     //
@@ -1951,6 +1954,9 @@ export class SessionManager {
     this.store.sessions.create(replacement);
     this.bus.registerSession(sessionId, replacement.rootId);
 
+    this.#avisarConfigDoProjetoQuebrada(replacement, task.id, project.path);
+    this.#avisarDependenciasNaoLigadas(replacement, task.id, worktree.dependencyWarnings);
+
     const anterior = this.store.tasks.get(task.id) ?? task;
     const updated = this.store.tasks.update(task.id, {
       sessionId,
@@ -2146,6 +2152,53 @@ export class SessionManager {
     );
     this.store.events.append(event);
     this.bus.publish(event);
+  }
+
+  /**
+   * Avisa na timeline quando o YAML de projeto está quebrado.
+   *
+   * `loadProjectOverrides`/`loadProjectContext` já caem na política global e já
+   * `console.error` no log do daemon — mas isso não aparece pra quem só olha o
+   * painel da sessão, exatamente onde a política "deveria" estar mais apertada
+   * e não está. Chamado uma vez no nascimento da sessão, não a cada gate.
+   */
+  #avisarConfigDoProjetoQuebrada(session: Session, taskId: string, projectPath: string): void {
+    const overrides = loadProjectOverrides(projectPath);
+    const contexto = loadProjectContext(projectPath);
+    const erro = overrides.error ?? contexto.error;
+    if (!erro) return;
+
+    this.#emit({
+      sessionId: session.id,
+      taskId,
+      agentId: session.agentId,
+      type: 'log',
+      payload: {
+        level: 'warn',
+        text: `configuração do projeto (.agents-hub/config.yaml) inválida — usando política global sem os ajustes do projeto: ${erro}`,
+      },
+    });
+  }
+
+  /**
+   * Avisa na timeline quando `node_modules`/`.venv`/`vendor` não puderam ser
+   * ligados no worktree — o sintoma sem este sinal é "o portão de validação
+   * reprovou sem motivo aparente", que a Fase 2 já corrigiu uma vez por outro
+   * caminho.
+   */
+  #avisarDependenciasNaoLigadas(session: Session, taskId: string, avisos: string[]): void {
+    if (avisos.length === 0) return;
+
+    this.#emit({
+      sessionId: session.id,
+      taskId,
+      agentId: session.agentId,
+      type: 'log',
+      payload: {
+        level: 'warn',
+        text: `dependências não ligadas neste worktree — build/testes podem falhar por causa disso: ${avisos.join('; ')}`,
+      },
+    });
   }
 
   async #finish(sessionId: string, state: Session['state'], _reason?: string): Promise<void> {
@@ -2574,7 +2627,7 @@ export class SessionManager {
   #projectPolicy(projectId: string): PolicyDocument {
     const project = this.store.projects.get(projectId);
     if (!project) return this.config.policy;
-    return mergeProjectPolicy(this.config.policy, loadProjectOverrides(project.path));
+    return mergeProjectPolicy(this.config.policy, loadProjectOverrides(project.path).overrides);
   }
 
   briefOf(sessionId: string): Brief {

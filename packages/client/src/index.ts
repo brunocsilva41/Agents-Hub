@@ -208,7 +208,14 @@ export class HubClient {
     return this.#post('/shutdown', {});
   }
 
-  sweep(): Promise<{ sweep: { examined: number; removed: string[]; kept: number } }> {
+  sweep(): Promise<{
+    sweep: {
+      examined: number;
+      removed: string[];
+      retained: number;
+      failed: Array<{ path: string; reason: string }>;
+    };
+  }> {
     return this.#post('/maintenance/sweep', {});
   }
 

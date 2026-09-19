@@ -7,10 +7,33 @@ import { HubError, type IsolationMode } from '@agents-hub/core';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * `maxBuffer` explícito em todo `execFileAsync('git', ...)` deste arquivo.
+ *
+ * O default do Node é 1 MB de stdout — `listStale` roda `git worktree list`,
+ * que cresce com o número de worktrees/sessões acumuladas ao longo do uso do
+ * Hub, e um `maxBuffer` estourado vira `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` em
+ * vez de "nenhum worktree obsoleto". Declarar em todo lugar custa zero.
+ */
+const GIT_MAX_BUFFER = 10 * 1024 * 1024;
+
 export interface WorktreeInfo {
   path: string;
   branch: string | null;
   isolated: boolean;
+  /**
+   * Dependências (`node_modules`, `.venv`, `vendor`) que existiam no projeto
+   * mas cuja ligação (junction/symlink) falhou neste worktree — vazio quando
+   * tudo ligou ou não havia nada pra ligar. O chamador decide o que fazer com
+   * o sinal (log de sessão, por exemplo); aqui só se relata o fato.
+   */
+  dependencyWarnings: string[];
+}
+
+/** Resultado de `release`: se o `git worktree remove` não rodou, o motivo real. */
+export interface ReleaseResult {
+  removed: boolean;
+  reason?: string;
 }
 
 /**
@@ -41,12 +64,22 @@ const DEPENDENCIAS_LIGADAS = ['node_modules', '.venv', 'vendor'];
  * meio das suas mudanças locais.
  */
 export class WorktreeManager {
-  constructor(private readonly root: string) {}
+  /**
+   * `symlink` é injetável só para teste determinístico da falha de ligação de
+   * dependências — sem isto, forçar `EPERM`/`EEXIST` de verdade dependeria de
+   * privilégio de administrador ou de condições de disco específicas do SO.
+   * Em produção é sempre `node:fs/promises#symlink`.
+   */
+  constructor(
+    private readonly root: string,
+    private readonly symlinkFn: typeof symlink = symlink,
+  ) {}
 
   async isGitRepo(dir: string): Promise<boolean> {
     try {
       const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
         cwd: dir,
+        maxBuffer: GIT_MAX_BUFFER,
       });
       return stdout.trim() === 'true';
     } catch {
@@ -62,7 +95,7 @@ export class WorktreeManager {
     baseRef?: string;
   }): Promise<WorktreeInfo> {
     if (params.isolation === 'none') {
-      return { path: params.projectPath, branch: null, isolated: false };
+      return { path: params.projectPath, branch: null, isolated: false, dependencyWarnings: [] };
     }
 
     if (params.isolation === 'container') {
@@ -88,6 +121,7 @@ export class WorktreeManager {
     try {
       await execFileAsync('git', ['worktree', 'add', '-b', branch, dir, base], {
         cwd: params.projectPath,
+        maxBuffer: GIT_MAX_BUFFER,
       });
     } catch (err) {
       throw new HubError('ILLEGAL_STATE', `Falha ao criar worktree: ${(err as Error).message}`, {
@@ -97,9 +131,9 @@ export class WorktreeManager {
       });
     }
 
-    await this.#ligarDependencias(params.projectPath, dir);
+    const dependencyWarnings = await this.#ligarDependencias(params.projectPath, dir);
 
-    return { path: dir, branch, isolated: true };
+    return { path: dir, branch, isolated: true, dependencyWarnings };
   }
 
   /**
@@ -107,9 +141,14 @@ export class WorktreeManager {
    *
    * Falhar aqui não invalida o worktree: o agente ainda consegue ler e editar
    * código, só não roda build nem testes. Derrubar a sessão inteira por causa
-   * disso seria pior que degradar.
+   * disso seria pior que degradar — mas degradar EM SILÊNCIO é o que fazia
+   * "build/testes falharam" parecer bug do agente quando era symlink que não
+   * subiu (permissão, por exemplo). Por isso: loga sempre, e devolve o motivo
+   * pra quem cria a sessão poder avisar na timeline também.
    */
-  async #ligarDependencias(projectPath: string, worktreePath: string): Promise<void> {
+  async #ligarDependencias(projectPath: string, worktreePath: string): Promise<string[]> {
+    const avisos: string[] = [];
+
     for (const nome of DEPENDENCIAS_LIGADAS) {
       const origem = path.join(projectPath, nome);
       const destino = path.join(worktreePath, nome);
@@ -119,12 +158,17 @@ export class WorktreeManager {
       try {
         // 'junction' no Windows não exige privilégio de administrador, ao
         // contrário de symlink de diretório.
-        await symlink(origem, destino, process.platform === 'win32' ? 'junction' : 'dir');
-      } catch {
-        // Degrada em silêncio: sem a ligação o agente perde build e testes,
-        // mas continua conseguindo trabalhar no código.
+        await this.symlinkFn(origem, destino, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (err) {
+        const motivo = (err as Error).message;
+        const aviso = `não foi possível ligar "${nome}" em ${worktreePath}: ${motivo}`;
+        avisos.push(aviso);
+        // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+        console.error(`[worktree] ${aviso} — build/testes podem falhar neste worktree`);
       }
     }
+
+    return avisos;
   }
 
   /**
@@ -136,17 +180,22 @@ export class WorktreeManager {
     projectPath: string;
     worktreePath: string;
     force?: boolean;
-  }): Promise<void> {
-    if (!existsSync(params.worktreePath)) return;
+  }): Promise<ReleaseResult> {
+    if (!existsSync(params.worktreePath)) return { removed: true };
     try {
       await execFileAsync(
         'git',
         ['worktree', 'remove', params.worktreePath, ...(params.force ? ['--force'] : [])],
-        { cwd: params.projectPath },
+        { cwd: params.projectPath, maxBuffer: GIT_MAX_BUFFER },
       );
-    } catch {
-      // Worktree sujo (build artifacts, arquivos não rastreados): mantemos o
-      // diretório em vez de forçar remoção e perder algo que você queria ver.
+      return { removed: true };
+    } catch (err) {
+      // Worktree sujo (build artifacts, arquivos não rastreados) ou outro erro
+      // real do `git worktree remove`: mantemos o diretório em vez de forçar
+      // remoção e perder algo que você queria ver — mas o motivo real (não só
+      // "não removido") importa pra quem decide se isso é normal (ainda dentro
+      // da janela de retenção não é nem chamado) ou uma falha de verdade.
+      return { removed: false, reason: (err as Error).message };
     }
   }
 
@@ -154,6 +203,7 @@ export class WorktreeManager {
     try {
       const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
         cwd: projectPath,
+        maxBuffer: GIT_MAX_BUFFER,
       });
       return stdout
         .split(/\r?\n/)
@@ -167,7 +217,10 @@ export class WorktreeManager {
 
   async prune(projectPath: string): Promise<void> {
     try {
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: projectPath });
+      await execFileAsync('git', ['worktree', 'prune'], {
+        cwd: projectPath,
+        maxBuffer: GIT_MAX_BUFFER,
+      });
     } catch {
       /* prune é oportunista */
     }
@@ -175,7 +228,10 @@ export class WorktreeManager {
 
   private async currentRef(dir: string): Promise<string> {
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: dir });
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: dir,
+        maxBuffer: GIT_MAX_BUFFER,
+      });
       return stdout.trim();
     } catch {
       return 'HEAD';

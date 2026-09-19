@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
-import { mergeProjectPolicy } from './project-config.js';
+import {
+  loadProjectOverrides,
+  mergeProjectPolicy,
+  PROJECT_CONFIG_RELATIVE,
+} from './project-config.js';
 
 describe('config por projeto', () => {
   test('o projeto define o comando de validação, que é o caso de uso principal', () => {
@@ -86,5 +93,60 @@ describe('config por projeto', () => {
     assert.deepEqual(merged.commands.allow, DEFAULT_POLICY.commands.allow);
     assert.equal(merged.maxDepth, DEFAULT_POLICY.maxDepth);
     assert.equal(merged.validation.command, null);
+  });
+});
+
+describe('YAML de projeto quebrado — sinal visível, não silêncio', () => {
+  let raiz: string;
+
+  before(() => {
+    raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-overrides-'));
+    mkdirSync(path.join(raiz, '.agents-hub'), { recursive: true });
+  });
+
+  after(() => {
+    try {
+      rmSync(raiz, { recursive: true, force: true });
+    } catch {
+      /* limpeza de temp é oportunista */
+    }
+  });
+
+  test('YAML quebrado cai na política global (vazio), mas o erro vem junto — não só {}', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'policy: [nao: fecha',
+      'utf8',
+    );
+
+    const { overrides, error } = loadProjectOverrides(raiz);
+    assert.deepEqual(overrides, {}, 'lado seguro: sem overrides, a política global vale inteira');
+    assert.match(
+      String(error),
+      /YAML inválido/,
+      'quem editou o YAML errado precisa de sinal, não só cair em silêncio na política global',
+    );
+  });
+
+  test('projeto sem arquivo de config: overrides vazios, sem erro nenhum', () => {
+    const vazio = mkdtempSync(path.join(os.tmpdir(), 'hub-overrides-vazio-'));
+    try {
+      const { overrides, error } = loadProjectOverrides(vazio);
+      assert.deepEqual(overrides, {});
+      assert.equal(error, null, 'não ter config.yaml não é um erro');
+    } finally {
+      rmSync(vazio, { recursive: true, force: true });
+    }
+  });
+
+  test('YAML válido não gera erro', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'policy:\n  maxDepth: 1\n',
+      'utf8',
+    );
+    const { overrides, error } = loadProjectOverrides(raiz);
+    assert.equal(error, null);
+    assert.equal(overrides.maxDepth, 1);
   });
 });

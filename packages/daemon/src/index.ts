@@ -19,18 +19,20 @@ export {
   type ConfigDoGate,
 } from './codex-gate.js';
 export { InMemoryEventBus } from './bus.js';
-export { WorktreeManager, type WorktreeInfo } from './worktree.js';
+export { WorktreeManager, type WorktreeInfo, type ReleaseResult } from './worktree.js';
 export { SessionManager, type StartSessionInput, type StartSessionResult } from './session-manager.js';
 export { HubServer } from './server.js';
 export { serveStatic } from './static.js';
 export { WorktreeReaper, type SweepResult } from './reaper.js';
 export {
   loadProjectOverrides,
+  loadProjectContext,
   mergeProjectPolicy,
   projectConfigPath,
   clearProjectConfigCache,
   PROJECT_CONFIG_RELATIVE,
   type ProjectPolicyOverrides,
+  type LoadedProjectOverrides,
 } from './project-config.js';
 export { runValidation } from './validation.js';
 export { interpretarRevisao } from './review-verdict.js';

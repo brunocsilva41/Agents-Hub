@@ -52,6 +52,12 @@ interface Cached {
   overrides: ProjectPolicyOverrides;
 }
 
+/** Resultado de carregar overrides/contexto: o dado, e o erro se o YAML estava quebrado. */
+export interface LoadedProjectOverrides {
+  overrides: ProjectPolicyOverrides;
+  error: string | null;
+}
+
 const cache = new Map<string, Cached | null>();
 
 export function projectConfigPath(projectPath: string): string {
@@ -64,29 +70,37 @@ export function projectConfigPath(projectPath: string): string {
  * Reler a cada evento seria caro (a vigilância classifica ação por ação), e
  * cachear para sempre obrigaria a reiniciar o daemon depois de editar o
  * arquivo — o mtime resolve os dois.
+ *
+ * Um YAML quebrado cai na política global (o lado seguro: o projeto nunca
+ * afrouxa a política sozinho), mas isso não pode acontecer em silêncio — quem
+ * editou o arquivo errado precisa de um sinal de que a política "apertada"
+ * que ele esperava não está valendo. Por isso o retorno inclui `error`.
  */
-export function loadProjectOverrides(projectPath: string): ProjectPolicyOverrides {
+export function loadProjectOverrides(projectPath: string): LoadedProjectOverrides {
   const file = projectConfigPath(projectPath);
 
   if (!existsSync(file)) {
     cache.set(file, null);
-    return {};
+    return { overrides: {}, error: null };
   }
 
   const mtimeMs = statSync(file).mtimeMs;
   const cached = cache.get(file);
-  if (cached && cached.mtimeMs === mtimeMs) return cached.overrides;
+  if (cached && cached.mtimeMs === mtimeMs) return { overrides: cached.overrides, error: null };
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
     const overrides = (parsed['policy'] ?? parsed) as ProjectPolicyOverrides;
     cache.set(file, { mtimeMs, overrides });
-    return overrides;
-  } catch {
+    return { overrides, error: null };
+  } catch (err) {
     // Um YAML quebrado não pode derrubar o daemon nem, pior, silenciosamente
-    // afrouxar a política: caímos no global, que é o lado seguro.
+    // afrouxar a política: caímos no global, que é o lado seguro. Mas
+    // "silenciosamente" também vale pro erro — por isso ele sobe, não some.
     cache.set(file, null);
-    return {};
+    const message = `${file}: YAML inválido (${(err as Error).message}) — caindo na política global`;
+    console.error(`[project-config] ${message}`);
+    return { overrides: {}, error: message };
   }
 }
 
@@ -125,6 +139,11 @@ export interface ProjectContext {
   env?: Record<string, Record<string, string>>;
 }
 
+interface LoadedProjectContext {
+  ctx: ProjectContext;
+  error: string | null;
+}
+
 const contextCache = new Map<string, { mtimeMs: number; ctx: ProjectContext } | null>();
 
 /**
@@ -132,19 +151,21 @@ const contextCache = new Map<string, { mtimeMs: number; ctx: ProjectContext } | 
  *
  * Devolve `{}` em qualquer falha — YAML quebrado não pode derrubar o daemon, e
  * aqui nem sequer há risco de afrouxar política: contexto é texto que vai no
- * prompt, não permissão.
+ * prompt, não permissão. Mesmo assim o erro sobe: é o mesmo arquivo que também
+ * carrega `policy`, e quem editou errado merece saber, mesmo que o dano aqui
+ * seja só "o agente não recebeu a memória do projeto".
  */
-export function loadProjectContext(projectPath: string): ProjectContext {
+export function loadProjectContext(projectPath: string): LoadedProjectContext {
   const file = projectConfigPath(projectPath);
 
   if (!existsSync(file)) {
     contextCache.set(file, null);
-    return {};
+    return { ctx: {}, error: null };
   }
 
   const mtimeMs = statSync(file).mtimeMs;
   const cached = contextCache.get(file);
-  if (cached && cached.mtimeMs === mtimeMs) return cached.ctx;
+  if (cached && cached.mtimeMs === mtimeMs) return { ctx: cached.ctx, error: null };
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
@@ -176,10 +197,12 @@ export function loadProjectContext(projectPath: string): ProjectContext {
     }
 
     contextCache.set(file, { mtimeMs, ctx });
-    return ctx;
-  } catch {
+    return { ctx, error: null };
+  } catch (err) {
     contextCache.set(file, null);
-    return {};
+    const message = `${file}: YAML inválido (${(err as Error).message}) — projeto sem memória/prompts/env nesta sessão`;
+    console.error(`[project-config] ${message}`);
+    return { ctx: {}, error: message };
   }
 }
 

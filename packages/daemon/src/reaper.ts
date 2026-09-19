@@ -6,7 +6,14 @@ import type { WorktreeManager } from './worktree.js';
 export interface SweepResult {
   examined: number;
   removed: string[];
-  kept: number;
+  retained: number;
+  /**
+   * Worktrees cujo `git worktree remove` foi tentado e FALHOU de verdade —
+   * diferente de `retained`, que é "ainda dentro da janela de retenção" e
+   * nunca chegou a tentar. Sem esta distinção, `existsSync` depois do fato não
+   * sabia dizer qual dos dois motivos era.
+   */
+  failed: Array<{ path: string; reason: string }>;
 }
 
 /**
@@ -50,7 +57,7 @@ export class WorktreeReaper {
 
   async sweep(now: Date = new Date()): Promise<SweepResult> {
     const cutoff = now.getTime() - this.retention.worktreeDays * 24 * 60 * 60 * 1000;
-    const result: SweepResult = { examined: 0, removed: [], kept: 0 };
+    const result: SweepResult = { examined: 0, removed: [], retained: 0, failed: [] };
 
     const finished = this.store.sessions
       .list()
@@ -61,19 +68,29 @@ export class WorktreeReaper {
 
       if (!existsSync(session.workdir)) continue;
       if (new Date(session.endedAt as string).getTime() > cutoff) {
-        result.kept += 1;
+        result.retained += 1;
         continue;
       }
 
       const project = this.store.projects.get(session.projectId);
       if (!project) continue;
 
-      await this.worktrees.release({
+      const outcome = await this.worktrees.release({
         projectPath: project.path,
         worktreePath: session.workdir,
       });
 
-      if (!existsSync(session.workdir)) result.removed.push(session.workdir);
+      if (outcome.removed) {
+        result.removed.push(session.workdir);
+      } else if (outcome.reason) {
+        // Diferente de "ainda no prazo": aqui a remoção foi tentada e falhou
+        // de verdade — vale log explícito, não só um número que não distingue
+        // os dois casos.
+        result.failed.push({ path: session.workdir, reason: outcome.reason });
+        console.error(
+          `[reaper] falha ao remover worktree ${session.workdir}: ${outcome.reason}`,
+        );
+      }
       await this.worktrees.prune(project.path);
     }
 

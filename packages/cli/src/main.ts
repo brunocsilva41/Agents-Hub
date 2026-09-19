@@ -915,9 +915,11 @@ async function decide(
 async function prune(client: HubClient): Promise<void> {
   const { sweep } = await client.sweep();
   console.log(
-    `${sweep.examined} sessão(ões) encerrada(s) examinada(s) · ${sweep.removed.length} worktree(s) recolhido(s) · ${sweep.kept} ainda no prazo`,
+    `${sweep.examined} sessão(ões) encerrada(s) examinada(s) · ${sweep.removed.length} worktree(s) recolhido(s) · ${sweep.retained} ainda no prazo` +
+      (sweep.failed.length > 0 ? ` · ${sweep.failed.length} falharam ao remover` : ''),
   );
   for (const removed of sweep.removed) console.log(`   ${dim(removed)}`);
+  for (const falha of sweep.failed) console.log(`   ${dim(`${falha.path}: ${falha.reason}`)}`);
   if (sweep.removed.length > 0) {
     console.log(dim(NEWLINE + 'os branches hub/<sessionId> continuam intactos.'));
   }
