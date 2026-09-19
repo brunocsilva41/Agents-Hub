@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { killProcessTree } from '@agents-hub/adapters';
 import type { ValidationOutcome, ValidationPolicy } from '@agents-hub/core';
 
 export interface ValidationContext {
@@ -63,16 +64,32 @@ function runCommandCheck(command: string, cwd: string, timeoutMs: number): Promi
     child.stdout?.on('data', capture);
     child.stderr?.on('data', capture);
 
+    // Guarda contra a corrida: matar a árvore faz o `close` do processo
+    // filho disparar (com um código de saída qualquer, geralmente não-zero)
+    // enquanto `killProcessTree` ainda está esperando `taskkill` voltar. Sem
+    // esta flag, `close` venceria a corrida e resolveria como "reprovado por
+    // código de saída X" em vez de "excedeu o timeout" — perdendo o motivo
+    // real e, pior, resolvendo ANTES de a árvore estar de fato morta.
+    let estourouTimeout = false;
+
     const timer = setTimeout(() => {
-      child.kill();
-      resolve({
-        name: command,
-        passed: false,
-        detail: `o comando de validação excedeu ${Math.round(timeoutMs / 1000)}s`,
+      estourouTimeout = true;
+      // `shell: true` roda o comando através de `cmd.exe`/`sh`: `child.kill()`
+      // sozinho mata só esse shell no Windows, deixando `npm`/`node` filho
+      // vivo e preso escrevendo no worktree que a validação deveria liberar.
+      // Vale esperar até +5s aqui (teto de `killProcessTree`) — é melhor que
+      // liberar o worktree com um processo ainda escrevendo nele.
+      void killProcessTree(child.pid ?? -1, () => child.kill()).then(() => {
+        resolve({
+          name: command,
+          passed: false,
+          detail: `o comando de validação excedeu ${Math.round(timeoutMs / 1000)}s`,
+        });
       });
     }, timeoutMs);
 
     child.on('error', (err) => {
+      if (estourouTimeout) return;
       clearTimeout(timer);
       resolve({
         name: command,
@@ -82,6 +99,7 @@ function runCommandCheck(command: string, cwd: string, timeoutMs: number): Promi
     });
 
     child.on('close', (code) => {
+      if (estourouTimeout) return;
       clearTimeout(timer);
       resolve({
         name: command,
