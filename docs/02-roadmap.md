@@ -697,8 +697,16 @@ nada aqui seja tratado como acidente na próxima vistoria.
 - [ ] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
       `settle`) e o teto de sessões simultâneas nunca foram testados com chamadas
       concorrentes
-- [ ] `pause` tem rota HTTP e não tem comando na CLI
-- [ ] O painel não expõe `workflow`, `prune`, `mcp` nem `hooks`
+- [x] `pause` tinha rota HTTP e client (`HubClient.pause`) mas nenhuma superfície a
+      expunha. Agora tem `hub pause <sessionId>` na CLI (`packages/cli/src/pause-cmd.ts`),
+      a tool MCP `hub_session_pause` (`packages/mcp/src/server.ts`) e um botão "Pausar"
+      dedicado no painel (`SidePanel.tsx`, distinto do botão "Interromper" que já existia
+      e que na verdade chamava `interrupt`, não `pause` — os dois nomes colidiam)
+- [~] O painel (Web) ainda não expõe `workflow`, `prune`, `mcp` nem `hooks` — mas o
+      motor de workflow declarativo passou a ter equivalente MCP (`hub_workflow_run`
+      em `packages/mcp/src/server.ts`, mesmo `runWorkflow` de `packages/core/src/workflow.ts`
+      que a CLI usa), então um agente externo já consegue disparar um workflow sem passar
+      pela CLI. `prune`, `mcp` e `hooks` continuam só na CLI
 
 ## Decisões ainda em aberto
 

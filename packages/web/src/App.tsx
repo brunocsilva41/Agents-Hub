@@ -211,6 +211,16 @@ export function App() {
         </div>
       </header>
 
+      {/* Erro de rede ao recarregar o índice (sessões/agentes/aprovações/projetos).
+          Sem isto, uma falha de `refresh()` ficava só em `state.error`, que
+          ninguém lia — o painel parecia funcionando enquanto mostrava dados
+          desatualizados sem aviso nenhum. */}
+      {state.error && (
+        <div className="error-banner app-error-banner" role="alert">
+          Falha ao atualizar dados do Hub: {state.error}
+        </div>
+      )}
+
       {/* Pending Approvals */}
       <Approvals
         approvals={state.approvals}

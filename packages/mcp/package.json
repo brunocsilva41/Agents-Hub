@@ -16,5 +16,8 @@
     "@agents-hub/core": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@agents-hub/daemon": "0.1.0"
   }
 }

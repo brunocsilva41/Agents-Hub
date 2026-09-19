@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { baseUrl, loadConfig, saveConfig, modoExigeGate } from '@agents-hub/daemon';
-import { HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
+import { HubApiError, HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
 import { runDaemon } from './daemon-run.js';
 import { decideToolCall, lerStdin, type HookInput } from './hook.js';
@@ -36,12 +36,13 @@ import {
   writeConfig,
 } from './mcp-install.js';
 import { workflowCommand } from './workflow-cmd.js';
+import { pauseCommand } from './pause-cmd.js';
 import { smokeTestAll, type SmokeOutcome } from './doctor-smoke.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
 const NEWLINE = String.fromCharCode(10);
 
-interface Args {
+export interface Args {
   command: string;
   positional: string[];
   flags: Record<string, string | boolean>;
@@ -127,6 +128,7 @@ ${bold('Sessões')}
   hub watch --root <rootId>                   acompanha o fluxo inteiro, todos os agentes
   hub send <sessionId> "texto"                fala com uma sessão
   hub interrupt <sessionId>                   para o turno atual
+  hub pause <sessionId>                       pausa a sessão sem encerrá-la
   hub cancel <sessionId>                      encerra a sessão e seus filhos
 
 ${bold('Delegação e custo')}
@@ -199,6 +201,8 @@ async function main(): Promise<void> {
         await client.interrupt(required(args.positional[0], 'sessionId'));
         console.log(green('turno interrompido'));
       });
+    case 'pause':
+      return withDaemon(() => pauseCommand(client, args));
     case 'cancel':
       return withDaemon(async () => {
         await client.cancel(required(args.positional[0], 'sessionId'));
@@ -416,7 +420,10 @@ async function withDaemon(fn: () => Promise<void>): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    console.error(red(message));
+    // O MCP (`describe()`) e a Web (`HubApiError.code`) já mostram o código do
+    // domínio — sem ele aqui, a CLI é a única das três superfícies onde
+    // "BUDGET_EXCEEDED" e "AGENT_NOT_FOUND" viram a mesma frase genérica.
+    console.error(red(err instanceof HubApiError ? `[${err.code}] ${message}` : message));
     process.exitCode = 1;
   }
 }
