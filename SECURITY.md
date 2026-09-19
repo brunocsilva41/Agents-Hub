@@ -59,6 +59,40 @@ São **três níveis com garantias diferentes**:
 Chamar vigilância de "aprovação prévia" seria mentira. Para os agentes sem gate,
 o Hub vê o comando depois que ele rodou.
 
+**A vigilância em si não pausa por padrão em risco `escalate`, nem para os
+agentes COM gate.** `DEFAULT_POLICY.watch` (`packages/core/src/policy.ts`) só
+lista `pauseOn: ['irreversible']`; `escalate` está apenas em `flagOn`, ou seja,
+por padrão vira log/timeline e a ação **segue executando até o fim**, mesmo que
+`policy.risk.escalate` diga `'approve'`. É decisão de produto deliberada
+(reduzir ruído de pausas), não bug — mas o efeito prático precisa ser
+explícito: em qualquer modo que não seja `supervised`, uma ação classificada
+`escalate` (ex.: escrita fora do workdir, comando fora da allow list, domínio
+de rede não liberado) não é retida por vigilância nenhuma; ela só é impedida de
+verdade nos dois agentes com gate pré-execução, porque ali o Hub responde
+`deny`/`approve` *antes* da ferramenta rodar. Só o modo `supervised` adiciona
+`escalate` a `pauseOn` (`watchForMode`), e mesmo assim isso só produz uma pausa
+real quando há gate — para os demais agentes, "pausar" quer dizer apenas que o
+evento fica marcado, a ação já foi executada.
+
+Dos 9 agentes suportados hoje, a situação é:
+
+| Agente | Tem gate pré-execução | `escalate` pausa de verdade antes de executar? |
+|---|---|---|
+| Claude Code | Sim | Sim |
+| Codex | Sim (exige `hub hooks install codex --write`; ver ressalva acima) | Sim, com o bypass instalado |
+| opencode | Não | Não — só log/flag, ação já executou |
+| openclaude | Não | Não |
+| copilot | Não | Não |
+| kimi | Não | Não |
+| antigravity | Não | Não |
+| mimo | Não | Não |
+| cursor | Não | Não |
+
+Ou seja: só **Claude Code** e **Codex** têm gate pré-execução. Os outros **7**
+(`opencode`, `openclaude`, `copilot`, `kimi`, `antigravity`, `mimo`, `cursor`)
+dependem inteiramente de vigilância reativa — e, por padrão, nem `escalate`
+pausa a sessão neles, só fica registrado no evento.
+
 O Codex é um caso à parte, e vale ser preciso sobre o que a cobertura acima
 garante: hook não confiável é **ignorado em silêncio** pelo binário — sem
 `--dangerously-bypass-hook-trust` (ligado por `hub hooks install codex --write`,
