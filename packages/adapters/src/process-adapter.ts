@@ -19,6 +19,23 @@ import type {
   RunOutcome,
 } from './types.js';
 
+/**
+ * Watermarks da fila de eventos deste adapter (ADR de endurecimento, Fase 5).
+ *
+ * O consumidor (`SessionManager#pump`) faz uma escrita SQLite síncrona por
+ * evento; um agente que fala mais rápido que isso enche a fila em memória sem
+ * teto algum. `HIGH`/`LOW` pausam e retomam `child.stdout` — throughput real,
+ * não bug, então o heartbeat precisa saber que isso é sinal de vida (ver
+ * `handle.touch()` no hook de pressão abaixo). `HARD_CAP` é a rede de
+ * segurança para quando a pausa não alcança a tempo: um único `chunk`/linha
+ * pode mapear para centenas de eventos de uma vez, saltando de baixo do teto
+ * de cima para muito acima dele antes que `child.stdout.pause()` faça
+ * qualquer diferença.
+ */
+export const QUEUE_HIGH_WATER_MARK = 1000;
+export const QUEUE_LOW_WATER_MARK = 200;
+export const QUEUE_HARD_CAP = 5000;
+
 interface InternalHandle extends RunHandle {
   child: ChildProcessWithoutNullStreams;
   queue: AsyncQueue<MappedEvent>;
@@ -212,7 +229,44 @@ export class ProcessAgentAdapter implements AgentAdapter {
       },
     ) as ChildProcessWithoutNullStreams;
 
-    const queue = new AsyncQueue<MappedEvent>();
+    /**
+     * Mantém o heartbeat vivo enquanto `child.stdout` está pausado por
+     * backpressure.
+     *
+     * Um único `touch()` no instante da pausa não basta: drenar de
+     * `highWaterMark` até `lowWaterMark` pode, sozinho, levar mais tempo que
+     * `heartbeatSeconds` inteiro quando o consumidor é lento (é exatamente o
+     * cenário que a pausa existe para tratar). Sem um sinal de vida CONTÍNUO
+     * durante essa espera, o heartbeat dispararia um falso "run travada" no
+     * meio de uma pausa saudável — o oposto do que a Fase 5 pediu.
+     */
+    let backpressureKeepAlive: NodeJS.Timeout | null = null;
+
+    const queue = new AsyncQueue<MappedEvent>({
+      highWaterMark: QUEUE_HIGH_WATER_MARK,
+      lowWaterMark: QUEUE_LOW_WATER_MARK,
+      onPressureChange: (aboveHigh) => {
+        // Backpressure É sinal de vida — o processo está falando rápido
+        // demais para o consumidor, não travado. Sem este touch, uma pausa
+        // legítima por volume real dispararia o heartbeat de "run travada"
+        // enquanto o agente está mais ativo do que nunca.
+        handle.touch();
+        if (aboveHigh) {
+          if (!child.stdout.isPaused()) child.stdout.pause();
+          if (!backpressureKeepAlive) {
+            const intervalMs = Math.max(250, Math.floor((ctx.heartbeatSeconds * 1000) / 3));
+            backpressureKeepAlive = setInterval(() => handle.touch(), intervalMs);
+            backpressureKeepAlive.unref?.();
+          }
+        } else {
+          if (child.stdout.isPaused()) child.stdout.resume();
+          if (backpressureKeepAlive) {
+            clearInterval(backpressureKeepAlive);
+            backpressureKeepAlive = null;
+          }
+        }
+      },
+    });
     let settled = false;
     let resolveDone!: (outcome: RunOutcome) => void;
     const done = new Promise<RunOutcome>((resolve) => {
@@ -297,31 +351,63 @@ export class ProcessAgentAdapter implements AgentAdapter {
     handle.clearTimers = () => {
       clearTimeout(overall);
       if (heartbeat) clearTimeout(heartbeat);
+      if (backpressureKeepAlive) clearInterval(backpressureKeepAlive);
     };
     handle.touch = armHeartbeat;
     armHeartbeat();
 
+    /**
+     * Teto duro: mesmo com `child.stdout` pausado no cruzar do `highWaterMark`,
+     * uma única linha JSONL pode mapear para dezenas de `MappedEvent` de uma
+     * vez (`#mapLine`) — o `push` de todos eles acontece ANTES de a pausa ter
+     * qualquer chance de surtir efeito no SO. Sem este teto, esse caso
+     * continuaria crescendo a fila sem limite algum.
+     *
+     * Devolve `false` quando decidiu encerrar a run por saturação — quem
+     * chama para de processar a linha atual.
+     */
+    let saturada = false;
+    const pushComTeto = (mapped: MappedEvent): boolean => {
+      if (saturada) return false;
+      if (queue.pending >= QUEUE_HARD_CAP) {
+        saturada = true;
+        handle.settle({
+          exitCode: null,
+          signal: null,
+          reason: 'error',
+          error: 'fila de eventos saturada — consumidor não acompanhou o agente',
+          nativeSessionId: discoveredNativeId,
+          tail: tail.join('\n'),
+        });
+        void killTree(child);
+        return false;
+      }
+      queue.push(mapped);
+      return true;
+    };
+
     // --- stdout: a timeline de verdade ---------------------------------------
     const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });
     stdout.on('line', (line) => {
+      if (saturada) return;
       handle.touch();
       for (const mapped of this.#mapLine(line)) {
         if (mapped.nativeSessionId && !discoveredNativeId) {
           discoveredNativeId = mapped.nativeSessionId;
           handle.nativeSessionId = mapped.nativeSessionId;
         }
-        queue.push(mapped);
+        if (!pushComTeto(mapped)) break;
       }
     });
 
     // --- stderr: diagnóstico, nunca descartado -------------------------------
     const stderr = createInterface({ input: child.stderr, crlfDelay: Infinity });
     stderr.on('line', (line) => {
-      if (line.trim().length === 0) return;
+      if (saturada || line.trim().length === 0) return;
       handle.touch();
       tail.push(line);
       if (tail.length > 200) tail.shift();
-      queue.push({ type: 'log', payload: { stream: 'stderr', text: line }, raw: line });
+      pushComTeto({ type: 'log', payload: { stream: 'stderr', text: line }, raw: line });
     });
 
     child.on('error', (err) => {

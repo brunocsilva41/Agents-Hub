@@ -39,6 +39,20 @@ const TURN_SETTLE_POLLS = 3;
 const POLL_INTERVAL_MS = 1000;
 
 /**
+ * Watermarks da fila de eventos deste adapter — mesma razão de
+ * `process-adapter.ts`: o consumidor (`SessionManager#pump`) faz uma escrita
+ * SQLite síncrona por evento, e o stream SSE não tem um `.pause()` de SO como
+ * `child.stdout`, então o próprio loop de consumo precisa se auto-pausar com
+ * `await queue.whenBelow(...)` antes de continuar lendo o próximo chunk.
+ * `HARD_CAP` cobre o caso em que um `chunk` sozinho mapeia para centenas de
+ * eventos de uma vez, saltando de baixo do teto para muito acima dele antes
+ * de a pausa ter qualquer chance de agir.
+ */
+const QUEUE_HIGH_WATER_MARK = 1000;
+const QUEUE_LOW_WATER_MARK = 200;
+const QUEUE_HARD_CAP = 5000;
+
+/**
  * Quanto esperar o loop do agente começar antes de desistir.
  *
  * Generoso porque o start a frio do OpenCode no Windows já foi medido em 20s, e
@@ -218,7 +232,10 @@ export class OpenCodeAdapter implements AgentAdapter {
   // ------------------------------------------------------------------- run
 
   #run(ctx: RunContext, nativeSessionId: string, prompt: string): RunHandle {
-    const queue = new AsyncQueue<MappedEvent>();
+    const queue = new AsyncQueue<MappedEvent>({
+      highWaterMark: QUEUE_HIGH_WATER_MARK,
+      lowWaterMark: QUEUE_LOW_WATER_MARK,
+    });
     const abort = new AbortController();
 
     let settled = false;
@@ -347,7 +364,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     void (async () => {
       // O stream abre ANTES do prompt de propósito: a rota de replay por sessão
       // está quebrada na 1.17.15, então evento perdido é perdido para sempre.
-      await this.#consume(run, nativeSessionId, finish);
+      await this.#consume(run, nativeSessionId, finish, ctx.heartbeatSeconds);
 
       try {
         await this.#prompt(nativeSessionId, prompt, 'steer');
@@ -373,6 +390,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     run: RunState,
     nativeSessionId: string,
     finish: (reason: RunOutcome['reason'], error: string | null) => void,
+    heartbeatSeconds: number,
   ): Promise<void> {
     const response = await fetch(`${this.baseUrl}/api/event`, {
       headers: { Accept: 'text/event-stream' },
@@ -391,11 +409,29 @@ export class OpenCodeAdapter implements AgentAdapter {
       const decoder = new TextDecoder();
       const sse = new SseDecoder();
 
+      let saturada = false;
+
       try {
         for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
           // Até o heartbeat do SSE conta como sinal de vida: o servidor está lá,
           // mesmo que esta sessão ainda não tenha falado.
           run.touch();
+
+          // Backpressure: sem `.pause()` de SO num stream fetch, o jeito de
+          // não empilhar mais itens do que o consumidor aguenta é o próprio
+          // loop se segurar antes de pedir o próximo chunk. `whenBelow`
+          // resolve na hora se já estiver abaixo do teto, então isto não
+          // penaliza o caminho comum.
+          //
+          // Drenar de HIGH até LOW pode, sozinho, levar mais que
+          // `heartbeatSeconds` inteiro quando o consumidor é lento — é
+          // exatamente o cenário que esta espera existe para tratar. Por
+          // isso o `touch()` acontece em INTERVALOS durante a espera, não só
+          // uma vez no fim dela: um único touch no início não impediria o
+          // heartbeat de disparar no meio de uma pausa saudável.
+          if (run.queue.pending >= QUEUE_HIGH_WATER_MARK) {
+            await waitBelowKeepingHeartbeat(run, QUEUE_LOW_WATER_MARK, heartbeatSeconds);
+          }
 
           for (const evento of sse.push(decoder.decode(chunk, { stream: true }))) {
             // O stream é global; sem este filtro uma sessão veria os eventos
@@ -408,12 +444,23 @@ export class OpenCodeAdapter implements AgentAdapter {
             if (mapeados.length > 0) run.markStarted();
 
             for (const mapped of mapeados) {
+              // Teto duro: um `chunk` sozinho pode decodificar em dezenas de
+              // eventos SSE de uma vez, saltando de baixo do teto de cima
+              // para muito acima dele antes de a checagem no topo do loop
+              // ter qualquer chance de agir de novo.
+              if (run.queue.pending >= QUEUE_HARD_CAP) {
+                saturada = true;
+                finish('error', 'fila de eventos saturada — consumidor não acompanhou o agente');
+                return;
+              }
               if (mapped.type === 'error') run.recordError(describeErrorPayload(mapped.payload));
               run.queue.push(mapped);
             }
 
             if (openCodeIdleSignal(evento)) finish('exit', null);
           }
+
+          if (saturada) return;
         }
       } catch (err) {
         if (!run.abort.signal.aborted) finish('error', describe(err));
@@ -634,4 +681,32 @@ function describe(err: unknown): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Espera `run.queue` cair abaixo de `threshold`, chamando `run.touch()`
+ * periodicamente enquanto espera — não só ao entrar e sair da espera.
+ *
+ * Existe porque `AsyncQueue#whenBelow` sozinho resolve uma única vez, no
+ * fim do dreno; se o dreno demorar mais que `heartbeatSeconds` (consumidor
+ * lento, fila cheia de verdade — o caso exato que a Fase 5 pediu para
+ * cobrir), o heartbeat dispararia um falso "run travada" no meio de uma
+ * pausa saudável, porque nada tocou `touch()` durante a espera em si.
+ */
+function waitBelowKeepingHeartbeat(
+  run: { queue: AsyncQueue<MappedEvent>; touch: () => void },
+  threshold: number,
+  heartbeatSeconds: number,
+): Promise<void> {
+  const intervalMs = Math.max(250, Math.floor((heartbeatSeconds * 1000) / 3));
+
+  return new Promise((resolve) => {
+    const keepAlive = setInterval(() => run.touch(), intervalMs);
+    keepAlive.unref?.();
+
+    void run.queue.whenBelow(threshold).then(() => {
+      clearInterval(keepAlive);
+      resolve();
+    });
+  });
 }
