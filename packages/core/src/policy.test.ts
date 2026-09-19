@@ -31,8 +31,35 @@ describe('PolicyEngine.classify', () => {
     assert.equal(verdict.risk, 'irreversible');
   });
 
+  test('caminho sensível é irreversível mesmo com maiúsculas diferentes (bypass em FS case-insensitive)', () => {
+    // Windows e o padrão do macOS (APFS) não diferenciam maiúsculas de
+    // minúsculas: `.ENV`/`ID_RSA`/`Credentials` são o MESMO arquivo físico
+    // que `.env`/`id_rsa`/`credentials` e precisam cair no mesmo fragmento.
+    const casos = [
+      path.join(workdir, '.ENV'),
+      path.join(workdir, 'config', 'ID_RSA'),
+      path.join(workdir, 'Credentials'),
+      path.join(workdir, '.SSH', 'id_rsa'),
+    ];
+    for (const alvo of casos) {
+      const verdict = engine.classify({ kind: 'file.write', path: alvo }, ctx);
+      assert.equal(verdict.risk, 'irreversible', `esperava irreversible para ${alvo}`);
+    }
+  });
+
   test('git push é sempre irreversível', () => {
     assert.equal(engine.classify({ kind: 'command', command: 'git push origin main' }, ctx).risk, 'irreversible');
+  });
+
+  test('comando irreversível é detectado independente de maiúsculas/minúsculas (ex.: PowerShell)', () => {
+    assert.equal(
+      engine.classify({ kind: 'command', command: 'Git Push origin main' }, ctx).risk,
+      'irreversible',
+    );
+    assert.equal(
+      engine.classify({ kind: 'command', command: 'NPM PUBLISH' }, ctx).risk,
+      'irreversible',
+    );
   });
 
   test('comando na allow list é exec', () => {

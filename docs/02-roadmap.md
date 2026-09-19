@@ -465,6 +465,47 @@ repositório do zero antes de aceitar mudança.
 - [x] **Daemon deixou de ser cego**: o autostart escreve em
       `~/.agents-hub/logs/`, que a config criava vazio desde sempre
 
+### Auditoria de segurança — 2026-09-19
+
+- [x] **Bypass de `denyFragments`/`IRREVERSIBLE_PATTERNS` por diferença de
+      maiúscula/minúscula (achado ALTO)**: `packages/core/src/policy.ts`
+      comparava `denyFragments` (`.ssh`, `.aws`, `.env`, `id_rsa`,
+      `credentials`, `.git/config`) com `.includes()` sensível a caixa, e 12
+      dos 13 `IRREVERSIBLE_PATTERNS` não tinham a flag `i`. Em Windows e no
+      padrão do macOS (APFS), sistema de arquivos é insensível a
+      maiúsculas/minúsculas: um `.ENV`/`ID_RSA`/`Credentials` escrito por um
+      agente (de boa-fé ou por prompt injection) era o MESMO arquivo físico
+      que `.env`/`id_rsa`/`credentials`, mas caía como `allow` comum em vez de
+      `irreversible`, gravado sem aprovação — quebrando a garantia que
+      `SECURITY.md` documenta. Corrigido normalizando `target`/`fragment` para
+      minúsculas antes do `.includes()`, e adicionando `i` a todos os regexes
+      de `IRREVERSIBLE_PATTERNS` (cobria variações tipo `Git Push`/`NPM
+      PUBLISH` em PowerShell, case-insensitive). Teste de regressão em
+      `policy.test.ts` cobrindo `.ENV`, `ID_RSA`, `Credentials`, `.SSH/id_rsa`
+      e `Git Push`/`NPM PUBLISH`
+- [x] **`SECURITY.md` deixa explícito que `escalate` só pausa de verdade com
+      gate pré-execução (achado MÉDIO, só documentação)**: `WatchPolicy`
+      padrão (`pauseOn: ['irreversible']`) não incluía `escalate` — decisão de
+      produto deliberada (ruído), mantida como estava. O texto agora nomeia os
+      9 agentes e diz, por linha, quais dos 2 com gate (Claude Code, Codex) e
+      quais dos 7 sem gate (opencode, openclaude, copilot, kimi, antigravity,
+      mimo, cursor) só recebem vigilância reativa que não impede a ação
+- [x] **Comentário sobre sequestro de `*_BASE_URL` em `agent-env.ts`** (achado
+      MÉDIO): documentado ao lado dos riscos já descritos de
+      `NODE_OPTIONS`/`PATH`/etc. que um `.agents-hub/config.yaml` malicioso
+      pode redirecionar `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL`/etc. para um
+      endpoint controlado por atacante, vazando a credencial nativa do CLI já
+      autenticado. Aviso na Web UI (`SettingsView.tsx`) foi avaliado e
+      **deliberadamente não implementado** nesta tarefa, para não arriscar
+      conflito de merge com outro trabalho em andamento nesse componente —
+      fica registrado aqui como sugestão pendente
+- Nota de execução: `npm test` teve uma falha isolada em
+  `runValidation mata a árvore inteira quando o comando estoura o timeout`
+  (`packages/daemon/src/validation.test.ts`) na primeira rodada da suíte
+  completa. Roda limpo isolado e limpo numa segunda rodada completa da suíte
+  — é kill de árvore de processo sob concorrência no Windows, teste flaky
+  pré-existente, sem relação com as mudanças desta auditoria
+
 ### Restante
 
 Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.

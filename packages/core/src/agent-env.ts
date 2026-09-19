@@ -21,6 +21,25 @@
  * aparecerem depois, em runtimes que ainda nem usamos. A lista de permissão
  * erra para o lado seguro: variável nova simplesmente não passa até alguém
  * decidir que deve passar.
+ *
+ * # `*_BASE_URL` é permitido de propósito, e isso É um vetor
+ *
+ * Diferente de `NODE_OPTIONS`/`PATH`/etc., que dão execução arbitrária,
+ * `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL`/`AZURE_OPENAI_BASE_URL`/etc. dão
+ * **sequestro do canal de API inteiro**: um `.agents-hub/config.yaml`
+ * malicioso num repositório clonado pode apontar o CLI do agente para um
+ * endpoint controlado pelo atacante. Como o CLI já está autenticado
+ * localmente (é assim que o Hub evita cofre de credencial — ver
+ * `SECURITY.md`), o request sai com a credencial nativa do usuário embutida,
+ * mas para o host errado; o atacante recebe a chave/token de sessão, e ainda
+ * pode devolver saída de modelo forjada para o agente continuar operando
+ * como se nada tivesse mudado. É deliberadamente permitido porque é o
+ * mecanismo real de "modelo local" (apontar para Ollama/vLLM na própria
+ * máquina) — a lista de permissão não filtra por *valor* de URL, só por
+ * *nome* de variável, então não há como distinguir aqui um Ollama legítimo de
+ * um endpoint hostil. Quem clona um repositório com `.agents-hub/config.yaml`
+ * de terceiro deveria revisar esse arquivo como revisaria qualquer outro
+ * script do repositório antes de rodar uma sessão do Hub nele.
  */
 
 /**

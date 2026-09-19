@@ -385,23 +385,30 @@ export function watchForMode(watch: WatchPolicy, mode: SessionMode): WatchPolicy
   };
 }
 
-/** Comandos cujo efeito não dá para desfazer — sempre passam por aprovação. */
+/**
+ * Comandos cujo efeito não dá para desfazer — sempre passam por aprovação.
+ *
+ * Todos os padrões usam a flag `i` (case-insensitive): PowerShell (comum no
+ * Windows) e vários shells não diferenciam maiúsculas/minúsculas em nomes de
+ * comando, então `Git Push`/`NPM Publish`/etc. precisam bater igual a
+ * `git push`/`npm publish`.
+ */
 const IRREVERSIBLE_PATTERNS: RegExp[] = [
-  /^git\s+push\b/,
-  /^git\s+reset\s+--hard\b/,
-  /^git\s+clean\s+-[a-z]*f/,
-  /^git\s+branch\s+-D\b/,
-  /^git\s+tag\s+-d\b/,
-  /^rm\s+-[a-z]*r[a-z]*f?\b/,
-  /^rm\s+-[a-z]*f/,
-  /^npm\s+publish\b/,
-  /^pnpm\s+publish\b/,
-  /^yarn\s+publish\b/,
-  /^docker\s+(rm|rmi|system\s+prune)\b/,
-  /^kubectl\s+delete\b/,
-  /^terraform\s+(apply|destroy)\b/,
-  /^gh\s+(pr\s+merge|release\s+create|repo\s+delete)\b/,
-  /^aws\s+/,
+  /^git\s+push\b/i,
+  /^git\s+reset\s+--hard\b/i,
+  /^git\s+clean\s+-[a-z]*f/i,
+  /^git\s+branch\s+-D\b/i,
+  /^git\s+tag\s+-d\b/i,
+  /^rm\s+-[a-z]*r[a-z]*f?\b/i,
+  /^rm\s+-[a-z]*f/i,
+  /^npm\s+publish\b/i,
+  /^pnpm\s+publish\b/i,
+  /^yarn\s+publish\b/i,
+  /^docker\s+(rm|rmi|system\s+prune)\b/i,
+  /^kubectl\s+delete\b/i,
+  /^terraform\s+(apply|destroy)\b/i,
+  /^gh\s+(pr\s+merge|release\s+create|repo\s+delete)\b/i,
+  /^aws\s+/i,
   /^Remove-Item\b/i,
 ];
 
@@ -441,8 +448,13 @@ export class PolicyEngine {
 
       case 'file.write': {
         const target = path.resolve(action.path);
+        // Comparação case-insensitive: Windows e o padrão do macOS (APFS) têm
+        // sistema de arquivos insensível a maiúsculas/minúsculas, então
+        // `.ENV`/`ID_RSA`/`Credentials` são o MESMO arquivo físico que
+        // `.env`/`id_rsa`/`credentials` e precisam ser bloqueados igual.
+        const normalizedTarget = target.replaceAll('\\', '/').toLowerCase();
         const fragment = this.policy.paths.denyFragments.find((f) =>
-          target.replaceAll('\\', '/').includes(f),
+          normalizedTarget.includes(f.toLowerCase()),
         );
         if (fragment) {
           return { risk: 'irreversible', reason: `caminho sensível (${fragment})` };
