@@ -25,6 +25,17 @@ invoke:
   extraArgs: []
   env: {}
 
+  # Verificado contra `openclaude --help` (binário real 0.13.0 nesta
+  # máquina): `--permission-mode` existe com o MESMO vocabulário do Claude
+  # Code (choices: acceptEdits, bypassPermissions, default, dontAsk, plan,
+  # auto — um superconjunto do Claude, que só usa plan/acceptEdits/
+  # bypassPermissions). Mesma política do claude.yaml: nunca usar
+  # `bypassPermissions`.
+  modeArgs:
+    supervised: ["--permission-mode", "plan"]
+    semi: ["--permission-mode", "acceptEdits"]
+    autonomous: ["--permission-mode", "acceptEdits"]
+
 session:
   strategy: native
   idFrom: "$.session_id"
@@ -56,3 +67,4 @@ caveats:
   - "Sendo fork, o formato do stream-json pode divergir do Claude Code entre versões — se a timeline empobrecer, é o primeiro lugar a olhar."
   - "Aceita `--session-id <uuid>` definido por quem chama: dá para o Hub fixar o id em vez de extraí-lo da saída (melhoria futura do adapter)."
   - "O modelo e o provedor dependem de variáveis de ambiente; a estimativa de custo usa o modelo que ele reportar, não um padrão fixo."
+  - "modeArgs verificado contra `openclaude --help`: dialeto idêntico ao Claude Code (--permission-mode plan/acceptEdits), confirmado no --help e não apenas suposto por ser fork."
