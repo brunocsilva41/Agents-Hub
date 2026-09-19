@@ -7,6 +7,7 @@ import { nowIso, newId, HubError } from '@agents-hub/core';
 import { AsyncQueue } from './async-queue.js';
 import { quoteForShell, resolveBin } from './bin-resolver.js';
 import { resolveMapper } from './mappers/index.js';
+import { killProcessTree } from './process-tree.js';
 import type {
   AgentAdapter,
   AgentManifest,
@@ -230,6 +231,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
       done,
       events: queue,
       supportsLiveSend: this.manifest.invoke.interactive,
+      pid: child.pid ?? null,
       child,
       queue,
       canceled: false,
@@ -350,7 +352,27 @@ export class ProcessAgentAdapter implements AgentAdapter {
 
     // --- prompt por stdin evita todo o inferno de escaping de linha de comando
     if (usesStdin) {
-      child.stdin.write(prompt);
+      // Sem callback aqui, uma falha na escrita (EPIPE: o CLI já saiu, ou
+      // nunca chegou a consumir stdin) some silenciosamente — a run fica
+      // pendurada esperando eventos que nunca vêm, até o heartbeat/timeout
+      // estourar sem nenhuma pista do motivo. `send()` já trata isso; o
+      // prompt inicial precisa do mesmo tratamento.
+      child.stdin.write(prompt, (err) => {
+        if (!err) return;
+        handle.settle({
+          exitCode: null,
+          signal: null,
+          reason: 'error',
+          error: `falha ao escrever o prompt inicial em stdin: ${err.message}`,
+          nativeSessionId: discoveredNativeId,
+          tail: tail.join('\n'),
+        });
+        // O processo pode continuar vivo mesmo com a escrita tendo falhado
+        // (ex.: ele destruiu só o lado de leitura do próprio stdin) — sem
+        // isto, a run é dada como terminada no domínio enquanto o processo
+        // real segue rodando, gastando recurso sem ninguém observando.
+        void killTree(child);
+      });
       if (!this.manifest.invoke.interactive) child.stdin.end();
     } else if (!this.manifest.invoke.interactive) {
       child.stdin.end();
@@ -403,43 +425,12 @@ function applyTemplate(template: string, vars: Record<string, string>): string {
  * escrevendo no worktree — e não restava nada no sistema capaz de pará-la,
  * porque o Hub não guarda PID em lugar nenhum.
  *
- * Resolve com o que houver: se `taskkill` não estiver no PATH, o `'error'`
- * seria emitido num ChildProcess sem listener, o que no Node é exceção não
- * tratada. Cair para `SIGKILL` é pior que `/T` (só mata o shim) e melhor que
- * derrubar o daemon.
+ * Lógica compartilhada com `killServerTree` (`opencode/adapter.ts`) mora em
+ * `killProcessTree` (`./process-tree.js`).
  */
 function killTree(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (child.killed || child.pid === undefined) return Promise.resolve();
-
-  if (process.platform !== 'win32') {
-    child.kill('SIGKILL');
-    return Promise.resolve();
-  }
-
-  // O CLI costuma ser um shim que abre um processo filho; sem /T o agente
-  // real sobrevive ao "cancelamento" e continua gastando tokens.
-  return new Promise((resolve) => {
-    const matador = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
-      windowsHide: true,
-    });
-
-    let resolvido = false;
-    const encerrar = (): void => {
-      if (resolvido) return;
-      resolvido = true;
-      resolve();
-    };
-
-    matador.on('error', () => {
-      child.kill('SIGKILL');
-      encerrar();
-    });
-    matador.on('exit', encerrar);
-
-    // Teto: o desligamento não pode ficar preso num `taskkill` que não volta.
-    const limite = setTimeout(encerrar, 5_000);
-    limite.unref();
-  });
+  return killProcessTree(child.pid, () => child.kill('SIGKILL'));
 }
 
 async function runToCompletion(

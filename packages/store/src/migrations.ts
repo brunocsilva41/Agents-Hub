@@ -142,4 +142,28 @@ INSERT INTO project_folders (id, project_id, path, label, is_primary, created_at
 SELECT 'pfd_' || id, id, path, name, 1, created_at FROM projects;
 `,
   },
+  {
+    version: 3,
+    name: 'pid por sessao',
+    sql: `
+-- A reconciliação na subida do daemon (\`reconcileOnStartup\`) só corrigia o
+-- registro no banco (marcava sessão viva como \`killed\`) sem nunca matar o
+-- processo real, porque não sabia qual PID pertencia a qual sessão. Nulo por
+-- padrão: nem toda sessão tem um processo dedicado (o OpenCode roda num
+-- servidor HTTP compartilhado por N sessões, não um filho por sessão).
+ALTER TABLE sessions ADD COLUMN pid INTEGER;
+`,
+  },
+  {
+    version: 4,
+    name: 'indice para retencao de eventos por sessao encerrada',
+    sql: `
+-- A compactação de \`events.raw_json\` (ADR 06.3: eventos para sempre,
+-- \`raw_json\` comprimido depois de N dias) filtra por sessão encerrada há
+-- tempo suficiente. Sem índice em \`ended_at\`, cada passada faria full scan
+-- de \`sessions\` para achar candidatas — barato hoje, caro quando o banco
+-- tiver anos de sessões.
+CREATE INDEX idx_sessions_ended ON sessions(ended_at);
+`,
+  },
 ];

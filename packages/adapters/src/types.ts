@@ -162,6 +162,15 @@ export interface RunHandle {
   readonly done: Promise<RunOutcome>;
   events: AsyncIterable<MappedEvent>;
   supportsLiveSend: boolean;
+  /**
+   * PID do processo real desta run, quando o adapter tiver um processo
+   * dedicado por sessão. `ProcessAgentAdapter` preenche com o PID real do
+   * `child_process`. `OpenCodeAdapter` sempre devolve `null`: sessões
+   * OpenCode rodam num servidor HTTP compartilhado (`opencode serve`) — o
+   * processo é o servidor, não um filho por sessão, e matar o PID do
+   * servidor por causa de uma sessão órfã derrubaria todas as outras.
+   */
+  pid: number | null;
 }
 
 export interface RunOutcome {

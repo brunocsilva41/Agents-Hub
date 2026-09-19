@@ -58,6 +58,7 @@ describe('interromper turno', () => {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       endedAt: null,
+      pid: null,
     };
     hub.store.sessions.create(session);
     return session;

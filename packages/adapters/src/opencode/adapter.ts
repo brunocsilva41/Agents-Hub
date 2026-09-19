@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { HubError, newId, nowIso } from '@agents-hub/core';
 import { AsyncQueue } from '../async-queue.js';
 import { quoteForShell, resolveBin } from '../bin-resolver.js';
+import { killProcessTree } from '../process-tree.js';
 import type {
   AgentAdapter,
   AgentManifest,
@@ -227,6 +228,9 @@ export class OpenCodeAdapter implements AgentAdapter {
       done,
       events: queue,
       supportsLiveSend: true,
+      // Sempre null: a sessão roda num servidor HTTP compartilhado, não num
+      // processo filho dedicado — ver comentário em `RunHandle.pid`.
+      pid: null,
       abort,
       queue,
       canceled: false,
@@ -459,6 +463,15 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     this.#ownServer = child;
 
+    // Se o spawn falhar (binário resolvido mas sem permissão de execução,
+    // por exemplo), o ChildProcess emite `'error'` sem `'close'` — sem este
+    // listener é exceção não tratada, e sem capturá-lo o loop abaixo só
+    // descobriria o problema esperando o timeout inteiro de 60s.
+    let spawnError: string | null = null;
+    child.on('error', (err) => {
+      spawnError = err.message;
+    });
+
     // `pipe` sem leitor enche o buffer do SO (~64 KB) e o "opencode serve"
     // BLOQUEIA na escrita em stderr — o processo congela, e leva junto toda
     // sessão OpenCode que o Hub estiver rodando. Drenar não é conveniência de
@@ -472,6 +485,11 @@ export class OpenCodeAdapter implements AgentAdapter {
     const limite = Date.now() + SERVER_BOOT_TIMEOUT_MS;
     while (Date.now() < limite) {
       if (await this.#healthy()) return;
+      if (spawnError !== null) {
+        throw new HubError('ADAPTER_FAILURE', `falha ao subir "opencode serve": ${spawnError}`, {
+          port: this.#port,
+        });
+      }
       if (child.exitCode !== null) {
         throw new HubError(
           'ADAPTER_FAILURE',
@@ -546,50 +564,16 @@ export function createOpenCodeAdapter(
  * `server.kill()` sozinho só derruba o `cmd.exe` do shim no Windows — o
  * `node.exe` real do "opencode serve" sobrevive, reparentado, e continua
  * servindo na porta. Mesma classe de achado já corrigida em
- * `process-adapter.ts` (`killTree`), aqui para o servidor que este adapter
- * sobe. Medido matando na ordem errada: `server.kill()` primeiro derruba o
- * `cmd.exe` na hora, e quando o `taskkill /T` roda em seguida o pai já não
- * existe mais para o Windows andar a árvore a partir dele — o `node.exe`
- * fica órfão e vivo. `/T /F` precisa ser o ÚNICO mecanismo, com o pai ainda
- * de pé, e espera-se a saída em vez de disparar e esquecer — senão o
- * chamador segue achando que a porta está livre antes de ela realmente
- * estar.
+ * `process-adapter.ts`, lógica compartilhada agora em `killProcessTree`
+ * (`../process-tree.js`). Medido matando na ordem errada: `server.kill()`
+ * primeiro derruba o `cmd.exe` na hora, e quando o `taskkill /T` roda em
+ * seguida o pai já não existe mais para o Windows andar a árvore a partir
+ * dele — o `node.exe` fica órfão e vivo. `/T /F` precisa ser o ÚNICO
+ * mecanismo, com o pai ainda de pé.
  */
 function killServerTree(server: ChildProcess): Promise<void> {
   if (server.pid === undefined) return Promise.resolve();
-
-  if (process.platform !== 'win32') {
-    server.kill('SIGKILL');
-    return Promise.resolve();
-  }
-
-  // `server.kill()` ANTES do `taskkill` mataria o `cmd.exe` do shim na hora,
-  // e o `node.exe` real do "opencode serve" já teria sido reparentado quando
-  // o `/T` fosse rodar — `taskkill` precisa do pai ainda vivo para achar os
-  // filhos. Por isso `/T /F` é o ÚNICO mecanismo aqui, não um reforço depois
-  // de já ter matado o topo da árvore.
-  return new Promise((resolve) => {
-    const matador = spawn('taskkill', ['/pid', String(server.pid), '/T', '/F'], {
-      windowsHide: true,
-    });
-
-    let resolvido = false;
-    const encerrar = (): void => {
-      if (resolvido) return;
-      resolvido = true;
-      resolve();
-    };
-
-    matador.on('error', () => {
-      server.kill();
-      encerrar();
-    });
-    matador.on('exit', encerrar);
-
-    // Teto: o desligamento não pode ficar preso num `taskkill` que não volta.
-    const limite = setTimeout(encerrar, 5_000);
-    limite.unref?.();
-  });
+  return killProcessTree(server.pid, () => server.kill('SIGKILL'));
 }
 
 function describeErrorPayload(payload: Record<string, unknown>): string {

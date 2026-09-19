@@ -492,12 +492,37 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       real**: `hub start --agent opencode` de ponta a ponta nesta máquina —
       autostart do `opencode serve` real, sessão completa, turno concluído
       ("teste ok", US$0, 3.5k tokens), `close()` sem processo órfão depois
-- [ ] **Retenção de eventos**: a tabela cresce para sempre com `payload_json` e
-      `raw_json`, sem `DELETE` nem `VACUUM`, enquanto reaper e reconciliação
-      fazem full scan. O ADR 06.3 decidiu "eventos para sempre" — e essa decisão
-      precisa ser reexaminada ou ganhar compactação do `raw`
-- [ ] **Matar a árvore no portão de validação**: `child.kill()` com `shell: true`
-      deixa o `npm`/`node` filho vivo a cada timeout
+- [x] **Retenção de eventos**: o ADR 06.3 ("eventos para sempre") foi mantido
+      para `payload_json` — é o que sustenta replay, timeline e auditoria.
+      `raw_json` (só serve para depurar mapper errado, nunca lido no dia a dia)
+      passa a ser compactado (`NULL`), nunca deletado. `EventRepository.compactRawBefore`
+      (`packages/core/src/ports.ts`, `packages/store/src/repositories.ts`) faz
+      `UPDATE ... SET raw_json = NULL WHERE ... session_id IN (SELECT id FROM
+      sessions WHERE ended_at IS NOT NULL AND ended_at < ?)`. Migração versão 4
+      cria `idx_sessions_ended` (a compactação filtra por sessão encerrada, e não
+      havia índice nesse campo). `RetentionPolicy.rawEventDays` (padrão 7, igual
+      a `worktreeDays`) e o novo `EventRetentionCompactor`
+      (`packages/daemon/src/event-retention.ts`, mesmo padrão de timer com
+      `unref()` do `WorktreeReaper`), ligado em `hub.ts` depois da reconciliação.
+      **Decisão explícita: sem `VACUUM` automático no loop periódico** —
+      bloquearia o banco inteiro por tempo proporcional ao tamanho do arquivo,
+      uma categoria nova de trava num daemon vivo por dias; `PRAGMA
+      auto_vacuum=INCREMENTAL` ficou de fora por ora, o compactamento de
+      `raw_json` sozinho já entrega o essencial. Testado em
+      `repositories.test.ts` (dentro/fora da janela, sessão viva, idempotência)
+      e `event-retention.test.ts` (corte calculado certo; passada na largada não
+      trava consulta concorrente)
+- [x] **Matar a árvore no portão de validação**: `child.kill()` com `shell: true`
+      deixava o `npm`/`node` filho vivo a cada timeout no Windows. A lógica de
+      matar árvore (duplicada em `killTree` de `process-adapter.ts` e
+      `killServerTree` de `opencode/adapter.ts`) foi extraída para
+      `packages/adapters/src/process-tree.ts` (`killProcessTree`), reexportada
+      de `index.ts`, e `packages/daemon/src/validation.ts` passa a usá-la no
+      timeout — aceitando que o `resolve` espere até +5s (teto da função) em
+      troca de matar a árvore de verdade antes de liberar o worktree. Testado em
+      `process-tree.test.ts` (mata raiz + neto que ignora SIGTERM) e
+      `validation.test.ts` (árvore de 3 níveis morta no timeout do portão do
+      validador)
 - [x] **Validar a config com Zod** e merge profundo de `policy`. `HubConfigOnDiskSchema`
       valida `config.json` antes do merge (`packages/daemon/src/config.ts`), com
       `HUB_CONFIG_INVALID` legível em vez de `NaN` silencioso. `mergePolicyLayer`
@@ -515,10 +540,36 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       nenhuma vez, então `AGENTS_HUB_PORT=abc` fazia o Node escutar numa porta
       aleatória só nesse caminho. Corrigido nos dois. `env.test.ts` +
       `daemon-run.test.ts` cobrem os dois entrypoints
-- [ ] **`.on('error')` nos quatro `spawn`** que não têm, e callback no
-      `stdin.write` (EPIPE quando o CLI sai antes de consumir)
-- [ ] **PID por sessão no schema**: a reconciliação corrige o registro na subida
-      e não mata os processos que sobreviveram ao crash, porque não sabe quais são
+- [x] **`.on('error')` nos `spawn`** que não têm, e callback no `stdin.write`
+      (EPIPE quando o CLI sai antes de consumir). Auditoria dos 5 `spawn()` do
+      repositório (`packages/adapters`, `packages/daemon`, `packages/cli`):
+      4 já tinham `.on('error')` de correções anteriores; faltava em
+      `opencode/adapter.ts#bootServer` (uma falha de spawn do servidor só seria
+      percebida depois do timeout de boot inteiro de 60s) — adicionado.
+      `process-adapter.ts#spawnRun` escrevia o prompt inicial em
+      `child.stdin.write(prompt)` sem callback: uma falha de escrita (EPIPE)
+      sumia em silêncio e a run ficava pendurada até heartbeat/timeout. Agora
+      tem callback que assenta a run como erro e mata a árvore, no mesmo padrão
+      que `send()` já usava. **Ressalva**: não foi possível reproduzir de forma
+      determinística, neste Windows, o EPIPE via teste automatizado —
+      `process.stdin.destroy()` no processo filho não fecha o handle de PIPE no
+      nível do SO até o processo sair, e um processo que sai rápido sempre
+      vence a corrida contra o callback assíncrono de erro da escrita. O fix
+      ficou coberto por revisão de código (mesmo padrão de `send()`, já em
+      produção) em vez de teste automatizado
+- [x] **PID por sessão no schema**: `Session.pid` (migração versão 3) e
+      `RunHandle.pid` (`ProcessAgentAdapter` preenche com o PID real; `OpenCodeAdapter`
+      sempre `null` — documentado que a sessão roda num servidor HTTP
+      compartilhado, não um processo dedicado). `reconcileOnStartup`
+      (`packages/daemon/src/session-manager.ts`) agora tenta matar o processo
+      antes de zerar o registro, **confirmando por `tasklist /FI "PID eq
+      <pid>"` que o processo vivo naquele PID ainda bate com o binário
+      esperado pelo manifesto do agente** antes de mandar `taskkill` — sem essa
+      checagem um daemon reiniciado dias depois podia matar um PID que o SO já
+      reciclou para outro processo qualquer do usuário. Testado em
+      `reconcile.test.ts` (processo vivo do binário esperado é morto e a sessão
+      cai; PID inexistente não lança erro; PID vivo de binário diferente do
+      esperado NÃO é morto)
 - [x] **Keep-alive e `id:` no SSE de `/api/tasks/*`**, try/catch no keep-alive do
       `/events`, e teto de conexões com backpressure. As duas rotas
       (`/events` e `/api/tasks/:id/events`) divergiam na origem: só `/events`

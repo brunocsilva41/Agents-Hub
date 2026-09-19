@@ -60,6 +60,7 @@ function one<T extends Row>(
 const str = (v: unknown): string => (typeof v === 'string' ? v : String(v ?? ''));
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v ?? 0));
+const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 
 class SqliteProjectRepository implements ProjectRepository {
   constructor(private readonly db: Db) {}
@@ -140,8 +141,8 @@ class SqliteSessionRepository implements SessionRepository {
       .prepare(
         `INSERT INTO sessions
          (id, project_id, agent_id, native_session_id, root_id, parent_id, depth, path_json,
-          state, mode, isolation, workdir, title, created_at, updated_at, ended_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          state, mode, isolation, workdir, title, created_at, updated_at, ended_at, pid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         session.id,
@@ -160,6 +161,7 @@ class SqliteSessionRepository implements SessionRepository {
         session.createdAt,
         session.updatedAt,
         session.endedAt,
+        session.pid,
       );
     return session;
   }
@@ -178,7 +180,7 @@ class SqliteSessionRepository implements SessionRepository {
       .prepare(
         `UPDATE sessions SET
            native_session_id = ?, state = ?, mode = ?, isolation = ?, workdir = ?,
-           title = ?, depth = ?, path_json = ?, updated_at = ?, ended_at = ?
+           title = ?, depth = ?, path_json = ?, updated_at = ?, ended_at = ?, pid = ?
          WHERE id = ?`,
       )
       .run(
@@ -192,6 +194,7 @@ class SqliteSessionRepository implements SessionRepository {
         toJson(next.path),
         next.updatedAt,
         next.endedAt,
+        next.pid,
         id,
       );
     return next;
@@ -424,6 +427,26 @@ class SqliteEventRepository implements EventRepository {
       )
       .get(sessionId) as Row | undefined;
     return { usd: num(row?.['usd']), tokens: num(row?.['tokens']), seconds: 0 };
+  }
+
+  /**
+   * Compacta `raw_json` de eventos de sessões encerradas há tempo suficiente.
+   *
+   * Nunca `DELETE`, nunca toca `payload_json` — o ADR 06.3 decidiu "eventos
+   * para sempre", e essa decisão vale para o que sustenta replay/timeline/
+   * auditoria. `raw_json` só serve para depurar mapper errado: não é lido no
+   * dia a dia, e é o que cresce sem limite junto com `payload_json` na mesma
+   * tabela.
+   */
+  compactRawBefore(cutoffIso: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE events SET raw_json = NULL
+         WHERE raw_json IS NOT NULL
+           AND session_id IN (SELECT id FROM sessions WHERE ended_at IS NOT NULL AND ended_at < ?)`,
+      )
+      .run(cutoffIso);
+    return num(result.changes);
   }
 }
 
@@ -662,6 +685,7 @@ function mapSession(row: Row): Session {
     createdAt: str(row['created_at']),
     updatedAt: str(row['updated_at']),
     endedAt: strOrNull(row['ended_at']),
+    pid: numOrNull(row['pid']),
   };
 }
 
