@@ -83,6 +83,13 @@ export class OpenCodeAdapter implements AgentAdapter {
   #ownServer: ChildProcess | null = null;
   #booting: Promise<void> | null = null;
 
+  /**
+   * `env` com que o servidor atualmente no ar foi (ou seria) subido — só para
+   * detectar e avisar quando uma sessão SEGUINTE pede um ambiente diferente.
+   * Ver aviso em `#ensureServer`: o Hub NÃO resolve esse conflito, só o expõe.
+   */
+  #bootEnv: Record<string, string> | null = null;
+
   constructor(manifest: AgentManifest, options: OpenCodeAdapterOptions = {}) {
     this.manifest = manifest;
     this.#host = options.host ?? '127.0.0.1';
@@ -119,7 +126,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async start(ctx: RunContext, prompt: string): Promise<RunHandle> {
-    await this.#ensureServer();
+    await this.#ensureServer(ctx);
 
     const created = await this.#json<{ data?: { id?: string } }>('POST', '/api/session', {
       // É assim que o worktree isolado é honrado sem um servidor por sessão.
@@ -136,7 +143,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   }
 
   async resume(ctx: RunContext, nativeSessionId: string, prompt: string): Promise<RunHandle> {
-    await this.#ensureServer();
+    await this.#ensureServer(ctx);
 
     // Não existe endpoint de resume: retomar é mandar outro prompt na mesma
     // sessão, e o servidor carrega o histórico. Confirmamos que a sessão
@@ -202,6 +209,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     const server = this.#ownServer;
     this.#ownServer = null;
+    this.#bootEnv = null;
     if (!server || server.killed) return;
 
     await killServerTree(server);
@@ -415,8 +423,11 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   // --------------------------------------------------------------- servidor
 
-  async #ensureServer(): Promise<void> {
-    if (await this.#healthy()) return;
+  async #ensureServer(ctx: RunContext): Promise<void> {
+    if (await this.#healthy()) {
+      this.#warnEnvMismatch(ctx.env);
+      return;
+    }
     if (!this.#autoStart) {
       throw new HubError(
         'AGENT_NOT_INSTALLED',
@@ -426,13 +437,40 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
 
     // Duas sessões começando juntas não podem subir dois servidores na mesma porta.
-    this.#booting ??= this.#bootServer().finally(() => {
+    this.#booting ??= this.#bootServer(ctx.env).finally(() => {
       this.#booting = null;
     });
     await this.#booting;
   }
 
-  async #bootServer(): Promise<void> {
+  /**
+   * O servidor é UM SÓ, compartilhado por todas as sessões deste adapter — não
+   * há um `opencode serve` por projeto. Ele só lê variáveis de ambiente (ex.:
+   * `OPENAI_BASE_URL`, chaves de API) na hora do próprio `spawn`, então só a
+   * PRIMEIRA sessão a subir o servidor consegue de fato influenciar o
+   * provedor/modelo por ambiente — sessões seguintes de projetos com um
+   * `ProjectContext.env` DIFERENTE não têm efeito nenhum sobre um servidor já
+   * no ar, e não há aviso nenhum na hora sem este log.
+   *
+   * Isto não é resolvido aqui: resolver de verdade exigiria um servidor por
+   * config (custo de boot medido em ~20s no Windows, multiplicado por projeto)
+   * ou uma forma da API aceitar credencial por sessão — nenhuma das duas
+   * existe hoje em `opencode serve` (ver `docs/referencias/opencode-api.md`
+   * §5: nem `model`, nem qualquer coisa de ambiente, é aceito por requisição).
+   * Só avisamos no log do daemon, para o operador não gastar horas achando que
+   * a config por projeto está valendo.
+   */
+  #warnEnvMismatch(requested: Record<string, string>): void {
+    if (this.#bootEnv === null) return;
+    const diffKeys = Object.keys(requested).filter((k) => requested[k] !== this.#bootEnv?.[k]);
+    if (diffKeys.length === 0) return;
+    console.error(
+      `[opencode] servidor já está no ar com outro ambiente; ${diffKeys.join(', ')} desta sessão ` +
+        `NÃO terá efeito (opencode serve é um processo único e compartilhado — ver caveats de manifests/opencode.yaml)`,
+    );
+  }
+
+  async #bootServer(env: Record<string, string>): Promise<void> {
     const resolved = await resolveBin(this.manifest.bin);
     if (!resolved) {
       throw new HubError('AGENT_NOT_INSTALLED', `Binário "${this.manifest.bin}" não encontrado`, {
@@ -450,10 +488,16 @@ export class OpenCodeAdapter implements AgentAdapter {
     // "C:\Users\Bruno" como comando e o resto como argumento solto, e o
     // "opencode serve" nunca chegava a existir — o autostart do OpenCode
     // falhava sempre que o perfil do usuário tivesse espaço no caminho.
+    // `ctx.env` (config de provedor/modelo por projeto, já filtrada por
+    // `filtrarEnvDeProjeto` antes de chegar aqui) só tem efeito para QUEM sobe
+    // o servidor — ver `#warnEnvMismatch` sobre o que acontece quando outra
+    // sessão pede um ambiente diferente depois.
+    const spawnEnv = { ...process.env, ...env };
     const child = spawn(
       resolved.needsShell ? quoteForShell(resolved.path) : resolved.path,
       resolved.needsShell ? args.map(quoteForShell) : args,
       {
+        env: spawnEnv,
         shell: resolved.needsShell,
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
@@ -462,6 +506,7 @@ export class OpenCodeAdapter implements AgentAdapter {
     );
 
     this.#ownServer = child;
+    this.#bootEnv = { ...env };
 
     // Se o spawn falhar (binário resolvido mas sem permissão de execução,
     // por exemplo), o ChildProcess emite `'error'` sem `'close'` — sem este

@@ -33,6 +33,33 @@ const ENDPOINTS_SUGERIDOS = [
   { rotulo: 'vLLM', url: 'http://localhost:8000/v1' },
 ];
 
+/**
+ * Espelha `PREFIXOS_PERMITIDOS` de `packages/core/src/agent-env.ts`.
+ *
+ * Duplicado (em vez de importado) de propósito: `@agents-hub/core` traz
+ * módulos com `node:crypto`/`node:path` no seu barrel de entrada, e o bundle
+ * do painel roda no navegador — importar a função em runtime arrastaria isso
+ * para o build do Vite. Quem valida de verdade é o daemon, em
+ * `filtrarEnvDeProjeto`; isto aqui é só a mesma lista, para orientar o
+ * usuário ANTES de salvar. Se a lista mudar lá, precisa mudar aqui também.
+ */
+const PREFIXOS_ENV_PERMITIDOS = [
+  'OPENAI_',
+  'ANTHROPIC_',
+  'AZURE_OPENAI_',
+  'OLLAMA_',
+  'GOOGLE_',
+  'GEMINI_',
+  'MISTRAL_',
+  'GROQ_',
+  'TOGETHER_',
+  'OPENROUTER_',
+  'DEEPSEEK_',
+  'MOONSHOT_',
+  'LMSTUDIO_',
+  'VLLM_',
+] as const;
+
 export function SettingsView({ agents, projects }: Props): React.JSX.Element {
   const [aba, setAba] = useState<Aba>('prompts');
   const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
@@ -40,6 +67,8 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
   const [ctx, setCtx] = useState<ProjectContextDto>({});
   const [carregando, setCarregando] = useState(false);
   const [sujo, setSujo] = useState(false);
+  const [novaChave, setNovaChave] = useState('');
+  const [novoValor, setNovoValor] = useState('');
   const action = useAction();
 
   // Sem projeto não há onde guardar: a tela precisa dizer isso, não fingir
@@ -98,6 +127,45 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
 
   const envDoAgente = ctx.env?.[agenteSelecionado] ?? {};
   const projetoAtual = projects.find((p) => p.id === projectId);
+  const agenteAtual = agents.find((a) => a.id === agenteSelecionado);
+
+  const CHAVES_FIXAS = ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'MODEL'];
+  const extrasDoAgente = Object.entries(envDoAgente).filter(
+    ([chave]) => !CHAVES_FIXAS.includes(chave),
+  );
+
+  /**
+   * O daemon só recusa `PATH`/`NODE_OPTIONS`/etc. do lado de fora — aqui é só
+   * eco antecipado da mesma regra, pra não deixar o usuário digitar, salvar e
+   * só descobrir na resposta que a chave nunca ia colar.
+   */
+  const chaveEhPermitida = (chave: string): boolean => {
+    const c = chave.trim();
+    if (c === 'MODEL' || c === 'MODEL_BASE_URL') return true;
+    return PREFIXOS_ENV_PERMITIDOS.some((p) => c.startsWith(p));
+  };
+
+  /**
+   * Aviso best-effort: o manifesto do agente não promete nada sobre essa
+   * variável específica. Não bloqueia — só um agente pode muito bem ler
+   * `OPENAI_*` sem isso estar documentado — mas evita o usuário configurar
+   * `ANTHROPIC_BASE_URL` num agente cujo manifesto só fala de `OPENAI_*`, ou
+   * vice-versa, sem perceber.
+   */
+  const variavelDocumentadaNoManifesto = (chave: string): boolean => {
+    if (!agenteAtual) return true;
+    const prefixo = chave.trim().split('_')[0] ?? '';
+    const textos = [agenteAtual.description, ...agenteAtual.caveats].join(' ').toUpperCase();
+    return textos.includes(chave.toUpperCase()) || (prefixo !== '' && textos.includes(prefixo));
+  };
+
+  const adicionarExtra = (): void => {
+    const chave = novaChave.trim();
+    if (chave === '' || novoValor.trim() === '') return;
+    mudarEnv(agenteSelecionado, chave, novoValor);
+    setNovaChave('');
+    setNovoValor('');
+  };
 
   return (
     <div className="settings-page">
@@ -298,9 +366,13 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   value={envDoAgente['OPENAI_API_KEY'] ?? ''}
                   onChange={(e) => mudarEnv(agenteSelecionado, 'OPENAI_API_KEY', e.target.value)}
                 />
-                <div className="help">
-                  Servidores locais costumam aceitar qualquer valor, mas quase todos exigem que o
-                  campo exista.
+                <div className="help help-warn">
+                  ⚠️ Vai para <code>.agents-hub/config.yaml</code>, que é <strong>versionado junto
+                  do código</strong>. Uma chave de API real aqui vaza para qualquer pessoa que
+                  clonar o repositório. Para um servidor local (Ollama, LM Studio) que aceita
+                  qualquer valor, prefira um texto qualquer como <code>ollama</code> — não uma
+                  chave de verdade. Se precisar de uma chave real, mantenha-a fora do projeto (por
+                  exemplo, no ambiente do próprio daemon) em vez de gravar aqui.
                 </div>
               </div>
 
@@ -314,6 +386,74 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   value={envDoAgente['MODEL'] ?? ''}
                   onChange={(e) => mudarEnv(agenteSelecionado, 'MODEL', e.target.value)}
                 />
+              </div>
+
+              <div className="field">
+                <label>Outras variáveis de ambiente</label>
+                <div className="help">
+                  Nem todo agente lê <code>OPENAI_*</code>. Prefixos aceitos:{' '}
+                  {PREFIXOS_ENV_PERMITIDOS.map((p) => (
+                    <code key={p} style={{ marginRight: 4 }}>
+                      {p}*
+                    </code>
+                  ))}
+                  e os nomes <code>MODEL</code>/<code>MODEL_BASE_URL</code>. Ex.:{' '}
+                  <code>ANTHROPIC_BASE_URL</code> para <code>claude</code>,{' '}
+                  <code>GOOGLE_API_KEY</code>/<code>GEMINI_API_KEY</code> para agentes Google.
+                </div>
+
+                {extrasDoAgente.length > 0 && (
+                  <ul className="lista-env-extra">
+                    {extrasDoAgente.map(([chave, valor]) => (
+                      <li key={chave}>
+                        <code>{chave}</code>
+                        <span className="valor-env-extra">{valor}</span>
+                        {!variavelDocumentadaNoManifesto(chave) && (
+                          <span className="aviso-inline">
+                            ⚠️ manifesto de "{agenteSelecionado}" não documenta esta variável
+                          </span>
+                        )}
+                        <button
+                          className="ghost"
+                          disabled={semProjeto}
+                          onClick={() => mudarEnv(agenteSelecionado, chave, '')}
+                        >
+                          remover
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="env-extra-form">
+                  <input
+                    type="text"
+                    placeholder="NOME_DA_VARIAVEL"
+                    disabled={semProjeto}
+                    value={novaChave}
+                    onChange={(e) => setNovaChave(e.target.value.toUpperCase())}
+                  />
+                  <input
+                    type="text"
+                    placeholder="valor"
+                    disabled={semProjeto}
+                    value={novoValor}
+                    onChange={(e) => setNovoValor(e.target.value)}
+                  />
+                  <button
+                    className="ghost"
+                    disabled={semProjeto || novaChave.trim() === '' || novoValor.trim() === ''}
+                    onClick={adicionarExtra}
+                  >
+                    adicionar
+                  </button>
+                </div>
+                {novaChave.trim() !== '' && !chaveEhPermitida(novaChave) && (
+                  <div className="aviso-inline">
+                    ⚠️ "{novaChave}" não bate com nenhum prefixo permitido — o daemon vai recusar
+                    esta variável ao salvar.
+                  </div>
+                )}
               </div>
 
               <p className="card-nota">

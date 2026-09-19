@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseDocument, parse as parseYaml, type Document } from 'yaml';
+import { parseDocument, parse as parseYaml, YAMLMap, type Document } from 'yaml';
 import {
   filtrarEnvDeProjeto,
   HubError,
@@ -244,6 +244,14 @@ export function saveProjectContext(projectPath: string, ctx: ProjectContext): vo
     }
   } else {
     doc = parseDocument('');
+    // Um `Document` recém-parseado de string vazia tem `contents: null`, e
+    // `doc.delete(...)` (ao contrário de `doc.set(...)`) lança "Expected a
+    // YAML collection as document contents" nesse estado — o que quebrava a
+    // PRIMEIRA gravação de qualquer projeto sem `config.yaml` ainda, sempre
+    // que `ctx.memory`/`ctx.prompts` vinham vazios (o caminho comum: alguém
+    // configura só `env` num projeto novo). Medido diretamente contra a
+    // biblioteca `yaml`. Um mapa vazio evita o caso especial.
+    doc.contents = new YAMLMap(doc.schema);
   }
 
   const memoria = ctx.memory?.trim();

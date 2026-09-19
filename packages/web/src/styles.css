@@ -3082,6 +3082,54 @@ textarea {
   margin: 0 0 16px;
 }
 
+.help-warn {
+  color: var(--warn);
+}
+
+.lista-env-extra {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lista-env-extra li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+.lista-env-extra .valor-env-extra {
+  color: var(--text-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-extra-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.env-extra-form input {
+  flex: 1;
+}
+
+.aviso-inline {
+  color: var(--warn);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
 .agent-selector-chips {
   display: flex;
   flex-wrap: wrap;

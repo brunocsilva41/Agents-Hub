@@ -52,7 +52,7 @@ interface Args {
  * consome o objetivo como valor de `--detach` e o comando falha dizendo que
  * faltou o objetivo — que estava lá o tempo todo.
  */
-const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke']);
+const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear']);
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -114,6 +114,14 @@ ${bold('Agentes')}
 ${bold('Projetos')}
   hub projects                      lista projetos registrados
   hub project add [caminho]         registra um repositório (padrão: diretório atual)
+  hub project env [projeto]                             lista o ambiente configurado por agente
+      --agent <id>                 restringe a listagem a um agente
+  hub project env [projeto] --agent <id> --set CHAVE=VALOR    configura uma variável (ex.: OPENAI_BASE_URL)
+  hub project env [projeto] --agent <id> --unset CHAVE        remove uma variável
+  hub project prompt [projeto] --agent <id>                   mostra a instrução salva para o agente
+  hub project prompt [projeto] --agent <id> --set "texto"     grava a instrução
+  hub project prompt [projeto] --agent <id> --clear           apaga a instrução
+      ${dim('[projeto] aceita id ou caminho; sem ele, usa o diretório atual (registra se preciso).')}
 
 ${bold('Sessões')}
   hub start --agent <id> "objetivo"          abre uma sessão-raiz e acompanha ao vivo
@@ -533,14 +541,137 @@ async function listProjects(client: HubClient): Promise<void> {
 }
 
 async function projectCommand(client: HubClient, args: Args): Promise<void> {
-  const [sub, dir] = args.positional;
-  if (sub !== 'add') {
-    console.error(red('uso: hub project add [caminho]'));
+  const [sub, ...rest] = args.positional;
+  switch (sub) {
+    case 'add':
+      return projectAdd(client, rest[0]);
+    case 'env':
+      return projectEnv(client, args, rest[0]);
+    case 'prompt':
+      return projectPrompt(client, args, rest[0]);
+    default:
+      console.error(
+        red('uso: hub project <add|env|prompt> ...') + '\n' + dim('veja "hub help" para os detalhes de cada um.'),
+      );
+      process.exitCode = 1;
+  }
+}
+
+async function projectAdd(client: HubClient, dir: string | undefined): Promise<void> {
+  const { project } = await client.addProject(path.resolve(dir ?? process.cwd()));
+  console.log(`${green('registrado')} ${bold(project.name)} ${dim(project.id)}`);
+}
+
+/**
+ * Nomes que sugerem segredo — só para avisar antes de gravar, nunca para
+ * bloquear. O daemon já filtra `NODE_OPTIONS`/`PATH`/etc. na entrada
+ * (`filtrarEnvDeProjeto`); isto aqui é outra coisa: uma chave de API
+ * LEGÍTIMA (aceita pelo filtro) ainda vai parar num arquivo VERSIONADO.
+ */
+function pareceSegredo(chave: string): boolean {
+  const c = chave.toUpperCase();
+  return c.includes('KEY') || c.includes('TOKEN') || c.includes('SECRET');
+}
+
+const AVISO_ARQUIVO_VERSIONADO =
+  '.agents-hub/config.yaml é versionado junto do código — uma chave de API real aqui ' +
+  'vaza para quem clonar o repositório. Para servidor local (Ollama, LM Studio) um valor ' +
+  'qualquer costuma bastar; para chave de verdade, mantenha-a fora do projeto.';
+
+/** `hub project env` — lista, define ou remove variáveis de ambiente por agente. */
+async function projectEnv(client: HubClient, args: Args, projectRef: string | undefined): Promise<void> {
+  const projectId = await resolveProjectId(client, projectRef);
+  const agentId = typeof args.flags['agent'] === 'string' ? args.flags['agent'] : undefined;
+  const setFlag = typeof args.flags['set'] === 'string' ? args.flags['set'] : undefined;
+  const unsetFlag = typeof args.flags['unset'] === 'string' ? args.flags['unset'] : undefined;
+
+  const { context } = await client.projectContext(projectId);
+
+  if (setFlag === undefined && unsetFlag === undefined) {
+    const env = context.env ?? {};
+    const agentIds = agentId !== undefined ? [agentId] : Object.keys(env);
+    if (agentIds.length === 0) {
+      console.log(dim('nenhuma variável de ambiente configurada neste projeto.'));
+      return;
+    }
+    for (const id of agentIds) {
+      console.log(bold(id));
+      const entries = Object.entries(env[id] ?? {});
+      if (entries.length === 0) console.log(`  ${dim('(nenhuma)')}`);
+      for (const [chave, valor] of entries) console.log(`  ${chave}=${valor}`);
+    }
+    return;
+  }
+
+  if (agentId === undefined) {
+    console.error(red('--agent é obrigatório para configurar (ex.: --agent claude --set MODEL=...)'));
     process.exitCode = 1;
     return;
   }
-  const { project } = await client.addProject(path.resolve(dir ?? process.cwd()));
-  console.log(`${green('registrado')} ${bold(project.name)} ${dim(project.id)}`);
+
+  const envAtual: Record<string, Record<string, string>> = { ...(context.env ?? {}) };
+  const doAgente: Record<string, string> = { ...(envAtual[agentId] ?? {}) };
+
+  if (setFlag !== undefined) {
+    const posIgual = setFlag.indexOf('=');
+    if (posIgual <= 0) {
+      console.error(red('formato esperado: --set CHAVE=VALOR'));
+      process.exitCode = 1;
+      return;
+    }
+    const chave = setFlag.slice(0, posIgual).trim();
+    const valor = setFlag.slice(posIgual + 1);
+    doAgente[chave] = valor;
+    if (pareceSegredo(chave)) console.error(yellow(`aviso: ${AVISO_ARQUIVO_VERSIONADO}`));
+  }
+  if (unsetFlag !== undefined) delete doAgente[unsetFlag];
+
+  envAtual[agentId] = doAgente;
+  const { context: salvo } = await client.saveProjectContext(projectId, { ...context, env: envAtual });
+
+  const ficou = salvo.env?.[agentId] ?? {};
+  if (setFlag !== undefined) {
+    const chave = setFlag.slice(0, setFlag.indexOf('=')).trim();
+    if (chave in ficou) console.log(`${green('gravado')} ${bold(agentId)} ${chave}=${ficou[chave]}`);
+    else {
+      // O daemon recusou — nome fora da lista de permissão. Silêncio aqui
+      // seria a mesma fachada que este trabalho existe para acabar.
+      console.error(red(`"${chave}" foi recusada pelo daemon (fora da lista de permissão de ambiente).`));
+      process.exitCode = 1;
+    }
+  } else {
+    console.log(`${green('removido')} ${bold(agentId)} ${unsetFlag ?? ''}`);
+  }
+}
+
+/** `hub project prompt` — mostra, grava ou apaga a instrução de um agente. */
+async function projectPrompt(client: HubClient, args: Args, projectRef: string | undefined): Promise<void> {
+  const projectId = await resolveProjectId(client, projectRef);
+  const agentId = typeof args.flags['agent'] === 'string' ? args.flags['agent'] : undefined;
+  if (agentId === undefined) {
+    console.error(red('--agent é obrigatório: hub project prompt [projeto] --agent <id>'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const setFlag = typeof args.flags['set'] === 'string' ? args.flags['set'] : undefined;
+  const clearFlag = args.flags['clear'] === true;
+
+  const { context } = await client.projectContext(projectId);
+
+  if (setFlag === undefined && !clearFlag) {
+    const atual = context.prompts?.[agentId];
+    console.log(atual ? atual : dim('(nenhuma instrução salva para este agente)'));
+    return;
+  }
+
+  const prompts = { ...(context.prompts ?? {}) };
+  if (clearFlag) delete prompts[agentId];
+  else if (setFlag !== undefined) prompts[agentId] = setFlag;
+
+  const { context: salvo } = await client.saveProjectContext(projectId, { ...context, prompts });
+  if (clearFlag) console.log(`${green('removida')} instrução de ${bold(agentId)}`);
+  else console.log(`${green('gravada')} instrução de ${bold(agentId)}: ${dim(salvo.prompts?.[agentId] ?? '')}`);
 }
 
 async function resolveProjectId(client: HubClient, flag: string | boolean | undefined): Promise<string> {

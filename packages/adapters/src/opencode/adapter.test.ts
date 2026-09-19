@@ -152,6 +152,114 @@ test(
   },
 );
 
+// -------------------------------------------------------------------------
+// ctx.env chega ao processo real do "opencode serve"
+// -------------------------------------------------------------------------
+
+/**
+ * Script de servidor falso que devolve, num endpoint próprio, o valor de uma
+ * variável de ambiente escolhida pelo teste — é como provamos que `ctx.env`
+ * chegou de fato ao `spawn()`, e não só ao corpo do `POST /api/session`.
+ */
+const FAKE_SERVER_ENV_SCRIPT = `
+const http = require('node:http');
+
+const args = process.argv.slice(2);
+const port = Number(args[args.indexOf('--port') + 1]);
+
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/api/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end('{}');
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/__env_de_teste') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ valor: process.env.HUB_TEST_OPENCODE_ENV ?? null }));
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/api/session') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ data: { id: 'ses_fake_env' } }));
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+server.listen(port, '127.0.0.1');
+`;
+
+function montarBinarioFalsoDeEnv(): Ambiente {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hub-opencode-env-'));
+  const script = path.join(dir, 'fake-opencode-server-env.cjs');
+  writeFileSync(script, FAKE_SERVER_ENV_SCRIPT, 'utf8');
+
+  const binName = 'opencode-fake-env-test';
+  if (process.platform === 'win32') {
+    writeFileSync(path.join(dir, `${binName}.cmd`), `@echo off\r\nnode "${script}" %*\r\n`, 'utf8');
+  } else {
+    const shPath = path.join(dir, binName);
+    writeFileSync(shPath, `#!/bin/sh\nexec node "${script}" "$@"\n`, 'utf8');
+    chmodSync(shPath, 0o755);
+  }
+  return { dir, binName };
+}
+
+test(
+  'ctx.env chega ao spawn() de "opencode serve" — não fica preso na sessão HTTP',
+  { timeout: 15_000 },
+  async () => {
+    const envAmbiente = montarBinarioFalsoDeEnv();
+    const pathAntes = process.env['PATH'];
+    process.env['PATH'] = `${envAmbiente.dir}${path.delimiter}${pathAntes ?? ''}`;
+    clearBinCache();
+
+    const manifest = AgentManifestSchema.parse({
+      id: 'opencode',
+      name: 'OpenCode Falso',
+      bin: envAmbiente.binName,
+      invoke: { oneShot: ['run'] },
+    });
+
+    let envAdapter: OpenCodeAdapter | null = null;
+    try {
+      envAdapter = createOpenCodeAdapter(manifest, { port: 48924, host: '127.0.0.1' });
+
+      await envAdapter.start(
+        {
+          sessionId: 'ses_teste_env',
+          taskId: null,
+          agentId: 'opencode',
+          workdir: envAmbiente.dir,
+          mode: 'autonomous',
+          env: { HUB_TEST_OPENCODE_ENV: 'valor-do-projeto' },
+          timeoutSeconds: 30,
+          heartbeatSeconds: 30,
+        },
+        'prompt de teste',
+      );
+
+      const resposta = (await fetch(`${envAdapter.baseUrl}/__env_de_teste`).then((r) =>
+        r.json(),
+      )) as { valor: string | null };
+      assert.equal(
+        resposta.valor,
+        'valor-do-projeto',
+        'esperava que o processo real do "opencode serve" tivesse recebido HUB_TEST_OPENCODE_ENV via spawn()',
+      );
+    } finally {
+      if (envAdapter) await envAdapter.close().catch(() => undefined);
+      process.env['PATH'] = pathAntes;
+      clearBinCache();
+      try {
+        rmSync(envAmbiente.dir, { recursive: true, force: true });
+      } catch {
+        /* limpeza de temp é oportunista */
+      }
+    }
+  },
+);
+
 async function esperarLinha(linhas: string[], marca: string, timeoutMs: number): Promise<void> {
   const limite = Date.now() + timeoutMs;
   while (Date.now() < limite) {
