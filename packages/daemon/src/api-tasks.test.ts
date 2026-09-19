@@ -19,6 +19,7 @@ describe('API REST de tasks (/api/tasks) — automação externa', () => {
     webRoot: '/web',
     retention: { worktreeDays: 7, sweepIntervalMinutes: 60 },
     opencodePort: 4096,
+    maxSseConnections: 100,
     policy: DEFAULT_POLICY,
     codexGate: { bypassHookTrust: false },
   };

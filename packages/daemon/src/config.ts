@@ -34,6 +34,16 @@ export interface HubConfig {
   opencodePort: number;
   policy: PolicyDocument;
   codexGate: CodexGateConfig;
+  /**
+   * Teto de conexões SSE simultâneas (`/events` + `/api/tasks/:id/events`).
+   *
+   * Sem isto, nada impede um cliente com bug (ou um scanner) de abrir
+   * conexões sem limite — cada uma com seu próprio keep-alive e fila, todas
+   * competindo pelo mesmo processo Node. Acima do teto, a rota responde 503
+   * em vez de aceitar mais uma conexão que o daemon não tem como atender bem.
+   * Generoso por padrão: uso real é CLI + Web UI + no máximo alguns peers.
+   */
+  maxSseConnections: number;
 }
 
 export interface CodexGateConfig {
@@ -52,6 +62,8 @@ export interface CodexGateConfig {
 export const DEFAULT_CODEX_GATE: CodexGateConfig = {
   bypassHookTrust: false,
 };
+
+export const DEFAULT_MAX_SSE_CONNECTIONS = 100;
 
 export interface RetentionPolicy {
   /**
@@ -123,6 +135,7 @@ const HubConfigOnDiskSchema = z
     port: z.number().int().min(1).max(65535).optional(),
     webRoot: z.string().min(1).optional(),
     opencodePort: z.number().int().min(1).max(65535).optional(),
+    maxSseConnections: z.number().int().min(1).max(100_000).optional(),
     policy: PartialPolicyDocumentSchema.optional(),
     retention: z
       .object({
@@ -184,6 +197,7 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
     port: 4747,
     webRoot: bundledWebRoot(),
     opencodePort: 4790,
+    maxSseConnections: DEFAULT_MAX_SSE_CONNECTIONS,
     ...onDisk,
     ...overrides,
     // A política nunca é substituída inteira por acidente: campos ausentes no

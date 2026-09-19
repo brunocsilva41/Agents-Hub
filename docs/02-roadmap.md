@@ -441,10 +441,55 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       `stdin.write` (EPIPE quando o CLI sai antes de consumir)
 - [ ] **PID por sessão no schema**: a reconciliação corrige o registro na subida
       e não mata os processos que sobreviveram ao crash, porque não sabe quais são
-- [ ] **Keep-alive e `id:` no SSE de `/api/tasks/*`**, try/catch no keep-alive do
-      `/events`, e teto de conexões com backpressure
-- [ ] **`since` inválido no SSE** devolvendo 200 com zero linhas; truncamento de
-      replay em 500 eventos sem sinal de que truncou
+- [x] **Keep-alive e `id:` no SSE de `/api/tasks/*`**, try/catch no keep-alive do
+      `/events`, e teto de conexões com backpressure. As duas rotas
+      (`/events` e `/api/tasks/:id/events`) divergiam na origem: só `/events`
+      tinha `setInterval` de ping e `id:`; nenhuma das duas tratava erro de
+      escrita nem cliente lento. Extraído para `packages/daemon/src/sse.ts`
+      (`startSseChannel`), usado pelas duas — eliminando a divergência na
+      origem em vez de remendar cada rota. Cobre:
+      - keep-alive com `try/catch` + checagem de `writableEnded`/`destroyed`
+        ANTES de escrever, tratando falha como a mesma desconexão do
+        `req.on('close')` (mesmo `cleanup`, uma vez só);
+      - teto de conexões SSE simultâneas (`config.maxSseConnections`,
+        `packages/daemon/src/config.ts`, default 100): acima do teto, 503
+        ANTES de `res.writeHead`;
+      - backpressure real usando o retorno de `res.write()`: fila local por
+        conexão (`queueCap`) enfileira o que não coube, um listener de
+        `'drain'` esvazia, e estourar o teto encerra a conexão em vez de
+        crescer sem limite na heap. **Achado rodando contra o daemon real**:
+        o cap não pode ser menor que o maior replay legítimo — com o default
+        de 200 sugerido inicialmente, o PRÓPRIO replay de uma sessão longa
+        (até 500 eventos, síncrono, antes de qualquer live event) se
+        autoclassificava como "cliente lento" e derrubava a conexão no
+        primeiro segundo. Corrigido com `SSE_QUEUE_CAP = SSE_REPLAY_LIMIT +
+        200` nas duas rotas (`server.ts`) — o cap de `sse.ts` continua 200
+        por padrão para quem não faz replay grande.
+      9 testes unitários de `startSseChannel` com timers falsos
+      (`packages/daemon/src/sse.test.ts`) + 4 testes de integração contra o
+      daemon HTTP real, incluindo o cenário de 503 acima do teto
+      (`packages/daemon/src/sse-http.test.ts`)
+- [x] **`since` inválido no SSE** devolvendo 200 com zero linhas; truncamento de
+      replay em 500 eventos sem sinal de que truncou.
+      `parseSseSince` (`packages/daemon/src/http-schemas.ts`) rejeita com 400
+      (`INVALID_QUERY`, novo código em `packages/core/src/errors.ts`) ANTES de
+      `res.writeHead` quando `since` está presente e não é um inteiro
+      não-negativo — deliberadamente DIFERENTE de `inteiroOpcional` (usado por
+      `/sessions/:id/events`), que trata inválido como "sem filtro": para uma
+      conexão SSE de longa duração, devolver replay completo em silêncio
+      quando o cliente pediu um filtro que não foi aplicado é pior que negar.
+      Truncamento: em vez de mudar a assinatura de `EventRepository.list`
+      (tocaria `session-manager.ts` em 3 lugares e a rota REST de eventos —
+      avaliado via `grep -rn "\.events\.list\|listEvents" packages/`), as
+      rotas SSE passam um `SSE_REPLAY_LIMIT` (500, igual ao default do
+      repositório) explícito para `listEvents` e comparam
+      `past.length === SSE_REPLAY_LIMIT`: se bateu no teto, quase certamente
+      cortou. Quando corta, um evento sintético `type: 'log'`
+      (`payload: { truncated: true, sentCount, sessionId }`, nunca persistido,
+      sem `id:` de propósito — não tem `seq` real e reconectar com
+      `Last-Event-ID` igual ao dele perderia eventos de verdade) é escrito
+      antes dos live events. Coberto em `sse-http.test.ts` contra uma sessão
+      com 520 eventos reais no banco.
 - [x] **Emissor para `budget.warning`** e projeção que funciona **durante** a run.
       `SessionManager.budget()` usava `consumed.seconds`, só liquidado em
       `ledger.settle()` no FIM da run — a projeção nunca aparecia com a sessão viva.

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { HubError } from '@agents-hub/core';
 
 /**
  * Contratos de entrada da API.
@@ -155,4 +156,28 @@ export function inteiroOpcional(valor: string | null, max: number): number | und
   const n = Number(valor);
   if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.min(Math.floor(n), max);
+}
+
+/**
+ * `since` do SSE de `/events`: ausente vira "sem filtro" (replay completo),
+ * mas presente-e-inválido é ERRO, não "sem filtro" disfarçado.
+ *
+ * `inteiroOpcional` (usado por `/sessions/:id/events`) trata os dois casos
+ * como a mesma coisa — `Number("abc")` é `NaN`, passa despercebido pelo
+ * filtro e devolve replay completo com 200, como se o pedido tivesse sido
+ * aceito. Para uma conexão SSE de longa duração isso é pior: o cliente que
+ * digitou "abc" por engano não descobre o erro, só recebe uma timeline que
+ * não é a que pediu. Aqui a borda recusa com 400 ANTES de `res.writeHead`,
+ * consistente com o resto da API, que valida tudo por schema `strict`.
+ */
+export function parseSseSince(valor: string | null): number | undefined {
+  if (valor === null) return undefined;
+  if (!/^\d+$/.test(valor)) {
+    throw new HubError(
+      'INVALID_QUERY',
+      `parâmetro "since" inválido: "${valor}" não é um inteiro não-negativo`,
+      { valor },
+    );
+  }
+  return Number(valor);
 }

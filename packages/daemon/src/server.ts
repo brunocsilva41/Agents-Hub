@@ -26,10 +26,51 @@ import {
   StartSessionSchema,
   TaskIdSchema,
   inteiroOpcional,
+  parseSseSince,
 } from './http-schemas.js';
 import type { WorktreeReaper } from './reaper.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
+import { startSseChannel } from './sse.js';
+
+/**
+ * Quantos eventos um replay de SSE manda antes de cortar.
+ *
+ * Igual ao teto padrão de `SqliteEventRepository.list` (500) — usar o mesmo
+ * número aqui é o que permite detectar truncamento sem mudar a assinatura do
+ * repositório: se o replay voltou exatamente `SSE_REPLAY_LIMIT` eventos, ele
+ * quase certamente foi cortado, e o cliente precisa saber.
+ */
+const SSE_REPLAY_LIMIT = 500;
+
+/**
+ * Fila do canal SSE para as duas rotas.
+ *
+ * Maior que `SSE_REPLAY_LIMIT`, de propósito: o replay inteiro manda até 500
+ * eventos de uma vez, de forma síncrona, ANTES de qualquer live event. Com o
+ * cap padrão de `sse.ts` (200, pensado para um cliente que parou de ler
+ * eventos AO VIVO), o replay de uma sessão longa se auto-classificaria como
+ * "cliente lento" e derrubaria a conexão no primeiro segundo — descoberto
+ * rodando este cenário de verdade, não hipótese. A margem sobre 500 é para
+ * live events que cheguem durante o próprio replay.
+ */
+const SSE_QUEUE_CAP = SSE_REPLAY_LIMIT + 200;
+
+/** Aviso sintético — nunca persistido — de que o replay de `/events` foi cortado. */
+function truncatedReplayNotice(sessionId: string, sentCount: number): EventEnvelope {
+  return {
+    id: `evt_truncated_${sessionId}`,
+    seq: 0,
+    ts: nowIso(),
+    sessionId,
+    taskId: null,
+    agentId: 'daemon',
+    type: 'log',
+    payload: { truncated: true, sentCount, sessionId },
+    cost: null,
+    raw: null,
+  };
+}
 
 type Handler = (
   req: IncomingMessage,
@@ -249,6 +290,8 @@ export class HubServer {
       const taskId = param(params['id'], TaskIdSchema, 'id');
       const task = this.sessions.getTask(taskId);
 
+      if (!this.#acceptSseConnection(res)) return;
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -257,17 +300,25 @@ export class HubServer {
       });
       res.write(`: conectado ao stream de eventos da task ${taskId}\n\n`);
 
-      for (const event of this.sessions.listEvents(task.sessionId)) {
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      // Stream de UMA sessão só (a task não muda de sessão em execução): o
+      // mesmo `id:` + keep-alive + backpressure que `/events` já tinha,
+      // extraído para não divergir de novo entre as duas rotas.
+      let unsubscribe: () => void = () => {};
+      const channel = startSseChannel(req, res, {
+        withId: true,
+        queueCap: SSE_QUEUE_CAP,
+        onClose: () => unsubscribe(),
+      });
+
+      const past = this.sessions.listEvents(task.sessionId, undefined, SSE_REPLAY_LIMIT);
+      for (const event of past) channel.send(event);
+      if (past.length === SSE_REPLAY_LIMIT) {
+        channel.send(truncatedReplayNotice(task.sessionId, past.length), { withId: false });
       }
 
-      const unsubscribe = this.bus.subscribe({ sessionId: task.sessionId }, (event: EventEnvelope) => {
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
-      });
-
-      req.on('close', () => {
-        unsubscribe();
-      });
+      unsubscribe = this.bus.subscribe({ sessionId: task.sessionId }, (event: EventEnvelope) =>
+        channel.send(event),
+      );
     });
 
     // ------------------------------------------------------------- projetos
@@ -593,6 +644,11 @@ export class HubServer {
       const url = new URL(req.url ?? '/', 'http://local');
       const sessionId = url.searchParams.get('sessionId') ?? undefined;
       const rootId = url.searchParams.get('rootId') ?? undefined;
+      // Presente-e-inválido é erro (400), não "sem filtro" — ver o
+      // comentário de `parseSseSince`. Lançado ANTES do `res.writeHead`.
+      const since = parseSseSince(url.searchParams.get('since'));
+
+      if (!this.#acceptSseConnection(res)) return;
 
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -602,51 +658,47 @@ export class HubServer {
       });
       res.write(`: conectado em ${nowIso()}\n\n`);
 
+      const singleSession = sessionId !== undefined;
+      let unsubscribe: () => void = () => {};
+      const channel = startSseChannel(req, res, {
+        withId: singleSession,
+        queueCap: SSE_QUEUE_CAP,
+        onClose: () => unsubscribe(),
+      });
+
       // Replay do que já passou: quem conecta no meio de uma sessão longa
-      // precisa ver o começo, senão a timeline chega truncada.
-      const since = url.searchParams.get('since');
+      // precisa ver o começo, senão a timeline chega truncada. Se o replay
+      // bateu no teto, o cliente precisa de um sinal — não só silêncio.
       if (sessionId) {
-        for (const past of this.sessions.listEvents(
-          sessionId,
-          since === null ? undefined : Number(since),
-        )) {
-          writeSse(res, past, true);
+        const past = this.sessions.listEvents(sessionId, since, SSE_REPLAY_LIMIT);
+        for (const event of past) channel.send(event);
+        if (past.length === SSE_REPLAY_LIMIT) {
+          channel.send(truncatedReplayNotice(sessionId, past.length), { withId: false });
         }
       }
 
-      const singleSession = sessionId !== undefined;
-      const unsubscribe = this.bus.subscribe({ sessionId, rootId }, (event) =>
-        writeSse(res, event, singleSession),
-      );
-
-      // Proxies e antivírus derrubam conexão ociosa; o comentário periódico
-      // mantém o canal vivo sem poluir o stream de eventos.
-      const keepAlive = setInterval(() => res.write(': ping\n\n'), 20_000);
-
-      req.on('close', () => {
-        clearInterval(keepAlive);
-        unsubscribe();
-      });
+      unsubscribe = this.bus.subscribe({ sessionId, rootId }, (event) => channel.send(event));
     });
   }
-}
 
-/**
- * Escreve um evento no stream SSE.
- *
- * DELIBERADAMENTE sem o campo `event:`. Nomear o evento com o tipo parece
- * elegante, mas faz o `onmessage` do navegador ignorar tudo que não se chame
- * literalmente "message" — o cliente receberia as falas do agente e perderia
- * `turn.completed`, `delegation.*` e `error` sem nenhum sinal de erro.
- * O tipo já viaja dentro do JSON, que é onde todo consumidor o lê.
- *
- * O `id:` só é enviado no stream de UMA sessão, porque `seq` é monotônico por
- * sessão: num stream multi-sessão ele seria ambíguo e estragaria o
- * `Last-Event-ID` na reconexão.
- */
-function writeSse(res: ServerResponse, event: EventEnvelope, withId: boolean): void {
-  const id = withId ? `id: ${event.seq}\n` : '';
-  res.write(`${id}data: ${JSON.stringify(event)}\n\n`);
+  /**
+   * Teto de conexões SSE simultâneas.
+   *
+   * Sem isto, cada conexão aceita compete pelo mesmo processo Node (keep-alive
+   * próprio, fila própria) sem limite algum. Acima do teto, 503 ANTES de
+   * `res.writeHead` — o cliente recebe um erro claro em vez de uma conexão
+   * que o daemon não tem como atender direito.
+   */
+  #acceptSseConnection(res: ServerResponse): boolean {
+    if (this.bus.subscriberCount < this.config.maxSseConnections) return true;
+    sendJson(res, 503, {
+      error: {
+        code: 'SSE_CONNECTION_LIMIT',
+        message: `limite de ${this.config.maxSseConnections} conexões SSE simultâneas atingido`,
+      },
+    });
+    return false;
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -688,6 +740,8 @@ function statusFor(code: string): number {
       return 409;
     case 'TIMEOUT':
       return 504;
+    case 'INVALID_QUERY':
+      return 400;
     case 'AGENT_NOT_INSTALLED':
     case 'AGENT_NOT_AUTHENTICATED':
     case 'CAPABILITY_UNRESOLVED':
