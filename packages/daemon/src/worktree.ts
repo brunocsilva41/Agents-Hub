@@ -116,7 +116,13 @@ export class WorktreeManager {
 
     const dir = path.join(this.root, sanitize(params.projectName), params.sessionId);
     const branch = `hub/${params.sessionId}`;
-    const base = params.baseRef ?? (await this.currentRef(params.projectPath));
+    let baseWarning: string | null = null;
+    let base = params.baseRef;
+    if (base === undefined) {
+      const resolved = await this.currentRef(params.projectPath);
+      base = resolved.ref;
+      baseWarning = resolved.warning;
+    }
 
     try {
       await execFileAsync('git', ['worktree', 'add', '-b', branch, dir, base], {
@@ -132,6 +138,7 @@ export class WorktreeManager {
     }
 
     const dependencyWarnings = await this.#ligarDependencias(params.projectPath, dir);
+    if (baseWarning !== null) dependencyWarnings.unshift(baseWarning);
 
     return { path: dir, branch, isolated: true, dependencyWarnings };
   }
@@ -210,7 +217,15 @@ export class WorktreeManager {
         .filter((l) => l.startsWith('worktree '))
         .map((l) => l.slice('worktree '.length))
         .filter((p) => p.startsWith(this.root));
-    } catch {
+    } catch (err) {
+      // Sem chamador ativo hoje (confirmado via `grep -rn "listStale"
+      // packages/`), mas o catch silencioso ficava pronto pra esconder um erro
+      // real assim que alguém religasse a função. Loga para não repetir aqui o
+      // mesmo buraco que `currentRef` tinha.
+      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      console.error(
+        `[worktree] falha ao listar worktrees de ${projectPath}: ${(err as Error).message}`,
+      );
       return [];
     }
   }
@@ -226,15 +241,30 @@ export class WorktreeManager {
     }
   }
 
-  private async currentRef(dir: string): Promise<string> {
+  /**
+   * Resolve o commit atual de `dir`, usado como `base` do novo worktree quando
+   * `baseRef` não foi passado — decide de qual commit o agente vai partir.
+   *
+   * Um `git rev-parse HEAD` falhando de verdade (HEAD quebrado, repositório em
+   * estado esquisito) não pode virar o literal `"HEAD"` em silêncio: isso faria
+   * o worktree nascer sobre uma ref simbólica ambígua sem ninguém saber que a
+   * resolução real falhou. Por isso loga o erro e devolve também um aviso, no
+   * mesmo formato de `dependencyWarnings`, para `create()` repassar pra quem
+   * está criando a sessão.
+   */
+  private async currentRef(dir: string): Promise<{ ref: string; warning: string | null }> {
     try {
       const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
         cwd: dir,
         maxBuffer: GIT_MAX_BUFFER,
       });
-      return stdout.trim();
-    } catch {
-      return 'HEAD';
+      return { ref: stdout.trim(), warning: null };
+    } catch (err) {
+      const motivo = (err as Error).message;
+      const aviso = `não foi possível resolver HEAD em ${dir}, worktree criado sobre a ref literal "HEAD": ${motivo}`;
+      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      console.error(`[worktree] ${aviso}`);
+      return { ref: 'HEAD', warning: aviso };
     }
   }
 }

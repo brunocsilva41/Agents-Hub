@@ -721,8 +721,33 @@ export class SessionManager {
         return;
       }
 
+      // A checagem de nome de imagem sozinha não fecha o caso do PID
+      // reciclado: se o SO reaproveitar o PID órfão para outro processo com o
+      // MESMO nome de binário (outro `node.exe`/shim `.cmd` do usuário, por
+      // exemplo — `imagemPareceEsperada` inclusive aceita `cmd`/`sh`/`bash`
+      // como wrapper plausível para QUALQUER `bin` alvo), a checagem de nome
+      // passa e mataríamos um processo alheio. Um processo reciclado nasce
+      // DEPOIS do daemon anterior morrer — ou seja, depois do último registro
+      // conhecido desta sessão no banco. Se o horário de criação do processo
+      // vivo for mais novo que isso, não é o órfão de verdade: é o SO tendo
+      // devolvido o número pra outro programa. Só no Windows por enquanto
+      // (mesma limitação de `imagemDoProcesso`: POSIX segue sem cobertura de
+      // kill nesta reconciliação).
+      if (process.platform === 'win32') {
+        const inicioProcesso = await horarioDeCriacaoDoProcesso(pid);
+        if (pidPareceReciclado(inicioProcesso, sessao.updatedAt)) {
+          console.error(
+            `reconciliação: pid ${pid} (${imagem}) da sessão ${sessao.id} nasceu em ` +
+              `${inicioProcesso?.toISOString()}, depois do último registro da sessão ` +
+              `(${sessao.updatedAt}) — provável PID reciclado, kill abortado`,
+          );
+          return;
+        }
+      }
+
       // Chegamos até aqui só porque `imagemDoProcesso` confirmou que o PID
-      // está vivo e bate com o binário esperado — ou seja, é um órfão de
+      // está vivo e bate com o binário esperado, e (no Windows) o processo não
+      // nasceu depois do último registro da sessão — ou seja, é um órfão de
       // verdade sobrevivendo a um crash, não o caminho comum de "já tinha
       // morrido sozinho". Vale o log.
       await killProcessTree(pid, () => {
@@ -2781,4 +2806,66 @@ function imagemPareceEsperada(imagem: string, bin: string): boolean {
   const alvo = bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   if (nome === alvo) return true;
   return ['cmd', 'sh', 'bash'].includes(nome);
+}
+
+/**
+ * Tolerância de relógio na comparação de horários: `sessao.updatedAt` e o
+ * `StartTime` do processo vêm de relógios/resoluções diferentes (SQLite vs.
+ * `Get-Process`), então uma diferença de poucos segundos não é sinal de nada
+ * — só folga suficiente para não gerar falso positivo no caminho comum onde
+ * processo e atualização da sessão acontecem quase juntos.
+ */
+const TOLERANCIA_RELOGIO_MS = 5_000;
+
+/**
+ * Horário em que o processo vivo no PID foi criado, ou `null` quando não dá
+ * para saber (POSIX hoje, ou qualquer falha ao consultar o SO).
+ *
+ * Usa PowerShell (`Get-Process -Id <pid>).StartTime`) em vez de
+ * `wmic process ... get CreationDate`: `wmic` está descontinuado nas versões
+ * recentes do Windows e seu formato de data (`yyyyMMddHHmmss.ffffff+UUU`)
+ * exige parsing manual sujeito a erro; `StartTime` já vem como `DateTime`.
+ */
+async function horarioDeCriacaoDoProcesso(pid: number): Promise<Date | null> {
+  if (process.platform !== 'win32') {
+    // Mesma limitação documentada em `imagemDoProcesso`: sem um equivalente
+    // barato ao `tasklist`/`Get-Process` no POSIX, a reconciliação segue sem
+    // cobertura de identidade (nome OU horário) fora do Windows.
+    return null;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')`,
+    ]);
+    const texto = stdout.trim();
+    if (texto.length === 0) return null;
+    const data = new Date(texto);
+    return Number.isNaN(data.getTime()) ? null : data;
+  } catch {
+    // Processo já não existe mais, ou o SO nega acesso ao StartTime (processo
+    // de sistema, por exemplo) — nos dois casos, não dá pra confirmar horário.
+    return null;
+  }
+}
+
+/**
+ * O processo vivo no PID nasceu depois do último registro conhecido da
+ * sessão no banco (com folga de `TOLERANCIA_RELOGIO_MS`)?
+ *
+ * Se sim, é quase certamente o SO tendo reciclado o PID para outro processo
+ * — o órfão de verdade só poderia ter nascido ANTES do daemon anterior
+ * morrer, ou seja, antes (ou muito perto) do último `updatedAt` gravado.
+ * `inicioProcesso === null` (horário desconhecido) NÃO conta como reciclado:
+ * a checagem de horário é uma mitigação best-effort a mais, não um requisito
+ * — na dúvida, mantém o comportamento anterior em vez de travar a limpeza.
+ */
+function pidPareceReciclado(inicioProcesso: Date | null, referenciaIso: string): boolean {
+  if (inicioProcesso === null) return false;
+  const referencia = new Date(referenciaIso).getTime();
+  if (Number.isNaN(referencia)) return false;
+  return inicioProcesso.getTime() > referencia + TOLERANCIA_RELOGIO_MS;
 }
