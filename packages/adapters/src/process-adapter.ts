@@ -229,6 +229,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
       done,
       events: queue,
       supportsLiveSend: this.manifest.invoke.interactive,
+      pid: child.pid ?? null,
       child,
       queue,
       canceled: false,

@@ -84,7 +84,7 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
     async start() {
       const endereco = await server.listen();
 
-      const reconciliado = sessions.reconcileOnStartup();
+      const reconciliado = await sessions.reconcileOnStartup();
       if (reconciliado.encerradas > 0) {
         console.error(
           `reconciliação: ${reconciliado.encerradas} sessão(ões) órfã(s) de daemon anterior encerrada(s)` +

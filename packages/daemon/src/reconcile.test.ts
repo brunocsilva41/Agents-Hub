@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { newId, nowIso, type Approval, type Session, type Task } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
+
+function pidVivo(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function aguardarMorte(pid: number, timeoutMs = 10_000): Promise<void> {
+  const limite = Date.now() + timeoutMs;
+  while (Date.now() < limite) {
+    if (!pidVivo(pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`pid ${pid} continua vivo depois de ${timeoutMs}ms`);
+}
 
 /**
  * Reconciliação de estado na subida do daemon.
@@ -23,6 +42,35 @@ describe('reconciliação na subida do daemon', () => {
     const manifestos = path.join(raiz, 'manifests');
     mkdirSync(manifestos, { recursive: true });
 
+    // Agente cujo binário é o próprio `node`: permite testar a checagem de
+    // identidade por nome de imagem (`imagemPareceEsperada`) contra um
+    // processo de verdade, sem depender de nenhum CLI de agente instalado.
+    writeFileSync(
+      path.join(manifestos, 'node-fake.yaml'),
+      [
+        'id: node-fake',
+        'name: Node Fake',
+        'bin: node',
+        'invoke:',
+        '  oneShot: ["--version"]',
+      ].join('\n'),
+      'utf8',
+    );
+
+    // Agente registrado, mas cujo manifesto espera um binário que nunca vai
+    // bater com o `node.exe` real usado nos testes de PID reciclado.
+    writeFileSync(
+      path.join(manifestos, 'wrong-bin.yaml'),
+      [
+        'id: wrong-bin',
+        'name: Wrong Bin',
+        'bin: totalmente-outro-binario',
+        'invoke:',
+        '  oneShot: ["--version"]',
+      ].join('\n'),
+      'utf8',
+    );
+
     hub = createHub({ home: raiz, manifestsDir: manifestos, webRoot: path.join(raiz, 'sem-web') });
     projectId = hub.sessions.registerProject(raiz, 'projeto-reconcile').id;
   });
@@ -36,7 +84,12 @@ describe('reconciliação na subida do daemon', () => {
     }
   });
 
-  function semear(state: Session['state'], comAprovacaoPendente = false): {
+  function semear(
+    state: Session['state'],
+    comAprovacaoPendente = false,
+    pid: number | null = null,
+    agentId = 'fantasma',
+  ): {
     session: Session;
     task: Task;
   } {
@@ -44,7 +97,7 @@ describe('reconciliação na subida do daemon', () => {
     const session: Session = {
       id: sessionId,
       projectId,
-      agentId: 'fantasma',
+      agentId,
       nativeSessionId: null,
       rootId: sessionId,
       parentId: null,
@@ -58,6 +111,7 @@ describe('reconciliação na subida do daemon', () => {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       endedAt: null,
+      pid,
     };
 
     const task: Task = {
@@ -94,10 +148,10 @@ describe('reconciliação na subida do daemon', () => {
     return { session, task };
   }
 
-  test('sessão marcada como running sem processo por trás é encerrada', () => {
+  test('sessão marcada como running sem processo por trás é encerrada', async () => {
     const { session, task } = semear('running');
 
-    const resultado = hub.sessions.reconcileOnStartup();
+    const resultado = await hub.sessions.reconcileOnStartup();
     assert.ok(resultado.encerradas >= 1);
 
     assert.equal(hub.store.sessions.get(session.id)?.state, 'killed');
@@ -108,10 +162,10 @@ describe('reconciliação na subida do daemon', () => {
     );
   });
 
-  test('sessão esperando aprovação humana SOBREVIVE ao reinício', () => {
+  test('sessão esperando aprovação humana SOBREVIVE ao reinício', async () => {
     const { session, task } = semear('waiting_approval', true);
 
-    const resultado = hub.sessions.reconcileOnStartup();
+    const resultado = await hub.sessions.reconcileOnStartup();
     assert.ok(resultado.revividas >= 1);
 
     assert.equal(
@@ -122,10 +176,10 @@ describe('reconciliação na subida do daemon', () => {
     assert.equal(hub.store.tasks.get(task.id)?.state, 'working');
   });
 
-  test('sessão em waiting_approval SEM aprovação pendente é órfã e cai', () => {
+  test('sessão em waiting_approval SEM aprovação pendente é órfã e cai', async () => {
     const { session } = semear('waiting_approval', false);
 
-    hub.sessions.reconcileOnStartup();
+    await hub.sessions.reconcileOnStartup();
 
     assert.equal(
       hub.store.sessions.get(session.id)?.state,
@@ -134,19 +188,72 @@ describe('reconciliação na subida do daemon', () => {
     );
   });
 
-  test('sessão já terminada não é tocada', () => {
+  test('sessão já terminada não é tocada', async () => {
     const { session } = semear('completed');
     const antes = hub.store.sessions.get(session.id);
 
-    hub.sessions.reconcileOnStartup();
+    await hub.sessions.reconcileOnStartup();
 
     assert.equal(hub.store.sessions.get(session.id)?.state, 'completed');
     assert.equal(hub.store.sessions.get(session.id)?.endedAt, antes?.endedAt);
   });
 
-  test('rodar duas vezes seguidas não muda mais nada', () => {
-    hub.sessions.reconcileOnStartup();
-    const segunda = hub.sessions.reconcileOnStartup();
+  test('rodar duas vezes seguidas não muda mais nada', async () => {
+    await hub.sessions.reconcileOnStartup();
+    const segunda = await hub.sessions.reconcileOnStartup();
     assert.equal(segunda.encerradas, 0, 'a reconciliação precisa ser idempotente');
+  });
+
+  describe('matar órfão pelo PID (§08 3.7)', () => {
+    test('sessão running com PID de processo vivo do agente esperado: mata a árvore E marca killed', async () => {
+      const filho = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], {
+        stdio: 'ignore',
+      });
+      assert.ok(filho.pid);
+      // Só prossegue quando o SO já reconhece o processo — evita corrida com
+      // `tasklist` rodando antes do PID existir de verdade.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const { session } = semear('running', false, filho.pid!, 'node-fake');
+
+      const resultado = await hub.sessions.reconcileOnStartup();
+      assert.ok(resultado.encerradas >= 1);
+      assert.equal(hub.store.sessions.get(session.id)?.state, 'killed');
+      assert.equal(hub.store.sessions.get(session.id)?.pid, null);
+
+      await aguardarMorte(filho.pid!);
+    });
+
+    test('sessão running com PID que já não existe: reconciliação não lança erro', async () => {
+      // Um PID improvável de estar em uso agora.
+      const { session } = semear('running', false, 999_999, 'node-fake');
+
+      await assert.doesNotReject(hub.sessions.reconcileOnStartup());
+      assert.equal(hub.store.sessions.get(session.id)?.state, 'killed');
+    });
+
+    test('PID existe mas pertence a outro binário: reconciliação NÃO mata', async () => {
+      // Um processo de verdade, mas registrado sob um agente cujo manifesto
+      // espera um binário diferente do que está de fato rodando naquele PID.
+      const filho = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], {
+        stdio: 'ignore',
+      });
+      assert.ok(filho.pid);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      try {
+        const { session } = semear('running', false, filho.pid!, 'wrong-bin');
+
+        await hub.sessions.reconcileOnStartup();
+
+        assert.equal(hub.store.sessions.get(session.id)?.state, 'killed');
+        assert.ok(
+          pidVivo(filho.pid!),
+          'o processo não deveria ter sido morto: o binário esperado ("totalmente-outro-binario") não bate com o que está de fato vivo no PID ("node")',
+        );
+      } finally {
+        filho.kill();
+      }
+    });
   });
 });

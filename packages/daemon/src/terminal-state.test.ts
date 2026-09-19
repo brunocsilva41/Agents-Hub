@@ -63,6 +63,7 @@ describe('estado terminal de sessão', () => {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       endedAt: state === 'running' ? null : nowIso(),
+      pid: null,
     };
     hub.store.sessions.create(session);
     return session;

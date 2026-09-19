@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import {
   BudgetLedger,
   HubError,
@@ -48,6 +50,7 @@ import {
   type ValidationOutcome,
   type UnitOfWork,
 } from '@agents-hub/core';
+import { killProcessTree } from '@agents-hub/adapters';
 import type {
   AgentRegistry,
   MappedEvent,
@@ -526,6 +529,8 @@ export class SessionManager {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       endedAt: null,
+      // Preenchido em `#launch`, assim que o adapter devolver o handle real.
+      pid: null,
     };
 
     const task: Task = {
@@ -637,7 +642,7 @@ export class SessionManager {
    * Sessões esperando aprovação humana são a exceção e ficam de pé: elas não
    * dependem de processo nenhum, dependem de você.
    */
-  reconcileOnStartup(): { revividas: number; encerradas: number } {
+  async reconcileOnStartup(): Promise<{ revividas: number; encerradas: number }> {
     const pendentes = new Set(
       this.store.approvals.listPending().map((a) => a.sessionId),
     );
@@ -653,9 +658,19 @@ export class SessionManager {
         continue;
       }
 
+      // Best-effort: o registro no banco já vai virar `killed` de qualquer
+      // jeito. Se sobrar um processo de verdade rodando por trás dele (o
+      // daemon anterior morreu sem chance de matar a árvore), esta é a única
+      // oportunidade de limpar antes de o worktree ser recolhido com ele
+      // ainda escrevendo nele.
+      if (sessao.pid !== null) {
+        await this.#matarOrfao(sessao);
+      }
+
       this.store.sessions.update(sessao.id, {
         state: 'killed',
         endedAt: sessao.endedAt ?? nowIso(),
+        pid: null,
       });
 
       // A task fica em `failed` para o pipeline não achar que ainda há trabalho.
@@ -669,6 +684,60 @@ export class SessionManager {
     }
 
     return { revividas, encerradas };
+  }
+
+  /**
+   * Mata o processo órfão de uma sessão morta cujo daemon anterior nunca
+   * teve chance de limpar — best-effort, sempre engolindo erro.
+   *
+   * A parte que não é opcional: um PID é um número que o SO recicla. Um
+   * daemon reiniciado dias depois do crash pode achar no banco o PID de uma
+   * sessão de agente que já morreu há muito, e esse número já foi dado de
+   * novo para QUALQUER outro processo do usuário. Matar sem checar seria
+   * capaz de derrubar algo que não tem nada a ver com o Hub. Por isso
+   * `tasklist /FI "PID eq <pid>"` confirma o nome do binário antes de mandar
+   * `taskkill` — só mata quando o processo vivo naquele PID ainda parece ser
+   * o esperado.
+   */
+  async #matarOrfao(sessao: Session): Promise<void> {
+    const pid = sessao.pid;
+    if (pid === null) return;
+
+    try {
+      const imagem = await imagemDoProcesso(pid);
+      if (imagem === null) return; // já não existe — o caso comum e esperado
+
+      const bin = this.registry.has(sessao.agentId)
+        ? this.registry.get(sessao.agentId).manifest.bin
+        : null;
+
+      if (bin === null || !imagemPareceEsperada(imagem, bin)) {
+        // Ou o agente nem está mais registrado (não dá para saber o que
+        // esperar), ou o PID já foi reciclado para outro binário. Nos dois
+        // casos, não mexer é mais seguro do que adivinhar.
+        return;
+      }
+
+      // Chegamos até aqui só porque `imagemDoProcesso` confirmou que o PID
+      // está vivo e bate com o binário esperado — ou seja, é um órfão de
+      // verdade sobrevivendo a um crash, não o caminho comum de "já tinha
+      // morrido sozinho". Vale o log.
+      await killProcessTree(pid, () => {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // já não existia mais entre o `tasklist` e agora — corrida rara,
+          // sem problema.
+        }
+      });
+      console.error(
+        `reconciliação: processo órfão (pid ${pid}, ${imagem}) da sessão ${sessao.id} (${sessao.agentId}) encerrado`,
+      );
+    } catch {
+      // "processo não existe" é o caminho esperado na imensa maioria das
+      // vezes — a sessão terminou limpo antes do crash do daemon, e o
+      // registro só não tinha sido atualizado ainda.
+    }
   }
 
   /**
@@ -1282,6 +1351,9 @@ export class SessionManager {
       createdAt: nowIso(),
       updatedAt: nowIso(),
       endedAt: null,
+      // Sessão adotada: o processo já existia fora do Hub antes da adoção, e
+      // nenhum adapter foi quem o subiu — não há PID para rastrear aqui.
+      pid: null,
     };
 
     this.store.sessions.create(session);
@@ -1514,6 +1586,13 @@ export class SessionManager {
     const handle = nativeSessionId
       ? await adapter.resume(ctx, nativeSessionId, prompt)
       : await adapter.start(ctx, prompt);
+
+    // PID real da run, quando o adapter souber (processo dedicado por
+    // sessão). `null` para o OpenCode, cujo processo é o servidor
+    // compartilhado, não um filho por sessão — ver comentário em
+    // `RunHandle.pid`. Sem isto, `reconcileOnStartup` não sabe qual processo
+    // matar quando o daemon reinicia com sessões vivas no banco.
+    this.store.sessions.update(session.id, { pid: handle.pid });
 
     this.#runs.set(session.id, {
       handle,
@@ -2152,7 +2231,11 @@ export class SessionManager {
     const session = this.store.sessions.get(sessionId);
     if (!session) return;
 
-    this.store.sessions.update(sessionId, { state, endedAt: nowIso() });
+    // `pid: null` no mesmo update que encerra: um PID sem sessão viva
+    // associada não pode sobreviver no banco depois que a sessão termina
+    // limpo, senão a reconciliação da próxima subida tentaria matar um PID
+    // que o SO já reciclou para outro processo qualquer.
+    this.store.sessions.update(sessionId, { state, endedAt: nowIso(), pid: null });
     this.bus.forgetSession(sessionId);
 
     // Caches por sessão: sem isto, cada sessão encerrada deixava três entradas
@@ -2580,4 +2663,69 @@ export class SessionManager {
   briefOf(sessionId: string): Brief {
     return this.#latestTask(sessionId).brief;
   }
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Nome da imagem do processo vivo num PID, ou `null` se ele não existe mais.
+ *
+ * No Windows usa `tasklist /FI "PID eq <pid>"`: é o jeito de confirmar
+ * IDENTIDADE, não só existência — `process.kill(pid, 0)` (o teste comum de
+ * "está vivo") não diz NADA sobre o que está rodando ali, e é exatamente essa
+ * lacuna que permite matar um PID reciclado pelo SO por engano.
+ */
+async function imagemDoProcesso(pid: number): Promise<string | null> {
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(pid, 0);
+      // POSIX não tem um equivalente de baixo custo ao `tasklist` aqui; a
+      // checagem de nome fica só para o Windows, que é a plataforma suportada
+      // hoje (ver decisão "Linux: informativo até provar" no roadmap).
+      return 'desconhecido';
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const { stdout } = await execFileAsync('tasklist', [
+      '/FI',
+      `PID eq ${pid}`,
+      '/FO',
+      'CSV',
+      '/NH',
+    ]);
+    const linha = stdout.trim().split(/\r?\n/)[0] ?? '';
+    // Sem processo casando, o `tasklist` imprime "INFO: No tasks..." em vez
+    // de CSV — não começa com aspas.
+    if (!linha.startsWith('"')) return null;
+    const primeiroCampo = linha.split('","')[0]?.replace(/^"/, '') ?? '';
+    return primeiroCampo.length > 0 ? primeiroCampo : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A imagem viva bate com o que o manifesto do agente declara?
+ *
+ * Comparação exata (`claude.exe` para `bin: claude`) cobriria só o caso onde
+ * o adapter não precisou de shell. A maioria dos CLIs de agente instalados
+ * via npm no Windows é um shim `.cmd`, e `ProcessAgentAdapter` spawna esses
+ * com `shell: true` — o PID guardado na sessão é do `cmd.exe`/`sh`
+ * intermediário, não do binário final (o `killProcessTree`/`taskkill /T`
+ * já lida com isso andando a árvore; aqui só precisamos aceitar o wrapper
+ * como identidade plausível, não confirmar o processo folha).
+ *
+ * Deliberadamente NÃO aceita `node` como wrapper genérico: isso deixaria
+ * qualquer script Node do usuário — sem nenhuma relação com o Hub — elegível
+ * para ser morto por qualquer agente. O wrapper aceito é só o shell que
+ * `needsShell: true` de fato usa para invocar o shim.
+ */
+function imagemPareceEsperada(imagem: string, bin: string): boolean {
+  const nome = imagem.toLowerCase().replace(/\.exe$/, '');
+  const alvo = bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
+  if (nome === alvo) return true;
+  return ['cmd', 'sh', 'bash'].includes(nome);
 }

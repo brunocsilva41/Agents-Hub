@@ -228,6 +228,9 @@ export class OpenCodeAdapter implements AgentAdapter {
       done,
       events: queue,
       supportsLiveSend: true,
+      // Sempre null: a sessão roda num servidor HTTP compartilhado, não num
+      // processo filho dedicado — ver comentário em `RunHandle.pid`.
+      pid: null,
       abort,
       queue,
       canceled: false,

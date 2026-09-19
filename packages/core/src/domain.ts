@@ -132,6 +132,17 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
+  /**
+   * PID do processo real da run em andamento, quando o adapter souber.
+   *
+   * `null` para sessão sem run viva, para agentes cujo processo não é
+   * exclusivo da sessão (OpenCode: um servidor HTTP compartilhado por N
+   * sessões, não um processo filho por sessão), ou depois que a sessão
+   * termina limpo — um PID sem sessão viva associada não deve sobreviver no
+   * banco, senão a reconciliação na subida seguinte tentaria matar um PID
+   * que o SO já reciclou para outro processo qualquer.
+   */
+  pid: number | null;
 }
 
 export interface TaskAttempt {

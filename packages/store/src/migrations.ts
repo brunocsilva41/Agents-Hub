@@ -142,4 +142,16 @@ INSERT INTO project_folders (id, project_id, path, label, is_primary, created_at
 SELECT 'pfd_' || id, id, path, name, 1, created_at FROM projects;
 `,
   },
+  {
+    version: 3,
+    name: 'pid por sessao',
+    sql: `
+-- A reconciliação na subida do daemon (\`reconcileOnStartup\`) só corrigia o
+-- registro no banco (marcava sessão viva como \`killed\`) sem nunca matar o
+-- processo real, porque não sabia qual PID pertencia a qual sessão. Nulo por
+-- padrão: nem toda sessão tem um processo dedicado (o OpenCode roda num
+-- servidor HTTP compartilhado por N sessões, não um filho por sessão).
+ALTER TABLE sessions ADD COLUMN pid INTEGER;
+`,
+  },
 ];
