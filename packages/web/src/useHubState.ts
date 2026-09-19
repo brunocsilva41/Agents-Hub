@@ -55,6 +55,8 @@ export interface HubState {
   flows: FlowSummary[];
   approvals: ApprovalSummary[];
   eventsOf: (sessionId: string) => EventEnvelope[];
+  /** `true` quando a última tentativa de buscar o histórico desta sessão falhou. */
+  eventsFailedFor: (sessionId: string) => boolean;
   /**
    * Sobe a cada rajada de eventos estruturais. Quem depende de grafo ou
    * orçamento observa este número em vez de refazer tudo a cada evento.
@@ -85,6 +87,7 @@ export function useHubState(): HubState {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [approvals, setApprovals] = useState<ApprovalSummary[]>([]);
   const [events, setEvents] = useState<Record<string, EventEnvelope[]>>({});
+  const [eventsFailed, setEventsFailed] = useState<Record<string, boolean>>({});
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -170,13 +173,21 @@ export function useHubState(): HubState {
     if (!events[sessionId] && !requestedRef.current.has(sessionId)) {
       requestedRef.current.add(sessionId);
       hub.events(sessionId).then(({ events: list }) => {
+        setEventsFailed((prev) => (prev[sessionId] ? { ...prev, [sessionId]: false } : prev));
         setEvents((prev) => ({ ...prev, [sessionId]: list }));
       }).catch(() => {
-        // Ignora erro de rede temporário
+        // Falha de rede não pode virar "sessão sem eventos" — a timeline vazia
+        // é indistinguível de "ainda não fez nada" sem este sinal à parte.
+        setEventsFailed((prev) => ({ ...prev, [sessionId]: true }));
       });
     }
     return events[sessionId] ?? [];
   }, [events]);
+
+  const eventsFailedFor = useCallback(
+    (sessionId: string) => eventsFailed[sessionId] === true,
+    [eventsFailed],
+  );
 
   /**
    * Um fluxo por `rootId` DISTINTO, não por `parentId === null`.
@@ -228,11 +239,25 @@ export function useHubState(): HubState {
       flows,
       approvals,
       eventsOf,
+      eventsFailedFor,
       revision,
       refresh,
       error,
     }),
-    [connected, ready, agents, projects, sessions, flows, approvals, eventsOf, revision, refresh, error],
+    [
+      connected,
+      ready,
+      agents,
+      projects,
+      sessions,
+      flows,
+      approvals,
+      eventsOf,
+      eventsFailedFor,
+      revision,
+      refresh,
+      error,
+    ],
   );
 }
 
@@ -302,14 +327,18 @@ export function useBudget(rootId: string | null, revision: number): BudgetSummar
 export function useSessionHistory(sessionId: string | null): {
   history: EventEnvelope[];
   loading: boolean;
+  /** `true` quando a busca do histórico falhou — timeline vazia por erro, não por falta de eventos. */
+  failed: boolean;
 } {
   const [history, setHistory] = useState<EventEnvelope[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
       setHistory([]);
       setLoading(false);
+      setFailed(false);
       return;
     }
 
@@ -318,6 +347,7 @@ export function useSessionHistory(sessionId: string | null): {
     // eventos da sessão velha sob o nome da nova até a resposta chegar.
     setHistory([]);
     setLoading(true);
+    setFailed(false);
 
     hub
       .events(sessionId, { limit: 2000 })
@@ -325,7 +355,12 @@ export function useSessionHistory(sessionId: string | null): {
         if (!cancelled) setHistory(events);
       })
       .catch(() => {
-        if (!cancelled) setHistory([]);
+        // Histórico vazio por falha de rede não é "sessão sem eventos ainda" —
+        // são desfechos distintos, e o componente precisa poder dizer qual é.
+        if (!cancelled) {
+          setHistory([]);
+          setFailed(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -336,7 +371,7 @@ export function useSessionHistory(sessionId: string | null): {
     };
   }, [sessionId]);
 
-  return { history, loading };
+  return { history, loading, failed };
 }
 
 /**
@@ -361,33 +396,45 @@ const MAX_FLOW_HISTORIES = 12;
 export function useFlowHistories(
   sessionIds: readonly string[],
   enabled: boolean,
-): EventEnvelope[][] {
+): { histories: EventEnvelope[][]; failed: boolean } {
   const [histories, setHistories] = useState<EventEnvelope[][]>([]);
+  const [failed, setFailed] = useState(false);
   const key = enabled ? sessionIds.join(',') : '';
 
   useEffect(() => {
     if (key === '') {
       setHistories([]);
+      setFailed(false);
       return;
     }
     let cancelled = false;
     const ids = key.split(',').slice(-MAX_FLOW_HISTORIES);
+    let anyFailed = false;
     Promise.all(
       ids.map((id) =>
         hub
           .events(id, { limit: 2000 })
           .then(({ events }) => events)
-          .catch(() => [] as EventEnvelope[]),
+          .catch(() => {
+            // Uma sessão do fluxo que falhou ao carregar não pode aparecer
+            // como "não fez nada" — sinaliza a falha para o consumidor decidir
+            // como avisar, em vez de fingir uma timeline vazia legítima.
+            anyFailed = true;
+            return [] as EventEnvelope[];
+          }),
       ),
     ).then((loaded) => {
-      if (!cancelled) setHistories(loaded);
+      if (!cancelled) {
+        setHistories(loaded);
+        setFailed(anyFailed);
+      }
     });
     return () => {
       cancelled = true;
     };
   }, [key]);
 
-  return histories;
+  return { histories, failed };
 }
 
 /** Junta histórico e stream ao vivo sem duplicar o que aparece nos dois. */

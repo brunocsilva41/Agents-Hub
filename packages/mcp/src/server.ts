@@ -1,8 +1,25 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { parse as parseYamlText } from 'yaml';
 import { z } from 'zod';
 import { HubApiError, type BriefInput, type HubClient } from '@agents-hub/client';
+import {
+  parseWorkflow,
+  runWorkflow,
+  validateWorkflow,
+  type UpstreamResult,
+  type WorkflowRunDeps,
+} from '@agents-hub/core';
 import type { CallerIdentity } from './caller.js';
-import { formatBudget, formatEvents, formatGraph, formatTaskStatus, formatTokens } from './format.js';
+import {
+  formatBudget,
+  formatEvents,
+  formatGraph,
+  formatTaskStatus,
+  formatTokens,
+  formatWorkflowResult,
+} from './format.js';
 
 /** Quebra de linha literal, para nao brigar com escapes ao montar texto. */
 const NEWLINE = String.fromCharCode(10);
@@ -343,6 +360,30 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
   );
 
+  // ------------------------------------------------------------------ pausar
+  server.registerTool(
+    'hub_session_pause',
+    {
+      title: 'Pausar uma sessão',
+      description:
+        'Pausa uma sessão sem encerrá-la — diferente de hub_agent_cancel, que mata a sessão ' +
+        'e tudo que ela delegou. Use quando quiser segurar o trabalho por um tempo sem perder ' +
+        'o estado, para retomar depois com hub_session_send.',
+      inputSchema: {
+        session_id: z.string().describe('a sessão a pausar'),
+      },
+      annotations: { destructiveHint: false },
+    },
+    async ({ session_id }): Promise<ToolResult> => {
+      try {
+        await client.pause(session_id);
+        return ok(`sessão ${session_id} pausada`);
+      } catch (err) {
+        return fail(describe(err));
+      }
+    },
+  );
+
   // ------------------------------------------------------------------ falar
   server.registerTool(
     'hub_session_send',
@@ -521,7 +562,179 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
   );
 
+  // --------------------------------------------------------------- workflow
+  server.registerTool(
+    'hub_workflow_run',
+    {
+      title: 'Rodar um workflow declarativo (DAG de agentes)',
+      description:
+        'Valida e executa um workflow YAML — o mesmo formato de `hub workflow validate/run` ' +
+        'da CLI — despachando cada passo como uma sessão e respeitando `dependsOn`. BLOQUEIA ' +
+        'até o workflow inteiro chegar a um desfecho (pode levar minutos: cada passo é uma ' +
+        'tarefa completa de agente). Prefira isto a orquestrar manualmente vários ' +
+        'hub_agent_call quando os passos têm dependências entre si — o motor cuida de esperar ' +
+        'cada lote terminar antes do próximo e de repartir o orçamento.',
+      inputSchema: {
+        yaml: z.string().optional().describe('conteúdo YAML do workflow, inline'),
+        path: z
+          .string()
+          .optional()
+          .describe('caminho de um arquivo .yaml no disco — alternativa a `yaml`'),
+        project: z
+          .string()
+          .optional()
+          .describe('diretório do projeto onde as sessões rodam; padrão: diretório atual'),
+        budget_usd: z
+          .number()
+          .positive()
+          .optional()
+          .describe('teto em dólares do workflow inteiro, repartido entre os passos'),
+      },
+      annotations: { destructiveHint: false, openWorldHint: true },
+    },
+    async ({ yaml, path: filePath, project, budget_usd }): Promise<ToolResult> => {
+      if (!yaml && !filePath) {
+        return fail('informe `yaml` (conteúdo do workflow) ou `path` (arquivo .yaml no disco)');
+      }
+
+      let parsed: ReturnType<typeof parseWorkflow>;
+      let executionOrder: string[][];
+      try {
+        const raw = parseYamlText(
+          yaml ?? readFileSync(path.resolve(filePath as string), 'utf8'),
+        ) as unknown;
+        parsed = parseWorkflow(raw);
+        const validation = validateWorkflow(parsed);
+        if (!validation.valid) {
+          return fail(`workflow inválido:\n${validation.errors.map((e) => `- ${e}`).join('\n')}`);
+        }
+        executionOrder = validation.executionOrder;
+      } catch (err) {
+        return fail(`não foi possível ler/validar o workflow: ${(err as Error).message}`);
+      }
+
+      const workflow = parsed;
+      try {
+        const { project: proj } = await client.addProject(project ?? process.cwd());
+
+        const deps: WorkflowRunDeps = {
+          start: async ({ step, upstream, capUsd }) => {
+            const res = await client.startSession({
+              projectId: proj.id,
+              brief: {
+                agent: step.agent,
+                objective: step.objective,
+                acceptanceCriteria: step.acceptanceCriteria,
+                constraints: step.constraints,
+                upstream,
+                budget: {
+                  ...step.budget,
+                  ...(capUsd !== null ? { usd: Math.max(0.01, Math.round(capUsd * 100) / 100) } : {}),
+                },
+                isolation: step.isolation,
+                supervision: step.supervision ?? 'semi',
+              },
+              title: `[${workflow.name}] Step: ${step.id}`,
+            });
+            return { sessionId: res.session.id, taskId: res.task.id };
+          },
+          settle: ({ sessionId }) => settlarPassoDoWorkflow(client, sessionId),
+        };
+
+        const resultado = await runWorkflow(
+          workflow,
+          executionOrder,
+          deps,
+          budget_usd === undefined ? {} : { budgetUsd: budget_usd },
+        );
+
+        return ok(formatWorkflowResult(workflow, resultado));
+      } catch (err) {
+        return fail(describe(err));
+      }
+    },
+  );
+
   return server;
+}
+
+/**
+ * Espera um passo do workflow chegar a estado terminal — o mesmo `aguardarPasso`
+ * de `hub workflow run` na CLI, reimplementado aqui porque o laço de espera é
+ * específico de cada superfície (a CLI imprime progresso, o MCP só formata o
+ * relatório final).
+ */
+const ESPERA_MAX_MS_WORKFLOW = 45 * 60 * 1000;
+const INTERVALO_MS_WORKFLOW = 2000;
+
+async function settlarPassoDoWorkflow(
+  client: HubClient,
+  sessionId: string,
+): Promise<{
+  state: 'completed' | 'failed' | 'blocked' | 'timeout';
+  summary: string | null;
+  detail: string | null;
+  usd: number;
+}> {
+  const limite = Date.now() + ESPERA_MAX_MS_WORKFLOW;
+
+  const gastoDa = async (): Promise<number> => {
+    const { budget } = await client
+      .budget(sessionId)
+      .catch(() => ({ budget: { consumed: { usd: 0 } } }) as never);
+    return budget.consumed.usd;
+  };
+
+  while (Date.now() < limite) {
+    const { tasks } = await client.tasks(sessionId).catch(() => ({ tasks: [] }));
+    const task = tasks[0];
+
+    if (!task) {
+      return { state: 'failed', summary: null, detail: 'a sessão não tem tarefa', usd: 0 };
+    }
+
+    if (task.state === 'input_required') {
+      const { approvals } = await client.approvals(sessionId).catch(() => ({ approvals: [] }));
+      const pendente = approvals[0];
+      return {
+        state: 'blocked',
+        summary: null,
+        detail: pendente
+          ? `esperando aprovação: ${pendente.action} — peça ao usuário "hub approve ${pendente.id}"`
+          : 'esperando decisão humana',
+        usd: await gastoDa(),
+      };
+    }
+
+    if (!TERMINAL_STATES.has(task.state)) {
+      await sleep(INTERVALO_MS_WORKFLOW);
+      continue;
+    }
+
+    const usd = await gastoDa();
+    if (task.state === 'completed') {
+      return { state: 'completed', summary: task.result?.summary ?? null, detail: null, usd };
+    }
+
+    const ultima = task.attempts[task.attempts.length - 1];
+    const validacao = task.result?.validation;
+    const reprovada = validacao?.checks.find((c) => !c.passed);
+    return {
+      state: 'failed',
+      summary: task.result?.summary ?? null,
+      detail:
+        ultima?.error ??
+        (reprovada ? `validação reprovou: ${reprovada.name}` : `tarefa terminou em ${task.state}`),
+      usd,
+    };
+  }
+
+  return {
+    state: 'timeout',
+    summary: null,
+    detail: `passou de ${Math.round(ESPERA_MAX_MS_WORKFLOW / 60000)} min — a sessão ${sessionId} continua viva no daemon`,
+    usd: await gastoDa(),
+  };
 }
 
 /**

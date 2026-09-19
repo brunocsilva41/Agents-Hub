@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@agents-hub/core';
+import type { EventEnvelope, Workflow, WorkflowRunResult } from '@agents-hub/core';
 import type { BudgetSummary, GraphSummary, TaskStatus } from '@agents-hub/client';
 
 /**
@@ -125,6 +125,37 @@ export function formatGraph(nodes: GraphSummary[], depth = 0): string {
       ...(node.children.length > 0 ? [formatGraph(node.children, depth + 1)] : []),
     ])
     .join('\n');
+}
+
+/** Relatório de `hub_workflow_run` — mesma informação que `hub workflow run` imprime. */
+export function formatWorkflowResult(workflow: Workflow, resultado: WorkflowRunResult): string {
+  const ok = resultado.steps.filter((s) => s.state === 'completed').length;
+  const lines = [
+    `workflow "${workflow.name}": ${ok}/${resultado.steps.length} passos concluídos · US$ ${resultado.totalUsd.toFixed(4)}`,
+  ];
+
+  for (const s of resultado.steps) {
+    const marca = s.state === 'completed' ? 'ok' : s.state === 'blocked' ? 'bloqueado' : s.state;
+    lines.push(
+      `- ${s.stepId} (${s.agent}): ${marca}` +
+        (s.detail ? ` — ${s.detail}` : '') +
+        (s.sessionId ? ` [sessão ${s.sessionId}]` : ''),
+    );
+  }
+
+  const vivos = resultado.steps.filter((s) => s.state === 'blocked' || s.state === 'timeout');
+  if (vivos.length > 0) {
+    lines.push(
+      '',
+      `sessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`,
+    );
+  }
+
+  if (!resultado.ok) {
+    lines.push('', 'ATENÇÃO: nem todos os passos concluíram — veja os detalhes acima.');
+  }
+
+  return lines.join('\n');
 }
 
 export function formatTokens(n: number): string {

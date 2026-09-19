@@ -21,6 +21,7 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
   const [handoffReason, setHandoffReason] = useState('');
   const [memoryExpanded, setMemoryExpanded] = useState(true);
   const [projectGuidelines, setProjectGuidelines] = useState<string | null>(null);
+  const [projectContextFailed, setProjectContextFailed] = useState(false);
 
   /**
    * Memória do projeto, vinda do daemon.
@@ -34,10 +35,12 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
     const projectId = session?.projectId;
     if (!projectId) {
       setProjectGuidelines(null);
+      setProjectContextFailed(false);
       return;
     }
 
     let cancelado = false;
+    setProjectContextFailed(false);
     hub
       .projectContext(projectId)
       .then(({ context }) => {
@@ -45,8 +48,12 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
       })
       .catch(() => {
         // Falha de leitura não pode virar "este projeto não tem memória" — são
-        // coisas diferentes, e confundi-las esconde justamente o problema.
-        if (!cancelado) setProjectGuidelines(null);
+        // coisas diferentes: aqui marcamos a falha à parte para a UI avisar,
+        // em vez de fingir silenciosamente que o projeto não tem memória.
+        if (!cancelado) {
+          setProjectGuidelines(null);
+          setProjectContextFailed(true);
+        }
       });
 
     // Trocar de sessão antes da resposta chegar mostraria a memória do projeto
@@ -185,10 +192,21 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
 
               {memoryExpanded && (
                 <div className="memory-body">
-                  {projectGuidelines && (
+                  {projectContextFailed && (
+                    <div className="notice warn" role="alert">
+                      ⚠️ Não foi possível buscar a memória do projeto — tente de novo mais tarde.
+                    </div>
+                  )}
+                  {!projectContextFailed && projectGuidelines && (
                     <div className="memory-card">
                       <div className="memory-tag">📁 Regras do Projeto</div>
                       <div className="memory-text">{projectGuidelines}</div>
+                    </div>
+                  )}
+                  {!projectContextFailed && !projectGuidelines && (
+                    <div className="memory-card memory-empty">
+                      <div className="memory-tag">📁 Regras do Projeto</div>
+                      <div className="memory-text muted">este projeto ainda não tem memória configurada.</div>
                     </div>
                   )}
 
@@ -221,13 +239,26 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                   onClick={() =>
                     act('interrupt', () => hub.interrupt(session.id), 'Turno interrompido.')
                   }
-                  title="Interrompe o turno sem matar o processo"
+                  title="Interrompe o turno atual sem matar o processo nem a sessão"
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="6" y="4" width="4" height="16"></rect>
                     <rect x="14" y="4" width="4" height="16"></rect>
                   </svg>
-                  <span>{action.busy === 'interrupt' ? '…' : 'Pausar'}</span>
+                  <span>{action.busy === 'interrupt' ? '…' : 'Interromper'}</span>
+                </button>
+                <button
+                  className="btn-ctrl btn-pause"
+                  disabled={!active || action.busy !== null}
+                  onClick={() => act('pause', () => hub.pause(session.id), 'Sessão pausada.')}
+                  title="Pausa a sessão sem encerrá-la — retome depois enviando uma mensagem"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="9" y1="9" x2="9" y2="15"></line>
+                    <line x1="15" y1="9" x2="15" y2="15"></line>
+                  </svg>
+                  <span>{action.busy === 'pause' ? '…' : 'Pausar'}</span>
                 </button>
                 <button
                   className="btn-ctrl btn-handoff"
