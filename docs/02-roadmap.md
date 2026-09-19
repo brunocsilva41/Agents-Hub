@@ -658,8 +658,51 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       `error`, não só `{}`) e `packages/daemon/src/worktree.test.ts` (`release()`
       forçado a falhar com worktree sujo devolve `removed: false` + motivo real do
       git; falha de `symlink` injetada loga e aparece em `dependencyWarnings`)
-- [ ] **Teto no `AsyncQueue`**, que hoje cresce sem limite contra um consumidor
-      que faz escrita SQLite síncrona por evento
+- [x] **Teto no `AsyncQueue`** — fechado em 2026-09-19. `AsyncQueue`
+      (`packages/adapters/src/async-queue.ts`) ganhou `highWaterMark`/
+      `lowWaterMark` configuráveis, `onPressureChange(aboveHigh)` disparado ao
+      cruzar cada teto, e `whenBelow(threshold)` para quem não tem
+      `.pause()`/`.resume()` de stream de SO e precisa se auto-segurar com
+      `await`. Os dois produtores reais ganharam backpressure:
+      - `ProcessAgentAdapter#spawnRun` (`process-adapter.ts`) pausa/retoma
+        `child.stdout` no cruzar dos tetos, e chama `handle.touch()` não só
+        nas bordas da pausa mas EM INTERVALOS durante ela
+        (`backpressureKeepAlive`, a cada ~⅓ de `heartbeatSeconds`) — sem
+        isto, drenar de HIGH até LOW num consumidor lento (o cenário exato em
+        que a pausa existe) levaria mais tempo que o heartbeat e derrubaria a
+        run como "travada" no meio de uma pausa saudável;
+      - `OpenCodeAdapter#consume` (`opencode/adapter.ts`, único arquivo
+        tocado desta parte que outro agente mexia em paralelo — mudança
+        restrita ao loop de consumo SSE, não a `#bootServer`/env/sessão) usa
+        `await waitBelowKeepingHeartbeat(...)` antes do próximo chunk, com o
+        mesmo cuidado de `touch()` periódico durante a espera.
+      - **Teto duro** (`QUEUE_HARD_CAP = 5000`, exportado de
+        `process-adapter.ts`) como rede de segurança independente do
+        `pause()`: checado a cada push individual (não por chunk), então a
+        fila matematicamente nunca ultrapassa o teto — o pior caso é parar
+        exatamente nele. Ao disparar, a run é encerrada com
+        `reason: 'error'` e mensagem "fila de eventos saturada — consumidor
+        não acompanhou o agente", nos dois adapters.
+      **Achado real rodando contra o processo de verdade nesta máquina
+      Windows** (não só teste com binário falso — o plano pediu
+      explicitamente para não assumir que `pause()`/`resume()` funciona sem
+      medir): um produtor que despeja tudo de uma vez, num `write()` só, é
+      rápido demais para o `pause()` reagir a tempo — os `data` chunks já
+      estavam enfileirados no event loop antes da pausa surtir efeito, e quem
+      segura a fila nesse caso é o TETO DURO, não o `pause()` sozinho. Um
+      produtor que escreve em lotes pequenos com `setTimeout` real entre eles
+      (mais perto de como um CLI de agente fala de verdade) fica bem
+      protegido pelo `pause()`/`resume()` sozinho, sem chegar perto do teto.
+      Ou seja: os dois mecanismos são necessários, não redundantes — achado
+      que só apareceu rodando contra I/O real, teoria sozinha não bastava.
+      4 testes de carga contra o `ProcessAgentAdapter` real (spawn de `node`,
+      sem mock) em
+      `packages/adapters/src/process-adapter.backpressure.test.ts`:
+      despejo único estourando o teto duro; escrita em lotes nunca chegando
+      perto dele; consumidor que nunca lê a fila (teto duro é quem encerra a
+      run); e consumidor com `heartbeatSeconds` bem menor que o tempo real de
+      dreno, confirmando que a pausa por backpressure NÃO dispara falso
+      "travada". Os quatro passam de verdade nesta máquina, não só em CI.
 
 ### Decidido aqui
 
