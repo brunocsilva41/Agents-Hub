@@ -570,6 +570,19 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       `reconcile.test.ts` (processo vivo do binário esperado é morto e a sessão
       cai; PID inexistente não lança erro; PID vivo de binário diferente do
       esperado NÃO é morto)
+      - **Reforço (auditoria):** a checagem por nome sozinha não fechava o
+        caso de reciclagem com o MESMO nome de binário (outro `node.exe`/shim
+        `.cmd` do usuário — `imagemPareceEsperada` aceita `cmd`/`sh`/`bash`
+        como wrapper plausível para qualquer `bin` alvo). Adicionada uma
+        segunda checagem, só no Windows: `horarioDeCriacaoDoProcesso` lê o
+        `StartTime` do processo vivo via PowerShell (`Get-Process -Id <pid>`)
+        e `pidPareceReciclado` rejeita o kill se esse horário for mais novo
+        que o último `updatedAt` da sessão no banco (com folga de 5s para
+        diferença de relógio) — um órfão de verdade só pode ter nascido
+        antes do daemon anterior morrer. POSIX continua sem cobertura de
+        kill nesta reconciliação (limitação já assumida, não resolvida
+        agora). Testado em `reconcile.test.ts` (processo nascido depois do
+        último registro da sessão NÃO é morto).
 - [x] **Keep-alive e `id:` no SSE de `/api/tasks/*`**, try/catch no keep-alive do
       `/events`, e teto de conexões com backpressure. As duas rotas
       (`/events` e `/api/tasks/:id/events`) divergiam na origem: só `/events`

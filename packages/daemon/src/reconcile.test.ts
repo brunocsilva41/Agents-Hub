@@ -89,6 +89,7 @@ describe('reconciliação na subida do daemon', () => {
     comAprovacaoPendente = false,
     pid: number | null = null,
     agentId = 'fantasma',
+    updatedAtOverride?: string,
   ): {
     session: Session;
     task: Task;
@@ -108,8 +109,8 @@ describe('reconciliação na subida do daemon', () => {
       isolation: 'none',
       workdir: raiz,
       title: `sessão em ${state}`,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
+      createdAt: updatedAtOverride ?? nowIso(),
+      updatedAt: updatedAtOverride ?? nowIso(),
       endedAt: null,
       pid,
     };
@@ -255,5 +256,47 @@ describe('reconciliação na subida do daemon', () => {
         filho.kill();
       }
     });
+
+    // Mitigação de PID reciclado (segunda checagem, além do nome de imagem):
+    // só faz sentido no Windows, onde `horarioDeCriacaoDoProcesso` de fato
+    // consulta o SO — em POSIX ela sempre devolve `null` e a checagem vira
+    // no-op (limitação já documentada e assumida).
+    const testeWin32 = process.platform === 'win32' ? test : test.skip;
+
+    testeWin32(
+      'PID vivo mas processo nasceu DEPOIS do último registro da sessão: reconciliação NÃO mata (provável PID reciclado)',
+      async () => {
+        // Sessão gravada como se tivesse sido atualizada pela última vez há uma
+        // hora — simula um daemon que crashou há tempo. Um processo real
+        // spawnado agora (bem depois desse "último registro") representa o SO
+        // tendo devolvido o PID órfão pra outro programa qualquer com o mesmo
+        // nome de binário.
+        const umaHoraAtras = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+        const filho = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], {
+          stdio: 'ignore',
+        });
+        assert.ok(filho.pid);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        try {
+          const { session } = semear('running', false, filho.pid!, 'node-fake', umaHoraAtras);
+
+          await hub.sessions.reconcileOnStartup();
+
+          assert.equal(
+            hub.store.sessions.get(session.id)?.state,
+            'killed',
+            'o registro no banco vira killed de qualquer jeito — só o kill do processo é que é abortado',
+          );
+          assert.ok(
+            pidVivo(filho.pid!),
+            'o processo não deveria ter sido morto: ele nasceu bem depois do último registro da sessão, sinal de PID reciclado pelo SO',
+          );
+        } finally {
+          filho.kill();
+        }
+      },
+    );
   });
 });
