@@ -52,7 +52,8 @@ describe('contexto do projeto', () => {
       ].join('\n'),
     );
 
-    const ctx = loadProjectContext(raiz);
+    const { ctx, error } = loadProjectContext(raiz);
+    assert.equal(error, null);
     assert.match(String(ctx.memory), /Nunca comite/);
     assert.equal(ctx.prompts?.['codex'], 'Mudanças pequenas e testáveis.');
 
@@ -68,19 +69,23 @@ describe('contexto do projeto', () => {
 
   test('valor que não é string é ignorado em vez de virar "[object Object]"', () => {
     escrever(['prompts:', '  codex:', '    algo: 1', ''].join('\n'));
-    const ctx = loadProjectContext(raiz);
+    const { ctx } = loadProjectContext(raiz);
     assert.equal(ctx.prompts, undefined);
   });
 
-  test('YAML quebrado não derruba nada: cai no vazio', () => {
+  test('YAML quebrado não derruba nada: cai no vazio, mas o erro é visível', () => {
     escrever('memory: [isto: nao: fecha');
-    assert.deepEqual(loadProjectContext(raiz), {});
+    const { ctx, error } = loadProjectContext(raiz);
+    assert.deepEqual(ctx, {});
+    assert.match(String(error), /YAML inválido/);
   });
 
-  test('projeto sem arquivo devolve vazio', () => {
+  test('projeto sem arquivo devolve vazio, sem erro', () => {
     const vazio = mkdtempSync(path.join(os.tmpdir(), 'hub-ctx-vazio-'));
     try {
-      assert.deepEqual(loadProjectContext(vazio), {});
+      const { ctx, error } = loadProjectContext(vazio);
+      assert.deepEqual(ctx, {});
+      assert.equal(error, null);
     } finally {
       rmSync(vazio, { recursive: true, force: true });
     }

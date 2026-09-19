@@ -453,11 +453,37 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       dispara na transição false→true da pressão de 80% (`SessionManager#checkBudgetWarning`),
       rearma em `raiseLimits()` e no fim do fluxo raiz. Painel mostra a projeção
       (`SidePanel.tsx`) e reage ao vivo (`useHubState.ts`)
-- [ ] **Limpar os prompts em `tmpdir`** (um arquivo por spawn, para sempre) e pôr
-      `maxBuffer` nos `execFileAsync` de `worktree.ts`
-- [ ] **Sinalizar o que hoje é engolido em silêncio**: YAML de projeto quebrado
+- [x] **Limpar os prompts em `tmpdir`** (um arquivo por spawn, para sempre) e pôr
+      `maxBuffer` nos `execFileAsync` de `worktree.ts`. `writePromptFile`
+      (`packages/adapters/src/process-adapter.ts`) grava um arquivo por spawn com
+      timestamp único, nunca reaproveitado, e nada apagava. Agora o caminho fica no
+      `InternalHandle` e `settle()` chama `unlink` antes de resolver `handle.done`
+      (encadeado, não fire-and-forget — sem isso o teste não teria como observar o
+      arquivo já removido de forma determinística). `maxBuffer: 10 * 1024 * 1024`
+      em todo `execFileAsync('git', ...)` de `worktree.ts` (`isGitRepo`, `create`,
+      `release`, `listStale`, `prune`, `currentRef`) — `listStale` era o que mais
+      importava, por crescer com o número de worktrees acumulados. Testado em
+      `packages/adapters/src/process-adapter.test.ts` (arquivo some depois que
+      `handle.done` resolve)
+- [x] **Sinalizar o que hoje é engolido em silêncio**: YAML de projeto quebrado
       caindo na política global, `git worktree remove` que falhou virando "kept"
-      implícito, junction de `node_modules` não criado
+      implícito, junction de `node_modules` não criado. `loadProjectOverrides` e
+      `loadProjectContext` (`packages/daemon/src/project-config.ts`) agora devolvem
+      `{ overrides/ctx, error }`: sempre `console.error`, e o `SessionManager`
+      (`#avisarConfigDoProjetoQuebrada`) anexa um evento `log` na sessão recém-criada
+      quando o YAML do projeto está quebrado. `release()` em `worktree.ts` devolve
+      `{ removed, reason? }` com a mensagem real do `git worktree remove`, e
+      `WorktreeReaper.sweep()` (`reaper.ts`) expõe `SweepResult` como
+      `{ examined, removed, retained, failed: Array<{ path, reason }> }` — `failed`
+      distingue "tentei remover e falhou de verdade" de "ainda dentro da janela de
+      retenção", logando cada falha. A junção de dependências
+      (`#ligarDependencias` em `worktree.ts`) loga a falha real (`console.error`) e
+      devolve `dependencyWarnings`, que o `SessionManager`
+      (`#avisarDependenciasNaoLigadas`) também anexa como evento `log` na sessão.
+      Testado em `packages/daemon/src/project-config.test.ts` (YAML quebrado expõe
+      `error`, não só `{}`) e `packages/daemon/src/worktree.test.ts` (`release()`
+      forçado a falhar com worktree sujo devolve `removed: false` + motivo real do
+      git; falha de `symlink` injetada loga e aparece em `dependencyWarnings`)
 - [ ] **Teto no `AsyncQueue`**, que hoje cresce sem limite contra um consumidor
       que faz escrita SQLite síncrona por evento
 

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -25,6 +25,8 @@ interface InternalHandle extends RunHandle {
   canceled: boolean;
   clearTimers: () => void;
   touch: () => void;
+  /** Caminho do `{{promptFile}}` desta run, se o manifesto usa esse modo — apagado em `settle`. */
+  promptFilePath: string | null;
 }
 
 /**
@@ -237,10 +239,26 @@ export class ProcessAgentAdapter implements AgentAdapter {
         handle.clearTimers();
         queue.close();
         this.#handles.delete(handle.id);
-        resolveDone(outcome);
+        // O prompt só serve enquanto o processo roda; cada spawn grava o seu
+        // com timestamp próprio (nunca reaproveitado), então sem isto o
+        // diretório de tmpdir cresce um arquivo por run, para sempre.
+        //
+        // `resolveDone` espera a tentativa de remoção terminar (mesmo que
+        // falhe) em vez de disparar e esquecer: sem isso, quem aguarda
+        // `handle.done` poderia seguir em frente antes de o unlink acontecer
+        // de verdade — inofensivo em produção, mas torna o comportamento
+        // difícil de testar e de raciocinar sobre.
+        const limpeza = handle.promptFilePath
+          ? unlink(handle.promptFilePath).catch(() => {
+              // Já pode ter sido removido, ou o disco pode ter sumido no
+              // desligamento — nenhum dos dois motivo pra derrubar a run.
+            })
+          : Promise.resolve();
+        void limpeza.then(() => resolveDone(outcome));
       },
       clearTimers: () => {},
       touch: () => {},
+      promptFilePath: wantsPromptFile ? promptFile : null,
     };
 
     // --- Guardas de tempo (ADR 03.2) -----------------------------------------
