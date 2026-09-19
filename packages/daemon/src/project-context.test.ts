@@ -152,4 +152,28 @@ describe('contexto do projeto', () => {
     escrever('policy: [nao: fecha');
     assert.throws(() => saveProjectContext(raiz, { memory: 'x' }), /não é YAML válido/);
   });
+
+  /**
+   * Regressão: projeto SEM `.agents-hub/config.yaml` ainda (o caso comum de
+   * `hub project env` — ou a Web UI — na primeira configuração de um
+   * projeto novo). `parseDocument('')` produz `contents: null`, e
+   * `Document#delete` (ao contrário de `Document#set`) lança "Expected a
+   * YAML collection as document contents" nesse estado. Como
+   * `saveProjectContext` sempre chama `.delete('memory')`/`.delete('prompts')`
+   * quando esses campos vêm vazios — o caminho normal de quem só quer
+   * configurar `env` —, a PRIMEIRA gravação de qualquer projeto novo
+   * quebrava com esse erro, sem nunca chegar a escrever o arquivo.
+   */
+  test('primeira gravação num projeto sem config.yaml ainda não lança', () => {
+    const raizNova = mkdtempSync(path.join(os.tmpdir(), 'hub-ctx-novo-'));
+    try {
+      assert.doesNotThrow(() =>
+        saveProjectContext(raizNova, { env: { opencode: { OPENAI_BASE_URL: 'http://x' } } }),
+      );
+      const { ctx } = loadProjectContext(raizNova);
+      assert.deepEqual(ctx.env, { opencode: { OPENAI_BASE_URL: 'http://x' } });
+    } finally {
+      rmSync(raizNova, { recursive: true, force: true });
+    }
+  });
 });

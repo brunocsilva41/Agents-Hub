@@ -433,6 +433,63 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
       lançamento de modelo novo, ou por reclamação de custo destoante) e regra
       de dono na ausência de CODEOWNERS, documentados em
       [`docs/10-manutencao-de-precos.md`](10-manutencao-de-precos.md)
+- [~] **Configurar ambiente (modelo/provedor/endpoint) ponta a ponta, por
+      agente** — auditoria de 2026-09-19 achou o controle do OpenCode
+      **fachada** (salvava, mas nunca chegava ao processo real) e a Web UI
+      cega para 12 dos 14 prefixos de provedor que `agent-env.ts` já permite.
+      Fechado parcialmente:
+      - 🕳️→[~] **`OpenCodeAdapter` não lia `ctx.env`** (achado crítico): nenhum
+        método do adapter (`start`/`resume`/`#bootServer`/`#prompt`) repassava
+        ambiente ao `opencode serve` real — configurar `OPENAI_BASE_URL` para
+        este agente na UI "salvava com sucesso" e não tinha efeito nenhum,
+        sem aviso em lugar nenhum. Corrigido: `#bootServer` agora sobe o
+        processo com `{ ...process.env, ...ctx.env }`
+        (`packages/adapters/src/opencode/adapter.ts`). Continua `[~]`, não
+        `[x]`, porque o servidor é **um só, compartilhado por todas as
+        sessões** — só a PRIMEIRA sessão a subir o servidor consegue de fato
+        influenciar o ambiente; sessões seguintes com `env` diferente não têm
+        efeito sobre um servidor já no ar. Não existe hoje mecanismo do
+        `opencode serve` para configurar isso por REQUISIÇÃO (confirmado em
+        `docs/referencias/opencode-api.md` §5). O adapter agora detecta essa
+        divergência e avisa no log do daemon
+        (`[opencode] servidor já está no ar com outro ambiente...`), em vez de
+        falhar em silêncio; resolver de verdade exigiria um servidor por
+        projeto (custo de boot medido em ~20s no Windows). Documentado em
+        `manifests/opencode.yaml` (`caveats`). Coberto por um teste de
+        integração novo (`adapter.test.ts`, servidor falso que ecoa a
+        variável recebida via `spawn()`) — **não testado contra dois
+        projetos concorrentes com `opencode serve` real** nesta tarefa
+      - [x] **Web UI só oferecia `OPENAI_*`** para qualquer um dos 9 agentes,
+        mesmo para `claude`/`antigravity`, que não leem essas variáveis.
+        `SettingsView.tsx` ganhou um editor de "outras variáveis de
+        ambiente" (chave livre + valor), com a lista de prefixos aceitos
+        exibida como referência e um aviso client-side quando a chave digitada
+        não bate com nenhum prefixo permitido (o daemon já recusava
+        server-side; isto só evita a surpresa de salvar achando que colou).
+        Também avisa quando a variável não é mencionada no manifesto do
+        agente selecionado (best-effort, não bloqueia)
+      - [x] **Nenhum caminho de CLI configurava env/prompt por projeto** — só a
+        Web UI chamava `saveProjectContext`. Adicionados `hub project env
+        [projeto] [--agent <id>] [--set CHAVE=VALOR|--unset CHAVE]` e `hub
+        project prompt [projeto] --agent <id> [--set "texto"|--clear]`
+        (`packages/cli/src/main.ts`), reaproveitando `client.projectContext`/
+        `saveProjectContext` já existentes — nenhuma rota HTTP nova.
+        Smoke-testado manualmente ponta a ponta (registrar projeto, setar e
+        listar env, variável recusada pelo filtro do daemon avisando na hora,
+        setar/ler/limpar prompt, conferindo o `config.yaml` final)
+      - 🐛 **Achado colateral, corrigido**: `saveProjectContext`
+        (`packages/daemon/src/project-config.ts`) quebrava com "Expected a
+        YAML collection as document contents" na PRIMEIRA gravação de
+        qualquer projeto sem `.agents-hub/config.yaml` ainda — o caminho
+        normal de configurar só `env` num projeto novo, pela Web UI ou pela
+        CLI nova. Causa: `Document#delete` da lib `yaml` (ao contrário de
+        `Document#set`) lança nesse estado, e `saveProjectContext` sempre
+        chama `.delete('memory')`/`.delete('prompts')` quando esses campos
+        vêm vazios. Corrigido inicializando `doc.contents` como mapa vazio
+        antes de aplicar as mudanças. Testado em `project-context.test.ts`
+      - [x] **Aviso de arquivo versionado perto do campo de chave de API**,
+        na Web UI (mais específico que a nota genérica que já existia) e na
+        CLI (impresso ao usar `--set` numa chave cujo nome sugere segredo)
 
 ## Fase 5 — Endurecimento operacional
 
