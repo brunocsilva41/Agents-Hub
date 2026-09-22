@@ -267,29 +267,40 @@ export function useHubState(): HubState {
  * O grafo é a única fonte do custo por nó, e custa uma requisição por raiz.
  * Buscar os 27 de uma vez a cada evento estrutural era o gargalo do painel.
  */
-export function useFlowGraph(rootId: string | null, revision: number): GraphSummary[] | null {
+export function useFlowGraph(
+  rootId: string | null,
+  revision: number,
+): { graph: GraphSummary[] | null; failed: boolean } {
   const [graph, setGraph] = useState<GraphSummary[] | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!rootId) {
       setGraph(null);
+      setFailed(false);
       return;
     }
     let cancelled = false;
+    setFailed(false);
     hub
       .graph(rootId)
       .then(({ graph: nodes }) => {
         if (!cancelled) setGraph(nodes);
       })
       .catch(() => {
-        if (!cancelled) setGraph([]);
+        // Falha de rede não pode virar "fluxo sem sessões" — são desfechos
+        // distintos, e quem consome precisa poder avisar qual é o caso.
+        if (!cancelled) {
+          setGraph([]);
+          setFailed(true);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [rootId, revision]);
 
-  return graph;
+  return { graph, failed };
 }
 
 /** Orçamento do fluxo selecionado — o único que o painel da direita mostra. */
@@ -319,134 +330,14 @@ export function useBudget(rootId: string | null, revision: number): BudgetSummar
 }
 
 /**
- * Carrega o histórico de uma sessão ao selecioná-la.
+ * Quantas sessões-irmãs de um fluxo a visão "Fluxo inteiro" busca de uma vez
+ * (via `eventsOf`, que já dedup/cacheia por sessão em `useHubState`).
  *
- * O SSE só traz o que acontece a partir de agora; sem isto, abrir uma sessão
- * antiga mostraria uma timeline vazia como se nada tivesse acontecido.
+ * Sem teto, abrir um fluxo com 30+ sub-sessões disparava uma requisição HTTP
+ * simultânea por sessão-irmã. Exportado para `App.tsx`, que é quem monta a
+ * lista de irmãos da sessão selecionada.
  */
-export function useSessionHistory(sessionId: string | null): {
-  history: EventEnvelope[];
-  loading: boolean;
-  /** `true` quando a busca do histórico falhou — timeline vazia por erro, não por falta de eventos. */
-  failed: boolean;
-} {
-  const [history, setHistory] = useState<EventEnvelope[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!sessionId) {
-      setHistory([]);
-      setLoading(false);
-      setFailed(false);
-      return;
-    }
-
-    let cancelled = false;
-    // Limpar ANTES de buscar: manter o histórico anterior na tela mostrava os
-    // eventos da sessão velha sob o nome da nova até a resposta chegar.
-    setHistory([]);
-    setLoading(true);
-    setFailed(false);
-
-    hub
-      .events(sessionId, { limit: 2000 })
-      .then(({ events }) => {
-        if (!cancelled) setHistory(events);
-      })
-      .catch(() => {
-        // Histórico vazio por falha de rede não é "sessão sem eventos ainda" —
-        // são desfechos distintos, e o componente precisa poder dizer qual é.
-        if (!cancelled) {
-          setHistory([]);
-          setFailed(true);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId]);
-
-  return { history, loading, failed };
-}
-
-/**
- * Quantas sessões de um fluxo têm o histórico buscado na visão "fluxo inteiro".
- *
- * Uma por requisição, porque o daemon só serve eventos por sessão. O teto
- * existe para que um fluxo com dezenas de delegações não vire uma rajada; nesse
- * caso ficam as mais recentes, que é o que se está lendo.
- */
-const MAX_FLOW_HISTORIES = 12;
-
-/**
- * Histórico de TODAS as sessões do fluxo.
- *
- * A visão "fluxo inteiro" prometia juntar os agentes numa timeline só, mas só o
- * histórico da sessão selecionada era carregado — o resto dependia do SSE, que
- * só traz o que acontece a partir de agora. Em qualquer fluxo passado a visão
- * de fluxo mostrava exatamente o mesmo que a visão de sessão.
- *
- * Só busca quando a visão está ligada: quem fica em "esta sessão" não paga nada.
- */
-export function useFlowHistories(
-  sessionIds: readonly string[],
-  enabled: boolean,
-): { histories: EventEnvelope[][]; failed: boolean } {
-  const [histories, setHistories] = useState<EventEnvelope[][]>([]);
-  const [failed, setFailed] = useState(false);
-  const key = enabled ? sessionIds.join(',') : '';
-
-  useEffect(() => {
-    if (key === '') {
-      setHistories([]);
-      setFailed(false);
-      return;
-    }
-    let cancelled = false;
-    const ids = key.split(',').slice(-MAX_FLOW_HISTORIES);
-    let anyFailed = false;
-    Promise.all(
-      ids.map((id) =>
-        hub
-          .events(id, { limit: 2000 })
-          .then(({ events }) => events)
-          .catch(() => {
-            // Uma sessão do fluxo que falhou ao carregar não pode aparecer
-            // como "não fez nada" — sinaliza a falha para o consumidor decidir
-            // como avisar, em vez de fingir uma timeline vazia legítima.
-            anyFailed = true;
-            return [] as EventEnvelope[];
-          }),
-      ),
-    ).then((loaded) => {
-      if (!cancelled) {
-        setHistories(loaded);
-        setFailed(anyFailed);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [key]);
-
-  return { histories, failed };
-}
-
-/** Junta histórico e stream ao vivo sem duplicar o que aparece nos dois. */
-export function mergeEvents(
-  history: EventEnvelope[],
-  live: EventEnvelope[],
-): EventEnvelope[] {
-  const bySeq = new Map<number, EventEnvelope>();
-  for (const event of history) bySeq.set(event.seq, event);
-  for (const event of live) bySeq.set(event.seq, event);
-  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
-}
+export const MAX_FLOW_HISTORIES = 12;
 
 /**
  * Junta as timelines de várias sessões do mesmo fluxo.

@@ -14,7 +14,7 @@ import { AgentSwarmView } from './components/AgentSwarmView';
 import { DagCanvasView } from './components/DagCanvasView';
 import { TelemetryView } from './components/TelemetryView';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
-import { useHubState, useBudget, mergeFlowEvents } from './useHubState';
+import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES } from './useHubState';
 
 type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'settings';
 
@@ -40,16 +40,36 @@ export function App() {
     [selectedId, state.sessions],
   );
 
+  const siblings = useMemo(() => {
+    if (!selected || scope !== 'flow') return [];
+    const rootId = selected.rootId ?? selected.id;
+    const all = state.sessions.filter((s) => s.rootId === rootId || s.id === rootId);
+    // Teto de sessões-irmãs buscadas de uma vez: sem isto, um fluxo com 30+
+    // sub-sessões dispara uma requisição HTTP simultânea por sessão-irmã ao
+    // abrir "Fluxo inteiro". Ficam as mais recentes, que é o que se está lendo.
+    return [...all]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, MAX_FLOW_HISTORIES);
+  }, [selected, scope, state.sessions]);
+
   const events = useMemo(() => {
     if (!selected) return [];
     if (scope === 'session') return state.eventsOf(selected.id);
-    const rootId = selected.rootId ?? selected.id;
-    const siblings = state.sessions.filter((s) => s.rootId === rootId || s.id === rootId);
     // `seq` só é monotônico DENTRO de uma sessão; intercalar streams de agentes
     // diferentes por `seq` embaralha a ordem cronológica real. `mergeFlowEvents`
     // ordena por timestamp entre sessões (ver useHubState.ts).
     return mergeFlowEvents(siblings.map((s) => state.eventsOf(s.id)));
-  }, [selected, scope, state]);
+  }, [selected, scope, siblings, state]);
+
+  // Falha de rede na busca de eventos é indistinguível de "sessão sem
+  // eventos" sem este sinal à parte — sem ele a timeline mostra "nenhum
+  // evento" tanto para uma sessão genuinamente vazia quanto para uma falha de
+  // rede (daemon reiniciando, conexão instável).
+  const eventsFailed = useMemo(() => {
+    if (!selected) return false;
+    if (scope === 'session') return state.eventsFailedFor(selected.id);
+    return siblings.some((s) => state.eventsFailedFor(s.id));
+  }, [selected, scope, siblings, state]);
 
   // Orçamento da sessão ativa: o ledger é chaveado pela RAIZ do fluxo, não pela
   // sessão selecionada — buscar por `selected.id` numa sub-sessão delegada
@@ -414,6 +434,7 @@ export function App() {
                 showVerbose={verbose}
                 showAgent={scope === 'flow'}
                 loading={!state.ready}
+                failed={eventsFailed}
               />
 
               {selected && (

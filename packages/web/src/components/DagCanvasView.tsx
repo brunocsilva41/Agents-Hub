@@ -103,7 +103,12 @@ export function DagCanvasView({
                 {flow.sessions.length > 1 && (
                   <div className="dag-children-lane">
                     <div className="dag-connector-arrow">➔</div>
-                    {flow.sessions.slice(0, flow.sessions.length - 1).map((sub) => (
+                    {/* Filtra por id, não por posição: `flow.sessions` é ordenado por
+                        `updatedAt` decrescente, então a raiz nem sempre cai na última
+                        posição (se ainda estiver ativa). Um `.slice` por posição removia
+                        a sub-sessão mais antiga em vez da raiz, duplicando a raiz na lane
+                        e escondendo a sub-sessão de verdade. */}
+                    {flow.sessions.filter((s) => s.id !== root.id).map((sub) => (
                       <div
                         key={sub.id}
                         className={`dag-node-card ${selectedId === sub.id ? 'node-active' : ''}`}
