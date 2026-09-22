@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { TaskAttempt } from './domain.js';
-import { classifyOutcome, failureContext, nextStep } from './resilience.js';
+import {
+  classifyOutcome,
+  closeLastAttempt,
+  failureContext,
+  nextStep,
+  novaTentativa,
+  sleep,
+} from './resilience.js';
 
 const config = { maxRetries: 2, backoffMs: 1000, fallbackChain: ['claude', 'codex', 'opencode'] };
 
@@ -139,5 +146,66 @@ describe('failureContext', () => {
 
   test('sem falhas, não polui o brief', () => {
     assert.equal(failureContext([attempt(1, 'claude', null)]), '');
+  });
+});
+
+/**
+ * `closeLastAttempt`/`novaTentativa`/`sleep`, extraídas de `session-manager.ts`
+ * (dívida arquitetural do arquivo grande) — sem teste próprio antes disso,
+ * cobertas só indiretamente via integração.
+ */
+describe('closeLastAttempt', () => {
+  test('lista vazia devolve a mesma lista vazia', () => {
+    assert.deepEqual(closeLastAttempt([], 'success', null), []);
+  });
+
+  test('fecha só a ÚLTIMA tentativa, preservando as anteriores intactas', () => {
+    const anterior = attempt(1, 'claude', 'já tinha erro');
+    const atual = novaTentativa(2, 'codex');
+    const fechadas = closeLastAttempt([anterior, atual], 'success', null);
+
+    assert.equal(fechadas[0], anterior, 'tentativa anterior não é tocada');
+    assert.equal(fechadas[1]?.outcome, 'success');
+    assert.equal(fechadas[1]?.error, null);
+    assert.notEqual(fechadas[1]?.endedAt, null);
+  });
+
+  test('mapeia outcome de resiliência para o vocabulário de TaskAttempt', () => {
+    const casos: Array<[Parameters<typeof closeLastAttempt>[1], TaskAttempt['outcome']]> = [
+      ['success', 'success'],
+      ['invalid', 'invalid'],
+      ['canceled', null],
+      ['transient', 'error'],
+      ['permanent', 'error'],
+    ];
+    for (const [outcome, esperado] of casos) {
+      const [fechada] = closeLastAttempt([novaTentativa(1, 'claude')], outcome, null);
+      assert.equal(fechada?.outcome, esperado, `outcome ${outcome} deveria mapear para ${esperado}`);
+    }
+  });
+
+  test('propaga a mensagem de erro', () => {
+    const [fechada] = closeLastAttempt([novaTentativa(1, 'claude')], 'permanent', 'boom');
+    assert.equal(fechada?.error, 'boom');
+  });
+});
+
+describe('novaTentativa', () => {
+  test('abre uma tentativa com o número e agente pedidos, sem desfecho ainda', () => {
+    const t = novaTentativa(3, 'kimi');
+    assert.equal(t.n, 3);
+    assert.equal(t.agentId, 'kimi');
+    assert.equal(t.outcome, null);
+    assert.equal(t.error, null);
+    assert.equal(t.endedAt, null);
+    assert.notEqual(t.startedAt, null);
+  });
+});
+
+describe('sleep', () => {
+  test('resolve depois de aproximadamente o tempo pedido', async () => {
+    const inicio = Date.now();
+    await sleep(20);
+    assert.ok(Date.now() - inicio >= 15, 'não pode resolver antes do tempo pedido');
   });
 });

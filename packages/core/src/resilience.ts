@@ -1,3 +1,4 @@
+import { nowIso } from './ids.js';
 import type { TaskAttempt } from './domain.js';
 
 /**
@@ -171,4 +172,42 @@ export interface ValidationOutcome {
 
 export function validationPassed(outcome: ValidationOutcome | null): boolean {
   return outcome === null || outcome.passed;
+}
+
+/**
+ * Fecha a última tentativa registrada com o desfecho observado.
+ *
+ * Extraído de `session-manager.ts` (dívida arquitetural do arquivo grande) —
+ * mora ao lado de `failureContext`/`ResilienceStep`, mesma lógica de
+ * `TaskAttempt` que o retry/fallback já trata aqui.
+ */
+export function closeLastAttempt(
+  attempts: TaskAttempt[],
+  outcome: OutcomeClass | 'invalid',
+  error: string | null,
+): TaskAttempt[] {
+  if (attempts.length === 0) return attempts;
+
+  const mapped: TaskAttempt['outcome'] =
+    outcome === 'success'
+      ? 'success'
+      : outcome === 'invalid'
+        ? 'invalid'
+        : outcome === 'canceled'
+          ? null
+          : 'error';
+
+  return attempts.map((a, i, arr) =>
+    i === arr.length - 1 ? { ...a, endedAt: nowIso(), outcome: mapped, error } : a,
+  );
+}
+
+/** Abre uma nova tentativa (`n`-ésima) para o agente indicado. */
+export function novaTentativa(n: number, agentId: string): TaskAttempt {
+  return { n, agentId, startedAt: nowIso(), endedAt: null, outcome: null, error: null };
+}
+
+/** Espera `ms` milissegundos — usado no backoff de retry. */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

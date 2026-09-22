@@ -4,7 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
-import { killProcessTree } from './process-tree.js';
+import {
+  killProcessTree,
+  imagemPareceEsperada,
+  pidPareceReciclado,
+  TOLERANCIA_RELOGIO_MS,
+} from './process-tree.js';
 
 /**
  * Prova que `killProcessTree` mata a árvore inteira, não só o processo raiz.
@@ -119,4 +124,62 @@ test('killProcessTree mata o processo raiz e o neto que ignora SIGTERM', async (
 test('killProcessTree resolve sem erro para PID inexistente', async () => {
   // PID improvável de existir; a função deve resolver (best-effort) e não lançar.
   await assert.doesNotReject(killProcessTree(999_999, () => {}));
+});
+
+/**
+ * `imagemPareceEsperada`/`pidPareceReciclado` são a lógica que decide se um
+ * PID reconciliado no restart do daemon ainda é o processo esperado — extraídas
+ * de `session-manager.ts` sem teste próprio até aqui (achado de auditoria).
+ * Puras, sem I/O: testadas direto, sem precisar de processo real.
+ */
+
+test('imagemPareceEsperada: nome bate exatamente (com ou sem .exe)', () => {
+  assert.equal(imagemPareceEsperada('claude.exe', 'claude'), true);
+  assert.equal(imagemPareceEsperada('claude', 'claude.exe'), true);
+  assert.equal(imagemPareceEsperada('CLAUDE.EXE', 'claude'), true, 'comparação é case-insensitive');
+});
+
+test('imagemPareceEsperada: aceita cmd/sh/bash como wrapper plausível de qualquer bin', () => {
+  assert.equal(imagemPareceEsperada('cmd.exe', 'codex'), true);
+  assert.equal(imagemPareceEsperada('sh', 'opencode'), true);
+  assert.equal(imagemPareceEsperada('bash', 'kimi'), true);
+});
+
+test('imagemPareceEsperada: NÃO aceita node como wrapper genérico', () => {
+  // Aceitar `node` deixaria qualquer script Node do usuário elegível para
+  // ser morto por qualquer agente — o wrapper aceito é só o shell que
+  // `needsShell: true` de fato usa.
+  assert.equal(imagemPareceEsperada('node.exe', 'claude'), false);
+});
+
+test('imagemPareceEsperada: imagem sem relação com o bin é recusada', () => {
+  assert.equal(imagemPareceEsperada('chrome.exe', 'claude'), false);
+});
+
+test('pidPareceReciclado: horário desconhecido nunca conta como reciclado', () => {
+  assert.equal(pidPareceReciclado(null, new Date().toISOString()), false);
+});
+
+test('pidPareceReciclado: processo nascido bem depois do último updatedAt é reciclado', () => {
+  const referencia = new Date('2026-01-01T00:00:00.000Z').toISOString();
+  const nascidoDepois = new Date('2026-01-01T00:00:30.000Z');
+  assert.equal(pidPareceReciclado(nascidoDepois, referencia), true);
+});
+
+test('pidPareceReciclado: dentro da tolerância de relógio não conta como reciclado', () => {
+  const referencia = new Date('2026-01-01T00:00:00.000Z').toISOString();
+  const dentroDaFolga = new Date(
+    new Date(referencia).getTime() + TOLERANCIA_RELOGIO_MS - 1,
+  );
+  assert.equal(pidPareceReciclado(dentroDaFolga, referencia), false);
+});
+
+test('pidPareceReciclado: processo nascido antes do último updatedAt não é reciclado (órfão de verdade)', () => {
+  const referencia = new Date('2026-01-01T00:10:00.000Z').toISOString();
+  const nascidoAntes = new Date('2026-01-01T00:00:00.000Z');
+  assert.equal(pidPareceReciclado(nascidoAntes, referencia), false);
+});
+
+test('pidPareceReciclado: referência inválida não lança e não conta como reciclado', () => {
+  assert.equal(pidPareceReciclado(new Date(), 'não é uma data'), false);
 });

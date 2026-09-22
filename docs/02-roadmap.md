@@ -590,6 +590,65 @@ repositório do zero antes de aceitar mudança.
   — é kill de árvore de processo sob concorrência no Windows, teste flaky
   pré-existente, sem relação com as mudanças desta auditoria
 
+### Auditoria de segurança — 2026-09-22
+
+- [x] **`mergePolicyLayer` não travava `risk`/`allowWriteOutsideWorkdir` por
+      projeto (achado CRÍTICO, dois campos, mesma causa raiz)** — fechado no
+      mesmo commit. `packages/core/src/policy.ts` fazia
+      `{ ...base.risk, ...(layer.risk ?? {}) }` incondicionalmente, mesmo sob
+      `clampToBase: true` — diferente de `commands.allow/deny`,
+      `watch.pauseOn/flagOn` e `network.allowDomains`, que já tinham ramo de
+      clamp. Como `loadProjectOverrides` (`project-config.ts`) faz só um cast
+      TypeScript de `parsed['policy']` sem validação Zod em runtime, um
+      `.agents-hub/config.yaml` de um repositório clonado com
+      `policy.risk.irreversible: allow` / `policy.risk.escalate: allow`
+      desativava a aprovação de `git push --force`, `rm -rf`, escrita em
+      `.env`/`.ssh`/`id_rsa` e qualquer ação `escalate` — para QUALQUER
+      agente, inclusive os dois com gate pré-execução (Claude Code, Codex),
+      cuja resposta ao hook deriva da mesma `verdict.decision`. Isso
+      contradizia diretamente a garantia documentada em `SECURITY.md`
+      ("config de projeto hostil só pode apertar, nunca afrouxar") e o
+      comentário no próprio código, uma função abaixo do bug. O segundo
+      campo, `paths.allowWriteOutsideWorkdir`, tinha o mesmo problema: era
+      sempre "layer vence" (`layer.paths?.allowWriteOutsideWorkdir ??
+      base...`), então `policy.paths.allowWriteOutsideWorkdir: true` no
+      config do projeto ligava escrita fora do worktree mesmo com a política
+      global desligada — uma escrita que seria classificada `escalate`
+      passava a `write` comum (risco padrão `allow`), sem aprovação e sem
+      aparecer na vigilância. Corrigido: `risk` sob clamp agora usa
+      `narrowestDecision` (já existente, mesma regra da herança pai→filho na
+      delegação) campo a campo, nunca deixando a camada de projeto afrouxar
+      uma decisão da base; `allowWriteOutsideWorkdir` sob clamp usa AND
+      lógico (`base.paths.allowWriteOutsideWorkdir && (layer... ?? base...)`),
+      espelhando o merge pai→filho já correto (`parent.paths.allow... &&
+      child.paths.allow...`). 4 testes de regressão novos em
+      `project-config.test.ts`, **confirmados como falhando sem a correção**
+      (revertida temporariamente com `git stash` para provar: `actual: allow,
+      expected: approve` e `actual: true, expected: false`) antes de
+      restaurar o fix — não é cobertura de fachada. Build limpo, suíte
+      inteira (410 testes) verde em duas rodadas.
+      **Ressalva de defesa em profundidade, não corrigida agora**: o cast
+      cego em `loadProjectOverrides` (sem validação Zod de
+      `ProjectPolicyOverrides`) significa que QUALQUER campo de
+      `PolicyDocument` presente no YAML — não só os que o tipo TypeScript
+      declara — chega ao `mergePolicyLayer`. A correção acima neutraliza o
+      caminho que importava (o merge agora trava certo mesmo recebendo campos
+      não declarados), mas adicionar validação Zod real no lugar do cast
+      fecharia a classe inteira de "campo não documentado, mas lido em
+      runtime" de uma vez — fica registrado como sugestão pendente
+- Achados verificados e descartados nesta rodada (sem correção necessária):
+  guarda de borda (`guard.ts`) continua cobrindo toda rota via `#dispatch`;
+  `http-schemas.ts` continua `.strict()` em todo schema; traversal em
+  `static.ts` continua por caminho relativo, não prefixo; `worktree.ts` só
+  recebe `sessionId` gerado internamente, nunca id bruto de requisição;
+  `quoteForShell` continua correto para os 3 call sites reais de hoje (nenhum
+  passa valor attacker-controlled sem espaço mas com metacaractere de
+  `cmd.exe` por esse caminho); nenhum vazamento de valor de env sensível em
+  log/evento (só nomes de chave aparecem em `console.error`). O aviso de
+  sequestro de `*_BASE_URL` na Web UI (`SettingsView.tsx`) continua **não
+  implementado** — mesma pendência registrada em 2026-09-19, reconfirmada,
+  não é achado novo
+
 ### Restante
 
 Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
@@ -952,11 +1011,44 @@ nada aqui seja tratado como acidente na próxima vistoria.
 
 ## Dívida conhecida, ainda não atacada
 
-- [ ] **`session-manager.ts` tem 2258 linhas** — quase o dobro do segundo maior arquivo.
-      Acumula sessões, tarefas, orçamento, portão de política, vigilância, resiliência,
-      revisão, diff, projetos, pastas e contexto. Não é bug; é onde os bugs se escondem.
-      Os três esquecimentos do invariante de estado terminal (`3f40028`) aconteceram
-      exatamente por isso
+- [~] **`session-manager.ts` tinha 2978 linhas** (não 2258 — o número no roadmap
+      estava desatualizado; cresceu ~32% desde que o item foi escrito, e uma
+      auditoria de 2026-09-22 não achou registro de nenhuma análise anterior
+      com "5 fatias mapeadas" apesar de uma nota antiga citar isso — tratada
+      como premissa falsa). Acumula sessões, tarefas, orçamento, portão de
+      política, vigilância, resiliência, revisão, diff, projetos, pastas e
+      contexto. Não é bug; é onde os bugs se escondem — os três esquecimentos
+      do invariante de estado terminal (`3f40028`) aconteceram exatamente por
+      isso. Uma auditoria mapeou 8 fatias candidatas à extração, ordenadas por
+      risco; as duas mais seguras (funções de módulo sem `this`, zero estado)
+      foram extraídas em 2026-09-22, cada uma com teste próprio novo (nenhuma
+      tinha teste isolado antes, só cobertura indireta via integração):
+      - **Identidade/reconciliação de PID** (`imagemDoProcesso`,
+        `imagemPareceEsperada`, `horarioDeCriacaoDoProcesso`,
+        `pidPareceReciclado`, `TOLERANCIA_RELOGIO_MS`) → movidas para
+        `packages/adapters/src/process-tree.ts`, ao lado de `killProcessTree`
+        (mesma preocupação: identidade e ciclo de vida de processo no SO).
+        11 testes novos em `process-tree.test.ts`, incluindo os casos que já
+        causaram bug real antes (wrapper `cmd`/`sh`/`bash` aceito, `node`
+        deliberadamente recusado, tolerância de relógio).
+      - **Tradução de evento em ação vigiada** (`guardedActionsOf`,
+        `describeAction`) → novo arquivo `packages/adapters/src/guarded-actions.ts`
+        (não foi para `core`: depende de `MappedEvent`, tipo do adapter, e
+        `core` não pode conhecer `adapters` — regra do CONTRIBUTING). 9 testes
+        novos em `guarded-actions.test.ts`.
+      - **Fechamento/abertura de tentativa e espera de backoff**
+        (`closeLastAttempt`, `novaTentativa`, `sleep`) → foram para
+        `packages/core/src/resilience.ts`, ao lado de `failureContext`/
+        `nextStep` (mesma lógica de `TaskAttempt` que o retry/fallback já
+        trata ali). 8 testes novos em `resilience.test.ts`.
+      Build limpo e suíte inteira (410 testes, +27 desde antes desta rodada)
+      verde em duas rodadas completas depois da extração. `session-manager.ts`
+      caiu para 2781 linhas (~200 linhas movidas, mesmo comportamento — nenhum
+      teste de integração pré-existente mudou de resultado). As 6 fatias
+      restantes (vigilância, revisão cruzada, diff/artefatos, projetos/pastas,
+      contexto/política por projeto, e o núcleo de sessão/execução que não é
+      extraível) continuam mapeadas, não atacadas — a próxima é mais arriscada
+      (toca estado: `#requestApproval`/`#emit`, ou orquestra um adapter real)
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
 - [x] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
       `settle`) não tinha teste de regressão — resolvido em 2026-09-22. Uma
