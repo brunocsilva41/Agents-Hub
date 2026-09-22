@@ -81,7 +81,8 @@ import {
   saveProjectContext,
   type ProjectContext,
 } from './project-config.js';
-import { captureBaseline, captureDiff, loadBaseline, persistDiff, saveBaseline } from './diff-capture.js';
+import { captureBaseline, captureDiff, loadBaseline, saveBaseline } from './diff-capture.js';
+import { capturarMudancas } from './artifact-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
 import { actionsOfToolCall, combineVerdicts, resumoDaChamada } from './pretool-gate.js';
 
@@ -2457,48 +2458,13 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Registra o que a sessão mudou no código.
-   *
-   * Sem isto, `TaskResult.artifacts` era sempre `[]` e a tabela de artefatos
-   * nunca via uma linha: o Hub sabia quanto custou e o que o agente disse, mas
-   * não o que ele efetivamente escreveu. O diff é a resposta à pergunta que
-   * sempre vem primeiro.
-   */
+  /** Registra o que a sessão mudou no código. Lógica em `artifact-capture.ts`. */
   async #capturarMudancas(session: Session, task: Task): Promise<string[]> {
-    const capture = await captureDiff(
-      session.workdir,
-      await loadBaseline(this.config.artifactRoot, session.id),
+    return capturarMudancas(
+      { store: this.store, artifactRoot: this.config.artifactRoot, emit: (draft) => this.#emit(draft) },
+      session,
+      task,
     );
-    if (!capture || capture.empty) return [];
-
-    const arquivo = await persistDiff(this.config.artifactRoot, session.id, capture);
-    if (!arquivo) return [];
-
-    const artifact: Artifact = {
-      id: newId('art'),
-      sessionId: session.id,
-      taskId: task.id,
-      kind: 'diff',
-      path: arquivo,
-      hash: null,
-      createdAt: nowIso(),
-    };
-    this.store.artifacts.create(artifact);
-
-    this.#emit({
-      sessionId: session.id,
-      taskId: task.id,
-      agentId: session.agentId,
-      type: 'file.changed',
-      payload: {
-        summary: `${capture.filesChanged} arquivo(s), +${capture.insertions} −${capture.deletions}`,
-        untracked: capture.untracked,
-        artifactId: artifact.id,
-      },
-    });
-
-    return [artifact.id];
   }
 
   listArtifacts(sessionId: string): Artifact[] {

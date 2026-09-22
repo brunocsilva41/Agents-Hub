@@ -1060,10 +1060,23 @@ nada aqui seja tratado como acidente na próxima vistoria.
       continuam no `SessionManager` (são chamados de 7+ lugares diferentes
       do arquivo, não isolados como o CRUD) — próxima fatia natural, junto
       com `policyFor`, que é recursivo sobre `session.parentId`.
-      As 5 fatias restantes (vigilância, revisão cruzada, diff/artefatos,
-      contexto/política por projeto, e o núcleo de sessão/execução que não é
-      extraível) continuam mapeadas, não atacadas — a próxima é mais arriscada
-      (toca estado: `#requestApproval`/`#emit`, ou orquestra um adapter real)
+      **Quarta fatia, mesma rodada**: diff/artefatos (`#capturarMudancas`) →
+      nova função `capturarMudancas` em `packages/daemon/src/artifact-capture.ts`,
+      recebendo `store`/`artifactRoot`/`emit` por parâmetro em vez de a lógica
+      pertencer à classe — a leitura/escrita de diff já era externa
+      (`diff-capture.ts`); só a cola (criar `Artifact`, persistir, emitir
+      evento) estava presa em `session-manager.ts`. `#capturarMudancas` na
+      classe agora é uma delegação de 4 linhas. `listArtifacts` (um-liner
+      sobre `store.artifacts.list`) foi deixado como está — baixo valor em
+      extrair um repasse trivial. 3 testes novos em `artifact-capture.test.ts`
+      (repositório git real por teste, sem mock), cobrindo árvore sem
+      mudança, arquivo alterado, e sessão sem baseline salvo — nenhum teste
+      isolado existia antes, só integração. `session-manager.ts` caiu para
+      2650 linhas. Build limpo, suíte (413 testes, +3) verde em duas rodadas.
+      As 4 fatias restantes (vigilância, revisão cruzada, contexto/política
+      por projeto, e o núcleo de sessão/execução que não é extraível)
+      continuam mapeadas, não atacadas — a próxima é mais arriscada (toca
+      estado: `#requestApproval`/`#emit`, ou orquestra um adapter real)
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
 - [x] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
       `settle`) não tinha teste de regressão — resolvido em 2026-09-22. Uma
