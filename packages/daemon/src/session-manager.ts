@@ -77,7 +77,6 @@ import {
   envForAgent,
   loadProjectContext,
   loadProjectOverrides,
-  mergeProjectPolicy,
   saveProjectContext,
   type ProjectContext,
 } from './project-config.js';
@@ -91,6 +90,7 @@ const ESPERA_PADRAO_DO_GATE_MS = 60_000;
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
 import { ProjectRegistry } from './project-registry.js';
+import { policyFor as resolvePolicyFor, projectPolicyFor } from './effective-policy.js';
 
 /** Quebra de linha literal para montar prompt sem brigar com escapes. */
 const NEWLINE_PROMPT = String.fromCharCode(10);
@@ -2614,33 +2614,15 @@ export class SessionManager {
   }
 
   /**
-   * Política efetiva de uma sessão.
-   *
-   * Numa sessão-raiz é a política do Hub; num filho é a interseção com a do
-   * pai, que é o que garante que delegar nunca aumente privilégio (ADR 03).
+   * Política efetiva de uma sessão. Lógica em `effective-policy.ts`
+   * (pai→filho e projeto→global) — aqui só a ligação com `store`/`config`.
    */
   policyFor(session: Session, visited = new Set<string>()): PolicyEngine {
-    const base = new PolicyEngine(this.#projectPolicy(session.projectId));
-    if (!session.parentId || visited.has(session.id)) return base;
-    visited.add(session.id);
-
-    const parent = this.store.sessions.get(session.parentId);
-    if (!parent) return base;
-
-    return this.policyFor(parent, visited).intersect(base.policy);
+    return resolvePolicyFor({ store: this.store, globalPolicy: this.config.policy }, session, visited);
   }
 
-  /**
-   * Política global com os ajustes do projeto aplicados por cima (ADR 05.2).
-   *
-   * O projeto só consegue APERTAR — a fusão garante isso. Um repositório que
-   * pudesse elevar o próprio teto transformaria qualquer clone malicioso em
-   * execução arbitrária.
-   */
   #projectPolicy(projectId: string): PolicyDocument {
-    const project = this.store.projects.get(projectId);
-    if (!project) return this.config.policy;
-    return mergeProjectPolicy(this.config.policy, loadProjectOverrides(project.path).overrides);
+    return projectPolicyFor({ store: this.store, globalPolicy: this.config.policy }, projectId);
   }
 
   briefOf(sessionId: string): Brief {

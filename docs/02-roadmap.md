@@ -1073,10 +1073,28 @@ nada aqui seja tratado como acidente na próxima vistoria.
       mudança, arquivo alterado, e sessão sem baseline salvo — nenhum teste
       isolado existia antes, só integração. `session-manager.ts` caiu para
       2650 linhas. Build limpo, suíte (413 testes, +3) verde em duas rodadas.
-      As 4 fatias restantes (vigilância, revisão cruzada, contexto/política
-      por projeto, e o núcleo de sessão/execução que não é extraível)
-      continuam mapeadas, não atacadas — a próxima é mais arriscada (toca
-      estado: `#requestApproval`/`#emit`, ou orquestra um adapter real)
+      **Quinta fatia, mesma rodada**: resolução de política efetiva
+      (`policyFor`, `#projectPolicy`) → novo `packages/daemon/src/effective-policy.ts`
+      (`policyFor`/`projectPolicyFor`, dependências injetadas via
+      `EffectivePolicyDeps`). `SessionManager.policyFor` (método público,
+      usado em 5 lugares do arquivo) e `#projectPolicy` viraram delegações de
+      1 linha. `#contextoDoProjeto`/`#envDoProjeto` continuam na classe —
+      são só dois `if (!project) return {}` de uma linha cada, baixo valor em
+      extrair. 7 testes novos em `effective-policy.test.ts` (fake mínimo de
+      `store`, sem banco): interseção pai→filho nunca supera o teto do pai,
+      projeto sem override cai no global, pai referenciado mas ausente não
+      lança, ciclo de sessões não trava em loop infinito. **O primeiro
+      rascunho do teste de herança pai→filho continha um bug de teste** (dois
+      projetos de fixture com o mesmo id hardcoded, colidindo no fake
+      `store`) que fez a asserção falhar com o valor errado — corrigido
+      gerando id único por chamada da fixture antes de aceitar o teste como
+      válido; fica registrado porque é exatamente o tipo de falso-negativo
+      que torna um teste inútil se não for percebido. `session-manager.ts`
+      caiu para 2632 linhas. Suíte (420 testes, +7) verde em duas rodadas.
+      As 3 fatias restantes (vigilância, revisão cruzada, e o núcleo de
+      sessão/execução que não é extraível) continuam mapeadas, não atacadas
+      — a próxima é mais arriscada (toca estado: `#requestApproval`/`#emit`,
+      ou orquestra um adapter real)
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
 - [x] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
       `settle`) não tinha teste de regressão — resolvido em 2026-09-22. Uma
