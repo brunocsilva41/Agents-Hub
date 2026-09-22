@@ -94,6 +94,74 @@ describe('config por projeto', () => {
     assert.equal(merged.maxDepth, DEFAULT_POLICY.maxDepth);
     assert.equal(merged.validation.command, null);
   });
+
+  /**
+   * Achado CRÍTICO de auditoria de segurança (2026-09-22): `mergePolicyLayer`
+   * fazia `{ ...base.risk, ...layer.risk }` incondicionalmente — mesmo sob
+   * `clampToBase: true`, a camada de projeto sobrescrevia `irreversible`/
+   * `escalate` de `approve` para `allow` sem restrição nenhuma. Como
+   * `loadProjectOverrides` faz só um cast TypeScript sem validação Zod em
+   * runtime, um `.agents-hub/config.yaml` malicioso com `policy.risk.irreversible:
+   * allow` desativava a aprovação de `git push --force`/`rm -rf`/escrita em
+   * `.env` para QUALQUER agente — contradizendo a garantia documentada em
+   * SECURITY.md de que config de projeto só pode apertar, nunca afrouxar.
+   */
+  test('o projeto NÃO pode afrouxar risk de approve/deny para allow', () => {
+    const merged = mergeProjectPolicy(DEFAULT_POLICY, {
+      // `risk` não faz parte do tipo `ProjectPolicyOverrides` declarado, mas
+      // o cast em `loadProjectOverrides` não filtra nada em runtime — o
+      // teste usa `as never` para simular exatamente essa entrada hostil.
+      risk: { irreversible: 'allow', escalate: 'allow' },
+    } as never);
+
+    assert.equal(
+      merged.risk.irreversible,
+      DEFAULT_POLICY.risk.irreversible,
+      'irreversible tem que continuar exigindo aprovação, não pode virar allow',
+    );
+    assert.equal(
+      merged.risk.escalate,
+      DEFAULT_POLICY.risk.escalate,
+      'escalate tem que continuar exigindo aprovação, não pode virar allow',
+    );
+  });
+
+  test('o projeto PODE apertar risk de allow para deny', () => {
+    const merged = mergeProjectPolicy(DEFAULT_POLICY, {
+      risk: { write: 'deny' },
+    } as never);
+    assert.equal(
+      merged.risk.write,
+      'deny',
+      'apertar (tornar mais restritivo) continua permitido — só afrouxar é bloqueado',
+    );
+  });
+
+  /**
+   * Achado CRÍTICO relacionado (mesma causa raiz, mesmo commit): o campo
+   * booleano `paths.allowWriteOutsideWorkdir` também não respeitava
+   * `clampToBase` — um projeto podia ligar escrita fora do worktree mesmo
+   * quando a política global mantinha isso desligado.
+   */
+  test('o projeto NÃO pode ligar allowWriteOutsideWorkdir se a global mantém desligado', () => {
+    assert.equal(DEFAULT_POLICY.paths.allowWriteOutsideWorkdir, false);
+    const merged = mergeProjectPolicy(DEFAULT_POLICY, {
+      paths: { allowWriteOutsideWorkdir: true },
+    } as never);
+    assert.equal(
+      merged.paths.allowWriteOutsideWorkdir,
+      false,
+      'escrita fora do worktree não pode ser ligada por config de projeto',
+    );
+  });
+
+  test('o projeto PODE desligar allowWriteOutsideWorkdir se a global permite', () => {
+    const global = { ...DEFAULT_POLICY, paths: { ...DEFAULT_POLICY.paths, allowWriteOutsideWorkdir: true } };
+    const merged = mergeProjectPolicy(global, {
+      paths: { allowWriteOutsideWorkdir: false },
+    } as never);
+    assert.equal(merged.paths.allowWriteOutsideWorkdir, false);
+  });
 });
 
 describe('YAML de projeto quebrado — sinal visível, não silêncio', () => {

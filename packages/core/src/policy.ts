@@ -229,6 +229,23 @@ export function mergePolicyLayer(
     ? [...new Set([...base.watch.flagOn, ...(layer.watch?.flagOn ?? [])])]
     : (layer.watch?.flagOn ?? base.watch.flagOn);
 
+  // `risk` sob clamp: layer NUNCA pode afrouxar uma decisão da base (achado
+  // CRÍTICO de auditoria — antes disto, `{ ...base.risk, ...layer.risk }`
+  // deixava a camada de projeto sobrescrever `irreversible`/`escalate` de
+  // `approve` para `allow` sem nenhuma restrição, contradizendo a garantia
+  // documentada em SECURITY.md de que config de projeto só pode apertar.
+  // `narrowestDecision` já existe para isto — é a mesma regra que a
+  // delegação pai→filho usa (`intersect()` mais abaixo).
+  const riskMerged = clamp
+    ? (Object.keys(base.risk) as RiskLevel[]).reduce<Record<RiskLevel, Decision>>(
+        (acc, level) => {
+          acc[level] = narrowestDecision(base.risk[level], layer.risk?.[level] ?? base.risk[level]);
+          return acc;
+        },
+        {} as Record<RiskLevel, Decision>,
+      )
+    : ({ ...base.risk, ...(layer.risk ?? {}) } as Record<RiskLevel, Decision>);
+
   return {
     ...base,
     maxDepth,
@@ -238,14 +255,22 @@ export function mergePolicyLayer(
     sessionTimeoutSeconds: layer.sessionTimeoutSeconds ?? base.sessionTimeoutSeconds,
     heartbeatTimeoutSeconds: layer.heartbeatTimeoutSeconds ?? base.heartbeatTimeoutSeconds,
     defaultBudget: { ...base.defaultBudget, ...(layer.defaultBudget ?? {}) },
-    risk: { ...base.risk, ...(layer.risk ?? {}) } as Record<RiskLevel, Decision>,
+    risk: riskMerged,
     commands: {
       allow: commandsAllow,
       deny: commandsDeny,
     },
     paths: {
-      allowWriteOutsideWorkdir:
-        layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir,
+      // Mesma regra da fila acima: sob clamp, layer só pode DESLIGAR
+      // (`true` → `false`), nunca ligar o que a base não já permitia — AND
+      // lógico, igual ao merge pai→filho na delegação (`intersect()` mais
+      // abaixo). Antes desta correção, `layer.paths?.allowWriteOutsideWorkdir
+      // ?? base...` deixava a camada de projeto ligar escrita fora do
+      // worktree incondicionalmente.
+      allowWriteOutsideWorkdir: clamp
+        ? base.paths.allowWriteOutsideWorkdir &&
+          (layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir)
+        : (layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir),
       denyFragments: clamp
         ? [...new Set([...base.paths.denyFragments, ...(layer.paths?.denyFragments ?? [])])]
         : (layer.paths?.denyFragments ?? base.paths.denyFragments),
