@@ -31,7 +31,6 @@ invoke:
 
 session:
   strategy: native
-  idFrom: "$.conversation_id"
 
 stream:
   format: jsonl

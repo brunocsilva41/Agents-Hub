@@ -21,7 +21,6 @@ invoke:
 
 session:
   strategy: native
-  idFrom: "$.session_id"
 
 stream:
   format: jsonl

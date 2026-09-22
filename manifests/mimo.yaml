@@ -40,7 +40,6 @@ invoke:
 
 session:
   strategy: native
-  idFrom: "$.sessionID"
 
 stream:
   format: jsonl

@@ -51,7 +51,6 @@ session:
   # `--resume=<id>` existe e foi confirmado no help; o id vem no evento `result`,
   # no fim da execução — tarde, mas suficiente para o próximo turno.
   strategy: native
-  idFrom: "$.sessionId"
 
 stream:
   format: jsonl

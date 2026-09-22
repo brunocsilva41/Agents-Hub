@@ -117,7 +117,6 @@ invoke:
   resume:  ["exec", "resume", "{{nativeSessionId}}", "--json", "{{prompt}}"]
 session:
   strategy: native            # native | replay | none
-  idFrom: "$.thread_id"
 stream:
   format: jsonl               # jsonl | text | sse
   mapper: codex               # mapper registrado no código
