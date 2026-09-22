@@ -891,6 +891,39 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       run); e consumidor com `heartbeatSeconds` bem menor que o tempo real de
       dreno, confirmando que a pausa por backpressure NÃO dispara falso
       "travada". Os quatro passam de verdade nesta máquina, não só em CI.
+- [x] **Timeout geral do run não considerava throughput de escrita, matando
+      agentes de saída muito volumosa (achado MÉDIO de auditoria de
+      carga)** — fechado em 2026-09-22. Medido de verdade contra o daemon
+      real: um agente falso emitindo 50.000 linhas sem delay era processado
+      pelo consumidor síncrono (`SessionManager` escrevendo cada evento no
+      SQLite) a ~41 eventos/s — bem abaixo da taxa de produção. O timeout
+      geral (`ctx.timeoutSeconds * 1000`, em `process-adapter.ts`) era um
+      único `setTimeout` armado no spawn e NUNCA reconsiderado, diferente do
+      heartbeat, que já é rearmado por `handle.touch()` a cada sinal de
+      atividade (linha processada, ou `backpressureKeepAlive` batendo
+      enquanto `child.stdout` está pausado por backpressure). Resultado: um
+      agente vivo, só mais devagar do que o daemon consegue persistir, era
+      classificado como `timeout` → `transient` pela resiliência
+      (`packages/core/src/resilience.ts`) e reprocessado do zero com o
+      MESMO agente — fadado a repetir o mesmo timeout em toda tentativa
+      (`policy.retries.max`, padrão 2 + a primeira = 3), porque o gargalo é
+      a taxa de escrita do daemon, não a tentativa em si. Corrigido
+      convertendo o timeout geral (`overall`, em `#spawnRun`) no mesmo
+      padrão do heartbeat: `armOverall()` rearma o timer a cada chamada de
+      `handle.touch()`, então atividade sustentada (mesmo que lenta, mesmo
+      que só via `backpressureKeepAlive` durante uma pausa) estende o teto
+      geral, não só o heartbeat. O teto geral NÃO foi eliminado: um agente
+      sem NENHUMA atividade por `timeoutSeconds` ainda cai nele (normalmente
+      antes, no heartbeat, que é mais curto). Dois testes de integração
+      novos contra o `ProcessAgentAdapter` real (spawn de `node`, sem mock)
+      em `packages/adapters/src/process-adapter.overall-timeout.test.ts`:
+      um produtor vivo e devagar (`timeoutSeconds` bem menor que a duração
+      real da run) termina em `exit`, não em `timeout`; um produtor
+      genuinamente travado (zero atividade, `heartbeatSeconds` bem maior
+      que `timeoutSeconds`, para provar que é o teto geral resolvendo, não
+      o heartbeat) ainda termina em `timeout` no tempo configurado — ambos
+      confirmados como falhando (o primeiro) antes da correção e passando
+      depois, rodados de ponta a ponta contra processo real nesta máquina.
 
 ### Decidido aqui
 
@@ -925,10 +958,46 @@ nada aqui seja tratado como acidente na próxima vistoria.
       Os três esquecimentos do invariante de estado terminal (`3f40028`) aconteceram
       exatamente por isso
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
-- [ ] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
-      `settle`) nunca foi testada com chamadas concorrentes. A outra metade
-      deste item — o teto de sessões simultâneas por agente — foi corrigida e
-      testada (fase 5, "TOCTOU no teto de concorrência por agente")
+- [x] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
+      `settle`) não tinha teste de regressão — resolvido em 2026-09-22. Uma
+      auditoria de carga anterior já tinha confirmado por HTTP real contra o
+      daemon (20 `POST /sessions` verdadeiramente concorrentes via
+      `Promise.all`, delegando de uma raiz com orçamento US$10, pedido total
+      US$20) que não havia corrida: exatamente 10/20 aceitas,
+      `consumed+reserved` nunca excedeu o teto — porque `session-manager.ts#start`
+      faz a leitura do saldo (`snapshot()`) e a reserva (`reserve()`) como
+      uma única operação síncrona, sem `await` entre elas (comentário
+      explícito por volta da linha 482-486). Isso era uma invariante de
+      código sem regressão automatizada: um `await` inserido no futuro entre
+      a leitura e a reserva quebraria a proteção em silêncio. Fechado com um
+      teste em `packages/daemon/src/session-manager-audit.test.ts`
+      ("auditoria: concorrência do BudgetLedger") no mesmo estilo do achado 1
+      de concorrência por agente acima — 20 chamadas de `start()` disparadas
+      via `Promise.allSettled` sem esperar uma pela outra, contra uma raiz
+      com orçamento insuficiente para todas, confirmando que exatamente as
+      N que cabem são aceitas e o resto é recusado com `BUDGET_EXCEEDED`,
+      com `consumed+reserved` nunca excedendo o limite. Diferença importante
+      em relação à auditoria por HTTP: este teste roda num único processo
+      Node, exercitando a reserva síncrona simulada via `Promise.allSettled`
+      — não múltiplos processos/conexões batendo no daemon real como a
+      auditoria HTTP fez. A outra metade deste item — o teto de sessões
+      simultâneas por agente — já tinha sido corrigida e testada (fase 5,
+      "TOCTOU no teto de concorrência por agente")
+- [ ] **Crescimento de RSS sob churn de sessão — inconclusivo, precisa de
+      investigação melhor instrumentada.** Uma auditoria de carga rodou 300
+      ciclos de churn de sessão (criar → concluir) contra o daemon real e
+      mediu RSS subindo de ~78MB para ~96MB (+~20MB). Isto NÃO é um achado
+      confirmado de vazamento — 300 ciclos é pouco para separar
+      aquecimento normal (cache de módulo, pools internos do V8, páginas de
+      SQLite ainda residentes) de retenção real de memória por sessão
+      encerrada. Para virar um achado de verdade precisaria de milhares de
+      ciclos com heap snapshot antes/depois (`--expose-gc` + comparação de
+      snapshot, ou `node --prof`) para atribuir o crescimento a SQLite, V8
+      ou a algum objeto de domínio (`#ledgers`, `#seeded`, `#models` já
+      foram fechados como vazamento conhecido nesta fase — ver "Concluído em
+      2026-09-18" — então se ainda houver retenção, é em outro lugar).
+      Deliberadamente não investigado mais a fundo nesta tarefa: sem essa
+      instrumentação, qualquer correção seria adivinhação
 - [x] `pause` tinha rota HTTP e client (`HubClient.pause`) mas nenhuma superfície a
       expunha. Agora tem `hub pause <sessionId>` na CLI (`packages/cli/src/pause-cmd.ts`),
       a tool MCP `hub_session_pause` (`packages/mcp/src/server.ts`) e um botão "Pausar"
