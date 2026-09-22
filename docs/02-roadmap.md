@@ -998,6 +998,29 @@ nada aqui seja tratado como acidente na próxima vistoria.
       2026-09-18" — então se ainda houver retenção, é em outro lugar).
       Deliberadamente não investigado mais a fundo nesta tarefa: sem essa
       instrumentação, qualquer correção seria adivinhação
+- [x] **Cache de config de projeto invalidado só por `mtimeMs` colidia sob
+      escrita rápida em sucessão (achado real, pego pelo próprio CI, não por
+      auditoria)** — fechado em 2026-09-22. Depois de mesclar três lotes de
+      correção em sequência nesta sessão, o portão de qualidade (Windows,
+      Node 22.5) reprovou `project-context.test.ts` (`YAML quebrado não
+      derruba nada`): o teste escreve YAML válido, depois quebrado, no MESMO
+      arquivo, em sucessão rápida — e a segunda leitura voltou com
+      `error: null` em vez da mensagem esperada. Causa raiz em
+      `packages/daemon/src/project-config.ts`: `loadProjectOverrides` e
+      `loadProjectContext` cacheavam por `mtimeMs` sozinho; a resolução do
+      relógio do sistema de arquivos (mais grosseira em alguns runners de CI
+      do que na máquina de desenvolvimento — reproduziu no Windows do CI, não
+      localmente em duas rodadas completas da suíte) deu o MESMO `mtimeMs`
+      para duas `writeFileSync` síncronas consecutivas, servindo a segunda
+      leitura do cache da primeira. Isto não é só flakiness de teste: é o
+      MESMO cache que guarda `policy` por projeto — duas edições rápidas de
+      `.agents-hub/config.yaml` (ex.: `hub project env --set` chamado duas
+      vezes em sequência por um script) podiam servir a política velha depois
+      da segunda escrita. Corrigido acrescentando `size` (do mesmo `statSync`,
+      sem custo extra) à checagem de invalidação nos dois caches — duas
+      escritas com conteúdo de tamanho diferente (o caso comum) não colidem
+      mais; três rodadas isoladas do arquivo de teste + duas rodadas completas
+      da suíte (383/383) confirmaram a correção antes do push seguinte
 - [x] `pause` tinha rota HTTP e client (`HubClient.pause`) mas nenhuma superfície a
       expunha. Agora tem `hub pause <sessionId>` na CLI (`packages/cli/src/pause-cmd.ts`),
       a tool MCP `hub_session_pause` (`packages/mcp/src/server.ts`) e um botão "Pausar"

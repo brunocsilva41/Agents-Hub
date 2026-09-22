@@ -49,6 +49,7 @@ export interface ProjectPolicyOverrides {
 
 interface Cached {
   mtimeMs: number;
+  size: number;
   overrides: ProjectPolicyOverrides;
 }
 
@@ -84,14 +85,24 @@ export function loadProjectOverrides(projectPath: string): LoadedProjectOverride
     return { overrides: {}, error: null };
   }
 
-  const mtimeMs = statSync(file).mtimeMs;
+  const stat = statSync(file);
   const cached = cache.get(file);
-  if (cached && cached.mtimeMs === mtimeMs) return { overrides: cached.overrides, error: null };
+  // `mtimeMs` sozinho não basta: a resolução do relógio do sistema de
+  // arquivos (mais grosseira em alguns runners de CI que na máquina de
+  // desenvolvimento) pode dar o MESMO `mtimeMs` para duas escritas
+  // `writeFileSync` síncronas em sucessão rápida — a segunda escrita seria
+  // servida do cache da primeira, com conteúdo desatualizado. `size` quase
+  // sempre difere quando o conteúdo muda, e não custa nada (já vem do mesmo
+  // `stat`), então fecha essa janela sem precisar reler o arquivo em toda
+  // chamada.
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return { overrides: cached.overrides, error: null };
+  }
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
     const overrides = (parsed['policy'] ?? parsed) as ProjectPolicyOverrides;
-    cache.set(file, { mtimeMs, overrides });
+    cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, overrides });
     return { overrides, error: null };
   } catch (err) {
     // Um YAML quebrado não pode derrubar o daemon nem, pior, silenciosamente
@@ -144,10 +155,15 @@ interface LoadedProjectContext {
   error: string | null;
 }
 
-const contextCache = new Map<string, { mtimeMs: number; ctx: ProjectContext } | null>();
+const contextCache = new Map<
+  string,
+  { mtimeMs: number; size: number; ctx: ProjectContext } | null
+>();
 
 /**
- * Lê memória e prompts do projeto, com o mesmo cache por mtime da política.
+ * Lê memória e prompts do projeto, com o mesmo cache por mtime+size da política
+ * (ver comentário em `loadProjectOverrides` sobre por que `size` entra na
+ * checagem além de `mtimeMs`).
  *
  * Devolve `{}` em qualquer falha — YAML quebrado não pode derrubar o daemon, e
  * aqui nem sequer há risco de afrouxar política: contexto é texto que vai no
@@ -163,9 +179,11 @@ export function loadProjectContext(projectPath: string): LoadedProjectContext {
     return { ctx: {}, error: null };
   }
 
-  const mtimeMs = statSync(file).mtimeMs;
+  const stat = statSync(file);
   const cached = contextCache.get(file);
-  if (cached && cached.mtimeMs === mtimeMs) return { ctx: cached.ctx, error: null };
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return { ctx: cached.ctx, error: null };
+  }
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
@@ -196,7 +214,7 @@ export function loadProjectContext(projectPath: string): LoadedProjectContext {
       if (Object.keys(porAgente).length > 0) ctx.env = porAgente;
     }
 
-    contextCache.set(file, { mtimeMs, ctx });
+    contextCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, ctx });
     return { ctx, error: null };
   } catch (err) {
     contextCache.set(file, null);
