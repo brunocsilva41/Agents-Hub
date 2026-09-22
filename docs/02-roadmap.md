@@ -1197,3 +1197,64 @@ abaixo, não por execução visual nesta sessão.
       "8 de 9 agentes..." fixo no JSX. Corrigido para uma contagem real a partir de
       `agents.filter((a) => a.probe?.installed === true).length` sobre `agents.length`.
 
+## Auditoria da Web UI (segunda rodada, mais profunda) — 2026-09-22
+
+Seis achados adicionais, todos corrigidos no mesmo lote sobre o estado deixado pela auditoria
+acima (`packages/web/src`). Mesma ressalva: sem harness de teste de componente no pacote web
+(`packages/web/package.json` não tem script `test`), a verificação de UI é por leitura de
+código + passos manuais descritos abaixo — não executados nesta sessão por falta de browser
+interativo.
+
+- [x] **ALTO — troca rápida de projeto em `SettingsView.tsx` podia salvar configuração de um
+      projeto sob o ID de outro.** `carregar(projectId)` não tinha guarda de cancelamento: se
+      o usuário selecionasse o Projeto A e trocasse para o Projeto B antes da resposta de A
+      chegar, e a resposta de A chegasse DEPOIS da de B, `setCtx` aplicava os dados de A sob o
+      `projectId` de B — um "Salvar" nesse estado gravava `OPENAI_API_KEY`/prompts de A no
+      `.agents-hub/config.yaml` de B. Corrigido com uma flag `cancelado` no mesmo padrão já
+      usado em `SidePanel.tsx` (`projectContext`). Verificação manual: abrir Configurações,
+      selecionar Projeto A, trocar rapidamente para Projeto B antes da resposta chegar (rede
+      throttled no DevTools ajuda a reproduzir), confirmar que o formulário mostrado corresponde
+      sempre ao projeto selecionado no dropdown, nunca a um projeto anterior.
+- [x] **MÉDIO/ALTO — falha de rede na timeline principal era indistinguível de "sessão sem
+      eventos".** `useHubState.ts` (`eventsOf`) já marcava `eventsFailed[sessionId]` e expunha
+      `eventsFailedFor`, mas nada em `App.tsx`/`Timeline.tsx` lia esse sinal — uma falha de
+      `hub.events()` no momento de selecionar uma sessão mostrava a mesma mensagem de "nenhum
+      evento" que uma sessão genuinamente vazia. Corrigido propagando `eventsFailedFor` (para
+      `scope === 'session'`) ou `siblings.some(eventsFailedFor)` (para `scope === 'flow'`) de
+      `App.tsx` até uma nova prop `failed` em `Timeline.tsx`, que agora mostra um aviso
+      explícito no lugar da mensagem de "vazio". Verificação manual: com o daemon rodando,
+      selecionar uma sessão, matar a conexão de rede momentaneamente (offline no DevTools) e
+      selecionar outra sessão ainda não cacheada — deve aparecer "Falha ao carregar os eventos
+      desta sessão", não "Nenhum evento".
+- [x] **MÉDIO — lane de sub-nós em `DagCanvasView.tsx` ainda assumia raiz na última posição.**
+      A correção da primeira auditoria já buscava a raiz certa (`root`) para o card principal,
+      mas a lane de sub-nós, ~60 linhas abaixo, ainda fazia
+      `flow.sessions.slice(0, flow.sessions.length - 1)` — removendo por posição em vez de por
+      id. Com a raiz ativa (por isso no início do array) e duas sub-sessões terminadas em
+      momentos diferentes, isso duplicava a raiz na lane (rotulada "Sub-agent/Task") e escondia
+      a sub-sessão mais antiga. Corrigido para `flow.sessions.filter((s) => s.id !== root.id)`.
+      Verificação manual: abrir a aba Grafo DAG num fluxo com uma raiz ainda ativa e 2+
+      sub-sessões já terminadas em momentos diferentes; confirmar que a raiz aparece só no card
+      principal e todas as sub-sessões aparecem na lane, nenhuma duplicada nem faltando.
+- [x] **MÉDIO — `useFlowGraph` mascarava falha de rede como "grafo vazio".** O `.catch` fazia
+      `setGraph([])`, indistinguível de um fluxo sem sessões; `FlowTree.tsx` mostrava sempre
+      "Este fluxo não possui sessões registradas". Corrigido: `useFlowGraph` agora devolve
+      `{ graph, failed }`, propagado por `FlowList.tsx` até uma nova prop `failed` em
+      `FlowTree.tsx`, que mostra um aviso distinto quando a busca falhou. Verificação manual:
+      na lista de fluxos da coluna esquerda, abrir um fluxo (dispara `/graph`) durante uma
+      queda de rede simulada; confirmar o aviso de falha em vez de "não possui sessões".
+- [x] **BAIXO — busca de eventos do "Fluxo inteiro" era ilimitada.** `App.tsx` disparava
+      `state.eventsOf(s.id)` para toda sessão-irmã do fluxo sem teto — um fluxo com 30+
+      sub-sessões dispara ~30 requisições simultâneas ao abrir "Fluxo inteiro". Corrigido
+      reaproveitando `MAX_FLOW_HISTORIES` (agora exportado de `useHubState.ts`) para limitar a
+      lista de irmãos às `N` sessões mais recentes por `updatedAt`, antes de chamar `eventsOf`.
+      Verificação manual: abrir um fluxo com muitas sub-sessões, alternar para "Fluxo inteiro" e
+      confirmar na aba Rede do DevTools que o número de requisições a `/events` fica limitado
+      (não uma por sessão-irmã).
+- [x] **BAIXO (informativo) — 3 exports mortos em `useHubState.ts` removidos.**
+      `useSessionHistory`, `useFlowHistories` e `mergeEvents` nunca eram importados fora do
+      próprio arquivo (confirmado por `Grep` em todo o repositório, não só em `src/`) — o mesmo
+      padrão que causou o achado CRÍTICO da primeira auditoria (hook correto, nunca importado).
+      Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
+      de fato pelo achado do teto de "Fluxo inteiro" acima.
+

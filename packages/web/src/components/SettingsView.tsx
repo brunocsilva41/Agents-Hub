@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { AgentSummary, ProjectContextDto, ProjectSummary } from '@agents-hub/client';
 import { useAction } from '../actions';
 import { agentColor, hub } from '../hub';
@@ -76,21 +76,30 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
   // que salvou em algum lugar.
   const semProjeto = projectId === '';
 
-  const carregar = useCallback(async (id: string) => {
-    if (id === '') return;
-    setCarregando(true);
-    try {
-      const { context } = await hub.projectContext(id);
-      setCtx(context);
-      setSujo(false);
-    } finally {
-      setCarregando(false);
-    }
-  }, []);
-
+  // Guarda de cancelamento: sem isto, trocar de projeto rapidamente antes da
+  // resposta anterior chegar pode aplicar a configuração do projeto A sob o ID
+  // do projeto B (se a resposta de A chegar depois da de B) — e salvar nesse
+  // estado grava o conteúdo de A (inclusive OPENAI_API_KEY, prompts) no
+  // config.yaml de B. Mesmo padrão de SidePanel.tsx (`projectContext`).
   useEffect(() => {
-    void carregar(projectId);
-  }, [projectId, carregar]);
+    if (projectId === '') return;
+    let cancelado = false;
+    setCarregando(true);
+    hub
+      .projectContext(projectId)
+      .then(({ context }) => {
+        if (!cancelado) {
+          setCtx(context);
+          setSujo(false);
+        }
+      })
+      .finally(() => {
+        if (!cancelado) setCarregando(false);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     if (projectId === '' && projects[0]) setProjectId(projects[0].id);

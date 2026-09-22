@@ -79,7 +79,7 @@ const FlowItem = memo(function FlowItem({
   onSelect: (sessionId: string) => void;
   revision: number;
 }) {
-  const graph = useFlowGraph(open ? flow.rootId : null, revision);
+  const { graph, failed: graphFailed } = useFlowGraph(open ? flow.rootId : null, revision);
   const contains = flow.sessions.some((s) => s.id === selectedId);
 
   return (
@@ -135,7 +135,7 @@ const FlowItem = memo(function FlowItem({
           </div>
         ) : (
           <div className="flow-tree">
-            <FlowTree nodes={graph} selectedId={selectedId} onSelect={onSelect} />
+            <FlowTree nodes={graph} selectedId={selectedId} onSelect={onSelect} failed={graphFailed} />
           </div>
         ))}
     </div>

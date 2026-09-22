@@ -8,12 +8,15 @@ interface Props {
   showVerbose: boolean;
   showAgent: boolean;
   loading: boolean;
+  /** `true` quando a última busca de eventos falhou — timeline vazia por erro
+   * de rede não pode ser mostrada como "sessão sem eventos". */
+  failed?: boolean;
 }
 
 const WINDOW = 400;
 const WINDOW_STEP = 800;
 
-export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
+export function Timeline({ events, showVerbose, showAgent, loading, failed = false }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
   const [window_, setWindow] = useState(WINDOW);
@@ -53,6 +56,19 @@ export function Timeline({ events, showVerbose, showAgent, loading }: Props) {
         <div className="skeleton-item" style={{ width: '65%' }} />
         <div className="skeleton-item" style={{ width: '90%' }} />
         <div className="skeleton-item" style={{ width: '50%' }} />
+      </div>
+    );
+  }
+
+  if (failed) {
+    return (
+      <div className="empty timeline-empty-state" role="alert">
+        <div className="empty-icon">⚠️</div>
+        <div className="empty-title">Falha ao carregar os eventos desta sessão</div>
+        <span className="empty-hint">
+          Não é uma sessão sem eventos — a busca falhou (rede instável ou daemon reiniciando).
+          Tente selecionar a sessão de novo.
+        </span>
       </div>
     );
   }

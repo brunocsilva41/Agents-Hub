@@ -5,10 +5,19 @@ interface Props {
   nodes: GraphSummary[];
   selectedId: string | null;
   onSelect: (sessionId: string) => void;
+  /** `true` quando a busca do grafo falhou — vazio por erro, não por fluxo sem sessões. */
+  failed?: boolean;
 }
 
-export function FlowTree({ nodes, selectedId, onSelect }: Props) {
+export function FlowTree({ nodes, selectedId, onSelect, failed = false }: Props) {
   if (nodes.length === 0) {
+    if (failed) {
+      return (
+        <div className="flow-loading" role="alert">
+          ⚠️ Falha ao carregar o grafo deste fluxo — não é um fluxo sem sessões, a busca falhou.
+        </div>
+      );
+    }
     return <div className="flow-loading">Este fluxo não possui sessões registradas</div>;
   }
 
