@@ -431,7 +431,8 @@ defaults:
 
     // Invariante central do achado: o que foi de fato aceito nunca pode
     // exceder o orçamento da raiz — nem em `reserved`, nem depois de somado
-    // a `consumed`.
+    // a `consumed`. Isto é o que a reserva síncrona (achado real) garante, e
+    // é robusto independente de quando cada processo termina.
     const snapshot = hub.store.budgets.get(rootId);
     assert.ok(snapshot, 'orçamento da raiz precisa existir depois das chamadas');
     const usadoTotal = (snapshot?.consumed.usd ?? 0) + (snapshot?.reserved.usd ?? 0);
@@ -439,10 +440,21 @@ defaults:
       usadoTotal <= LIMITE_USD,
       `consumed+reserved (${usadoTotal}) não pode exceder o limite da raiz (${LIMITE_USD})`,
     );
-    assert.equal(
-      usadoTotal,
-      ESPERADO_ACEITAS * PEDIDO_USD_CADA,
-      'o total reservado tem que corresponder exatamente ao número de aceitas',
-    );
+    // NENHUMA asserção de igualdade exata sobre `usadoTotal` daqui em diante:
+    // `SCRIPT_AGENTE` sai quase instantaneamente com "AGENTE OK" e nenhum
+    // evento de custo. `#launch` só espera o processo SUBIR
+    // (`adapter.start`), não terminar; o `#pump` que drena o resto roda
+    // solto (fire-and-forget) e pode `settle()` — devolvendo a reserva não
+    // usada, já que o custo real ficou em US$0 — em qualquer momento entre o
+    // spawn e esta leitura, para qualquer subconjunto das 10 tarefas
+    // aceitas. Medido rodando a suíte localmente 10 vezes seguidas: o valor
+    // observado variou entre US$8 e US$10, sem padrão fixo — é uma corrida
+    // real e inofensiva entre o teste e o próprio agente-de-mentira
+    // terminando rápido demais, não a reserva síncrona que este achado
+    // prova (essa already está provada por `aceitas.length` acima, que
+    // permaneceu em exatamente 10 em todas as 10 rodadas). Uma versão
+    // anterior deste teste exigia igualdade exata e depois uma faixa
+    // estreita (10 ou 9) — as duas derrubaram o CI de forma intermitente
+    // sem relação com nenhuma mudança de código real.
   });
 });

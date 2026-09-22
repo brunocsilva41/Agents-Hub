@@ -1124,6 +1124,38 @@ nada aqui seja tratado como acidente na próxima vistoria.
       orçamento, aplica o gate do Codex — ver ressalva da auditoria
       original sobre resolver `#summarize` primeiro, usado por ela e por
       `#settle`, antes de extrair)
+- [x] **Teste flaky pego pelo CI no meio desta esteira, corrigido**: o push
+      da sexta fatia (vigilância) reprovou o portão de qualidade —
+      inicialmente pareceu ser o mesmo flaky de `runValidation`/kill de
+      árvore já documentado (apareceu junto, numa rodada), mas um SEGUNDO
+      teste também caiu, de forma nova: "N chamadas concorrentes de
+      delegação contra orçamento insuficiente" (`session-manager-audit.test.ts`,
+      achado da fase 5) — `usadoTotal !== 10` (às vezes 9, numa repetição
+      local caiu até 8). Investigado a fundo antes de aceitar como flaky
+      (achado que parecia crítico — furo na reserva síncrona de orçamento —
+      não podia ser descartado sem prova): reproduzido localmente 3 de 5
+      vezes antes da correção, então NÃO era exclusivo do runner de CI.
+      Causa raiz real, confirmada por leitura de código: `SCRIPT_AGENTE`
+      (o agente-de-mentira do teste) sai quase instantaneamente com "AGENTE
+      OK" e zero eventos de custo; `#launch` só espera o processo SUBIR, não
+      terminar, e o `#pump` que drena o resto roda solto (fire-and-forget) —
+      ele pode `settle()` (devolvendo a reserva não usada, já que o custo
+      real virou US$0) para qualquer subconjunto das 10 tarefas aceitas, em
+      qualquer momento entre o spawn e o instante em que o teste lê o
+      snapshot final do ledger. A invariante de segurança real (a reserva
+      síncrona nunca deixa passar mais que o orçamento) permanecia intacta
+      em toda repetição — confirmado por `aceitas.length === 10` estável em
+      15 rodadas locais seguidas depois da correção — só a leitura POSTERIOR
+      do total (que depende de quando cada processo termina) variava.
+      Corrigido removendo a asserção de igualdade exata sobre
+      `consumed+reserved` (uma tentativa intermediária de afrouxar para uma
+      faixa estreita, 10 ou 9, ainda falhou numa 8ª repetição local — o
+      valor real não tem piso previsível), mantendo as duas asserções que
+      de fato provam o achado: `aceitas.length === 10` (exatamente) e
+      `usadoTotal <= LIMITE_USD` (nunca excede). Nenhuma mudança em código
+      de produção — só a asserção do teste. 15 rodadas locais seguidas
+      depois da correção, todas verdes; suíte completa (426 testes) verde
+      em duas rodadas
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
 - [x] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
       `settle`) não tinha teste de regressão — resolvido em 2026-09-22. Uma
