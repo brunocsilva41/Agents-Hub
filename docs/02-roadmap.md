@@ -1044,8 +1044,23 @@ nada aqui seja tratado como acidente na próxima vistoria.
       Build limpo e suíte inteira (410 testes, +27 desde antes desta rodada)
       verde em duas rodadas completas depois da extração. `session-manager.ts`
       caiu para 2781 linhas (~200 linhas movidas, mesmo comportamento — nenhum
-      teste de integração pré-existente mudou de resultado). As 6 fatias
-      restantes (vigilância, revisão cruzada, diff/artefatos, projetos/pastas,
+      teste de integração pré-existente mudou de resultado).
+      **Terceira fatia, mesma rodada**: CRUD de projetos e pastas
+      (`registerProject`, `listProjects`, `#project`, `getProjectContext`,
+      `setProjectContext`, `listProjectFolders`, `addProjectFolder`,
+      `removeProjectFolder`) → nova classe `ProjectRegistry`
+      (`packages/daemon/src/project-registry.ts`, não `core`: depende de
+      `UnitOfWork`/I/O de arquivo). `SessionManager` guarda uma instância
+      privada (`#projects`) e os métodos públicos viraram delegações finas —
+      a API que `server.ts`/CLI/MCP chamam não mudou, então os 30 testes já
+      existentes (`projects.test.ts`, `project-config.test.ts`,
+      `project-context.test.ts`) passaram sem alteração, provando que a
+      extração não mudou comportamento. `session-manager.ts` caiu para 2684
+      linhas. `#contextoDoProjeto`/`#envDoProjeto`/`#projectPolicy`
+      continuam no `SessionManager` (são chamados de 7+ lugares diferentes
+      do arquivo, não isolados como o CRUD) — próxima fatia natural, junto
+      com `policyFor`, que é recursivo sobre `session.parentId`.
+      As 5 fatias restantes (vigilância, revisão cruzada, diff/artefatos,
       contexto/política por projeto, e o núcleo de sessão/execução que não é
       extraível) continuam mapeadas, não atacadas — a próxima é mais arriscada
       (toca estado: `#requestApproval`/`#emit`, ou orquestra um adapter real)

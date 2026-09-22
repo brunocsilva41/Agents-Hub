@@ -2,7 +2,6 @@ import path from 'node:path';
 import {
   BudgetLedger,
   HubError,
-  validarNovaPasta,
   PolicyEngine,
   SequenceCounter,
   ZERO_USAGE,
@@ -90,6 +89,7 @@ import { actionsOfToolCall, combineVerdicts, resumoDaChamada } from './pretool-g
 const ESPERA_PADRAO_DO_GATE_MS = 60_000;
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
+import { ProjectRegistry } from './project-registry.js';
 
 /** Quebra de linha literal para montar prompt sem brigar com escapes. */
 const NEWLINE_PROMPT = String.fromCharCode(10);
@@ -181,6 +181,8 @@ export class SessionManager {
    */
   gateWaitMs = ESPERA_PADRAO_DO_GATE_MS;
 
+  readonly #projects: ProjectRegistry;
+
   constructor(
     private readonly config: HubConfig,
     private readonly store: UnitOfWork,
@@ -189,60 +191,21 @@ export class SessionManager {
     private readonly worktrees: WorktreeManager,
   ) {
     this.#seq = new SequenceCounter();
+    this.#projects = new ProjectRegistry(store);
   }
 
   // ---------------------------------------------------------------- projetos
+  //
+  // O CRUD mora em `ProjectRegistry` (`project-registry.ts`) — os métodos
+  // abaixo são delegações finas, preservando a API pública que
+  // `server.ts`/CLI/MCP já chamam sobre `SessionManager`.
 
   registerProject(dir: string, name?: string): Project {
-    // Formato primeiro, COM O CAMINHO CRU.
-    //
-    // `path.resolve` transforma "./algo" num absoluto contra o diretório onde o
-    // DAEMON subiu — que quem chamou por HTTP não conhece e não escolheu.
-    // Resolver antes de validar fazia a checagem de relativo nunca disparar, e
-    // um relativo virava silenciosamente uma pasta em lugar nenhum esperado.
-    //
-    // Lista vazia: aqui só interessam as checagens de formato (vazio, relativo),
-    // não a de sobreposição — essa vem depois, e só quando for mesmo criar.
-    const formato = validarNovaPasta(dir, []);
-    if (!formato.ok) {
-      throw new HubError('PROJECT_FOLDER_CONFLICT', formato.motivo, { path: dir });
-    }
-
-    const absolute = path.resolve(dir);
-
-    // Idempotência ANTES da checagem de sobreposição, e a ordem importa:
-    // registrar o mesmo projeto duas vezes é uso normal (a CLI faz isso a cada
-    // `hub start`), e a pasta dele conflita consigo mesma. Validar primeiro
-    // fazia a segunda chamada falhar com "esta pasta já pertence ao projeto X"
-    // — sendo X o próprio projeto que o chamador queria de volta.
-    const existing = this.store.projects.getByPath(absolute);
-    if (existing) return existing;
-
-    const veredito = validarNovaPasta(absolute, this.store.projects.allFolders());
-    if (!veredito.ok) {
-      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
-    }
-
-    const project = this.store.projects.create({
-      name: name ?? path.basename(absolute),
-      path: absolute,
-      defaultBranch: 'main',
-    });
-
-    // Todo projeto nasce com uma pasta: a dele. Sem isto, um projeto recém
-    // criado não teria onde rodar sessão nenhuma.
-    this.store.projects.addFolder({
-      projectId: project.id,
-      path: absolute,
-      label: project.name,
-      isPrimary: true,
-    });
-
-    return project;
+    return this.#projects.register(dir, name);
   }
 
   listProjects(): Project[] {
-    return this.store.projects.list();
+    return this.#projects.list();
   }
 
   /**
@@ -291,86 +254,26 @@ export class SessionManager {
     }
   }
 
-  /** Projeto por id, ou erro — nunca `null` seguindo adiante em silêncio. */
-  #project(projectId: string): Project {
-    const project = this.store.projects.get(projectId);
-    if (!project) {
-      throw new HubError('PROJECT_NOT_FOUND', `Projeto ${projectId} não encontrado`, {
-        projectId,
-      });
-    }
-    return project;
-  }
-
   /** Memória e prompts do projeto, como estão no arquivo. */
   getProjectContext(projectId: string): ProjectContext {
-    return loadProjectContext(this.#project(projectId).path).ctx;
+    return this.#projects.getContext(projectId);
   }
 
   /** Grava memória e prompts, preservando o bloco de política do arquivo. */
   setProjectContext(projectId: string, ctx: ProjectContext): ProjectContext {
-    const project = this.#project(projectId);
-    saveProjectContext(project.path, ctx);
-    return loadProjectContext(project.path).ctx;
+    return this.#projects.setContext(projectId, ctx);
   }
 
   listProjectFolders(projectId: string): ProjectFolder[] {
-    // Valida a existência para não devolver lista vazia de projeto inexistente,
-    // que o chamador leria como "projeto sem pastas".
-    this.#project(projectId);
-    return this.store.projects.listFolders(projectId);
+    return this.#projects.listFolders(projectId);
   }
 
-  /**
-   * Acrescenta uma pasta ao projeto.
-   *
-   * É o que torna um "projeto" capaz de cobrir frontend e backend em
-   * repositórios separados sem perder a unificação de custo, política e
-   * histórico — e sem unir o acesso, porque a sessão continua rodando em uma
-   * pasta só.
-   */
   addProjectFolder(projectId: string, dir: string, label?: string): ProjectFolder {
-    const project = this.#project(projectId);
-
-    // Mesma razão de `registerProject`: validar o bruto, resolver depois.
-    const veredito = validarNovaPasta(dir, this.store.projects.allFolders());
-    if (!veredito.ok) {
-      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: dir });
-    }
-    const absolute = path.resolve(dir);
-
-    return this.store.projects.addFolder({
-      projectId: project.id,
-      path: absolute,
-      label: label ?? path.basename(absolute),
-      isPrimary: false,
-    });
+    return this.#projects.addFolder(projectId, dir, label);
   }
 
-  /**
-   * Remove uma pasta do projeto.
-   *
-   * A principal não sai: ela é a raiz padrão das sessões, e um projeto sem raiz
-   * padrão só descobriria o problema na próxima vez que alguém tentasse abrir
-   * uma sessão nele.
-   */
   removeProjectFolder(projectId: string, folderId: string): void {
-    const pastas = this.listProjectFolders(projectId);
-    const alvo = pastas.find((f) => f.id === folderId);
-    if (!alvo) {
-      throw new HubError('FOLDER_NOT_FOUND', `pasta ${folderId} não pertence a este projeto`, {
-        projectId,
-        folderId,
-      });
-    }
-    if (alvo.isPrimary) {
-      throw new HubError(
-        'FOLDER_IS_PRIMARY',
-        'a pasta principal não pode ser removida; ela é a raiz padrão das sessões deste projeto',
-        { projectId, folderId },
-      );
-    }
-    this.store.projects.removeFolder(folderId);
+    this.#projects.removeFolder(projectId, folderId);
   }
 
   // ---------------------------------------------------------------- sessões
