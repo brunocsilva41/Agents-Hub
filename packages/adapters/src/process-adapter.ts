@@ -319,19 +319,43 @@ export class ProcessAgentAdapter implements AgentAdapter {
 
     // --- Guardas de tempo (ADR 03.2) -----------------------------------------
     let heartbeat: NodeJS.Timeout | null = null;
-    const overall = setTimeout(() => {
-      handle.settle({
-        exitCode: null,
-        signal: null,
-        reason: 'timeout',
-        error: `run excedeu ${ctx.timeoutSeconds}s`,
-        nativeSessionId: discoveredNativeId,
-        tail: tail.join('\n'),
-      });
-      // `void` deliberado: o turno já foi liquidado acima, e quem estourou o
-      // timeout não espera o kill terminar para seguir.
-      void killTree(child);
-    }, ctx.timeoutSeconds * 1000);
+    let overall: NodeJS.Timeout | null = null;
+
+    /**
+     * Teto geral da run. Historicamente era um único `setTimeout` armado uma
+     * vez no spawn e NUNCA reconsiderado — o que faz um agente vivo, só
+     * mais rápido em produzir do que o daemon é em persistir (achado da
+     * auditoria de carga: ~41 eventos/s de escrita síncrona no SQLite contra
+     * um agente emitindo 50k linhas sem delay), ser classificado como
+     * `timeout` → `transient` e reprocessado do zero pela resiliência —
+     * fadado a repetir o mesmo timeout em toda tentativa, porque o gargalo é
+     * a taxa de escrita do daemon, não a tentativa em si.
+     *
+     * A correção reaproveita o MESMO sinal de "houve atividade" que já
+     * estende o heartbeat (`handle.touch()`, chamado por linha de
+     * stdout/stderr e, durante backpressure, pelo `backpressureKeepAlive`
+     * acima): cada chamada rearma este timer também, não só o heartbeat.
+     * Isso não elimina o teto geral — um agente sem NENHUMA atividade por
+     * `timeoutSeconds` ainda cai aqui (ou antes, no heartbeat, que é mais
+     * curto); só deixa de contar tempo de spawn morto contra um agente que
+     * está, de fato, processando.
+     */
+    const armOverall = (): void => {
+      if (overall) clearTimeout(overall);
+      overall = setTimeout(() => {
+        handle.settle({
+          exitCode: null,
+          signal: null,
+          reason: 'timeout',
+          error: `run excedeu ${ctx.timeoutSeconds}s`,
+          nativeSessionId: discoveredNativeId,
+          tail: tail.join('\n'),
+        });
+        // `void` deliberado: o turno já foi liquidado acima, e quem estourou o
+        // timeout não espera o kill terminar para seguir.
+        void killTree(child);
+      }, ctx.timeoutSeconds * 1000);
+    };
 
     const armHeartbeat = (): void => {
       if (heartbeat) clearTimeout(heartbeat);
@@ -349,12 +373,15 @@ export class ProcessAgentAdapter implements AgentAdapter {
     };
 
     handle.clearTimers = () => {
-      clearTimeout(overall);
+      if (overall) clearTimeout(overall);
       if (heartbeat) clearTimeout(heartbeat);
       if (backpressureKeepAlive) clearInterval(backpressureKeepAlive);
     };
-    handle.touch = armHeartbeat;
-    armHeartbeat();
+    handle.touch = () => {
+      armHeartbeat();
+      armOverall();
+    };
+    handle.touch();
 
     /**
      * Teto duro: mesmo com `child.stdout` pausado no cruzar do `highWaterMark`,

@@ -3,7 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY, newId, nowIso, type Approval, type Session } from '@agents-hub/core';
+import {
+  DEFAULT_POLICY,
+  isHubError,
+  newId,
+  nowIso,
+  type Approval,
+  type HubError,
+  type Session,
+} from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
 const SCRIPT_AGENTE = `
@@ -255,5 +263,186 @@ defaults:
     );
     assert.equal(hub.store.sessions.get(sessionId)?.state, 'killed');
     assert.equal(hub.sessions.isLive(sessionId), false);
+  });
+});
+
+/**
+ * Regressão de dívida conhecida (não um bug): `BudgetLedger.reserve`/`settle`
+ * não tinham teste de concorrência, embora a invariante que os protege já
+ * exista em código — `session-manager.ts#start` faz a leitura do saldo
+ * (`ledger.snapshot()`) e a reserva (`ledger.reserve()`) como uma única
+ * operação síncrona, sem `await` entre elas (comentário explícito por volta
+ * da linha 482-486). Uma auditoria de carga anterior já confirmou isso por
+ * HTTP real contra o daemon (20 `POST /sessions` verdadeiramente
+ * concorrentes via `Promise.all`, orçamento US$10, pedido total US$20:
+ * exatamente 10/20 aceitas, sem corrida). Este teste fixa essa invariante
+ * como regressão automatizada, no mesmo estilo do achado 1 acima
+ * (`Promise.allSettled` sem esperar uma chamada pela outra) — mas roda num
+ * único processo Node, então exercita a reserva síncrona simulada, não
+ * múltiplos processos batendo no daemon real como a auditoria por HTTP fez.
+ * Se um `await` for inserido no futuro entre a leitura e a reserva, este
+ * teste passa a falhar (mais de uma reserva furando o teto).
+ */
+describe('auditoria: concorrência do BudgetLedger (dívida conhecida, agora com regressão)', () => {
+  let raiz: string;
+  let hub: Hub;
+  let manifestos: string;
+  let projetoPath: string;
+
+  before(() => {
+    raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-auditoria-budget-'));
+    manifestos = path.join(raiz, 'manifests');
+    projetoPath = path.join(raiz, 'projeto');
+    const script = path.join(raiz, 'agente.cjs');
+
+    mkdirSync(manifestos, { recursive: true });
+    mkdirSync(projetoPath, { recursive: true });
+    writeFileSync(script, SCRIPT_AGENTE, 'utf8');
+
+    writeFileSync(
+      path.join(manifestos, 'agente-x.yaml'),
+      `
+id: agente-x
+name: agente-x
+vendor: Test
+description: Agente de teste para auditoria de orçamento
+bin: node
+invoke:
+  oneShot: ["${script.replace(/\\/g, '\\\\')}"]
+  interactive: false
+detect:
+  args: ["${script.replace(/\\/g, '\\\\')}", "--version"]
+capabilities:
+  - code-edit
+session:
+  strategy: replay
+stream:
+  format: text
+  mapper: generic-text
+defaults:
+  isolation: none
+  timeoutSeconds: 30
+`,
+      'utf8',
+    );
+
+    hub = createHub({
+      home: path.join(raiz, 'home'),
+      manifestsDir: manifestos,
+      policy: {
+        ...DEFAULT_POLICY,
+        watch: { pauseOn: [], flagOn: [] },
+        // Altos o bastante para NÃO serem o gargalo deste teste — quem tem
+        // que decidir aceitar/recusar aqui é o orçamento, não o teto de
+        // concorrência (esse já tem regressão própria no achado 1 acima).
+        maxConcurrency: 50,
+        maxConcurrencyPerAgent: 50,
+      },
+    });
+  });
+
+  after(async () => {
+    await hub.shutdown();
+    try {
+      rmSync(raiz, { recursive: true, force: true });
+    } catch {
+      /* limpeza de temp é oportunista */
+    }
+  });
+
+  test('N chamadas concorrentes de delegação contra orçamento insuficiente: soma aceita nunca excede a raiz, sobra recusada com BUDGET_EXCEEDED', async () => {
+    const proj = hub.sessions.registerProject(projetoPath, 'Teste Orçamento Concorrente');
+
+    // Sessão-raiz "viva" (running), criada direto no store — não precisamos
+    // de um processo real rodando para exercitar a reserva de orçamento dos
+    // filhos, só que o pai não esteja em estado terminal.
+    const rootId = newId('ses');
+    const root: Session = {
+      id: rootId,
+      projectId: proj.id,
+      agentId: 'agente-x',
+      nativeSessionId: null,
+      rootId,
+      parentId: null,
+      depth: 0,
+      path: [`agente-x:${rootId}`],
+      state: 'running',
+      mode: 'semi',
+      isolation: 'none',
+      workdir: proj.path,
+      title: 'sessão-raiz de teste',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: null,
+      pid: null,
+    };
+    hub.store.sessions.create(root);
+
+    const LIMITE_USD = 10;
+    hub.store.budgets.ensure(rootId, { usd: LIMITE_USD, tokens: 1_000_000, seconds: 3600 });
+
+    const TOTAL_CHAMADAS = 20;
+    const PEDIDO_USD_CADA = 1;
+    // 10 cabem exatamente no teto de 10; as outras 10 têm que ser recusadas.
+    const ESPERADO_ACEITAS = LIMITE_USD / PEDIDO_USD_CADA;
+
+    const brief = {
+      agent: 'agente-x',
+      objective: 'delegação concorrente de teste de orçamento',
+      acceptanceCriteria: [],
+      constraints: [],
+      budget: { usd: PEDIDO_USD_CADA },
+      isolation: 'none' as const,
+      supervision: 'semi' as const,
+    };
+
+    // Disparadas SEM esperar uma pela outra — mesmo padrão do achado 1: como
+    // cada `start()` roda sincronamente até seu primeiro `await` (que vem
+    // DEPOIS da checagem-e-reserva de orçamento), a corrida é exercitada de
+    // forma determinística.
+    const resultados = await Promise.allSettled(
+      Array.from({ length: TOTAL_CHAMADAS }, () =>
+        hub.sessions.start({
+          projectId: proj.id,
+          agentId: 'agente-x',
+          requesterSessionId: rootId,
+          brief,
+        }),
+      ),
+    );
+
+    const aceitas = resultados.filter((r) => r.status === 'fulfilled');
+    const recusadas = resultados.filter((r) => r.status === 'rejected');
+
+    assert.equal(
+      aceitas.length,
+      ESPERADO_ACEITAS,
+      `esperava exatamente ${ESPERADO_ACEITAS} aceitas (US$${LIMITE_USD} / US$${PEDIDO_USD_CADA} cada), veio ${aceitas.length}`,
+    );
+    assert.equal(recusadas.length, TOTAL_CHAMADAS - ESPERADO_ACEITAS);
+
+    for (const r of recusadas) {
+      if (r.status === 'rejected') {
+        const err = r.reason;
+        assert.ok(isHubError(err), 'recusa por orçamento tem que ser um HubError');
+        assert.equal((err as HubError).code, 'BUDGET_EXCEEDED');
+      }
+    }
+
+    // Invariante central do achado: o que foi de fato aceito nunca pode
+    // exceder o orçamento da raiz — nem em `reserved`, nem depois de somado
+    // a `consumed`.
+    const snapshot = hub.store.budgets.get(rootId);
+    assert.ok(snapshot, 'orçamento da raiz precisa existir depois das chamadas');
+    const usadoTotal = (snapshot?.consumed.usd ?? 0) + (snapshot?.reserved.usd ?? 0);
+    assert.ok(
+      usadoTotal <= LIMITE_USD,
+      `consumed+reserved (${usadoTotal}) não pode exceder o limite da raiz (${LIMITE_USD})`,
+    );
+    assert.equal(
+      usadoTotal,
+      ESPERADO_ACEITAS * PEDIDO_USD_CADA,
+      'o total reservado tem que corresponder exatamente ao número de aceitas',
+    );
   });
 });
