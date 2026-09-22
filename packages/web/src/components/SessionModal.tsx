@@ -55,6 +55,7 @@ export function SessionModal({
   onNewProject,
 }: Props): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [projectId, setProjectId] = useState('');
   const [agent, setAgent] = useState(
     // Padrão: o primeiro agente INSTALADO. Abrir o formulário já apontando para
@@ -70,13 +71,19 @@ export function SessionModal({
 
   useEffect(() => {
     if (delegateFrom) return;
+    setProjectsFailed(false);
     hub
       .projects()
       .then(({ projects: list }) => {
         setProjects(list);
         setProjectId((current) => current || list[0]?.id || '');
       })
-      .catch(() => {});
+      .catch(() => {
+        // Erro engolido em silêncio mostrava "Nenhum projeto registrado" —
+        // indistinguível de rede/daemon fora do ar. Sinaliza a falha à parte,
+        // como em SidePanel.tsx (projectContextFailed).
+        setProjectsFailed(true);
+      });
   }, [delegateFrom]);
 
   // Instalados primeiro. A ordem alfabética punia quem só queria começar:
@@ -187,6 +194,11 @@ export function SessionModal({
                 </option>
               ))}
             </select>
+            {projectsFailed && (
+              <div className="notice warn" role="alert">
+                ⚠️ Não foi possível buscar os projetos — tente de novo mais tarde.
+              </div>
+            )}
           </div>
         )}
 

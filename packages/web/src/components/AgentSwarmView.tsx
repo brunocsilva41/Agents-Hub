@@ -8,13 +8,18 @@ interface Props {
 }
 
 export function AgentSwarmView({ agents, onNewSession }: Props): React.JSX.Element {
+  // Contagem real, calculada da sondagem de instalação de cada agente — o texto
+  // antes era fixo ("8 de 9") e ficava errado assim que a lista de agentes ou
+  // o que está instalado nesta máquina mudasse.
+  const instalados = agents.filter((a) => a.probe?.installed === true).length;
+
   return (
     <div className="swarm-container">
       <div className="swarm-header">
         <div>
           <h2 className="swarm-title">Swarm de Agentes Conectados</h2>
           <p className="swarm-subtitle">
-            8 de 9 agentes de IA integrados e prontos para orquestração autônoma e colaborativa pelo Agents-Hub.
+            {instalados} de {agents.length} agentes de IA integrados e prontos para orquestração autônoma e colaborativa pelo Agents-Hub.
           </p>
         </div>
       </div>

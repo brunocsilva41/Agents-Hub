@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import type { BudgetSummary, SessionSummary } from '@agents-hub/client';
+import { useMemo, useState } from 'react';
+import type { SessionSummary } from '@agents-hub/client';
 import { Approvals } from './components/Approvals';
 import { Composer } from './components/Composer';
 import { FlowList } from './components/FlowList';
@@ -13,8 +13,8 @@ import { CommandPalette } from './components/CommandPalette';
 import { AgentSwarmView } from './components/AgentSwarmView';
 import { DagCanvasView } from './components/DagCanvasView';
 import { TelemetryView } from './components/TelemetryView';
-import { agentColor, formatAgo, isLiveState, STATE_LABEL, hub } from './hub';
-import { useHubState } from './useHubState';
+import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
+import { useHubState, useBudget, mergeFlowEvents } from './useHubState';
 
 type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'settings';
 
@@ -24,7 +24,6 @@ export function App() {
   const [scope, setScope] = useState<'session' | 'flow'>('session');
   const [verbose, setVerbose] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [budget, setBudget] = useState<BudgetSummary | null>(null);
 
   const [modal, setModal] = useState<{ delegateFrom: { sessionId: string; agentId: string } | null; defaultAgentId?: string } | null>(null);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -46,24 +45,17 @@ export function App() {
     if (scope === 'session') return state.eventsOf(selected.id);
     const rootId = selected.rootId ?? selected.id;
     const siblings = state.sessions.filter((s) => s.rootId === rootId || s.id === rootId);
-    const merged = siblings.flatMap((s) => state.eventsOf(s.id));
-    return merged.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    // `seq` só é monotônico DENTRO de uma sessão; intercalar streams de agentes
+    // diferentes por `seq` embaralha a ordem cronológica real. `mergeFlowEvents`
+    // ordena por timestamp entre sessões (ver useHubState.ts).
+    return mergeFlowEvents(siblings.map((s) => state.eventsOf(s.id)));
   }, [selected, scope, state]);
 
-  // Carrega orçamento da sessão ativa
-  React.useEffect(() => {
-    if (!selected) {
-      setBudget(null);
-      return;
-    }
-    let cancel = false;
-    hub.budget(selected.id).then((b) => {
-      if (!cancel) setBudget(b.budget);
-    }).catch(() => {
-      if (!cancel) setBudget(null);
-    });
-    return () => { cancel = true; };
-  }, [selected?.id, state.revision]);
+  // Orçamento da sessão ativa: o ledger é chaveado pela RAIZ do fluxo, não pela
+  // sessão selecionada — buscar por `selected.id` numa sub-sessão delegada
+  // criava (ou lia) um ledger órfão, sempre zerado. `useBudget` já busca pela
+  // raiz correta.
+  const budget = useBudget(selected?.rootId ?? selected?.id ?? null, state.revision);
 
   const toggleFlow = (rootId: string) => {
     setExpanded((prev) => {

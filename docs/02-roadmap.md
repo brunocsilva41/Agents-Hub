@@ -923,3 +923,51 @@ Tudo que bloqueava a Fase 2 foi decidido no [ADR 06](decisoes/06-resiliencia-ret
 falha final termina em `failed` sem travar o fluxo, fallback é `claude → codex → opencode`,
 eventos ficam para sempre e worktrees por 7 dias, e o modelo é o default de cada CLI.
 
+## Auditoria da Web UI — 2026-09-22
+
+Seis achados de uma auditoria real do painel React (`packages/web/src`), todos corrigidos
+no mesmo lote. O pacote web não tem suíte de teste de componente (`packages/web/package.json`
+não tem script `test`, e não há `*.test.*`/`*.spec.*` em `src/`); onde não havia como escrever
+um teste automatizado, a verificação foi por leitura de código + passos manuais descritos
+abaixo, não por execução visual nesta sessão.
+
+- [x] **CRÍTICO — painel de orçamento lia o ledger errado para sessões delegadas.**
+      `App.tsx` chamava `hub.budget(selected.id)`, mas `GET /budget/:rootId`
+      (`packages/daemon/src/session-manager.ts`, método `#ledger`) é chaveado pela
+      sessão-RAIZ, não pela sessão selecionada — se a chave não existir, `#ledger` cria um
+      ledger órfão novo com orçamento cheio e consumo zero. Qualquer sub-sessão delegada
+      selecionada no painel mostrava esse ledger falso. Corrigido reusando o hook
+      `useBudget(rootId, revision)` de `useHubState.ts`, que já buscava pela raiz e nunca
+      tinha sido importado em lugar nenhum (confirmado por `Grep` antes da correção).
+      Verificação: leitura de código confirmando que `#ledger` no daemon é chaveado por
+      `rootId` e que `useBudget` já recebia esse parâmetro; sem harness de teste de
+      componente no pacote web, os passos manuais equivalentes são: `hub start` numa
+      sessão, delegar para outro agente, selecionar a sub-sessão delegada no painel e
+      confirmar que o orçamento mostrado é o mesmo da sessão-raiz (não um valor
+      zerado/cheio novo). Esses passos não foram executados nesta sessão — não há
+      ambiente de browser interativo disponível aqui.
+- [x] **MÉDIO — timeline "fluxo inteiro" embaralhava eventos entre agentes diferentes.**
+      `App.tsx` intercalava eventos de sessões distintas ordenando por `seq`, que só é
+      monotônico DENTRO de uma sessão. Corrigido trocando por `mergeFlowEvents` de
+      `useHubState.ts` (ordena por timestamp entre sessões), que já existia com o
+      comentário explicando exatamente esse problema e também nunca tinha sido importada
+      (confirmado por `Grep`).
+- [x] **MÉDIO — grafo DAG podia rotular o nó errado como "Root Coordinator".**
+      `DagCanvasView.tsx` assumia que a raiz do fluxo está sempre na última posição de
+      `flow.sessions` (ordenado por `updatedAt` decrescente) — falha quando a raiz
+      continua ativa depois de uma sub-sessão já ter terminado. Corrigido com
+      `flow.sessions.find((s) => s.id === flow.rootId) ?? ...`, mesmo padrão já usado em
+      `useHubState.ts` (`flows`, linha ~210).
+- [x] **BAIXO — falha silenciosa ao carregar projetos no modal de nova sessão.**
+      `SessionModal.tsx` engolia o erro de `hub.projects()` com `.catch(() => {})`, e a UI
+      mostrava "Nenhum projeto registrado" indistinguível de rede/daemon fora do ar.
+      Corrigido com um estado `projectsFailed` e aviso explícito, mesmo padrão de
+      `projectContextFailed` em `SidePanel.tsx`.
+- [x] **BAIXO — chave de API em texto plano.** `SettingsView.tsx` tinha o campo
+      `#api-key` como `type="text"`. Corrigido para `type="password"` com um botão de
+      mostrar/ocultar local (`mostrarChaveApi`), mantendo o aviso já existente sobre o
+      arquivo versionado.
+- [x] **BAIXO — texto estático incorreto na visão Swarm.** `AgentSwarmView.tsx` tinha
+      "8 de 9 agentes..." fixo no JSX. Corrigido para uma contagem real a partir de
+      `agents.filter((a) => a.probe?.installed === true).length` sobre `agents.length`.
+

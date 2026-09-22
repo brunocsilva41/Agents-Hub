@@ -69,6 +69,7 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
   const [sujo, setSujo] = useState(false);
   const [novaChave, setNovaChave] = useState('');
   const [novoValor, setNovoValor] = useState('');
+  const [mostrarChaveApi, setMostrarChaveApi] = useState(false);
   const action = useAction();
 
   // Sem projeto não há onde guardar: a tela precisa dizer isso, não fingir
@@ -358,14 +359,25 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
 
               <div className="field">
                 <label htmlFor="api-key">Chave</label>
-                <input
-                  id="api-key"
-                  type="text"
-                  disabled={semProjeto}
-                  placeholder="ollama"
-                  value={envDoAgente['OPENAI_API_KEY'] ?? ''}
-                  onChange={(e) => mudarEnv(agenteSelecionado, 'OPENAI_API_KEY', e.target.value)}
-                />
+                <div className="budget-input-wrap">
+                  <input
+                    id="api-key"
+                    type={mostrarChaveApi ? 'text' : 'password'}
+                    disabled={semProjeto}
+                    placeholder="ollama"
+                    value={envDoAgente['OPENAI_API_KEY'] ?? ''}
+                    onChange={(e) => mudarEnv(agenteSelecionado, 'OPENAI_API_KEY', e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={semProjeto}
+                    onClick={() => setMostrarChaveApi((v) => !v)}
+                    title={mostrarChaveApi ? 'Ocultar chave' : 'Mostrar chave'}
+                  >
+                    {mostrarChaveApi ? '🙈' : '👁️'}
+                  </button>
+                </div>
                 <div className="help help-warn">
                   ⚠️ Vai para <code>.agents-hub/config.yaml</code>, que é <strong>versionado junto
                   do código</strong>. Uma chave de API real aqui vaza para qualquer pessoa que

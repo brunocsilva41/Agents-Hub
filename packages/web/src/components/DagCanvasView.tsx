@@ -37,7 +37,13 @@ export function DagCanvasView({
 
       <div className="dag-flows-list">
         {flows.map((flow) => {
-          const root = flow.sessions[flow.sessions.length - 1] ?? flow.sessions[0];
+          // `flow.sessions` vem ordenado por `updatedAt` decrescente — a raiz não
+          // fica necessariamente na última posição se ela continuar ativa depois
+          // de uma sub-sessão já ter terminado. Mesmo padrão de useHubState.ts.
+          const root =
+            flow.sessions.find((s) => s.id === flow.rootId) ??
+            flow.sessions[flow.sessions.length - 1] ??
+            flow.sessions[0];
           if (!root) return null;
           const isSelected = selectedId === root.id;
 
