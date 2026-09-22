@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+const realExecFileAsync = promisify(execFile);
 
 export interface ResolvedBin {
   path: string;
@@ -16,13 +16,36 @@ export interface ResolvedBin {
   needsShell: boolean;
 }
 
+/**
+ * Dependências injetáveis de `resolveBin`/`lookup`, isoladas só para permitir
+ * testar a lógica de preferência entre candidatos e o fallback sem depender
+ * de `where`/`which` ou do disco reais. Em produção, `resolveBin` sempre usa
+ * `defaultLookupDeps` — nenhum call site precisa (ou deve) passar `deps`.
+ */
+export interface LookupDeps {
+  execFileAsync: (
+    file: string,
+    args: readonly string[],
+    options: { windowsHide: boolean },
+  ) => Promise<{ stdout: string; stderr: string }>;
+  existsSync: (path: string) => boolean;
+}
+
+export const defaultLookupDeps: LookupDeps = {
+  execFileAsync: realExecFileAsync as LookupDeps['execFileAsync'],
+  existsSync,
+};
+
 const cache = new Map<string, ResolvedBin | null>();
 
-export async function resolveBin(bin: string): Promise<ResolvedBin | null> {
+export async function resolveBin(
+  bin: string,
+  deps: LookupDeps = defaultLookupDeps,
+): Promise<ResolvedBin | null> {
   const cached = cache.get(bin);
   if (cached !== undefined) return cached;
 
-  const resolved = await lookup(bin);
+  const resolved = await lookup(bin, deps);
   cache.set(bin, resolved);
   return resolved;
 }
@@ -31,17 +54,17 @@ export function clearBinCache(): void {
   cache.clear();
 }
 
-async function lookup(bin: string): Promise<ResolvedBin | null> {
+async function lookup(bin: string, deps: LookupDeps): Promise<ResolvedBin | null> {
   const isWindows = process.platform === 'win32';
   const finder = isWindows ? 'where' : 'which';
 
   try {
-    const { stdout } = await execFileAsync(finder, [bin], { windowsHide: true });
+    const { stdout } = await deps.execFileAsync(finder, [bin], { windowsHide: true });
     const candidates = stdout
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
-    if (candidates.length === 0) return lookupFallback(bin, isWindows);
+    if (candidates.length === 0) return lookupFallback(bin, isWindows, deps);
 
     if (!isWindows) {
       return { path: candidates[0] as string, needsShell: false };
@@ -57,11 +80,15 @@ async function lookup(bin: string): Promise<ResolvedBin | null> {
 
     return { path: best, needsShell: /\.(cmd|bat)$/i.test(best) };
   } catch {
-    return lookupFallback(bin, isWindows);
+    return lookupFallback(bin, isWindows, deps);
   }
 }
 
-function lookupFallback(bin: string, isWindows: boolean): ResolvedBin | null {
+function lookupFallback(
+  bin: string,
+  isWindows: boolean,
+  deps: LookupDeps,
+): ResolvedBin | null {
   if (!isWindows) return null;
   const fallbacks = [
     path.join(process.env['LOCALAPPDATA'] ?? '', 'agy', 'bin', `${bin}.exe`),
@@ -71,7 +98,7 @@ function lookupFallback(bin: string, isWindows: boolean): ResolvedBin | null {
     path.join(process.env['APPDATA'] ?? '', 'npm', `${bin}.cmd`),
   ];
   for (const fb of fallbacks) {
-    if (existsSync(fb)) {
+    if (deps.existsSync(fb)) {
       return { path: fb, needsShell: /\.(cmd|bat)$/i.test(fb) };
     }
   }

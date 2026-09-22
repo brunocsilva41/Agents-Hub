@@ -258,6 +258,24 @@ errados**, dois deles de forma que quebraria a invocação:
       main` — o Hub pausou a sessão em `waiting_approval` ANTES da execução
       (`hub approve`/`hub deny`), `deny` confirmado, `origin/main` confirmado
       intocado depois. Mesmo critério já usado para o Claude
+- [x] **`resolveBin`/`lookup` ganharam teste automatizado** (2026-09-22): até aqui,
+      a camada que causou os dois incidentes acima — `where <bin>` devolvendo
+      primeiro o shim sem extensão, e o quoting do `codex.cmd` — não tinha
+      NENHUM teste próprio; `bin-resolver.test.ts` cobria só `quoteForShell`.
+      `resolveBin`/`lookup` chamavam `execFileAsync`/`existsSync` direto, sem
+      ponto de injeção, então `packages/adapters/src/bin-resolver.ts` ganhou um
+      `LookupDeps` (execFileAsync + existsSync) opcional com default de
+      produção inalterado — nenhum call site existente precisou mudar.
+      Cobertura nova em `packages/adapters/src/bin-resolver-lookup.test.ts`
+      (15 testes): preferência de ordem `.exe` > `.cmd`/`.bat` > primeira linha
+      crua entre múltiplos candidatos do Windows; ramo POSIX (`which`, sem
+      lógica de extensão); cache por `Map` (segunda chamada não rechama
+      `execFileAsync`) e `clearBinCache()` limpando de fato; fallback dos 5
+      caminhos hardcoded na ordem certa quando `where`/`which` falha ou
+      devolve vazio. Confirmado que os testes não são de fachada: revertendo a
+      ordem de preferência (`.cmd` antes de `.exe`) no `dist/` compilado, os 2
+      testes de ordem falham como esperado antes de reconstruir. Build limpo e
+      suíte inteira em 380 testes (365 anteriores + 15 novos) verde
 - [ ] Gate pré-execução para os demais agentes
 - [ ] TUI (a Web UI cobriu a necessidade; virou conveniência, não bloqueio)
 
@@ -360,10 +378,19 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
       Onde não achou equivalente nativo (mimo em supervised/semi, kimi em
       supervised, opencode nos três), o manifesto deixou `modeArgs` vazio e
       documentou a ausência em `caveats`, em vez de inventar flag
-- [ ] **`session.idFrom` é declarado no schema e lido por ninguém**: Cursor e MiMo
-      prometem `session.strategy: native` que o mapper genérico nunca cumpre — todo
-      turno seguinte cai em replay. Ou o adapter passa a ler `idFrom`, ou a promessa
-      sai do manifesto
+- [x] **`session.idFrom` removido do schema e dos 9 manifestos** (2026-09-22): era
+      dead code puro — nenhum código lia o campo; a extração de id nativo, quando
+      acontece, já é feita pelo mapper dedicado de cada agente
+      (`mapped.nativeSessionId` em `packages/adapters/src/process-adapter.ts`), nunca
+      por `idFrom`. Em vez de implementar a leitura, a promessa foi removida do
+      schema Zod (`packages/adapters/src/types.ts`) e de `claude.yaml`, `codex.yaml`,
+      `antigravity.yaml`, `copilot.yaml`, `kimi.yaml`, `opencode.yaml`,
+      `openclaude.yaml`, `cursor.yaml` e `mimo.yaml`. Build limpo e suíte inteira
+      (365 testes) verde depois da remoção — confirma que ninguém dependia do campo.
+      **Não confundir com o item de mapper dedicado do Cursor/MiMo (linhas 200-201),
+      que continua aberto separadamente** — aquele é sobre extrair id nativo de
+      verdade via mapper; este era sobre um campo de schema que nunca foi lido por
+      nenhum mecanismo
 - [~] **`openclaude` como cidadão pleno**: entrou em `MCP_TARGETS`
       (`packages/cli/src/mcp-install.ts`), `HOOK_TARGETS`
       (`packages/cli/src/hooks-install.ts`) e nas cadeias de fallback por

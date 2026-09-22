@@ -51,7 +51,6 @@ session:
   # `GET /api/session/{id}` recupera sessão criada em outro processo do servidor
   # (confirmado contra o binário real), então o id nativo é handle durável.
   strategy: native
-  idFrom: "$.data.sessionID"
 
 stream:
   format: text

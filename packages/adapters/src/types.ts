@@ -68,8 +68,6 @@ export const AgentManifestSchema = z.object({
   session: z
     .object({
       strategy: z.enum(['native', 'replay', 'none']).default('replay'),
-      /** Caminho estilo `$.session_id` dentro do evento bruto que traz o id nativo. */
-      idFrom: z.string().optional(),
     })
     .default({}),
 
@@ -86,8 +84,7 @@ export const AgentManifestSchema = z.object({
   auth: z
     .object({
       /** `inherit`: o Hub nunca toca em segredo, usa o login do próprio CLI (ADR 03.1). */
-      mode: z.enum(['inherit', 'env']).default('inherit'),
-      envKeys: z.array(z.string()).default([]),
+      mode: z.literal('inherit').default('inherit'),
       /** Dica exibida no `hub doctor` quando o agente não está autenticado. */
       loginHint: z.string().default(''),
     })
