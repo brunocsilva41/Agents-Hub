@@ -1,5 +1,11 @@
 import path from 'node:path';
-import type { GuardedAction } from '@agents-hub/core';
+import type {
+  GuardedAction,
+  PolicyEngine,
+  RiskLevel,
+  SessionMode,
+  WatchPolicy,
+} from '@agents-hub/core';
 import type { MappedEvent } from './types.js';
 
 /**
@@ -53,4 +59,54 @@ export function describeAction(action: GuardedAction): string {
     case 'budget.overrun':
       return action.detail;
   }
+}
+
+interface VeredictoDeAcao {
+  action: GuardedAction;
+  risk: RiskLevel;
+  reason: string;
+}
+
+export interface VigilanciaVeredito {
+  outcome: 'ok' | 'flagged' | 'paused';
+  /** Ações flagged ANTES da que pausou (ou todas, se não pausou) — na ordem em que ocorreram. */
+  flagged: VeredictoDeAcao[];
+  /** Presente só quando `outcome === 'paused'`. */
+  pausedBy?: VeredictoDeAcao;
+}
+
+/**
+ * Decide o veredito de vigilância reativa para um evento — extraído de
+ * `session-manager.ts#watch` (dívida arquitetural do arquivo grande).
+ *
+ * Puramente decisão: não emite evento nem abre aprovação (isso continua no
+ * daemon, que é quem tem `store`/`bus`). Preserva o comportamento original —
+ * short-circuit na primeira ação que bate `pauseOn` (ações seguintes nem são
+ * classificadas), mas as ações ANTERIORES que bateram `flagOn` continuam
+ * presentes em `flagged`, na mesma ordem, para o chamador emitir antes de
+ * tratar a pausa.
+ */
+export function avaliarVigilancia(
+  mapped: MappedEvent,
+  workdir: string,
+  mode: SessionMode,
+  engine: PolicyEngine,
+  watch: WatchPolicy,
+): VigilanciaVeredito {
+  const actions = guardedActionsOf(mapped, workdir);
+  const flagged: VeredictoDeAcao[] = [];
+
+  for (const action of actions) {
+    const { risk, reason } = engine.classify(action, { workdir, mode });
+
+    if (watch.pauseOn.includes(risk)) {
+      return { outcome: 'paused', flagged, pausedBy: { action, risk, reason } };
+    }
+
+    if (watch.flagOn.includes(risk)) {
+      flagged.push({ action, risk, reason });
+    }
+  }
+
+  return { outcome: flagged.length > 0 ? 'flagged' : 'ok', flagged };
 }

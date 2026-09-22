@@ -10,7 +10,12 @@ export {
   TOLERANCIA_RELOGIO_MS,
 } from './process-tree.js';
 export { ProcessAgentAdapter } from './process-adapter.js';
-export { guardedActionsOf, describeAction } from './guarded-actions.js';
+export {
+  guardedActionsOf,
+  describeAction,
+  avaliarVigilancia,
+  type VigilanciaVeredito,
+} from './guarded-actions.js';
 export { AgentRegistry, loadManifestDir, loadManifestFile } from './registry.js';
 export { resolveMapper, listMappers } from './mappers/index.js';
 export {

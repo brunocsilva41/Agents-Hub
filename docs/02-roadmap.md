@@ -1091,10 +1091,39 @@ nada aqui seja tratado como acidente na próxima vistoria.
       válido; fica registrado porque é exatamente o tipo de falso-negativo
       que torna um teste inútil se não for percebido. `session-manager.ts`
       caiu para 2632 linhas. Suíte (420 testes, +7) verde em duas rodadas.
-      As 3 fatias restantes (vigilância, revisão cruzada, e o núcleo de
-      sessão/execução que não é extraível) continuam mapeadas, não atacadas
-      — a próxima é mais arriscada (toca estado: `#requestApproval`/`#emit`,
-      ou orquestra um adapter real)
+      **Sexta fatia, mesma rodada**: vigilância reativa (`#watch`) — a
+      DECISÃO (classificar risco de cada `GuardedAction` contra
+      `pauseOn`/`flagOn`) foi para `avaliarVigilancia`, nova função em
+      `packages/adapters/src/guarded-actions.ts` (ao lado de
+      `guardedActionsOf`/`describeAction`, que ela já usa internamente).
+      Os EFEITOS (`#emit` do alerta, `#requestApproval` da pausa) continuam
+      em `session-manager.ts#watch`, porque dependem de `store`/`bus` — não
+      dava para levar isso para `adapters` sem violar a regra de camadas.
+      Preservado byte a byte o comportamento original, inclusive o
+      short-circuit (a primeira ação que bate `pauseOn` interrompe a
+      avaliação — ações seguintes nem são classificadas) e a ORDEM dos
+      efeitos colaterais (alertas de ações anteriores são emitidos antes da
+      aprovação da ação que pausou, nunca depois). Esta é a fatia de maior
+      sensibilidade de segurança da rodada — é o mecanismo que decide se uma
+      ação `irreversible`/`escalate` pausa a sessão de verdade, e a mesma
+      auditoria que achou o bug crítico de `mergePolicyLayer` nesta esteira
+      motivou o cuidado extra de teste direto. 6 testes novos em
+      `guarded-actions.test.ts`: ação não vigiada é `ok`; escrita em `.env`
+      pausa (`irreversible`, `pauseOn` padrão); ação comum dentro do workdir
+      não pausa nem alerta; `watch` customizado com `flagOn` alerta sem
+      pausar; short-circuit confirmado (duas escritas, a política pausa em
+      `write`, e a segunda nunca é avaliada); e a ordem exata dos efeitos
+      (uma ação `flagged` antes de uma `paused` aparece em `flagged`, não é
+      descartada pelo short-circuit). `session-manager.ts` caiu para 2630
+      linhas — pouco, de propósito: só a decisão saiu, os efeitos (que são a
+      maior parte do método) ficaram, porque tocam `store`/`bus` direto.
+      Suíte (426 testes, +6) verde em duas rodadas.
+      As 2 fatias restantes (revisão cruzada, e o núcleo de sessão/execução
+      que não é extraível) continuam mapeadas, não atacadas — revisão
+      cruzada é a mais arriscada (orquestra um agente real, cobra
+      orçamento, aplica o gate do Codex — ver ressalva da auditoria
+      original sobre resolver `#summarize` primeiro, usado por ela e por
+      `#settle`, antes de extrair)
 - [ ] **83 blocos `catch`** em `packages/*/src` — separar os que tratam dos que engolem
 - [x] **Concorrência sob corrida**: reserva de orçamento (`BudgetLedger.reserve`/
       `settle`) não tinha teste de regressão — resolvido em 2026-09-22. Uma

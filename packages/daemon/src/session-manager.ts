@@ -53,8 +53,8 @@ import {
   imagemPareceEsperada,
   horarioDeCriacaoDoProcesso,
   pidPareceReciclado,
-  guardedActionsOf,
   describeAction,
+  avaliarVigilancia,
 } from '@agents-hub/adapters';
 import type {
   AgentRegistry,
@@ -2013,47 +2013,45 @@ export class SessionManager {
    * Retorna 'paused' quando a sessão foi interrompida e uma aprovação foi
    * aberta — o chamador precisa matar a run.
    */
+  /**
+   * Vigilância reativa. Decisão em `avaliarVigilancia`
+   * (`packages/adapters/src/guarded-actions.ts`) — aqui só os efeitos
+   * (emitir alerta, abrir aprovação), que dependem de `store`/`bus`.
+   */
   #watch(session: Session, task: Task, mapped: MappedEvent): 'ok' | 'flagged' | 'paused' {
-    const actions = guardedActionsOf(mapped, session.workdir);
-    if (actions.length === 0) return 'ok';
-
     const engine = this.policyFor(session);
     const watch = watchForMode(this.config.policy.watch, session.mode);
+    const veredito = avaliarVigilancia(mapped, session.workdir, session.mode, engine, watch);
 
-    let flagged = false;
-    for (const action of actions) {
-      const { risk, reason } = engine.classify(action, {
-        workdir: session.workdir,
-        mode: session.mode,
+    for (const f of veredito.flagged) {
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'log',
+        payload: {
+          level: 'warn',
+          text: `ação de risco "${f.risk}": ${describeAction(f.action)} — ${f.reason}`,
+        },
       });
-
-      if (watch.pauseOn.includes(risk)) {
-        this.#requestApproval({
-          session,
-          taskId: task.id,
-          risk,
-          action: describeAction(action),
-          detail: { kind: 'watch', reason, eventType: mapped.type, alreadyExecuted: true },
-        });
-        return 'paused';
-      }
-
-      if (watch.flagOn.includes(risk)) {
-        this.#emit({
-          sessionId: session.id,
-          taskId: task.id,
-          agentId: session.agentId,
-          type: 'log',
-          payload: {
-            level: 'warn',
-            text: `ação de risco "${risk}": ${describeAction(action)} — ${reason}`,
-          },
-        });
-        flagged = true;
-      }
     }
 
-    return flagged ? 'flagged' : 'ok';
+    if (veredito.outcome === 'paused' && veredito.pausedBy) {
+      this.#requestApproval({
+        session,
+        taskId: task.id,
+        risk: veredito.pausedBy.risk,
+        action: describeAction(veredito.pausedBy.action),
+        detail: {
+          kind: 'watch',
+          reason: veredito.pausedBy.reason,
+          eventType: mapped.type,
+          alreadyExecuted: true,
+        },
+      });
+    }
+
+    return veredito.outcome;
   }
 
   /**
