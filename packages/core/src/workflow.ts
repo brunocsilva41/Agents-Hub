@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { HubError } from './errors.js';
+import { HubError, isHubError } from './errors.js';
 import { BriefSchema, type Brief, type UpstreamResult } from './brief.js';
+import { sleep as defaultSleep } from './resilience.js';
 
 export const WorkflowStepSchema = z.object({
   id: z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'id do step deve ser alfanumérico'),
@@ -199,6 +200,14 @@ export interface WorkflowRunDeps {
   }>;
 
   report?(event: WorkflowRunEvent): void;
+
+  /**
+   * Espera `ms` milissegundos entre tentativas de `deps.start` quando a
+   * anterior bateu em `CONCURRENCY_EXCEEDED`. Injetável para que o teste
+   * controle o tempo sem `setTimeout` real; o padrão usa o `sleep` de
+   * `resilience.ts` (timer de verdade).
+   */
+  sleep?(ms: number): Promise<void>;
 }
 
 export interface WorkflowRunOptions {
@@ -208,6 +217,24 @@ export interface WorkflowRunOptions {
    * laço, repartindo o saldo e parando de despachar quando ele acaba.
    */
   budgetUsd?: number | undefined;
+
+  /**
+   * Quantas vezes tentar de novo um `deps.start` que recusou com
+   * `CONCURRENCY_EXCEEDED` antes de desistir e marcar o passo como `failed`.
+   * A vaga de concorrência é reservada de forma síncrona no SessionManager —
+   * dois passos do MESMO lote que delegam ao MESMO agente competem por ela, e
+   * o segundo a chegar recebe esse erro mesmo sem nenhuma tarefa ter rodado
+   * ainda. É transitório: a vaga libera quando o outro passo do lote termina.
+   * Padrão: 5 tentativas adicionais.
+   */
+  concurrencyRetryMaxAttempts?: number;
+
+  /**
+   * Base do backoff (ms) entre tentativas de `CONCURRENCY_EXCEEDED`, dobrando
+   * a cada tentativa (mesmo formato de `resilience.ts#nextStep`). Padrão:
+   * 200ms.
+   */
+  concurrencyRetryBackoffMs?: number;
 }
 
 export async function runWorkflow(
@@ -219,6 +246,9 @@ export async function runWorkflow(
   const stepMap = new Map(workflow.steps.map((s) => [s.id, s]));
   const results = new Map<string, WorkflowStepResult>();
   const report = deps.report ?? ((): void => {});
+  const sleep = deps.sleep ?? defaultSleep;
+  const maxTentativasConcorrencia = options.concurrencyRetryMaxAttempts ?? 5;
+  const backoffBaseConcorrencia = options.concurrencyRetryBackoffMs ?? 200;
   let gastoTotal = 0;
 
   const registrar = (r: WorkflowStepResult): WorkflowStepResult => {
@@ -306,24 +336,45 @@ export async function runWorkflow(
 
         const upstream = upstreamDe(step, results);
 
-        let ids: { sessionId: string; taskId: string };
-        try {
-          ids = await deps.start({ step, upstream, capUsd: teto });
-        } catch (err) {
-          report({
-            kind: 'settled',
-            step: registrar({
-              stepId: step.id,
-              agent: step.agent,
-              state: 'failed',
-              sessionId: null,
-              taskId: null,
-              summary: null,
-              detail: `não foi possível iniciar: ${(err as Error).message}`,
-              usd: 0,
-            }),
-          });
-          return;
+        // `CONCURRENCY_EXCEEDED` nasce ANTES de qualquer tarefa existir: é a
+        // reserva de vaga do SessionManager, síncrona, disputada por passos
+        // do MESMO lote que delegam ao MESMO agente. Diferente de um erro
+        // definitivo (agente inexistente, política negada), a vaga libera
+        // sozinha quando o outro passo termina — então vale esperar e tentar
+        // de novo, com um teto para não girar para sempre se a vaga nunca
+        // vier (ex.: concorrência ocupada por processo externo).
+        let ids: { sessionId: string; taskId: string } | null = null;
+        let tentativa = 0;
+
+        while (ids === null) {
+          try {
+            ids = await deps.start({ step, upstream, capUsd: teto });
+          } catch (err) {
+            const éConcorrencia = isHubError(err) && err.code === 'CONCURRENCY_EXCEEDED';
+            if (!éConcorrencia || tentativa >= maxTentativasConcorrencia) {
+              const detail = éConcorrencia
+                ? `esgotou tentativas de concorrência (${tentativa + 1}/${maxTentativasConcorrencia + 1}): ${(err as Error).message}`
+                : `não foi possível iniciar: ${(err as Error).message}`;
+              report({
+                kind: 'settled',
+                step: registrar({
+                  stepId: step.id,
+                  agent: step.agent,
+                  state: 'failed',
+                  sessionId: null,
+                  taskId: null,
+                  summary: null,
+                  detail,
+                  usd: 0,
+                }),
+              });
+              return;
+            }
+
+            const backoffMs = backoffBaseConcorrencia * 2 ** tentativa;
+            tentativa += 1;
+            await sleep(backoffMs);
+          }
         }
 
         report({

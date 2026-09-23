@@ -649,6 +649,81 @@ repositório do zero antes de aceitar mudança.
   implementado** — mesma pendência registrada em 2026-09-19, reconfirmada,
   não é achado novo
 
+### Auditoria do motor de workflows (re-auditoria) — 2026-09-23
+
+Reauditoria confirmou `runWorkflow` (`packages/core/src/workflow.ts`)
+majoritariamente correto: lote inteiro espera estado terminal antes do
+próximo começar, fan-in real via `upstream`, pulo propagado
+transitivamente, `--budget-usd` lido e repartido, aprovação
+pendente/timeout como desfechos distintos — nada disso regrediu. Um achado
+novo, específico:
+
+- [x] **`CONCURRENCY_EXCEEDED` num lote paralelo era tratado como falha
+      permanente, sem retry (ALTO)**. Cenário: dois ou mais passos do MESMO
+      lote (`Promise.all` em `runWorkflow`) delegam ao MESMO agente, e a
+      política efetiva tem `maxConcurrencyPerAgent` baixo (padrão 2, ou 1 se
+      configurado). `SessionManager#start` (chamado como `deps.start`)
+      reserva a vaga de concorrência de forma SÍNCRONA — ver a correção do
+      TOCTOU documentada acima (`#reserveSlot`/`#releaseSlot`) — e o segundo
+      `start()` concorrente para o mesmo agente lança `CONCURRENCY_EXCEEDED`
+      (`HubError`) IMEDIATAMENTE, antes de qualquer tarefa existir. Esse
+      erro caía no `catch` de `deps.start` dentro de `runWorkflow` e o passo
+      era marcado `failed` PERMANENTEMENTE — mesmo tratamento dado a um erro
+      genuinamente definitivo (agente inexistente, política negada). Mas
+      `CONCURRENCY_EXCEEDED` é transitório por natureza: a vaga libera assim
+      que o OUTRO passo do mesmo lote (que já estava rodando) termina,
+      tipicamente em segundos. Como a condição nasce ANTES de qualquer
+      tarefa existir (na reserva de vaga, não na execução de uma tentativa
+      já iniciada), ela nunca entrava no pipeline de resiliência
+      (`resilience.ts`, `nextStep`/`classifyOutcome`), que só atua depois
+      que uma tentativa de tarefa já está rodando.
+
+      **Mecanismo escolhido**: retry com backoff exponencial, dentro do
+      próprio `runWorkflow`, sem tocar `SessionManager` nem a CLI (fora do
+      escopo desta correção). Quando `deps.start` falha com
+      `isHubError(err) && err.code === 'CONCURRENCY_EXCEEDED'`, o laço espera
+      via `deps.sleep` (nova dependência injetável de `WorkflowRunDeps`,
+      padrão `sleep` de `resilience.ts` — timer real; testes injetam uma
+      versão sem espera de verdade, controlando tempo e contagem) e chama
+      `deps.start` de novo, com backoff `concurrencyRetryBackoffMs * 2^tentativa`
+      (padrão base 200ms, dobrando a cada tentativa — mesmo formato de
+      `resilience.ts#nextStep`). Teto de tentativas
+      (`WorkflowRunOptions.concurrencyRetryMaxAttempts`, padrão 5 tentativas
+      ADICIONAIS) evita loop infinito se a vaga nunca liberar por algum
+      motivo real (ex.: concorrência ocupada por processo externo); ao
+      esgotar, o passo é marcado `failed` com mensagem distinta —
+      "esgotou tentativas de concorrência" — em vez da mensagem genérica
+      "não foi possível iniciar", para que quem lê o relatório do workflow
+      saiba que não foi um erro definitivo do agente. Qualquer outro erro
+      de `deps.start` (inclusive outros `HubError` com código diferente)
+      continua falhando o passo de imediato, sem retry — comportamento
+      antigo preservado.
+
+      2 testes novos em `packages/core/src/workflow.test.ts`: (a)
+      `CONCURRENCY_EXCEEDED` na primeira chamada, sucesso na segunda —
+      confirma que o passo termina `completed`, não `failed`; (b) a vaga
+      nunca libera — confirma esgotamento das tentativas configuradas
+      (`concurrencyRetryMaxAttempts: 3` no teste, 4 chamadas totais, 3
+      esperas) e o passo termina `failed` com a mensagem distinta. Os dois
+      testes foram confirmados como **falhando sem a correção** (revertida
+      temporariamente com `git stash`, restaurada depois — sem
+      `git stash pop`/stash bare, seguindo o protocolo deste worktree
+      compartilhado). Build limpo, suíte inteira verde (426 testes, mais os
+      2 novos = 428 no total do repositório; 14/14 em `workflow.test.ts`).
+
+      **Escopo desta correção, e o que ficou fora dele, de propósito**: só
+      `packages/core/src/workflow.ts` e `packages/core/src/workflow.test.ts`
+      foram tocados. `packages/daemon/src/session-manager.ts` (dono da
+      reserva de vaga em si) e `packages/cli/src/workflow-cmd.ts` (quem
+      chamaria `runWorkflow` com `deps.sleep` real em produção) não foram
+      tocados — a correção resolve o problema inteiro no nível do motor de
+      workflows (a política de retry vive em `workflow.ts`, testável sem
+      processo real), mas quem constrói o `WorkflowRunDeps` de verdade na
+      CLI precisa, em algum momento, passar (ou aceitar o padrão de)
+      `deps.sleep` — não é urgente porque o padrão já usa timer real, mas
+      fica registrado que a CLI não foi auditada/tocada para confirmar que
+      não sobrescreve `sleep` com algo incompatível.
+
 ### Restante
 
 Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.

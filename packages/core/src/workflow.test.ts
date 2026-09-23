@@ -7,6 +7,7 @@ import {
   type WorkflowRunDeps,
 } from './workflow.js';
 import type { UpstreamResult } from './brief.js';
+import { HubError } from './errors.js';
 
 describe('Workflow DAG Validation & Execution Ordering', () => {
   test('valida workflow linear simples e ordena topologicamente', () => {
@@ -285,5 +286,65 @@ describe('execução do workflow', () => {
     assert.equal(res.steps[0]!.state, 'failed');
     assert.match(res.steps[0]!.detail!, /AGENT_NOT_FOUND/);
     assert.equal(res.steps[1]!.state, 'completed');
+  });
+
+  test('CONCURRENCY_EXCEEDED na primeira chamada de deps.start é transitório: reservou de novo e o passo termina completed', async () => {
+    const wf = parseWorkflow({
+      name: 'Concorrência libera',
+      steps: [{ id: 'p', agent: 'codex', objective: 'Passo que disputa vaga de concorrência' }],
+    });
+    const { deps } = fabrica();
+    const original = deps.start;
+    let chamadas = 0;
+    const sleeps: number[] = [];
+
+    deps.start = async (input) => {
+      chamadas += 1;
+      if (chamadas === 1) {
+        throw new HubError('CONCURRENCY_EXCEEDED', 'vaga ocupada por outro passo do lote');
+      }
+      return original(input);
+    };
+    deps.sleep = async (ms) => {
+      sleeps.push(ms);
+      // sem espera real: o teste controla o tempo, não o relógio.
+    };
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps);
+
+    assert.equal(chamadas, 2, 'deps.start deveria ter sido chamado de novo depois da primeira recusa');
+    assert.equal(sleeps.length, 1, 'deveria ter esperado uma vez entre as duas tentativas');
+    assert.equal(res.steps[0]!.state, 'completed');
+    assert.equal(res.steps[0]!.detail, null);
+  });
+
+  test('CONCURRENCY_EXCEEDED que nunca libera esgota as tentativas e falha com mensagem distinta', async () => {
+    const wf = parseWorkflow({
+      name: 'Concorrência nunca libera',
+      steps: [{ id: 'p', agent: 'codex', objective: 'Passo que nunca ganha a vaga' }],
+    });
+    const { deps } = fabrica();
+    let chamadas = 0;
+    const sleeps: number[] = [];
+
+    deps.start = async () => {
+      chamadas += 1;
+      throw new HubError('CONCURRENCY_EXCEEDED', 'vaga ocupada — nunca libera neste teste');
+    };
+    deps.sleep = async (ms) => {
+      sleeps.push(ms);
+    };
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps, {
+      concurrencyRetryMaxAttempts: 3,
+      concurrencyRetryBackoffMs: 10,
+    });
+
+    // 1 tentativa inicial + 3 retries = 4 chamadas, 3 esperas entre elas.
+    assert.equal(chamadas, 4);
+    assert.equal(sleeps.length, 3);
+    assert.equal(res.steps[0]!.state, 'failed');
+    assert.match(res.steps[0]!.detail!, /esgotou tentativas de concorrência/);
+    assert.doesNotMatch(res.steps[0]!.detail!, /não foi possível iniciar/);
   });
 });
