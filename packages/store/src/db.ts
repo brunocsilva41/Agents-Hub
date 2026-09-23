@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { HubError } from '@agents-hub/core';
 import { MIGRATIONS } from './migrations.js';
 
 export type Db = DatabaseSync;
@@ -37,11 +38,33 @@ export function migrate(db: Db): void {
     applied_at TEXT NOT NULL
   );`);
 
-  const applied = new Set(
-    (db.prepare('SELECT version FROM migrations').all() as Array<{ version: number }>).map(
-      (r) => r.version,
-    ),
-  );
+  const appliedRows = db.prepare('SELECT version FROM migrations').all() as Array<{
+    version: number;
+  }>;
+  const applied = new Set(appliedRows.map((r) => r.version));
+
+  // Guarda contra downgrade silencioso: se o banco já tem uma migração com
+  // versão maior que qualquer uma que este código conhece, ele foi criado (ou
+  // atualizado) por uma versão MAIS NOVA do Hub. `migrate()` só sabe rodar o
+  // que está em `MIGRATIONS` — se não houver nada pendente nesse conjunto, ele
+  // retornaria em silêncio e o código antigo seguiria lendo/escrevendo dados
+  // de um schema que não entende. As 4 migrações de hoje são todas aditivas
+  // (ALTER TABLE ADD COLUMN / CREATE INDEX), então isso não corrompe nada
+  // ainda — mas essa garantia não vale para o dia em que uma migração futura
+  // mudar semântica em vez de só adicionar.
+  const maxKnownVersion = Math.max(0, ...MIGRATIONS.map((m) => m.version));
+  const maxAppliedVersion = Math.max(0, ...appliedRows.map((r) => r.version));
+  if (maxAppliedVersion > maxKnownVersion) {
+    throw new HubError(
+      'HUB_CONFIG_INVALID',
+      `Este banco tem a migração ${maxAppliedVersion} aplicada, mas esta versão do Hub só ` +
+        `conhece até a migração ${maxKnownVersion}. O banco foi criado (ou atualizado) por uma ` +
+        `versão mais nova do Hub. Atualize o Hub para a versão mais recente antes de abrir este ` +
+        `arquivo — abrir com um Hub mais antigo arriscaria interpretar mal dados de um schema ` +
+        `que ele não conhece.`,
+      { maxAppliedVersion, maxKnownVersion },
+    );
+  }
 
   for (const migration of MIGRATIONS) {
     if (applied.has(migration.version)) continue;
