@@ -217,4 +217,57 @@ describe('YAML de projeto quebrado — sinal visível, não silêncio', () => {
     assert.equal(error, null);
     assert.equal(overrides.maxDepth, 1);
   });
+
+  /**
+   * Achado MÉDIO de auditoria de segurança (ressalva de defesa em profundidade
+   * deixada pela correção CRÍTICA de `mergePolicyLayer` em 2026-09-22):
+   * `loadProjectOverrides` fazia só um cast TypeScript (`as ProjectPolicyOverrides`)
+   * sem NENHUMA validação Zod em runtime — o objeto vindo do YAML parseado
+   * podia ter qualquer campo, mesmo um que não existe em `PolicyDocument`
+   * nenhum. `mergePolicyLayer` já neutraliza o caminho que importava (`risk`/
+   * `allowWriteOutsideWorkdir` sob `clampToBase`), mas um campo desconhecido
+   * que chegasse até lá seria só ignorado em silêncio — nenhum sinal de que a
+   * config de projeto não fez o que quem a escreveu esperava.
+   *
+   * YAML sintaticamente VÁLIDO, mas com um campo que não existe em
+   * `PolicyDocument` nenhum, tem que cair na política global com erro visível
+   * — o MESMO caminho seguro do YAML quebrado — em vez de ser aceito.
+   */
+  test('campo desconhecido dentro de policy é recusado, não aceito em silêncio', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'policy:\n  algumCampoQueNaoExisteNoSchema: true\n',
+      'utf8',
+    );
+    const { overrides, error } = loadProjectOverrides(raiz);
+    assert.deepEqual(
+      overrides,
+      {},
+      'campo fora do schema: lado seguro, sem overrides, política global vale inteira',
+    );
+    assert.match(
+      String(error),
+      /política do projeto inválida/,
+      'quem escreveu o campo errado precisa de sinal, não só cair em silêncio na política global',
+    );
+  });
+
+  test('campo conhecido com tipo errado é recusado, não aceito em silêncio', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'policy:\n  maxDepth: "nao é numero"\n',
+      'utf8',
+    );
+    const { overrides, error } = loadProjectOverrides(raiz);
+    assert.deepEqual(
+      overrides,
+      {},
+      'tipo errado num campo real: lado seguro, sem overrides, política global vale inteira',
+    );
+    assert.match(
+      String(error),
+      /política do projeto inválida/,
+      'tipo errado precisa de sinal visível, não só cair em silêncio na política global',
+    );
+  });
 });
