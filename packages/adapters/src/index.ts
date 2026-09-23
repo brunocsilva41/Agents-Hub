@@ -29,3 +29,4 @@ export {
   openCodeSessionId,
   openCodeIdleSignal,
 } from './opencode/events.js';
+export { discoverAgent, type DiscoverOptions } from './discovery/index.js';
