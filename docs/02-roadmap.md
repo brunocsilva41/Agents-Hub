@@ -412,9 +412,12 @@ supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
       igual ao Claude ou oposto como o Codex?) segue **não exercido**. Ainda
       não vira `[x]`: falta a mesma vistoria comportamental que o gate do
       Codex recebeu (ver Fase 2)
-- [ ] **Provar profundidade 2** (A→B→C): `maxDepth` é 3 e a profundidade máxima já
-      atingida na vida do repositório é **1**. Detecção de ciclo e herança de política
-      em segundo nível nunca foram exercidas num fluxo real
+- [~] **Provar profundidade 2** (A→B→C): provado em 2026-09-23 com agentes FALSOS
+      (`packages/daemon/src/delegation-depth.integration.test.ts`, 5 testes; mutados
+      em `checkDelegation`, herança de modo e ledger da raiz — todos ficam vermelhos)
+      e ponta a ponta por HTTP em `npm run demo`. Cobre grafo, custo consolidado,
+      herança de supervisão, `CYCLE_DETECTED` e `DEPTH_EXCEEDED`. **Não** foi exercido
+      com agentes reais (custo), por isso `[~]` e não `[x]`
 - [ ] **Matriz de pares A→B** para os pares que importam: todo destino já delegado foi
       o Codex, e 3 dos 4 chamadores eram sessões adotadas do harness de fumaça
 - [~] **Verificar os caminhos de config de MCP** — fechado em 2026-09-18 para os
