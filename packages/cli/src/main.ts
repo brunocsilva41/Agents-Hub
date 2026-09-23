@@ -122,6 +122,8 @@ ${bold('Projetos')}
   hub project prompt [projeto] --agent <id>                   mostra a instrução salva para o agente
   hub project prompt [projeto] --agent <id> --set "texto"     grava a instrução
   hub project prompt [projeto] --agent <id> --clear           apaga a instrução
+  hub project folders [projeto]                               lista as pastas vinculadas ao projeto
+  hub project folders remove [projeto] <folderId>             desvincula uma pasta
       ${dim('[projeto] aceita id ou caminho; sem ele, usa o diretório atual (registra se preciso).')}
 
 ${bold('Sessões')}
@@ -143,6 +145,7 @@ ${bold('Delegação e custo')}
   hub delegate <sessionId> --agent <id> "objetivo"   um agente pede a outro
   hub handoff <sessionId> --to <id>                  transfere a liderança da sessão
   hub diff <sessionId>                                o que o agente mudou no código
+  hub artifacts <sessionId>                           artefatos da sessão (diff, log, report, transcript...)
   hub graph <rootId>                                  árvore de quem chamou quem
   hub budget <rootId>                                 consumo contra o orçamento
 
@@ -179,7 +182,7 @@ async function main(): Promise<void> {
       return runHook(config, args);
     case 'hooks':
       // Offline como o `mcp`: mexer em config não precisa do daemon.
-      return hooksCommand(args, config);
+      return hooksCommandSeguro(args, config);
     case 'stop':
       return stopDaemon(client);
     case 'status':
@@ -246,6 +249,8 @@ async function main(): Promise<void> {
       return mcpCommand(args, config);
     case 'diff':
       return withDaemon(() => showDiff(client, args));
+    case 'artifacts':
+      return withDaemon(() => showArtifacts(client, args));
     case 'graph':
       return withDaemon(() => showGraph(client, args));
     case 'budget':
@@ -293,6 +298,23 @@ async function runHook(
 }
 
 // ------------------------------------------------------ gate pré-execução
+
+/**
+ * `hub mcp install --write` já protege sua escrita de config com try/catch
+ * (ver `mcpCommand`) — `gravarConfig`/`installCodexGate`/`saveConfig`, chamados
+ * dentro de `hooksCommand`, fazem o mesmo tipo de I/O (`mkdirSync`,
+ * `copyFileSync`, `writeFileSync`) e podem lançar por permissão negada, disco
+ * cheio ou caminho inválido. Sem esta borda, o processo crashava com stack
+ * trace bruto em vez do erro formatado que as outras superfícies mostram.
+ */
+async function hooksCommandSeguro(args: Args, config: ReturnType<typeof loadConfig>): Promise<void> {
+  try {
+    await hooksCommand(args, config);
+  } catch (err) {
+    console.error(red((err as Error).message));
+    process.exitCode = 1;
+  }
+}
 
 async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): Promise<void> {
   const [sub, alvoId] = args.positional;
@@ -432,8 +454,32 @@ async function withDaemon(fn: () => Promise<void>): Promise<void> {
     // domínio — sem ele aqui, a CLI é a única das três superfícies onde
     // "BUDGET_EXCEEDED" e "AGENT_NOT_FOUND" viram a mesma frase genérica.
     console.error(red(err instanceof HubApiError ? `[${err.code}] ${message}` : message));
+    // O client já preserva `details.issues` (caminho + mensagem de cada campo
+    // que falhou), mas até aqui a CLI descartava e só mostrava o código
+    // genérico. Sem isto, "Brief inválido" chegava sem dizer qual campo.
+    if (err instanceof HubApiError) {
+      for (const issue of extractIssues(err.details)) {
+        console.error(`  - ${issue.path || '(raiz)'}: ${issue.message}`);
+      }
+    }
     process.exitCode = 1;
   }
+}
+
+/** Lê `details.issues` de um `HubApiError` sem confiar no formato — é `unknown`. */
+function extractIssues(details: unknown): Array<{ path: string; message: string }> {
+  if (typeof details !== 'object' || details === null) return [];
+  const issues = (details as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) return [];
+  const resultado: Array<{ path: string; message: string }> = [];
+  for (const issue of issues) {
+    if (typeof issue !== 'object' || issue === null) continue;
+    const message = (issue as { message?: unknown }).message;
+    if (typeof message !== 'string') continue;
+    const path = (issue as { path?: unknown }).path;
+    resultado.push({ path: typeof path === 'string' ? path : '', message });
+  }
+  return resultado;
 }
 
 // ---------------------------------------------------------------- comandos
@@ -556,6 +602,8 @@ async function projectCommand(client: HubClient, args: Args): Promise<void> {
       return projectEnv(client, args, rest[0]);
     case 'prompt':
       return projectPrompt(client, args, rest[0]);
+    case 'folders':
+      return projectFolders(client, rest);
     default:
       console.error(
         red('uso: hub project <add|env|prompt> ...') + '\n' + dim('veja "hub help" para os detalhes de cada um.'),
@@ -681,6 +729,67 @@ async function projectPrompt(client: HubClient, args: Args, projectRef: string |
   else console.log(`${green('gravada')} instrução de ${bold(agentId)}: ${dim(salvo.prompts?.[agentId] ?? '')}`);
 }
 
+/**
+ * Espelha `lerOrcamento` de `workflow-cmd.ts`: sem isto, `--budget-usd abc`
+ * só falhava depois de um round-trip HTTP completo, com "Brief inválido"
+ * genérico (achado do audit corrigido junto — ver `extractIssues`). Falhar
+ * localmente é imediato e não depende do daemon estar de pé.
+ */
+function lerBudgetUsd(flag: string | boolean | undefined): number | undefined | Error {
+  if (flag === undefined) return undefined;
+  if (typeof flag === 'boolean') return new Error('--budget-usd precisa de um valor em dólares');
+  const n = Number(flag);
+  if (!Number.isFinite(n) || n <= 0) {
+    return new Error(`--budget-usd inválido: "${flag}"`);
+  }
+  return n;
+}
+
+/**
+ * `hub project folders` — o client já tinha `folders`/`removeFolder` e o
+ * daemon já tinha as rotas (a Web usa `folders` via `ProjectModal` para
+ * vincular pastas extras a um projeto), mas nenhuma CLI as expunha: quem
+ * vinculava uma pasta pela Web não tinha como listá-las ou desvincular
+ * depois. Segue o mesmo estilo de `hub project env`/`hub project prompt`:
+ * `[projeto]` é opcional (id ou caminho; sem ele, usa o diretório atual).
+ */
+async function projectFolders(client: HubClient, rest: string[]): Promise<void> {
+  if (rest[0] === 'remove') {
+    const argumentos = rest.slice(1);
+    // Com dois argumentos, o primeiro é o projeto; com um só, é o folderId e
+    // o projeto vem do diretório atual — mesma convenção de `resolveProjectId`.
+    const projectRef = argumentos.length >= 2 ? argumentos[0] : undefined;
+    const folderId = argumentos.length >= 2 ? argumentos[1] : argumentos[0];
+
+    if (folderId === undefined || folderId.length === 0) {
+      console.error(red('uso: hub project folders remove [projeto] <folderId>'));
+      process.exitCode = 1;
+      return;
+    }
+
+    const projectId = await resolveProjectId(client, projectRef);
+    await client.removeFolder(projectId, folderId);
+    console.log(`${green('desvinculada')} pasta ${bold(folderId)} do projeto ${dim(projectId)}`);
+    return;
+  }
+
+  const projectId = await resolveProjectId(client, rest[0]);
+  const { folders } = await client.folders(projectId);
+  if (folders.length === 0) {
+    console.log(dim('nenhuma pasta vinculada a este projeto.'));
+    return;
+  }
+  for (const folder of folders) {
+    console.log(
+      `${folder.isPrimary ? green('●') : dim('○')} ${bold(folder.id)} ${dim(folder.path)}${
+        folder.label ? ` ${dim(`(${folder.label})`)}` : ''
+      }`,
+    );
+  }
+  if (!folders.some((f) => !f.isPrimary)) return;
+  console.log(`${NEWLINE}${dim('desvincule com:')} ${bold('hub project folders remove <folderId>')}`);
+}
+
 async function resolveProjectId(client: HubClient, flag: string | boolean | undefined): Promise<string> {
   const target = path.resolve(typeof flag === 'string' ? flag : process.cwd());
   const { projects } = await client.projects();
@@ -706,6 +815,13 @@ async function start(client: HubClient, args: Args): Promise<void> {
     return;
   }
 
+  const budgetUsd = lerBudgetUsd(args.flags['budget-usd']);
+  if (budgetUsd instanceof Error) {
+    console.error(red(budgetUsd.message));
+    process.exitCode = 1;
+    return;
+  }
+
   const projectId = await resolveProjectId(client, args.flags['project']);
   const brief: BriefInput = {
     agent,
@@ -718,9 +834,7 @@ async function start(client: HubClient, args: Args): Promise<void> {
           : 'worktree',
   };
   if (isSupervision(args.flags['mode'])) brief.supervision = args.flags['mode'];
-  if (typeof args.flags['budget-usd'] === 'string') {
-    brief.budget = { usd: Number(args.flags['budget-usd']) };
-  }
+  if (budgetUsd !== undefined) brief.budget = { usd: budgetUsd };
 
   const result = await client.startSession({ projectId, brief });
   console.log(`${green('sessão iniciada')} ${bold(result.session.id)} ${dim(`(${agent})`)}`);
@@ -887,10 +1001,15 @@ async function delegate(client: HubClient, args: Args): Promise<void> {
     return;
   }
 
-  const brief: BriefInput = { agent, objective };
-  if (typeof args.flags['budget-usd'] === 'string') {
-    brief.budget = { usd: Number(args.flags['budget-usd']) };
+  const budgetUsd = lerBudgetUsd(args.flags['budget-usd']);
+  if (budgetUsd instanceof Error) {
+    console.error(red(budgetUsd.message));
+    process.exitCode = 1;
+    return;
   }
+
+  const brief: BriefInput = { agent, objective };
+  if (budgetUsd !== undefined) brief.budget = { usd: budgetUsd };
 
   const result = await client.delegate(sessionId, brief);
   console.log(
@@ -916,6 +1035,25 @@ async function showDiff(client: HubClient, args: Args): Promise<void> {
     else if (linha.startsWith('@@')) console.log(cyan(linha));
     else if (linha.startsWith('#')) console.log(dim(linha));
     else console.log(linha);
+  }
+}
+
+/**
+ * `hub artifacts` — o client já tinha `artifacts(sessionId)` e o daemon já
+ * tinha a rota, mas só `diff` (kind === 'diff') era acessível por qualquer
+ * superfície. Artefatos de outro `kind` (`file`, `report`, `log`,
+ * `transcript`) ficavam inacessíveis por completo; isto lista todos.
+ */
+async function showArtifacts(client: HubClient, args: Args): Promise<void> {
+  const sessionId = required(args.positional[0], 'sessionId');
+  const { artifacts } = await client.artifacts(sessionId);
+  if (artifacts.length === 0) {
+    console.log(dim('nenhum artefato registrado para esta sessão.'));
+    return;
+  }
+  for (const artifact of artifacts) {
+    console.log(`${bold(artifact.id)} ${cyan(artifact.kind)} ${dim(artifact.path)}`);
+    console.log(`   ${dim(artifact.createdAt)}`);
   }
 }
 

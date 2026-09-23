@@ -1350,3 +1350,64 @@ interativo.
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
 
+## Auditoria da CLI (`packages/cli/src/main.ts`) — 2026-09-23
+
+Quatro achados, todos corrigidos no mesmo lote, escopo restrito a `main.ts` (leitura de
+`hooks-install.ts` e `workflow-cmd.ts` para replicar padrão, sem editar nenhum dos dois).
+Sem harness de teste de comando de CLI que importe `main.ts` (o arquivo dispara `main()`
+por `await main()` de topo de módulo — é por isso que `pause-cmd.ts`/`workflow-cmd.ts`
+vivem em arquivos próprios, testáveis sem esse efeito colateral; ver `pause-cmd.test.ts`).
+Como o escopo desta tarefa não permitia extrair para um novo arquivo, a verificação foi
+**manual, contra um daemon real** (`AGENTS_HUB_HOME` apontado para um diretório temporário,
+`node packages/cli/dist/main.js <comando>`), não só leitura de código:
+
+- [x] **CRÍTICO (parte que cabe na CLI) — mensagem de validação por campo descartada.**
+      `withDaemon` (catch em torno da falha de qualquer comando) imprimia só `[código]
+      mensagem` de um `HubApiError`, e `err.details?.issues` — o array `{path, message}`
+      por campo que o daemon já manda (`parseBrief` em `packages/core/src/brief.ts`, e o
+      client já preserva em `HubApiError.details`, `packages/client/src/index.ts`) — nunca
+      era lido. Resultado real: `hub start --agent claude "x"` (objetivo curto demais)
+      mostrava só `[INVALID_BRIEF] Brief inválido`, sem dizer qual campo nem por quê.
+      Corrigido com `extractIssues(details)` (lê `details.issues` sem confiar no formato —
+      é `unknown`) e uma linha extra por issue depois da linha principal. Verificado contra
+      daemon real: `[INVALID_BRIEF] Brief inválido` agora vem seguido de
+      `  - objective: o objetivo precisa ser descritivo`.
+- [x] **MÉDIO — `--budget-usd` não validado localmente em `start`/`delegate`.** Os dois
+      comandos faziam `Number(args.flags['budget-usd'])` sem checar `NaN`/negativo,
+      delegando 100% da validação ao round-trip HTTP — que só ficou com detalhe claro
+      depois do achado anterior corrigido; antes disso, dava "Brief inválido" genérico
+      depois de subir o daemon e fazer a chamada. `workflow-cmd.ts` (`lerOrcamento`, não
+      alterado por este lote, só lido como referência) já validava localmente. Replicado
+      como `lerBudgetUsd` em `main.ts` (não importado de `workflow-cmd.ts` para não criar
+      acoplamento entre os dois comandos por um helper de 6 linhas) — falha imediata, sem
+      chamada de rede, quando o valor não é finito e positivo. Verificado contra daemon
+      real: `hub start --agent claude --budget-usd abc "teste"` sai com `--budget-usd
+      inválido: "abc"` e `exitCode 1` **sem** subir sessão nem tocar a rede.
+- [x] **MÉDIO — `hub hooks install --write` sem try/catch, ao contrário de `hub mcp install
+      --write`.** `case 'hooks'` chamava `hooksCommand` direto; `gravarConfig`/
+      `installCodexGate`/`saveConfig`, chamados por dentro (I/O de arquivo real —
+      `mkdirSync`/`copyFileSync`/`writeFileSync`), podem lançar por permissão negada, disco
+      cheio ou caminho inválido, e o processo crashava com stack trace bruto em vez do erro
+      formatado que `mcpCommand` já mostra para o mesmo tipo de falha. Corrigido com
+      `hooksCommandSeguro`, mesmo padrão de try/catch de `mcpCommand`. **Não reproduzido
+      contra uma falha de I/O real nesta sessão** (forçar permissão negada em disco exigiria
+      tocar o ambiente do jeito que o sandbox desta tarefa recusou) — a garantia aqui é por
+      leitura de código (o `try` cobre exatamente a chamada que faz todo o I/O) e pelo
+      espelho comprovado (`mcpCommand`) fazer a mesma coisa para o mesmo tipo de exceção.
+- [x] **ALTO — pastas extra de projeto e artefatos não-diff inacessíveis por qualquer
+      superfície.** O client já tinha `folders`/`removeFolder`/`artifacts`
+      (`packages/client/src/index.ts`) e o daemon já tinha as rotas, mas nenhuma CLI, MCP
+      ou Web os expunha (escopo desta correção: só CLI). Quem vinculava uma pasta extra a
+      um projeto pela Web (`ProjectModal`) não tinha como listá-la ou desvincular depois; e
+      artefato com `kind !== 'diff'` (`file`/`report`/`log`/`transcript`) era inacessível
+      por completo, já que só `hub diff` existia. Adicionados `hub project folders
+      [projeto]` (lista, `isPrimary` marcado com `●`), `hub project folders remove
+      [projeto] <folderId>` (mesmo estilo posicional-opcional de `hub project env`/`hub
+      project prompt`) e `hub artifacts <sessionId>` (lista id/kind/path/createdAt).
+      Verificado contra daemon real: projeto registrado aparece com sua pasta principal
+      (`isPrimary`); tentar remover a pasta principal devolve
+      `[FOLDER_IS_PRIMARY] a pasta principal não pode ser removida...` (formatado pelo
+      `withDaemon`, sem crash); folderId inexistente devolve `[FOLDER_NOT_FOUND] pasta ...
+      não pertence a este projeto`; `hub artifacts` numa sessão sem artefatos devolve
+      "nenhum artefato registrado", sem erro.
+
