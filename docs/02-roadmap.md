@@ -1349,4 +1349,21 @@ interativo.
       padrão que causou o achado CRÍTICO da primeira auditoria (hook correto, nunca importado).
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
+- [x] **MÉDIO — `cursor.yaml`/`mimo.yaml` prometiam retomada nativa que o mapper genérico nunca
+      cumpre.** Os dois manifestos declaram `session.strategy: native`, mas usam o mapper
+      `generic-json` (`packages/adapters/src/mappers/generic.ts`), que nunca escreve
+      `mapped.nativeSessionId` — só produz eventos `message`/`log`/`error`. Sem esse id,
+      `resume()` nunca é chamado de fato para estes dois agentes; todo turno cai em
+      `rebuildConversation` (replay), mesmo com o manifesto prometendo retomada nativa. Este NÃO é
+      o item de mapper dedicado do Cursor/MiMo (linhas 200-201 acima, que continua `[ ]` — é
+      trabalho de código maior, fora de escopo aqui). O que foi corrigido é a mentira da
+      documentação: `caveats` de `manifests/cursor.yaml` e `manifests/mimo.yaml` agora dizem
+      explicitamente que `session.strategy: native` é aspiracional para estes dois, e
+      `SECURITY.md` (seção "Prevenção só existe onde há gate pré-execução") agora deixa claro que
+      para `mimo`/`cursor` a vigilância reativa não tem nenhum evento de `command.executed`/
+      `file.changed` para vigiar — é vigilância inexistente disfarçada de existente, não apenas
+      mais fraca que a dos agentes com gate. Verificação: `npm run build && npm test` seguem
+      verdes (426/426) sem tocar nenhum `.ts` — os dois YAMLs continuam validados pelo schema Zod
+      de manifestos (`packages/adapters/src/types.ts`), exercido pelos testes de registry que
+      carregam os manifestos reais.
 

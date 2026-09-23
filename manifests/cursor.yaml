@@ -47,3 +47,4 @@ caveats:
   - "NAO VERIFICADO: as flags aqui sao deduzidas da documentacao, nao confirmadas contra o binario."
   - "A IDE do Cursor estar instalada NAO basta: o agente de terminal e um binario separado (`cursor-agent`), e nesta maquina so existem `cursor` e os tuneis. Instale a CLI do Cursor para este manifesto valer."
   - "Mapper generico: eventos de ferramenta e custo ainda nao sao extraidos."
+  - "session.strategy: native e aspiracional aqui: o mapper generic-json (packages/adapters/src/mappers/generic.ts) nunca preenche mapped.nativeSessionId, so produz eventos message/log/error. Sem nativeSessionId, resume() nunca e chamado de fato — todo turno cai em rebuildConversation (replay). Fechar isto de verdade exige um mapper dedicado do Cursor (item aberto no roadmap), nao uma mudanca de manifesto."

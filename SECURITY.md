@@ -93,6 +93,23 @@ Ou seja: só **Claude Code** e **Codex** têm gate pré-execução. Os outros **
 dependem inteiramente de vigilância reativa — e, por padrão, nem `escalate`
 pausa a sessão neles, só fica registrado no evento.
 
+**Para `mimo` e `cursor`, essa vigilância reativa nem chega a existir.** A
+tabela acima já diz "Não" para os dois, mas isso pode ser lido como "vigilância
+mais fraca" — não é: é vigilância **ausente**. Os dois manifestos
+(`manifests/mimo.yaml`, `manifests/cursor.yaml`) usam o mapper `generic-json`
+(`packages/adapters/src/mappers/generic.ts`), que só produz eventos
+`message`/`log`/`error` — nunca `command.executed` ou `file.changed`. Como a
+classificação de risco (`escalate`/`irreversible`/etc.) roda sobre esses
+eventos estruturados, e eles simplesmente não são emitidos para estes dois
+agentes, não há nem o mínimo de "vigilância vê o que já aconteceu": não existe
+um evento de comando ou de arquivo para essa vigilância avaliar. A garantia
+mínima da linha "Vigilância" na tabela de três níveis acima (evento do que já
+aconteceu, para a próxima ação) simplesmente não se aplica a `mimo`/`cursor` —
+é vigilância inexistente disfarçada de existente, não apenas mais fraca que a
+dos agentes com gate. Fechar isto de verdade exige um mapper dedicado para cada
+um (item aberto no roadmap), que extraia esses eventos do formato nativo de
+cada CLI.
+
 O Codex é um caso à parte, e vale ser preciso sobre o que a cobertura acima
 garante: hook não confiável é **ignorado em silêncio** pelo binário — sem
 `--dangerously-bypass-hook-trust` (ligado por `hub hooks install codex --write`,
