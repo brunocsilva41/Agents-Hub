@@ -1350,3 +1350,26 @@ interativo.
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
 
+## Auditoria de `packages/store` — 2026-09-23
+
+- [x] **MÉDIO — `migrate()` não tinha guarda contra banco com versão de schema mais nova que o
+      código atual.** `packages/store/src/db.ts` (`migrate()`) só comparava `migration.version`
+      contra o conjunto já aplicado (`applied`) para decidir o que rodar — nunca verificava se
+      havia linhas na tabela `migrations` com `version` MAIOR que a maior versão conhecida em
+      `MIGRATIONS`. Cenário: um daemon mais novo (schema v5+, hipotético) grava no banco; depois
+      uma versão MAIS ANTIGA do código (que só conhece até v4) é aberta contra esse mesmo
+      arquivo `.db`. `migrate()` não achava nada pendente e retornava em silêncio — nenhum erro,
+      nenhum aviso. Hoje isso não corrompe nada de forma comprovável (as 4 migrações atuais são
+      só `ALTER TABLE ADD COLUMN`/`CREATE INDEX`, aditivas), mas não havia rede de segurança para
+      o dia em que uma migração futura mudar semântica em vez de só aditar — o código antigo
+      processaria dados mal-interpretados silenciosamente. Corrigido: depois de ler as versões
+      já aplicadas, `migrate()` agora compara `MAX(version)` da tabela `migrations` contra
+      `Math.max(...MIGRATIONS.map(m => m.version))` e lança `HubError('HUB_CONFIG_INVALID', ...)`
+      se o banco estiver mais novo que o código, com mensagem orientando a atualizar o Hub em
+      vez de seguir em silêncio (reaproveita o código já usado em `packages/daemon/src/config.ts`
+      e `env.ts` para descasamento de configuração/ambiente detectado na subida). Teste de
+      regressão em `packages/store/src/db.test.ts`: insere manualmente uma linha de migração com
+      versão 999 e confirma que `migrate()` lança em vez de retornar quieto; confirmado que o
+      teste falha (`Missing expected exception`) revertendo temporariamente a correção antes de
+      restaurá-la.
+
