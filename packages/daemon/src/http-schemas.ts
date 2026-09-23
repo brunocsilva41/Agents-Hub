@@ -181,3 +181,26 @@ export function parseSseSince(valor: string | null): number | undefined {
   }
   return Number(valor);
 }
+
+export const AgentIdParamSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9_-]*$/i, 'agentId inválido');
+
+/**
+ * Corpo de `POST /projects/:id/import`.
+ *
+ * `dryRun` tem padrão `true`: escrever em config de outra ferramenta ou no
+ * arquivo versionado do projeto exige pedir (`dryRun: false`) explicitamente.
+ */
+export const ImportSchema = z
+  .object({
+    agentId: AgentIdParamSchema,
+    kinds: z.array(z.enum(['instructions', 'env', 'mcp'])).min(1).max(3),
+    dryRun: z.boolean().default(true),
+    targetAgents: z.array(AgentIdParamSchema).max(32).optional(),
+    overwrite: z.boolean().optional(),
+    includeEnv: z.boolean().optional(),
+  })
+  .strict();

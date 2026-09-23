@@ -1,4 +1,9 @@
-import type { EventEnvelope } from '@agents-hub/core';
+import type {
+  AgentDiscovery,
+  EventEnvelope,
+  ImportKind,
+  ImportResult,
+} from '@agents-hub/core';
 import type {
   AgentSummary,
   ApprovalSummary,
@@ -84,6 +89,33 @@ export class HubClient {
 
   addProject(path: string, name?: string): Promise<{ project: ProjectSummary }> {
     return this.#post('/projects', { path, name });
+  }
+
+  // ------------------------------------------------- descoberta e absorção
+  /** O que cada CLI já tem (só leitura, sem segredo). Cache de 30s no daemon. */
+  discovery(refresh = false): Promise<{ agents: AgentDiscovery[] }> {
+    return this.#get(`/discovery${refresh ? '?refresh=1' : ''}`);
+  }
+
+  discoverAgent(agentId: string, refresh = false): Promise<{ agent: AgentDiscovery }> {
+    return this.#get(
+      `/discovery/${encodeURIComponent(agentId)}${refresh ? '?refresh=1' : ''}`,
+    );
+  }
+
+  /** `dryRun` é verdadeiro por padrão no daemon: só grava com `dryRun: false`. */
+  importFromAgent(
+    projectId: string,
+    body: {
+      agentId: string;
+      kinds: ImportKind[];
+      dryRun?: boolean;
+      targetAgents?: string[];
+      overwrite?: boolean;
+      includeEnv?: boolean;
+    },
+  ): Promise<ImportResult> {
+    return this.#post(`/projects/${encodeURIComponent(projectId)}/import`, body);
   }
 
   // ----------------------------------------------------------------- sessões

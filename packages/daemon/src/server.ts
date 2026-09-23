@@ -15,6 +15,8 @@ import {
   CancelSchema,
   AddFolderSchema,
   CreateProjectSchema,
+  AgentIdParamSchema,
+  ImportSchema,
   DelegateSchema,
   HandoffSessionSchema,
   ResolveApprovalSchema,
@@ -32,6 +34,7 @@ import type { WorktreeReaper } from './reaper.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
 import { startSseChannel } from './sse.js';
+import type { DiscoveryService, ImportService } from './absorption.js';
 
 /**
  * Quantos eventos um replay de SSE manda antes de cortar.
@@ -105,6 +108,8 @@ export class HubServer {
     private readonly registry: AgentRegistry,
     private readonly bus: InMemoryEventBus,
     private readonly reaper: WorktreeReaper,
+    private readonly discovery: DiscoveryService,
+    private readonly importer: ImportService,
   ) {
     this.#registerRoutes();
   }
@@ -215,6 +220,24 @@ export class HubServer {
 
     this.#route('POST', '/agents/probe', async (_req, res) => {
       sendJson(res, 200, { probes: await this.registry.probeAll(true) });
+    });
+
+    // ------------------------------------------- descoberta e absorção
+    //
+    // Só leitura; a resposta nunca carrega segredo (ver `absorption.ts`).
+    // Cache de 30s; `?refresh=1` força releitura (e novo probe).
+    const wantsRefresh = (req: IncomingMessage): boolean => {
+      const v = new URL(req.url ?? '/', 'http://local').searchParams.get('refresh');
+      return v === '1' || v === 'true';
+    };
+
+    this.#route('GET', '/discovery', async (req, res) => {
+      sendJson(res, 200, { agents: await this.discovery.all(wantsRefresh(req)) });
+    });
+
+    this.#route('GET', '/discovery/:agentId', async (req, res, params) => {
+      const agentId = param(params['agentId'], AgentIdParamSchema, 'agentId');
+      sendJson(res, 200, { agent: await this.discovery.one(agentId, wantsRefresh(req)) });
     });
 
     // ------------------------------------------------------- API REST de tasks
@@ -374,6 +397,24 @@ export class HubServer {
           body,
         ),
       });
+    });
+
+    // Absorção: traz para o projeto o que o agente já tem (instruções, defaults
+    // de modelo, ferramentas MCP). `dryRun` é verdadeiro por padrão.
+    this.#route('POST', '/projects/:id/import', async (req, res, params) => {
+      const projectId = param(params['id'], ProjectIdSchema, 'id');
+      const body = await readBody(req, ImportSchema);
+      const project = this.sessions.getProject(projectId);
+      const result = await this.importer.run(
+        {
+          path: project.path,
+          getContext: () => this.sessions.getProjectContext(projectId),
+          setContext: (ctx) => void this.sessions.setProjectContext(projectId, ctx),
+        },
+        // `?? true`: ausência de dryRun NUNCA pode significar "escreva".
+        { ...body, dryRun: body.dryRun ?? true },
+      );
+      sendJson(res, 200, result);
     });
 
     // ------------------------------------------------------------- sessões

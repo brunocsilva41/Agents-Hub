@@ -46,5 +46,17 @@ export {
   type ToolCall,
 } from './pretool-gate.js';
 export { guardRequest, type GuardVerdict } from './guard.js';
-export { createHub, type Hub } from './hub.js';
+export { createHub, type Hub, type HubDeps } from './hub.js';
 export { instalarRedeDeSeguranca } from './safety-net.js';
+export {
+  MCP_TARGETS,
+  mcpTargets,
+  resolveConfigPath,
+  addMcpServers,
+  existingServerNames,
+  type ConfigFormat,
+  type McpTarget,
+  type PortableMcpServer,
+  type McpMergeOutcome,
+} from './mcp-config.js';
+export { DiscoveryService, ImportService, type DiscoverFn } from './absorption.js';
