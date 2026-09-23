@@ -1,4 +1,5 @@
-import { HubClient } from '@agents-hub/client';
+import { HubApiError, HubClient } from '@agents-hub/client';
+import type { AgentDiscovery, ImportKind, ImportResult } from '@agents-hub/core';
 
 /**
  * A UI é servida pelo próprio daemon (ADR 05.3), então a API está na mesma
@@ -116,3 +117,72 @@ export const RISK_LABEL: Record<string, string> = {
   high: 'alto',
   critical: 'crítico',
 };
+
+/* ------------------------------------------------------------------------ */
+/* Descoberta e importação do ambiente dos CLIs                             */
+/* ------------------------------------------------------------------------ */
+
+export interface ImportRequest {
+  agentId: string;
+  kinds: ImportKind[];
+  /** Padrão do daemon é `true`: prévia. Aplicar exige `false` explícito. */
+  dryRun: boolean;
+  targetAgents?: string[];
+  overwrite?: boolean;
+  includeEnv?: boolean;
+}
+
+/**
+ * Estas rotas ainda não estão no `HubClient` (pacote fora da área da UI), então
+ * falam com a API por aqui. O tratamento de erro espelha o do cliente: o
+ * `HubApiError` carrega `details.issues`, que `describeError` já sabe exibir.
+ */
+async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${window.location.origin}${path}`, {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  });
+  const text = await response.text();
+  let parsed: Record<string, unknown> = {};
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new HubApiError(
+        `o Hub respondeu algo que não é JSON (HTTP ${response.status}).`,
+        'RESPOSTA_NAO_JSON',
+        response.status,
+      );
+    }
+  }
+  if (!response.ok) {
+    const error = parsed['error'] as { code?: string; message?: string; details?: unknown } | undefined;
+    throw new HubApiError(
+      error?.message ?? (text || `HTTP ${response.status}`),
+      error?.code ?? String(response.status),
+      response.status,
+      error?.details,
+    );
+  }
+  return parsed as T;
+}
+
+/** Lista o que cada CLI instalado já tem (leitura apenas, sem segredos). */
+export function fetchDiscovery(): Promise<{ agents: AgentDiscovery[] }> {
+  return call('GET', '/discovery');
+}
+
+/** Relê um agente do disco, ignorando o cache do daemon. */
+export function refreshDiscovery(agentId: string): Promise<AgentDiscovery> {
+  return call<AgentDiscovery | { agent: AgentDiscovery }>(
+    'GET',
+    `/discovery/${encodeURIComponent(agentId)}?refresh=1`,
+  ).then((r) => ('agent' in r ? r.agent : r));
+}
+
+/** Prévia (`dryRun: true`) ou aplicação (`dryRun: false`) da importação. */
+export function importFromAgent(projectId: string, request: ImportRequest): Promise<ImportResult> {
+  return call('POST', `/projects/${encodeURIComponent(projectId)}/import`, request);
+}

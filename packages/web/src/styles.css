@@ -3168,3 +3168,40 @@ textarea {
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* ---- Agentes detectados ------------------------------------------------ */
+.disc-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.disc-lista { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.disc-card { border: 1px solid var(--border); border-left: 3px solid var(--disc-color, var(--accent)); border-radius: var(--radius); background: var(--bg-card); padding: 14px 16px; }
+.disc-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.disc-spacer { flex: 1; }
+.disc-nome { font-size: 15px; }
+.disc-versao { color: var(--text-dim); }
+.disc-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-dim); white-space: nowrap; }
+.disc-badge.ok, .disc-badge.auth-present { color: var(--ok); border-color: var(--ok); background: var(--ok-glow); }
+.disc-badge.off, .disc-badge.auth-absent { color: var(--danger); border-color: var(--danger); background: var(--danger-glow); }
+.disc-badge.auth-unknown { color: var(--warn); border-color: var(--warn); background: var(--warn-glow); cursor: help; }
+.disc-badge.auth-present, .disc-badge.auth-absent { cursor: help; }
+.disc-dl { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 12px 0 0; font-size: 13px; }
+.disc-dl dt { color: var(--text-faint); }
+.disc-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.disc-sub { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.disc-sub li, .disc-itens li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.disc-fonte { font-size: 11px; }
+.dim { color: var(--text-faint); }
+.disc-warnings { list-style: none; margin: 12px 0 0; padding: 8px 12px; border: 1px solid var(--warn); border-radius: var(--radius-sm); background: var(--warn-glow); font-size: 12px; }
+.disc-vazio { padding: 24px; text-align: center; color: var(--text-dim); }
+.disc-import { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border-strong); display: flex; flex-direction: column; gap: 10px; }
+.disc-import-title { margin: 0; font-size: 13px; font-weight: 500; }
+.disc-fieldset { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.disc-fieldset legend { font-size: 12px; color: var(--text-dim); padding: 0 6px; }
+.disc-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.disc-check input { margin-top: 3px; width: auto; flex: none; padding: 0; }
+.disc-check > span { min-width: 0; text-align: left; }
+.disc-import-actions { display: flex; gap: 8px; }
+.disc-resultado { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-code); padding: 10px 12px; font-size: 13px; }
+.disc-resultado-title { font-weight: 600; margin-bottom: 6px; }
+.disc-resultado-sub { margin: 10px 0 4px; color: var(--text-dim); font-size: 12px; }
+.disc-itens { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.disc-confirm { border: 1px solid var(--danger); border-radius: var(--radius-sm); background: var(--danger-glow); padding: 10px 12px; font-size: 13px; }
+.disc-confirm p { margin: 0 0 10px; }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { AgentSummary, ProjectContextDto, ProjectSummary } from '@agents-hub/client';
 import { useAction } from '../actions';
 import { agentColor, hub } from '../hub';
+import { DiscoveryPanel } from './DiscoveryPanel';
 
 /**
  * Configurações do projeto.
@@ -19,7 +20,7 @@ import { agentColor, hub } from '../hub';
  * projeto. Por isso a tela é POR PROJETO: é onde a configuração de fato mora.
  */
 
-type Aba = 'prompts' | 'memory' | 'models' | 'sandbox';
+type Aba = 'prompts' | 'memory' | 'models' | 'sandbox' | 'discovery';
 
 interface Props {
   agents: AgentSummary[];
@@ -268,6 +269,13 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
             titulo="Isolamento"
             sub="O que governa cada agente"
           />
+          <BotaoAba
+            ativa={aba === 'discovery'}
+            onClick={() => setAba('discovery')}
+            icone="🔍"
+            titulo="Agentes detectados"
+            sub="O que cada CLI já tem; importar"
+          />
         </aside>
 
         <main className="settings-content">
@@ -505,6 +513,14 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
           )}
 
           {aba === 'sandbox' && <PainelIsolamento agents={agents} />}
+
+          {aba === 'discovery' && (
+            <DiscoveryPanel
+              agents={agents}
+              projectId={projectId}
+              projectName={projetoAtual?.name ?? ''}
+            />
+          )}
         </main>
       </div>
     </div>
