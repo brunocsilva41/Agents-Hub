@@ -74,6 +74,18 @@ npm run build && npm run demo
 
 Sobe um daemon isolado (home temporária, porta efêmera; não toca em `~/.agents-hub` nem na porta 4747) com três agentes falsos (raiz, filho, neto) e percorre o fluxo principal só por HTTP: abre a sessão-raiz, delega raiz → filho → neto (profundidade 2), espera os estados terminais e imprime o grafo com estado e custo. Também confere que o painel (`GET /`) e `/health` respondem. Cada passo sai como `PASS`/`FAIL`, o código de saída é 0 só se tudo passou, e o daemon e o temp são removidos ao final, mesmo em falha. Custo: zero, nenhum agente real é chamado.
 
+## Usar o que você já tem instalado
+
+O Hub reconhece os CLIs já instalados e absorve a configuração deles, sem copiar segredo:
+
+```bash
+hub discover                                   # instalado, versão, auth, modelo padrão, MCP, instruções
+hub import claude --to codex,opencode          # prévia (dry-run) de compartilhar os MCP servers
+hub import claude --kinds env,mcp --to codex --write
+```
+
+Também disponível no painel, em Configurações → "Agentes detectados". Detalhes e modelo de segurança em [`docs/11-descoberta-e-absorcao.md`](docs/11-descoberta-e-absorcao.md).
+
 ## Dar aos seus agentes o poder de chamar os outros
 
 O Hub se expõe como **MCP server** — o único protocolo que os oito CLIs já falam. Registrado uma vez, o Cursor pode chamar o Claude, que chama o Codex.
