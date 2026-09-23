@@ -53,6 +53,29 @@ export function useToasts(): Toast[] {
 }
 
 /**
+ * Extrai `path`/`message` de `HubApiError.details.issues`, quando presente.
+ *
+ * O daemon manda essa lista em todo erro 422 de validação (ver `readBody` em
+ * `packages/daemon/src/server.ts`), campo a campo — mas o formato de `details`
+ * é `unknown` no cliente, então cada acesso aqui é conferido antes de usar.
+ */
+function formatIssues(details: unknown): string | null {
+  if (typeof details !== 'object' || details === null) return null;
+  const issues = (details as { issues?: unknown }).issues;
+  if (!Array.isArray(issues) || issues.length === 0) return null;
+  const linhas = issues
+    .map((issue) => {
+      if (typeof issue !== 'object' || issue === null) return null;
+      const { path, message } = issue as { path?: unknown; message?: unknown };
+      const campo = typeof path === 'string' && path.length > 0 ? path : '(raiz)';
+      if (typeof message !== 'string' || message.length === 0) return null;
+      return `${campo}: ${message}`;
+    })
+    .filter((linha): linha is string => linha !== null);
+  return linhas.length > 0 ? linhas.join('; ') : null;
+}
+
+/**
  * Mensagem que serve para quem está olhando a tela sob pressão.
  *
  * Os códigos do daemon já foram escritos para dizer o que fazer (ADR do MCP),
@@ -62,13 +85,19 @@ export function useToasts(): Toast[] {
  */
 export function describeError(err: unknown): { title: string; detail: string | null } {
   if (err instanceof HubApiError) {
+    const issues = formatIssues(err.details);
     if (err.status === 403) {
       return {
         title: 'O Hub recusou a ação (403)',
         detail: `${err.message} — a origem da página não é a que o daemon aceita.`,
       };
     }
-    return { title: err.message, detail: err.code === String(err.status) ? null : err.code };
+    const detail = err.code === String(err.status) ? null : err.code;
+    // `details.issues` traz o campo e o motivo de cada validação que falhou —
+    // sem isto a interface só mostrava "Brief inválido" e quem operava não
+    // tinha como saber qual campo corrigir.
+    if (issues) return { title: err.message, detail: detail ? `${detail} — ${issues}` : issues };
+    return { title: err.message, detail };
   }
   if (err instanceof SyntaxError) {
     return {

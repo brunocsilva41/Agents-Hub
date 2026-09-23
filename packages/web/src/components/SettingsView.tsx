@@ -156,6 +156,15 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
   };
 
   /**
+   * Risco distinto do vazamento de chave (aviso ao lado do campo "Chave"
+   * acima): aqui o problema não é o valor vazar, é o valor ser aceito. Uma
+   * variável `*_BASE_URL` redireciona o canal inteiro — o CLI já autenticado
+   * localmente manda a credencial nativa para o host que essa URL apontar.
+   * Ver `packages/core/src/agent-env.ts` e `SECURITY.md`.
+   */
+  const chaveEhBaseUrl = (chave: string): boolean => chave.trim().toUpperCase().endsWith('_BASE_URL');
+
+  /**
    * Aviso best-effort: o manifesto do agente não promete nada sobre essa
    * variável específica. Não bloqueia — só um agente pode muito bem ler
    * `OPENAI_*` sem isso estar documentado — mas evita o usuário configurar
@@ -473,6 +482,15 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   <div className="aviso-inline">
                     ⚠️ "{novaChave}" não bate com nenhum prefixo permitido — o daemon vai recusar
                     esta variável ao salvar.
+                  </div>
+                )}
+                {novaChave.trim() !== '' && chaveEhBaseUrl(novaChave) && (
+                  <div className="help help-warn">
+                    ⚠️ Redirecionar esta URL pode enviar a credencial nativa do CLI (já
+                    autenticado localmente) para um endpoint que você não controla — o atacante
+                    recebe a chave/token de sessão e ainda pode forjar a resposta do modelo. Só
+                    aponte para um servidor local (Ollama, LM Studio, vLLM) ou outro destino em que
+                    você confia.
                   </div>
                 )}
               </div>

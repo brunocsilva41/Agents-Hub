@@ -1350,3 +1350,51 @@ interativo.
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
 
+## Auditoria da Web UI (terceira rodada) — 2026-09-23
+
+Dois achados, escopo restrito a `packages/web/src/actions.ts` e
+`packages/web/src/components/SettingsView.tsx`. Mesma ressalva das rodadas anteriores: o
+pacote web não tem harness de teste de componente (`packages/web/package.json` só declara
+`dev`/`build`/`preview`/`typecheck`, nenhum script `test`, e não há `*.test.*`/`*.spec.*` em
+`src/`). A verificação desta rodada foi por leitura de código + `npm run build && npm test`
+(build limpo, suíte inteira do monorepo verde) — não houve interação visual com a interface
+nesta sessão, sem ambiente de browser disponível aqui.
+
+- [x] **CRÍTICO (parte que cabia neste escopo) — mensagem de validação por campo descartada
+      na Web UI.** `HubApiError` (`packages/client/src/index.ts`) já captura
+      `error.details` da resposta do daemon — inclusive `details.issues`, a lista
+      `{path, message}` por campo que `readBody`/`param` em
+      `packages/daemon/src/server.ts` produzem em todo erro 422 de validação — mas
+      `describeError()` em `actions.ts` só usava `err.message`/`err.code`, nunca
+      `err.details`. O toast mostrava só "corpo da requisição inválido" ou o código, sem
+      dizer qual campo. Corrigido com uma função nova, `formatIssues()`, que lê
+      `details.issues` de forma defensiva (tipo é `unknown` no cliente) e devolve uma string
+      `"campo: mensagem; campo: mensagem"`; `describeError()` agora anexa essa string ao
+      `detail` já existente em vez de descartá-la. Não mudei a assinatura de retorno de
+      `describeError()` (ainda `{ title, detail: string | null }`) — o único chamador é
+      `useAction()` no mesmo arquivo, então o ajuste ficou inteiro dentro do escopo
+      permitido, sem precisar tocar em `SidePanel`/`App.tsx`/etc. Verificação manual
+      equivalente (não executada aqui): abrir o modal de nova sessão, submeter um brief sem
+      `objective` (campo obrigatório) e confirmar que o toast de erro mostra algo como
+      `objective: <mensagem de validação do Zod>`, não só "corpo da requisição inválido".
+- [x] **MÉDIO (item B6 do plano de MVP) — aviso de sequestro de `*_BASE_URL` ausente na Web
+      UI.** Pendência registrada nas auditorias de segurança de 2026-09-19 e 2026-09-22 (ver
+      acima): `packages/core/src/agent-env.ts` documenta que uma variável `*_BASE_URL`
+      (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, etc. — qualquer uma dos 14 prefixos em
+      `PREFIXOS_PERMITIDOS`, mais o nome exato `MODEL_BASE_URL`) num
+      `.agents-hub/config.yaml` de um repositório clonado redireciona o canal de API inteiro:
+      o CLI do agente, já autenticado localmente, manda a credencial nativa para o endpoint
+      que essa URL apontar. `SettingsView.tsx` já tinha um aviso (`help help-warn`) sobre o
+      risco DIFERENTE de vazamento de chave versionada, ao lado do campo `#api-key`, mas
+      nada alertava sobre sequestro de URL no editor de "Outras variáveis de ambiente" (onde
+      o usuário digita uma chave livre, ex. `ANTHROPIC_BASE_URL`). Corrigido com uma função
+      `chaveEhBaseUrl()` (checa se a chave digitada termina em `_BASE_URL`,
+      case-insensitive) e um novo bloco `<div className="help help-warn">` abaixo do aviso
+      já existente de prefixo não permitido, mesma classe CSS reaproveitada — sem inventar
+      estilo novo. Verificação manual equivalente (não executada aqui): abrir Configurações
+      → aba "Modelos locais", digitar `ANTHROPIC_BASE_URL` no campo "NOME_DA_VARIAVEL" de
+      "Outras variáveis de ambiente" e confirmar que aparece o aviso "Redirecionar esta URL
+      pode enviar a credencial nativa do CLI... para um endpoint que você não controla",
+      sumindo quando o campo é limpo ou trocado por uma chave que não termina em
+      `_BASE_URL` (ex. `ANTHROPIC_API_KEY`).
+
