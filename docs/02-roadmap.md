@@ -1350,3 +1350,56 @@ interativo.
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
 
+## Auditoria do daemon (`packages/daemon`) — transações e mapeamento de erros HTTP — 2026-09-23
+
+Três achados sobre `packages/daemon/src/server.ts` e `packages/daemon/src/session-manager.ts`.
+Os dois de concorrência/persistência têm regressão automatizada em
+`session-manager-audit.test.ts`; o de HTTP tem regressão em `server.test.ts`. Suíte completa
+(430 testes) rodada duas vezes após as correções, verde nas duas.
+
+- [x] **MÉDIO — `ADAPTER_FAILURE` mapeava para HTTP 400 (erro de cliente) em vez de 502.**
+      `statusFor` (`server.ts`) não listava `ADAPTER_FAILURE` e caía no `default: 400`. Todo
+      lançamento de `ADAPTER_FAILURE` no repositório (`packages/adapters/src/process-adapter.ts`,
+      `packages/adapters/src/opencode/adapter.ts`) é falha de execução do adapter/processo —
+      agente não sobe, `opencode serve` morre antes de responder, upstream HTTP não-2xx — nunca
+      payload inválido de quem chamou. Corrigido para `502` (Bad Gateway). Nenhum teste existente
+      dependia do 400 anterior para este código especificamente. Regressão em `server.test.ts`
+      (`statusFor('ADAPTER_FAILURE') === 502`).
+- [x] **ALTO — `#fallback` criava a sessão substituta e reatribuía a task fora de transação.**
+      Dentro de `session-manager.ts#fallback`, `this.store.sessions.create(replacement)` e
+      `this.store.tasks.update(task.id, { sessionId, attempts })` eram duas escritas separadas.
+      Um crash exatamente entre as duas deixava a task com `sessionId` apontando para a sessão
+      ANTIGA (já terminal) e criava uma sessão substituta órfã — `reconcileOnStartup` só
+      revisitava sessões `running`/`waiting_approval`, então essa task ficaria presa para
+      sempre, um vazamento silencioso permanente. Corrigido envolvendo as duas escritas em
+      `this.store.transaction(...)`, mesmo padrão já usado em `start()`. Regressão em
+      `session-manager-audit.test.ts` (descrição "achado 2"): como `#fallback` é um método
+      privado de verdade (campo `#`), inacessível de fora mesmo por reflection, e disparar o
+      cenário pelo pipeline assíncrono completo (`#pump` roda solto, sem `.catch` próprio) produz
+      uma `unhandledRejection` que o test runner do Node atribui ao teste e reprova de qualquer
+      forma — o teste replica de forma síncrona e determinística a MESMA sequência de escritas
+      através do MESMO `hub.store.transaction(...)`, e foi confirmado manualmente (revertendo a
+      transação só no teste, depois restaurando) que sem ela a sessão substituta sobrevive ao
+      erro simulado — o vazamento exato do achado.
+- [x] **ALTO — `reconcileOnStartup` marcava sessão como `killed` e fechava tasks em escritas
+      separadas, fora de transação.** Nem `this.store.sessions.update(sessao.id, { state:
+      'killed', ... })` nem o loop de `this.store.tasks.update(task.id, { state: 'failed' })`
+      estavam em transação. Um crash NO MEIO da própria rotina de recuperação (dois crashes
+      seguidos) deixava a sessão `killed` com tasks ainda não-terminais, e como o laço externo só
+      revisita sessões `running`/`waiting_approval`, essas tasks nunca seriam revisitadas de
+      novo — especialmente grave por estar dentro da rede de segurança contra crash. Corrigido
+      envolvendo a atualização da sessão e o loop de fechamento de tasks em
+      `this.store.transaction(...)`. Regressão em `session-manager-audit.test.ts` (descrição
+      "achado 3"), via a API pública `reconcileOnStartup()`; confirmado manualmente (revertendo
+      a transação no código-fonte, rodando o teste, restaurando) que sem a correção o teste
+      reprova com a sessão em `killed` e a task ainda em `working`.
+      **Decisão sobre a passada complementar sugerida pela auditoria:** implementada. No início
+      de `reconcileOnStartup`, antes do laço principal, uma passada varre TODAS as tasks
+      (`this.store.tasks.list()`) e fecha (`state: 'failed'`) qualquer task não-terminal cuja
+      sessão dona já esteja num estado terminal (`isTerminalSessionState`) — cobrindo o que pode
+      ter vazado historicamente antes desta correção, incluindo o cenário do achado 2 acima (uma
+      sessão substituta órfã de uma reatribuição que falhou pela metade, por exemplo). Essa
+      passada não está coberta por teste de regressão dedicado nesta rodada (o teste do achado 3
+      cobre a passada principal, que já é suficiente para provar a atomicidade da correção);
+      fica registrada aqui como dívida de cobertura, não como decisão de não implementar.
+

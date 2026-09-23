@@ -11,6 +11,7 @@ import {
   type Approval,
   type HubError,
   type Session,
+  type Task,
 } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
@@ -456,5 +457,305 @@ defaults:
     // anterior deste teste exigia igualdade exata e depois uma faixa
     // estreita (10 ou 9) — as duas derrubaram o CI de forma intermitente
     // sem relação com nenhuma mudança de código real.
+  });
+});
+
+/**
+ * Regressão do achado 2 (ALTO) de uma auditoria posterior sobre
+ * `session-manager.ts`: dentro de `#fallback`, a criação da sessão
+ * substituta (`this.store.sessions.create(replacement)`) e a reatribuição da
+ * task a ela (`this.store.tasks.update(task.id, { sessionId, attempts })`)
+ * eram duas escritas separadas, fora de `this.store.transaction(...)`. Um
+ * crash exatamente entre as duas deixava a task com `sessionId` apontando
+ * para a sessão ANTIGA (já terminal) e criava uma sessão substituta órfã,
+ * que nunca é revisitada por `reconcileOnStartup` (só olha sessões
+ * `running`/`waiting_approval`) — vazamento silencioso permanente.
+ *
+ * Simula o "crash no meio" sem precisar matar o processo de verdade:
+ * monkeypatch em `store.tasks.update` faz a PRIMEIRA chamada que carrega
+ * `sessionId` no patch (a exata reatribuição de `#fallback`; a atualização de
+ * `attempts` antes da troca de agente não carrega essa chave) lançar. Isso
+ * exercita o mesmo `catch`/`ROLLBACK` de `UnitOfWork.transaction` que uma
+ * queda real do processo forçaria.
+ */
+describe('auditoria: #fallback cria sessão substituta e reatribui task atomicamente (achado 2)', () => {
+  let raiz: string;
+  let hub: Hub;
+
+  before(() => {
+    raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-auditoria-fallback-'));
+    const manifestos = path.join(raiz, 'manifests');
+    mkdirSync(manifestos, { recursive: true });
+
+    hub = createHub({
+      home: path.join(raiz, 'home'),
+      manifestsDir: manifestos,
+      policy: { ...DEFAULT_POLICY, watch: { pauseOn: [], flagOn: [] } },
+    });
+  });
+
+  after(async () => {
+    await hub.shutdown();
+    try {
+      rmSync(raiz, { recursive: true, force: true });
+    } catch {
+      /* limpeza de temp é oportunista */
+    }
+  });
+
+  /**
+   * `#fallback` é um método privado de verdade (campo `#`, privacidade
+   * imposta pelo runtime) — não há como chamá-lo diretamente de fora para
+   * testar via a "porta da frente". Disparar o cenário pelo pipeline
+   * completo (processo real falhando → retry → fallback) tampouco funciona
+   * aqui: `#pump` roda solto (`void this.#pump(...)`, só com `.finally`, sem
+   * `.catch` — ver `packages/daemon/src/safety-net.ts`), então o crash
+   * simulado vira uma `unhandledRejection` que o test runner do Node atribui
+   * ao teste em execução e reprova, independente de qualquer listener
+   * próprio.
+   *
+   * Por isso este teste replica, de forma síncrona e determinística, a
+   * MESMA sequência de escritas que `#fallback` faz (linhas ~1943-1958 de
+   * `session-manager.ts`): `sessions.create(replacement)` seguido de
+   * `tasks.update(task.id, { sessionId, attempts })`, através do MESMO
+   * `hub.store.transaction(...)` — o mesmo repositório, o mesmo primitivo de
+   * transação, só sem a burocracia de spawnar processos de verdade.
+   */
+  test('crash simulado entre criar a sessão substituta e reatribuir a task não deixa sessão órfã', () => {
+    const proj = hub.sessions.registerProject(path.join(raiz, 'projeto'), 'Teste Fallback Atômico');
+    mkdirSync(proj.path, { recursive: true });
+
+    const originalSessionId = newId('ses');
+    const originalSession: Session = {
+      id: originalSessionId,
+      projectId: proj.id,
+      agentId: 'flaky',
+      nativeSessionId: null,
+      rootId: originalSessionId,
+      parentId: null,
+      depth: 0,
+      path: [`flaky:${originalSessionId}`],
+      // Já concluída como `failed` — exatamente o estado em que `#fallback`
+      // deixa a sessão original ANTES de tentar criar a substituta
+      // (`#concludeSession` roda primeiro, fora da transação).
+      state: 'failed',
+      mode: 'semi',
+      isolation: 'none',
+      workdir: proj.path,
+      title: 'sessão original (já falhou)',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: nowIso(),
+      pid: null,
+    };
+    hub.store.sessions.create(originalSession);
+
+    const taskId = newId('tsk');
+    const task: Task = {
+      id: taskId,
+      sessionId: originalSessionId,
+      requesterSessionId: null,
+      brief: {
+        agent: 'flaky',
+        objective: 'tarefa que precisa de fallback',
+        acceptanceCriteria: [],
+        constraints: [],
+        artifacts: [],
+        contextRefs: [],
+        upstream: [],
+        budget: {},
+        isolation: 'none',
+        mode: 'async',
+        supervision: 'semi',
+        labels: {},
+      },
+      state: 'working',
+      attempts: [{ n: 1, agentId: 'flaky', startedAt: nowIso(), endedAt: nowIso(), outcome: 'error', error: 'falha simulada' }],
+      result: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    hub.store.tasks.create(task);
+
+    const replacementId = newId('ses');
+    const replacement: Session = {
+      ...originalSession,
+      id: replacementId,
+      agentId: 'backup',
+      state: 'running',
+      title: 'sessão substituta',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: null,
+    };
+
+    const originalUpdate = hub.store.tasks.update.bind(hub.store.tasks);
+    hub.store.tasks.update = ((id: string, patch: Partial<Task>) => {
+      if (Object.prototype.hasOwnProperty.call(patch, 'sessionId')) {
+        throw new Error('crash simulado: escrita interrompida no meio da transação de #fallback (achado 2)');
+      }
+      return originalUpdate(id, patch);
+    }) as typeof hub.store.tasks.update;
+
+    try {
+      assert.throws(() => {
+        hub.store.transaction(() => {
+          hub.store.sessions.create(replacement);
+          hub.store.tasks.update(taskId, {
+            sessionId: replacementId,
+            attempts: [...task.attempts, { n: 2, agentId: 'backup', startedAt: nowIso(), endedAt: null, outcome: null, error: null }],
+          });
+        });
+      }, /crash simulado/);
+
+      // O ponto central do achado: a transação precisa ter desfeito a
+      // criação da sessão substituta junto com a reatribuição da task. Sem
+      // `this.store.transaction(...)` envolvendo as duas escritas (o bug
+      // original), `sessions.create(replacement)` já teria COMMITADO como
+      // statement independente antes de `tasks.update` lançar, deixando uma
+      // sessão "backup" órfã no banco.
+      assert.equal(
+        hub.store.sessions.get(replacementId),
+        null,
+        'a sessão substituta não pode sobreviver ao rollback da transação',
+      );
+
+      // A task continua apontando para a sessão original — nunca foi
+      // reatribuída, porque a escrita que faria isso fez parte da mesma
+      // transação revertida.
+      const taskDepois = hub.store.tasks.get(taskId);
+      assert.equal(taskDepois?.sessionId, originalSessionId, 'sessionId da task não pode ter mudado sem a reatribuição completa');
+    } finally {
+      hub.store.tasks.update = originalUpdate;
+    }
+  });
+});
+
+/**
+ * Regressão do achado 3 (ALTO) da mesma auditoria: dentro de
+ * `reconcileOnStartup`, marcar a sessão como `killed` e fechar as tasks
+ * não-terminais dela eram escritas separadas, fora de transação. Um crash NO
+ * MEIO da própria rotina de recuperação (ex.: dois crashes seguidos) deixava
+ * a sessão `killed` com tasks ainda não-terminais — e como o laço externo só
+ * revisita sessões `running`/`waiting_approval`, essas tasks nunca seriam
+ * revisitadas de novo.
+ *
+ * Simula o crash monkeypatchando `store.tasks.update` para lançar na
+ * primeira chamada que fecha uma task (`{ state: 'failed' }`) — o mesmo
+ * `catch`/`ROLLBACK` de `UnitOfWork.transaction` que um crash real forçaria.
+ */
+describe('auditoria: reconcileOnStartup fecha sessão + tasks atomicamente (achado 3)', () => {
+  let raiz: string;
+  let hub: Hub;
+
+  before(() => {
+    raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-auditoria-reconcile-'));
+    const manifestos = path.join(raiz, 'manifests');
+    mkdirSync(manifestos, { recursive: true });
+
+    hub = createHub({
+      home: path.join(raiz, 'home'),
+      manifestsDir: manifestos,
+      policy: { ...DEFAULT_POLICY, watch: { pauseOn: [], flagOn: [] } },
+    });
+  });
+
+  after(async () => {
+    await hub.shutdown();
+    try {
+      rmSync(raiz, { recursive: true, force: true });
+    } catch {
+      /* limpeza de temp é oportunista */
+    }
+  });
+
+  test('crash simulado entre marcar a sessão killed e fechar as tasks desfaz os dois (não deixa sessão killed com task viva)', async () => {
+    const proj = hub.sessions.registerProject(path.join(raiz, 'projeto-reconcile'), 'Teste Reconcile Atômico');
+    mkdirSync(proj.path, { recursive: true });
+
+    const sessionId = newId('ses');
+    const session: Session = {
+      id: sessionId,
+      projectId: proj.id,
+      agentId: 'agente-x',
+      nativeSessionId: null,
+      rootId: sessionId,
+      parentId: null,
+      depth: 0,
+      path: [`agente-x:${sessionId}`],
+      // "running" sem processo de verdade por trás: simula o registro deixado
+      // por um daemon anterior que morreu — exatamente o que
+      // `reconcileOnStartup` existe para varrer.
+      state: 'running',
+      mode: 'semi',
+      isolation: 'none',
+      workdir: proj.path,
+      title: 'sessão presa de um crash anterior',
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      endedAt: null,
+      pid: null,
+    };
+    hub.store.sessions.create(session);
+
+    const taskId = newId('tsk');
+    const task: Task = {
+      id: taskId,
+      sessionId,
+      requesterSessionId: null,
+      brief: {
+        agent: 'agente-x',
+        objective: 'tarefa presa',
+        acceptanceCriteria: [],
+        constraints: [],
+        artifacts: [],
+        contextRefs: [],
+        upstream: [],
+        budget: {},
+        isolation: 'none',
+        mode: 'async',
+        supervision: 'semi',
+        labels: {},
+      },
+      state: 'working',
+      attempts: [{ n: 1, agentId: 'agente-x', startedAt: nowIso(), endedAt: null, outcome: null, error: null }],
+      result: null,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    hub.store.tasks.create(task);
+
+    const originalUpdate = hub.store.tasks.update.bind(hub.store.tasks);
+    let armado = true;
+    hub.store.tasks.update = ((id: string, patch: Partial<Task>) => {
+      if (armado && id === taskId && patch.state === 'failed') {
+        armado = false;
+        throw new Error('crash simulado: escrita interrompida no meio de reconcileOnStartup (achado 3)');
+      }
+      return originalUpdate(id, patch);
+    }) as typeof hub.store.tasks.update;
+
+    try {
+      await assert.rejects(
+        () => hub.sessions.reconcileOnStartup(),
+        /crash simulado/,
+        'a exceção no meio da rotina precisa propagar, não ser engolida — senão a rotina de recuperação mentiria sobre ter terminado',
+      );
+
+      // O ponto central do achado: SEM a transação, a sessão já teria virado
+      // "killed" antes do loop de tasks explodir — aqui, com a correção, o
+      // ROLLBACK desfaz também a atualização da sessão.
+      const sessaoDepois = hub.store.sessions.get(sessionId);
+      assert.equal(
+        sessaoDepois?.state,
+        'running',
+        'sem transação, a sessão ficaria "killed" mesmo com a task ainda não-terminal — a correção desfaz os dois juntos',
+      );
+
+      const taskDepois = hub.store.tasks.get(taskId);
+      assert.equal(taskDepois?.state, 'working', 'a task não pode ter sido fechada sem a sessão também ter sido');
+    } finally {
+      hub.store.tasks.update = originalUpdate;
+    }
   });
 });
