@@ -627,15 +627,38 @@ repositório do zero antes de aceitar mudança.
       expected: approve` e `actual: true, expected: false`) antes de
       restaurar o fix — não é cobertura de fachada. Build limpo, suíte
       inteira (410 testes) verde em duas rodadas.
-      **Ressalva de defesa em profundidade, não corrigida agora**: o cast
+      **Ressalva de defesa em profundidade — fechada em 2026-09-23**: o cast
       cego em `loadProjectOverrides` (sem validação Zod de
-      `ProjectPolicyOverrides`) significa que QUALQUER campo de
+      `ProjectPolicyOverrides`) significava que QUALQUER campo de
       `PolicyDocument` presente no YAML — não só os que o tipo TypeScript
-      declara — chega ao `mergePolicyLayer`. A correção acima neutraliza o
-      caminho que importava (o merge agora trava certo mesmo recebendo campos
-      não declarados), mas adicionar validação Zod real no lugar do cast
-      fecharia a classe inteira de "campo não documentado, mas lido em
-      runtime" de uma vez — fica registrado como sugestão pendente
+      declara — chegava ao `mergePolicyLayer`. A correção acima já neutraliza
+      o caminho que importava (o merge trava certo mesmo recebendo campos não
+      declarados), mas a superfície "campo não documentado, lido em runtime
+      sem validação" ficava aberta para qualquer campo futuro que alguém
+      adicionasse a `PolicyDocument` sem lembrar do clamp correspondente em
+      `mergePolicyLayer`. Corrigido em `packages/daemon/src/project-config.ts`:
+      `loadProjectOverrides` agora valida `parsed['policy'] ?? parsed` com
+      `PartialPolicyDocumentSchema.strict().safeParse(...)` — reusando o
+      schema Zod que já existe em `packages/core/src/policy.ts` (não duplicado)
+      — antes de aceitar o objeto como overrides. `.strict()` recusa qualquer
+      chave fora do schema INTEIRO de `PolicyDocument` (não só fora da
+      interface `ProjectPolicyOverrides`, que continua mais estreita de
+      propósito); campo conhecido com tipo errado (`maxDepth: "não é número"`)
+      também é recusado. Um YAML semanticamente inválido cai no MESMO caminho
+      seguro que um YAML sintaticamente quebrado já caía: `overrides: {}`,
+      política global vale inteira, com `error` visível no log — nunca
+      silêncio. 2 testes de regressão novos em `project-config.test.ts`
+      (campo desconhecido dentro de `policy`; campo real com tipo errado),
+      **confirmados como falhando sem a correção** (revertida temporariamente
+      com `git stash push -u` sobre só este arquivo, para provar: os dois
+      testes falhavam com `actual: { algumCampoQueNaoExisteNoSchema: true }`/
+      `actual: { maxDepth: 'nao é numero' }` em vez de `{}`) antes de
+      restaurar o fix. Build limpo, suíte inteira (428 testes, 2 novos) verde
+      em duas rodadas — a única falha observada em uma delas foi o teste
+      flaky pré-existente de drenagem de stderr do `opencode serve`
+      (`packages/adapters`), sem relação com esta mudança.
+      `packages/core/src/policy.ts` (`mergePolicyLayer`) não foi tocado de
+      novo — fora do escopo desta correção, e sem motivo novo para revisitá-lo.
 - Achados verificados e descartados nesta rodada (sem correção necessária):
   guarda de borda (`guard.ts`) continua cobrindo toda rota via `#dispatch`;
   `http-schemas.ts` continua `.strict()` em todo schema; traversal em

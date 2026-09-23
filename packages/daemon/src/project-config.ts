@@ -5,6 +5,7 @@ import {
   filtrarEnvDeProjeto,
   HubError,
   mergePolicyLayer,
+  PartialPolicyDocumentSchema,
   type ContextoDoProjeto,
   type PolicyDocument,
 } from '@agents-hub/core';
@@ -61,6 +62,30 @@ export interface LoadedProjectOverrides {
 
 const cache = new Map<string, Cached | null>();
 
+/**
+ * `PartialPolicyDocumentSchema` (de `@agents-hub/core`) já é o mesmo schema que
+ * valida a política global — reusado aqui, não duplicado.
+ *
+ * `.strict()` por cima: sem ele, um campo desconhecido dentro de `policy` (que
+ * não existe em `PolicyDocument` nenhum, presente ou futuro) seria só ignorado
+ * — silêncio, não sinal. Com `.strict()`, um campo fora do schema INTEIRO de
+ * `PolicyDocument` é recusado explicitamente, e a config cai no mesmo caminho
+ * seguro do YAML quebrado: política global, com erro visível.
+ *
+ * Isto é defesa em profundidade, não a correção principal: campos que EXISTEM
+ * no schema mas não estão na interface `ProjectPolicyOverrides` mais estreita
+ * (como `risk` e `paths.allowWriteOutsideWorkdir`) continuam passando por
+ * aqui — como sempre passaram — porque são política legítima, só não exposta
+ * no tipo TypeScript. É `mergePolicyLayer({ clampToBase: true })` quem trava
+ * esses campos para só apertar, nunca afrouxar (achado CRÍTICO corrigido em
+ * 2026-09-22). O que esta validação fecha é a superfície mais ampla: um campo
+ * que não existe em `PolicyDocument` NENHUM não deveria nem chegar a
+ * `mergeProjectPolicy` — hoje ele seria ignorado ali por ausência de uso, mas
+ * um campo futuro adicionado a `PolicyDocument` sem o clamp correspondente em
+ * `mergePolicyLayer` passaria batido pelo cast cego que existia aqui antes.
+ */
+const PROJECT_OVERRIDES_SCHEMA = PartialPolicyDocumentSchema.strict();
+
 export function projectConfigPath(projectPath: string): string {
   return path.join(projectPath, PROJECT_CONFIG_RELATIVE);
 }
@@ -101,7 +126,26 @@ export function loadProjectOverrides(projectPath: string): LoadedProjectOverride
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
-    const overrides = (parsed['policy'] ?? parsed) as ProjectPolicyOverrides;
+    const candidato = parsed['policy'] ?? parsed;
+
+    // YAML sintaticamente válido, mas semanticamente fora do que
+    // `PolicyDocument` permite (campo desconhecido, ou campo conhecido com
+    // tipo errado — ex. `maxDepth: "não é número"`) cai no MESMO caminho
+    // seguro de um YAML quebrado: política global inteira, com erro visível.
+    // Ver `PROJECT_OVERRIDES_SCHEMA` acima para por que isto é validação real,
+    // não o cast cego que existia antes.
+    const validado = PROJECT_OVERRIDES_SCHEMA.safeParse(candidato);
+    if (!validado.success) {
+      cache.set(file, null);
+      const detalhe = validado.error.issues
+        .map((issue) => `${issue.path.join('.') || '(raiz)'}: ${issue.message}`)
+        .join('; ');
+      const message = `${file}: política do projeto inválida (${detalhe}) — caindo na política global`;
+      console.error(`[project-config] ${message}`);
+      return { overrides: {}, error: message };
+    }
+
+    const overrides = validado.data as ProjectPolicyOverrides;
     cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, overrides });
     return { overrides, error: null };
   } catch (err) {
