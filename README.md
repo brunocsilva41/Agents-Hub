@@ -66,6 +66,14 @@ hub stop
 
 `hub help` lista o resto.
 
+## Testar o MVP sem gastar nada
+
+```bash
+npm run build && npm run demo
+```
+
+Sobe um daemon isolado (home temporária, porta efêmera; não toca em `~/.agents-hub` nem na porta 4747) com três agentes falsos (raiz, filho, neto) e percorre o fluxo principal só por HTTP: abre a sessão-raiz, delega raiz → filho → neto (profundidade 2), espera os estados terminais e imprime o grafo com estado e custo. Também confere que o painel (`GET /`) e `/health` respondem. Cada passo sai como `PASS`/`FAIL`, o código de saída é 0 só se tudo passou, e o daemon e o temp são removidos ao final, mesmo em falha. Custo: zero, nenhum agente real é chamado.
+
 ## Dar aos seus agentes o poder de chamar os outros
 
 O Hub se expõe como **MCP server** — o único protocolo que os oito CLIs já falam. Registrado uma vez, o Cursor pode chamar o Claude, que chama o Codex.

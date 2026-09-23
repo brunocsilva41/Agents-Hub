@@ -20,7 +20,8 @@
     "test": "node scripts/run-tests.mjs",
     "build:packages": "tsc -b",
     "web:dev": "npm run dev --workspace @agents-hub/web",
-    "verify": "npm run build && npm test"
+    "verify": "npm run build && npm test",
+    "demo": "node scripts/demo-e2e.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
