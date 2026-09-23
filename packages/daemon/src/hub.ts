@@ -1,7 +1,14 @@
 import path from 'node:path';
-import { AgentRegistry, createOpenCodeAdapter, type OpenCodeAdapter } from '@agents-hub/adapters';
+import os from 'node:os';
+import {
+  AgentRegistry,
+  createOpenCodeAdapter,
+  discoverAgent,
+  type OpenCodeAdapter,
+} from '@agents-hub/adapters';
 import { createStore } from '@agents-hub/store';
 import type { UnitOfWork } from '@agents-hub/core';
+import { DiscoveryService, ImportService, type DiscoverFn } from './absorption.js';
 import { InMemoryEventBus } from './bus.js';
 import { loadConfig, type HubConfig } from './config.js';
 import { EventRetentionCompactor } from './event-retention.js';
@@ -32,7 +39,20 @@ export interface Hub {
  * todas as peças. Testes montam o mesmo grafo com banco em memória, sem
  * precisar subir servidor.
  */
-export function createHub(overrides: Partial<HubConfig> = {}): Hub {
+/**
+ * Pontos de injeção para teste. Em produção tudo vem dos padrões: o leitor de
+ * descoberta real e o diretório home do usuário.
+ */
+export interface HubDeps {
+  /** Substitui `discoverAgent` (leitores reais leem o disco do usuário). */
+  discoverAgent?: DiscoverFn;
+  /** Home usado por descoberta e pelos destinos de config MCP. */
+  homeDir?: string;
+  /** TTL do cache de descoberta em ms (padrão 30s). */
+  discoveryTtlMs?: number;
+}
+
+export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}): Hub {
   const config = loadConfig(overrides);
   const store = createStore(config.dbFile);
   const registry = AgentRegistry.fromDirectory(config.manifestsDir, {
@@ -54,7 +74,13 @@ export function createHub(overrides: Partial<HubConfig> = {}): Hub {
   const sessions = new SessionManager(config, store, registry, bus, worktrees);
   const reaper = new WorktreeReaper(store, worktrees, config.retention);
   const eventRetention = new EventRetentionCompactor(store, config.retention);
-  const server = new HubServer(config, sessions, registry, bus, reaper);
+  const homeDir = deps.homeDir ?? os.homedir();
+  const discovery = new DiscoveryService(registry, deps.discoverAgent ?? discoverAgent, {
+    home: homeDir,
+    ...(deps.discoveryTtlMs !== undefined ? { ttlMs: deps.discoveryTtlMs } : {}),
+  });
+  const importer = new ImportService(discovery, { home: homeDir });
+  const server = new HubServer(config, sessions, registry, bus, reaper, discovery, importer);
 
   const hub: Hub = {
     config,

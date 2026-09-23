@@ -209,6 +209,11 @@ export class SessionManager {
     return this.#projects.list();
   }
 
+  /** Projeto por id, ou erro PROJECT_NOT_FOUND. */
+  getProject(projectId: string): Project {
+    return this.#projects.get(projectId);
+  }
+
   /**
    * Memória e instruções do projeto para o agente desta sessão.
    *

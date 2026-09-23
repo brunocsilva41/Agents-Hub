@@ -37,6 +37,7 @@ import {
 } from './mcp-install.js';
 import { workflowCommand } from './workflow-cmd.js';
 import { pauseCommand } from './pause-cmd.js';
+import { discoverCommand, importCommand } from './discover-cmd.js';
 import { smokeTestAll, type SmokeOutcome } from './doctor-smoke.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
@@ -53,7 +54,7 @@ export interface Args {
  * consome o objetivo como valor de `--detach` e o comando falha dizendo que
  * faltou o objetivo — que estava lá o tempo todo.
  */
-const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear']);
+const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh']);
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -111,6 +112,15 @@ ${bold('Agentes')}
   hub doctor                        checa quais agentes estão instalados
   hub doctor --smoke                abre sessão real em cada agente instalado (GASTA TOKENS/CRÉDITOS)
   hub agents                        lista agentes, capabilities e limitações
+  hub discover [--agent <id>] [--json] [--refresh]
+                                    o que cada CLI já tem: instalado, versão, auth, modelo padrão,
+                                    servidores MCP e instruções globais (só leitura, nunca mostra segredo)
+  hub import <agente> [--project <caminho>] [--kinds instructions,env,mcp] [--to ag1,ag2] [--write]
+                                    traz o ambiente do agente para o projeto. SEM --write só imprime o plano.
+      --kinds              padrão: instructions,env (mcp entra quando há --to)
+      --to <ag1,ag2>       agentes que receberão os servidores MCP descobertos (merge + backup .bak)
+      --overwrite          substitui instrução/variável que o projeto já tem
+      --include-env        copia o env dos servidores MCP (valores reais; padrão: só nomes, sem copiar)
 
 ${bold('Projetos')}
   hub projects                      lista projetos registrados
@@ -195,6 +205,10 @@ async function main(): Promise<void> {
       return withDaemon(() => doctor(client, args));
     case 'agents':
       return withDaemon(() => listAgents(client));
+    case 'discover':
+      return withDaemon(() => discoverCommand(client, args));
+    case 'import':
+      return withDaemon(() => importCommand(client, args, (flag) => resolveProjectId(client, flag)));
     case 'projects':
       return withDaemon(() => listProjects(client));
     case 'project':
