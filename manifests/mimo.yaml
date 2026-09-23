@@ -70,3 +70,4 @@ caveats:
   - "A API v1 não tem custo por passo; o custo do Hub sai estimado pela tabela de preços."
   - "Vocabulário de eventos do `--format json` não confirmado evento a evento: usa o mapper genérico."
   - "A memória persistente do MiMo vive fora do Hub: o que ele lembra não aparece na auditoria."
+  - "session.strategy: native é aspiracional aqui: o mapper generic-json (packages/adapters/src/mappers/generic.ts) nunca preenche mapped.nativeSessionId, só produz eventos message/log/error. Sem nativeSessionId, resume() nunca é chamado de fato — todo turno cai em rebuildConversation (replay). Fechar isto de verdade exige um mapper dedicado do MiMo (item aberto no roadmap), não uma mudança de manifesto."
