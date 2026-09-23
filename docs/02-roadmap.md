@@ -1350,3 +1350,45 @@ interativo.
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
 
+## Auditoria do MCP server — 2026-09-23
+
+Três achados sobre `packages/mcp/src/server.ts`, todos corrigidos no mesmo lote e cobertos por
+teste novo em `packages/mcp/src/server.test.ts` (suíte inteira: 432/432).
+
+- [x] **CRÍTICO — `HubApiError.details.issues` (mensagem de validação por campo) era descartado
+      pelo MCP.** `describe()` só devolvia `code: message` (ex.: "INVALID_BRIEF: Brief inválido"),
+      mesmo quando o daemon mandava `details.issues` com o campo e a mensagem exatos (o client já
+      captura isso em `HubApiError.details` — ver `packages/client/src/index.ts:370-382`). O agente
+      chamador via só o código genérico e nunca descobria qual campo do brief falhou.
+      `explainDelegationFailure` (usado por `hub_agent_call`) tinha o mesmo problema no seu `default`:
+      devolvia `err.message` puro, sem nem o código. Corrigido com `formatIssues()`, que formata
+      `issues: [{ path, message }]` como lista "campo: problema" e é chamado tanto por `describe()`
+      quanto pelo `default` de `explainDelegationFailure`. Teste
+      (`hub_agent_call com brief inválido devolve o campo e a mensagem, não só o código genérico`)
+      chama `hub_agent_call` com `agent: ""` (passa pelo schema solto da tool MCP, rejeitado pelo
+      `BriefSchema.agent.min(1)` do daemon) e confirma que o texto devolvido tem `INVALID_BRIEF`,
+      "campos inválidos" e o nome do campo `agent`.
+- [x] **ALTO — não havia tool MCP equivalente a `POST /sessions/:id/interrupt`.** A rota existe no
+      daemon e o client já tinha `HubClient.interrupt` (`packages/client/src/index.ts:131-133`,
+      exposto na CLI como `hub interrupt`), mas um agente orquestrando via MCP só tinha
+      `hub_agent_cancel` — que mata a sessão inteira e tudo que ela delegou. Não havia como parar só
+      o turno atual sem perder o estado da sessão. Adicionada `hub_session_interrupt`, seguindo a
+      mesma convenção de `hub_session_pause`/`hub_session_send` (nome, `annotations`, tratamento de
+      erro via `describe()`); a descrição da tool deixa explícito que ela difere de
+      `hub_agent_cancel` por não encerrar a sessão. Dois testes novos: um confirma que a sessão
+      continua `running` depois da interrupção (`interrupted: false` no fake de teste, sem turno
+      nativo em andamento) e outro confirma erro descritivo (`SESSION_NOT_FOUND`) para sessão
+      inexistente.
+- [x] **ALTO — não havia tool MCP equivalente a `GET /sessions/:id/diff`.** A rota e o client
+      (`HubClient.diff`) já existiam (CLI expõe via `hub diff`, `packages/cli/src/main.ts` função
+      `showDiff`), mas um agente que delegou trabalho só tinha `hub_agent_events` (log verboso) para
+      validar o que foi de fato alterado antes de reportar ao usuário. Adicionada `hub_session_diff`,
+      que devolve o patch unificado ou a mensagem que o próprio daemon já manda quando não há diff
+      (`"esta sessão não alterou nenhum arquivo"` — a rota não distingue "sessão sem mudanças" de
+      "sessão inexistente"; documentado assim no teste em vez de fingir um erro que a rota não
+      produz). Acrescentada truncagem por linha (`DIFF_MAX_CHARS = 12_000`) porque a CLI imprime o
+      patch inteiro para um humano no terminal, mas aqui quem lê é outro agente — um diff gigante
+      (ex.: lockfile regenerado) queimaria orçamento de tokens sem ajudar em nada. Três testes novos:
+      "sem mudanças", "devolve o patch quando há diff capturado" (semeia um artefato `kind: 'diff'`
+      de verdade e confirma o conteúdo do patch no texto devolvido) e o caso de sessão inexistente.
+
