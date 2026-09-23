@@ -240,4 +240,126 @@ steps:
       assert.match(texto, /unico \(agente-mcp\): ok/);
     },
   );
+
+  test('hub_agent_call com brief inválido devolve o campo e a mensagem, não só o código genérico', async () => {
+    // `hub_agent_call` delega a partir da sessão do CHAMADOR (resolvida por
+    // `caller.resolve()`), e a fixture principal usa um id de sessão fixo que
+    // não bate o formato "ses_..." exigido pela rota — então este teste monta
+    // seu próprio par cliente/servidor MCP com uma sessão real semeada como
+    // chamadora, só para isolar o comportamento de `hub_agent_call`.
+    const sessaoChamadora = semearRodando();
+    const callerReal = new CallerIdentity(hubClient, 'agente-mcp', projetoPath, sessaoChamadora.id);
+    const serverReal = buildMcpServer(hubClient, callerReal);
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const clientReal = new Client({ name: 'teste-brief-invalido', version: '0.0.1' });
+    await Promise.all([serverReal.connect(serverTransport), clientReal.connect(clientTransport)]);
+
+    try {
+      // `agent: ""` passa pelo schema da tool MCP (que não exige mínimo), mas é
+      // rejeitado pelo `BriefSchema` do daemon (`agent: z.string().min(1)`) —
+      // exatamente o caso do Achado 1: sem a correção, o agente chamador só via
+      // "INVALID_BRIEF: Brief inválido" e nunca descobria qual campo falhou.
+      const result = await clientReal.callTool({
+        name: 'hub_agent_call',
+        arguments: { agent: '', objective: 'objetivo longo o suficiente para passar' },
+      });
+
+      assert.equal(result.isError, true);
+      const texto = textOf(result);
+      assert.match(texto, /INVALID_BRIEF/);
+      assert.match(texto, /campos inválidos/i);
+      assert.match(texto, /agent:/);
+    } finally {
+      await clientReal.close();
+    }
+  });
+
+  test('hub_session_interrupt interrompe o turno sem encerrar a sessão', async () => {
+    const session = semearRodando();
+
+    const result = await client.callTool({
+      name: 'hub_session_interrupt',
+      arguments: { session_id: session.id },
+    });
+
+    assert.equal(result.isError, undefined, textOf(result));
+    // Sem turno nativo em andamento no fake do teste, `interrupted` vem
+    // `false` — o texto precisa dizer isso, e a sessão precisa continuar viva
+    // (diferente de hub_agent_cancel).
+    assert.match(textOf(result), /não tinha turno em andamento/);
+    assert.equal(hub.store.sessions.get(session.id)?.state, 'running');
+  });
+
+  test('hub_session_interrupt devolve erro descritivo para sessão inexistente', async () => {
+    // Formato válido (bate o regex de `SessionIdSchema`) mas nenhuma sessão
+    // criada com este id — é o `SESSION_NOT_FOUND` do domínio, não um 422 de
+    // borda por id malformado.
+    const result = await client.callTool({
+      name: 'hub_session_interrupt',
+      arguments: { session_id: 'ses_naoexiste000' },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /SESSION_NOT_FOUND|não encontrada|not found/i);
+  });
+
+  test('hub_session_diff avisa quando a sessão não alterou nenhum arquivo', async () => {
+    const session = semearRodando();
+
+    const result = await client.callTool({
+      name: 'hub_session_diff',
+      arguments: { session_id: session.id },
+    });
+
+    assert.equal(result.isError, undefined, textOf(result));
+    assert.match(textOf(result), /não alterou nenhum arquivo/i);
+  });
+
+  test('hub_session_diff devolve o patch quando há um diff capturado', async () => {
+    const session = semearRodando();
+    const diffPath = path.join(raiz, `${session.id}.diff`);
+    const patch = [
+      'diff --git a/foo.txt b/foo.txt',
+      '--- a/foo.txt',
+      '+++ b/foo.txt',
+      '@@ -1 +1 @@',
+      '-antes',
+      '+depois',
+      '',
+    ].join('\n');
+    writeFileSync(diffPath, patch, 'utf8');
+    hub.store.artifacts.create({
+      id: newId('art'),
+      sessionId: session.id,
+      taskId: null,
+      kind: 'diff',
+      path: diffPath,
+      hash: null,
+      createdAt: nowIso(),
+    });
+
+    const result = await client.callTool({
+      name: 'hub_session_diff',
+      arguments: { session_id: session.id },
+    });
+
+    assert.equal(result.isError, undefined, textOf(result));
+    assert.match(textOf(result), /diff --git a\/foo\.txt/);
+    assert.match(textOf(result), /\+depois/);
+  });
+
+  test('hub_session_diff para sessão inexistente devolve mensagem clara, não erro genérico', async () => {
+    // A rota `/sessions/:id/diff` do daemon não checa se a sessão existe —
+    // ela só procura artefatos do tipo "diff" e não encontra nenhum, então o
+    // desfecho é indistinguível de "sessão real sem mudanças". Documentando
+    // este comportamento aqui em vez de fingir um SESSION_NOT_FOUND que a
+    // rota não produz.
+    const result = await client.callTool({
+      name: 'hub_session_diff',
+      arguments: { session_id: 'ses_naoexiste000' },
+    });
+
+    assert.equal(result.isError, undefined, textOf(result));
+    assert.match(textOf(result), /não alterou nenhum arquivo/i);
+  });
 });

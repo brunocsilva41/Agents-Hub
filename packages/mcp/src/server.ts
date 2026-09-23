@@ -335,6 +335,34 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
   );
 
+  // -------------------------------------------------------------------- diff
+  server.registerTool(
+    'hub_session_diff',
+    {
+      title: 'Ver o diff de uma sessão',
+      description:
+        'Patch unificado do que a sessão efetivamente mudou no código — o mesmo que ' +
+        '`hub diff` na CLI. Use antes de reportar uma delegação como concluída, para ' +
+        'validar o que foi de fato alterado em vez de confiar só no resumo da task ' +
+        '(hub_agent_status) ou no log de eventos (hub_agent_events).',
+      inputSchema: {
+        session_id: z.string().describe('a sessão cujo diff você quer ver'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ session_id }): Promise<ToolResult> => {
+      try {
+        const { diff, message } = await client.diff(session_id);
+        if (!diff) {
+          return ok(message ?? 'esta sessão não tem diff disponível');
+        }
+        return ok(truncateDiff(diff));
+      } catch (err) {
+        return fail(describe(err));
+      }
+    },
+  );
+
   // ----------------------------------------------------------------- cancelar
   server.registerTool(
     'hub_agent_cancel',
@@ -354,6 +382,38 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
       try {
         await client.cancel(session_id, reason ?? 'cancelado pelo agente chamador');
         return ok(`sessão ${session_id} encerrada, junto com o que ela havia delegado`);
+      } catch (err) {
+        return fail(describe(err));
+      }
+    },
+  );
+
+  // --------------------------------------------------------------- interromper
+  server.registerTool(
+    'hub_session_interrupt',
+    {
+      title: 'Interromper o turno atual de uma sessão',
+      description:
+        'Para o turno em andamento de uma sessão SEM encerrá-la — diferente de ' +
+        'hub_agent_cancel, que mata a sessão e tudo que ela delegou. Use quando quiser ' +
+        'que o agente pare o que está fazendo agora mas continue disponível para receber ' +
+        'uma nova instrução com hub_session_send, sem perder o estado acumulado.',
+      inputSchema: {
+        session_id: z.string().describe('a sessão cujo turno atual deve parar'),
+      },
+      annotations: { destructiveHint: false },
+    },
+    async ({ session_id }): Promise<ToolResult> => {
+      try {
+        const { interrupted } = (await client.interrupt(session_id)) as {
+          ok: boolean;
+          interrupted: boolean;
+        };
+        return ok(
+          interrupted
+            ? `turno da sessão ${session_id} interrompido`
+            : `sessão ${session_id} não tinha turno em andamento — nada para interromper`,
+        );
       } catch (err) {
         return fail(describe(err));
       }
@@ -761,12 +821,17 @@ function explainDelegationFailure(err: unknown): string {
     case 'CODEX_GATE_NOT_GUARANTEED':
       return `${err.message}\nPeça ao seu usuário para rodar "hub hooks install codex --write" nesta máquina, ou delegue com --mode semi/autonomous.`;
     default:
-      return err.message;
+      // Inclui `err.code` e os issues por campo — sem isto, um brief com
+      // `agent: ""` ou `budget.usd` inválido virava só "Brief inválido" para
+      // quem chamou, sem dizer qual campo falhou nem por quê.
+      return `${err.code}: ${err.message}${formatIssues(err.details)}`;
   }
 }
 
 function describe(err: unknown): string {
-  if (err instanceof HubApiError) return `${err.code}: ${err.message}`;
+  if (err instanceof HubApiError) {
+    return `${err.code}: ${err.message}${formatIssues(err.details)}`;
+  }
   const message = (err as Error)?.message ?? String(err);
   if (message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
     return 'O daemon do Agents-Hub não está rodando. Peça ao seu usuário para executar "hub daemon".';
@@ -774,6 +839,59 @@ function describe(err: unknown): string {
   return message;
 }
 
+/**
+ * `HubApiError.details` traz `issues: [{ path, message }]` quando o daemon
+ * rejeitou o corpo por erro de validação (Zod). Sem isto, o agente chamador
+ * só via o código genérico ("INVALID_BRIEF: corpo da requisição inválido")
+ * e não descobria QUAL campo falhou nem por quê — ficava tentando de novo
+ * no escuro, ou pedindo ao usuário para adivinhar.
+ */
+function formatIssues(details: unknown): string {
+  if (!details || typeof details !== 'object') return '';
+  const issues = (details as { issues?: unknown }).issues;
+  if (!Array.isArray(issues) || issues.length === 0) return '';
+
+  const linhas = issues
+    .map((issue) => {
+      if (!issue || typeof issue !== 'object') return null;
+      const path = String((issue as { path?: unknown }).path ?? '').trim();
+      const message = String((issue as { message?: unknown }).message ?? '').trim();
+      if (!message) return null;
+      return path ? `${path}: ${message}` : message;
+    })
+    .filter((linha): linha is string => linha !== null);
+
+  if (linhas.length === 0) return '';
+  return `${NEWLINE}campos inválidos:${NEWLINE}${linhas.map((l) => `- ${l}`).join(NEWLINE)}`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Teto para o diff que entra na janela de contexto de quem chamou a tool. A
+ * CLI (`hub diff`) imprime o patch inteiro porque quem lê é um humano no
+ * terminal — aqui quem lê é outro agente, então um diff gigante (ex.: um
+ * `package-lock.json` regenerado) queima orçamento de tokens sem ajudar em
+ * nada. Corta por linha, não por caractere, para não partir um hunk no meio.
+ */
+const DIFF_MAX_CHARS = 12_000;
+
+function truncateDiff(diff: string): string {
+  if (diff.length <= DIFF_MAX_CHARS) return diff;
+
+  const linhas = diff.split(NEWLINE);
+  const mantidas: string[] = [];
+  let total = 0;
+  for (const linha of linhas) {
+    if (total + linha.length + 1 > DIFF_MAX_CHARS) break;
+    mantidas.push(linha);
+    total += linha.length + 1;
+  }
+
+  return (
+    `${mantidas.join(NEWLINE)}${NEWLINE}` +
+    `… [diff truncado — ${diff.length} caracteres no total, mostrando os primeiros ${total}]`
+  );
 }
