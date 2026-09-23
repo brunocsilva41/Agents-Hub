@@ -241,6 +241,15 @@ describe('ImportService', () => {
     assert.ok(r.items.every((i) => i.applied));
   });
 
+  test('env: agente sem variável de ambiente real (kimi) NÃO recebe MODEL fantasma; vai em skipped', async () => {
+    const c = cenario((dir) => ({ ...comServidores(dir), agentId: 'kimi' }));
+    const r = await c.svc.run(c.access, req({ agentId: 'kimi', kinds: ['env'], dryRun: false }));
+    assert.equal(c.getCtx().env?.['kimi'], undefined);
+    assert.equal(c.gravacoes.length, 0);
+    assert.ok(r.skipped.some((s) => s.what === 'env:model' && /não lê/.test(s.reason)));
+    assert.ok(r.skipped.some((s) => s.what === 'env:baseUrl'));
+  });
+
   test('env: nome fora da lista de permissão é REJEITADO e vai em skipped com motivo', async () => {
     const c = cenario(comServidores);
     // Mapeamento sabotado de propósito: se a lista de permissão sumir, NODE_OPTIONS entra.

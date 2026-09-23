@@ -219,7 +219,10 @@ export interface ImportServiceOptions {
   /** Lê os valores REAIS do env de um servidor na origem. Injetável para teste. */
   readMcpEnv?: McpEnvReader;
   /** Nome da variável de ambiente para model/baseUrl de cada agente (injetável para teste). */
-  envVarNames?: { model: (agentId: string) => string; baseUrl: (agentId: string) => string };
+  envVarNames?: {
+    model: (agentId: string) => string | null;
+    baseUrl: (agentId: string) => string | null;
+  };
 }
 
 export class ImportService {
@@ -234,8 +237,8 @@ export class ImportService {
     this.#targets = mcpTargets(options.home ?? os.homedir());
     this.#readMcpEnv = options.readMcpEnv ?? readMcpEnvFromSource;
     this.#envVarNames = options.envVarNames ?? {
-      model: (id) => MODEL_VAR[id] ?? 'MODEL',
-      baseUrl: (id) => BASE_URL_VAR[id] ?? 'MODEL_BASE_URL',
+      model: (id) => MODEL_VAR[id] ?? null,
+      baseUrl: (id) => BASE_URL_VAR[id] ?? null,
     };
   }
 
@@ -347,9 +350,23 @@ export class ImportService {
     skipped: ImportResult['skipped'],
   ): boolean {
     const candidates: Array<[string, string]> = [];
-    if (found.defaults.model) candidates.push([this.#envVarNames.model(req.agentId), found.defaults.model]);
+    // Sem variável que o CLI realmente leia, importar seria um controle fantasma:
+    // grava algo que o agente ignora. Esses vão para `skipped`, com o motivo.
+    const semVar = (what: string): void => {
+      skipped.push({
+        what,
+        reason: `${req.agentId} não lê ${what.split(':')[1]} do ambiente; ele já usa a própria config ao ser lançado pelo Hub`,
+      });
+    };
+    if (found.defaults.model) {
+      const nome = this.#envVarNames.model(req.agentId);
+      if (nome) candidates.push([nome, found.defaults.model]);
+      else semVar('env:model');
+    }
     if (found.defaults.baseUrl) {
-      candidates.push([this.#envVarNames.baseUrl(req.agentId), found.defaults.baseUrl]);
+      const nome = this.#envVarNames.baseUrl(req.agentId);
+      if (nome) candidates.push([nome, found.defaults.baseUrl]);
+      else semVar('env:baseUrl');
     }
     if (found.defaults.provider) {
       skipped.push({
