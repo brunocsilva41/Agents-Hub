@@ -14,3 +14,4 @@ export * from './resilience.js';
 export * from './ports.js';
 export * from './workflow.js';
 
+export * from './discovery.js';
