@@ -520,6 +520,22 @@ export class SessionManager {
     let encerradas = 0;
     let revividas = 0;
 
+    // Passada complementar: fecha tasks não-terminais cuja sessão dona JÁ é
+    // terminal. Cobre o que pode ter vazado historicamente por escritas
+    // relacionadas fora de transação (ex.: `#fallback` criando a sessão
+    // substituta e reatribuindo a task em dois passos separados) — o laço
+    // principal abaixo só revisita sessões `running`/`waiting_approval`, então
+    // uma task presa apontando para uma sessão já terminal nunca seria
+    // revisitada sem isto.
+    const estadoPorSessao = new Map(this.store.sessions.list().map((s) => [s.id, s.state]));
+    for (const task of this.store.tasks.list()) {
+      if (isTerminalTaskState(task.state)) continue;
+      const estado = estadoPorSessao.get(task.sessionId);
+      if (estado && isTerminalSessionState(estado)) {
+        this.store.tasks.update(task.id, { state: 'failed' });
+      }
+    }
+
     for (const sessao of this.store.sessions.list()) {
       if (sessao.state !== 'running' && sessao.state !== 'waiting_approval') continue;
 
@@ -532,23 +548,32 @@ export class SessionManager {
       // jeito. Se sobrar um processo de verdade rodando por trás dele (o
       // daemon anterior morreu sem chance de matar a árvore), esta é a única
       // oportunidade de limpar antes de o worktree ser recolhido com ele
-      // ainda escrevendo nele.
+      // ainda escrevendo nele. `#matarOrfao` é best-effort e assíncrono, por
+      // isso fica FORA da transação abaixo — só a atualização de estado da
+      // sessão e o fechamento das tasks precisam ser atômicos entre si.
       if (sessao.pid !== null) {
         await this.#matarOrfao(sessao);
       }
 
-      this.store.sessions.update(sessao.id, {
-        state: 'killed',
-        endedAt: sessao.endedAt ?? nowIso(),
-        pid: null,
-      });
+      // Sessão e tasks são escritas relacionadas: se o daemon cair de novo
+      // NO MEIO desta própria rotina de recuperação (ex.: dois crashes
+      // seguidos), sem a transação a sessão ficaria `killed` mas as tasks
+      // continuariam não-terminais — e como o laço externo só revisita
+      // sessões `running`/`waiting_approval`, elas nunca seriam revisitadas.
+      this.store.transaction(() => {
+        this.store.sessions.update(sessao.id, {
+          state: 'killed',
+          endedAt: sessao.endedAt ?? nowIso(),
+          pid: null,
+        });
 
-      // A task fica em `failed` para o pipeline não achar que ainda há trabalho.
-      for (const task of this.store.tasks.list({ sessionId: sessao.id })) {
-        if (!isTerminalTaskState(task.state)) {
-          this.store.tasks.update(task.id, { state: 'failed' });
+        // A task fica em `failed` para o pipeline não achar que ainda há trabalho.
+        for (const task of this.store.tasks.list({ sessionId: sessao.id })) {
+          if (!isTerminalTaskState(task.state)) {
+            this.store.tasks.update(task.id, { state: 'failed' });
+          }
         }
-      }
+      });
 
       encerradas += 1;
     }
@@ -1940,17 +1965,24 @@ export class SessionManager {
         endedAt: null,
       };
 
-      this.store.sessions.create(replacement);
-      this.bus.registerSession(sessionId, replacement.rootId);
+      // Criar a sessão substituta e reatribuir a task a ela são duas escritas
+      // relacionadas: se o daemon cair entre uma e outra, a task fica com
+      // `sessionId` apontando para a sessão ANTIGA (já terminal), e
+      // `reconcileOnStartup` nunca a revisita — um vazamento permanente.
+      // `transaction` garante que as duas acontecem juntas ou nenhuma.
+      let updated!: Task;
+      this.store.transaction(() => {
+        this.store.sessions.create(replacement);
+        const anterior = this.store.tasks.get(task.id) ?? task;
+        updated = this.store.tasks.update(task.id, {
+          sessionId,
+          attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
+        });
+      });
 
+      this.bus.registerSession(sessionId, replacement.rootId);
       this.#avisarConfigDoProjetoQuebrada(replacement, task.id, project.path);
       this.#avisarDependenciasNaoLigadas(replacement, task.id, worktree.dependencyWarnings);
-
-      const anterior = this.store.tasks.get(task.id) ?? task;
-      const updated = this.store.tasks.update(task.id, {
-        sessionId,
-        attempts: [...anterior.attempts, novaTentativa(anterior.attempts.length + 1, agentId)],
-      });
 
       // O histórico de falhas vai junto: sem ele o substituto recomeça cego e
       // tende a cair no mesmo buraco.

@@ -720,7 +720,7 @@ function sendError(res: ServerResponse, err: unknown): void {
   });
 }
 
-function statusFor(code: string): number {
+export function statusFor(code: string): number {
   switch (code) {
     case 'AGENT_NOT_FOUND':
     case 'SESSION_NOT_FOUND':
@@ -747,6 +747,13 @@ function statusFor(code: string): number {
     case 'CAPABILITY_UNRESOLVED':
     case 'CODEX_GATE_NOT_GUARANTEED':
       return 424;
+    case 'ADAPTER_FAILURE':
+      // Sempre falha de execução do adapter/processo (agente não sobe,
+      // upstream HTTP não-2xx, etc.) — nunca payload inválido do chamador.
+      // 502 (Bad Gateway) é o que descreve corretamente uma falha de serviço
+      // upstream; cair no default 400 faz um cliente HTTP tratar isto como
+      // "corrija seu payload" quando na verdade é "tente de novo depois".
+      return 502;
     default:
       return 400;
   }
