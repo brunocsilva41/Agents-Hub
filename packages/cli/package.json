@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "description": "CLI do Agents-Hub.",
+  "license": "UNLICENSED",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./bin": "./dist/bin.js"
   },
   "types": "./dist/index.d.ts",
   "bin": {
-    "hub": "./dist/main.js"
+    "hub": "./dist/bin.js"
   },
   "dependencies": {
     "@agents-hub/client": "0.1.0",

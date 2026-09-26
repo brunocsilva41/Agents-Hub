@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { HubClient } from '@agents-hub/client';
+import { readHubEnv, type HubEnv } from '@agents-hub/core';
 import { CallerIdentity } from './caller.js';
 import { buildMcpServer } from './server.js';
 
@@ -13,12 +14,24 @@ import { buildMcpServer } from './server.js';
  * Todo diagnóstico vai para stderr.
  */
 
-const hubUrl = process.env['AGENTS_HUB_URL'] ?? 'http://127.0.0.1:4747';
+// Validadas pelo mesmo esquema do daemon e da CLI. Antes eram lidas cruas:
+// `AGENTS_HUB_MCP_GRACE_MS=abc` virava `NaN`, `grace > 0` dava falso e a
+// carência sumia em silêncio. Valor inválido agora encerra com a mensagem —
+// no stderr, que é onde o agente hospedeiro mostra o log do MCP server.
+let hubEnv: HubEnv;
+try {
+  hubEnv = readHubEnv();
+} catch (err) {
+  process.stderr.write(`agents-hub mcp: ${(err as Error).message}\n`);
+  process.exit(1);
+}
+
+const hubUrl = hubEnv.AGENTS_HUB_URL ?? 'http://127.0.0.1:4747';
 
 // Injetado pelo adapter quando o agente roda DENTRO do Hub. Ausente quando o
 // agente é o principal externo — nesse caso a identidade é adotada sob demanda.
 const sessionId = process.env['AGENTS_HUB_SESSION_ID'];
-const agentId = process.env['AGENTS_HUB_AGENT_ID'] ?? process.env['AGENTS_HUB_MCP_AGENT'] ?? 'externo';
+const agentId = process.env['AGENTS_HUB_AGENT_ID'] ?? hubEnv.AGENTS_HUB_MCP_AGENT ?? 'externo';
 
 const client = new HubClient(hubUrl);
 const caller = new CallerIdentity(client, agentId, process.cwd(), sessionId);
@@ -40,7 +53,7 @@ process.stderr.write(
  * Não esperamos a delegação em si: ela roda no daemon e sobrevive à nossa
  * saída, que é exatamente o ponto de a delegação ser assíncrona.
  */
-const SHUTDOWN_GRACE_MS = Number(process.env['AGENTS_HUB_MCP_GRACE_MS'] ?? 3000);
+const SHUTDOWN_GRACE_MS = hubEnv.AGENTS_HUB_MCP_GRACE_MS ?? 3000;
 
 let closing = false;
 const shutdown = async (grace: number): Promise<void> => {

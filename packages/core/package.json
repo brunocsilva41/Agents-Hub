@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Domínio puro do Agents-Hub: tipos, eventos, política, orçamento e grafo de chamadas. Sem I/O.",
+  "license": "UNLICENSED",
   "exports": {
     ".": "./dist/index.js",
     "./agent-env": {

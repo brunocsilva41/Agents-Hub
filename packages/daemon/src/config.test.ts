@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
 import { isHubError } from '@agents-hub/core';
-import { loadConfig } from './config.js';
+import { cliHookEntrypoint, installRoot, loadConfig, mensagemDeJsonInvalido } from './config.js';
 
 /**
  * `loadConfig` lê `config.json` sem validação nenhuma antes desta mudança —
@@ -93,5 +93,97 @@ describe('loadConfig — validação de config.json', () => {
     const home = homeComConfig({ port: 5050, umaChaveQueNaoExisteMais: 'valor-antigo' });
     const config = loadConfig({ home });
     assert.equal(config.port, 5050);
+  });
+
+  // R07-07: o `HubError` já existia, mas dizia "at position 20" — ninguém conta
+  // caracteres num arquivo. Agora diz caminho:linha:coluna.
+  test('JSON inválido: mensagem com caminho, linha e coluna', () => {
+    const raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-config-'));
+    raizes.push(raiz);
+    const arquivo = path.join(raiz, 'config.json');
+    writeFileSync(arquivo, '{\n  "port": 4747,\n  oops\n}\n', 'utf8');
+    assert.throws(
+      () => loadConfig({ home: raiz }, {}),
+      (err: unknown) => {
+        assert.ok(isHubError(err));
+        assert.ok((err as Error).message.startsWith(`${arquivo}:3:3:`), (err as Error).message);
+        assert.match((err as Error).message, /linha 3, coluna 3/);
+        return true;
+      },
+    );
+  });
+
+  test('mensagem de JSON truncado aponta o fim do arquivo', () => {
+    let erro: Error | undefined;
+    try {
+      JSON.parse('{\n  "port": 1');
+    } catch (e) {
+      erro = e as Error;
+    }
+    assert.match(mensagemDeJsonInvalido('c.json', '{\n  "port": 1', erro!), /^c\.json:2:/);
+  });
+
+  test('BOM do Bloco de Notas não invalida o config.json', () => {
+    const raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-config-'));
+    raizes.push(raiz);
+    writeFileSync(path.join(raiz, 'config.json'), '﻿{"port": 5151}', 'utf8');
+    assert.equal(loadConfig({ home: raiz }, {}).port, 5151);
+  });
+});
+
+// R07-08 / R14-07: `AGENTS_HUB_PORT` valia só para `hub daemon`; CLI, hook e
+// `hub mcp` usavam a porta do config.json. Agora é `loadConfig` que aplica.
+describe('loadConfig — variáveis de ambiente', () => {
+  const raizes: string[] = [];
+  after(() => {
+    for (const raiz of raizes) rmSync(raiz, { recursive: true, force: true });
+  });
+  function home(conteudo?: unknown): string {
+    const raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-config-env-'));
+    raizes.push(raiz);
+    if (conteudo !== undefined) writeFileSync(path.join(raiz, 'config.json'), JSON.stringify(conteudo), 'utf8');
+    return raiz;
+  }
+
+  test('AGENTS_HUB_PORT vence o config.json', () => {
+    assert.equal(loadConfig({ home: home({ port: 5000 }) }, { AGENTS_HUB_PORT: '48210' }).port, 48210);
+  });
+
+  test('override explícito vence a variável (createHub({ port: 0 }) dos testes)', () => {
+    assert.equal(loadConfig({ home: home(), port: 0 }, { AGENTS_HUB_PORT: '48210' }).port, 0);
+  });
+
+  test('AGENTS_HUB_PORT=abc lança HubError com o nome da variável', () => {
+    assert.throws(
+      () => loadConfig({ home: home() }, { AGENTS_HUB_PORT: 'abc' }),
+      (err: unknown) => isHubError(err) && /AGENTS_HUB_PORT/.test((err as Error).message),
+    );
+  });
+
+  test('AGENTS_HUB_HOME do ambiente passado é respeitada', () => {
+    const h = home({ port: 5252 });
+    assert.equal(loadConfig({}, { AGENTS_HUB_HOME: h }).home, h);
+    assert.equal(loadConfig({}, { AGENTS_HUB_HOME: h }).port, 5252);
+  });
+});
+
+// Item 5.7: instalado pelo tarball, os pacotes ficam em
+// `agents-hub/node_modules/@agents-hub/*`; "três níveis acima" caía em
+// `node_modules/` e o daemon subia sem manifestos e sem painel.
+describe('raiz da instalação', () => {
+  test('pacote instalado: a raiz é o próprio agents-hub/', () => {
+    const dist = path.join('C:', 'npm', 'node_modules', 'agents-hub', 'node_modules', '@agents-hub', 'daemon', 'dist');
+    assert.equal(installRoot(dist), path.join('C:', 'npm', 'node_modules', 'agents-hub'));
+  });
+
+  test('clone: a raiz é a do repositório (tem manifests/)', () => {
+    const raiz = installRoot();
+    assert.ok(existsSync(path.join(raiz, 'manifests', 'claude.yaml')), raiz);
+  });
+
+  test('o hook do Codex aponta para o bin.js que existe (não para main.js)', () => {
+    const entrada = cliHookEntrypoint();
+    assert.ok(entrada.endsWith(path.join('cli', 'dist', 'bin.js')), entrada);
+    assert.ok(existsSync(entrada), entrada);
   });
 });

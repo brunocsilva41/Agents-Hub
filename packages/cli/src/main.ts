@@ -5,7 +5,8 @@ import { baseUrl, loadConfig, ligarBypassDoGateCodex, modoExigeGate } from '@age
 import { HubApiError, HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
 import { runDaemon } from './daemon-run.js';
-import { decideToolCall, lerStdin, type HookInput } from './hook.js';
+import { runHook } from './hook-run.js';
+import { autostartCommand } from './autostart-cmd.js';
 import {
   HOOK_TARGETS,
   MATCHER_DE_RISCO,
@@ -105,6 +106,7 @@ ${bold('Daemon')} ${dim('(sobe sozinho quando algum comando precisa)')}
   hub daemon                        roda em primeiro plano, para ver os logs
   hub stop                          encerra o daemon e as sessões vivas
   hub health                        resposta crua da API
+  hub autostart [enable|disable|status]  sobe o daemon no login do Windows (desligado por padrão)
 
 ${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar)')}
   hub hooks install claude --write   registra o hook PreToolUse no Claude Code
@@ -213,6 +215,8 @@ async function main(): Promise<void> {
   switch (args.command) {
     case 'daemon':
       return runDaemon();
+    case 'autostart':
+      return autostartCommand(args, client);
     case 'hook':
       // NAO passa por withDaemon: subir o daemon de dentro de um hook faria
       // isso acontecer a cada chamada de ferramenta do agente.
@@ -312,52 +316,6 @@ async function main(): Promise<void> {
       console.log(HELP);
       process.exitCode = 1;
   }
-}
-
-/**
- * Responde ao hook do agente. Silencioso por construção: qualquer coisa fora do
- * JSON no stdout confunde quem está lendo a resposta.
- */
-async function runHook(args: Args): Promise<void> {
-  // O dialeto é DECLARADO por quem instala o hook, nunca farejado do payload.
-  // Codex e Claude mandam entrada quase idêntica e esperam saídas opostas para
-  // "permitir"; adivinhar por formato daria um erro silencioso no dia em que os
-  // dois payloads convergirem — e o erro cairia justamente no caminho feliz.
-  const dialeto = args.flags['dialect'] === 'codex' ? 'codex' : 'claude';
-
-  let entrada: HookInput = {};
-  try {
-    const bruto = await lerStdin();
-    entrada = bruto.trim().length > 0 ? (JSON.parse(bruto) as HookInput) : {};
-  } catch {
-    // stdin ilegível não pode virar bloqueio: o agente ficaria travado.
-    entrada = {};
-  }
-
-  // Config ilegível não derruba o hook: cai no endereço padrão, e o modo de
-  // falha (fechado numa sessão do Hub) decide se o daemon não atender.
-  let url = 'http://127.0.0.1:4747';
-  let failMode: 'open' | 'closed' | undefined;
-  try {
-    const config = loadConfig();
-    url = baseUrl(config);
-    failMode = config.gate?.failMode;
-  } catch {
-    // mantém os padrões acima
-  }
-
-  // Claude recebe o id no ambiente; Codex, no próprio comando (`--session`),
-  // porque ele só repassa variáveis `CODEX_*` ao hook.
-  const sessaoNoComando = args.flags['session'];
-  const sessionId =
-    typeof sessaoNoComando === 'string' ? sessaoNoComando : process.env['AGENTS_HUB_SESSION_ID'];
-
-  const { saida, codigo } = await decideToolCall(entrada, url, dialeto, { sessionId, failMode });
-  // Sai assim que a resposta estiver escrita: se o teto do hook estourou, o
-  // `fetch` ao daemon ainda está pendurado e seguraria o processo — e o agente
-  // só lê a resposta quando o hook termina.
-  process.exitCode = codigo;
-  process.stdout.write(saida, () => process.exit(codigo));
 }
 
 // ------------------------------------------------------ gate pré-execução

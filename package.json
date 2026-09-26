@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Plano de controle onde qualquer agente de IA pode orquestrar e ser orquestrado.",
+  "license": "UNLICENSED",
   "engines": {
     "node": ">=22.5.0"
   },
@@ -16,13 +17,15 @@
     "clean": "tsc -b --clean",
     "typecheck": "tsc -b && npm run typecheck --workspace @agents-hub/web",
     "daemon": "node --experimental-sqlite packages/daemon/dist/main.js",
-    "hub": "node packages/cli/dist/main.js",
+    "hub": "node packages/cli/dist/bin.js",
     "test": "node scripts/run-tests.mjs",
     "test:e2e": "npm run build:packages && npm run build --workspace @agents-hub/web && playwright test -c packages/web/playwright.config.ts",
     "build:packages": "tsc -b",
     "web:dev": "npm run dev --workspace @agents-hub/web",
     "verify": "npm run build && npm test",
-    "demo": "node scripts/demo-e2e.mjs"
+    "demo": "node scripts/demo-e2e.mjs",
+    "pack:dist": "node scripts/pack-dist.mjs",
+    "test:install": "node scripts/test-install.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

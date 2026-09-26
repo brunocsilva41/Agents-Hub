@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "description": "Daemon do Agents-Hub: orquestrador, gerenciador de sessões e API HTTP+SSE.",
+  "license": "UNLICENSED",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./config": "./dist/config.js",
+    "./pretool-gate": "./dist/pretool-gate.js"
   },
   "types": "./dist/index.d.ts",
   "bin": {

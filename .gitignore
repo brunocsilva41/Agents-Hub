@@ -27,3 +27,6 @@ session-export-*.zip
 
 # lógica pura do painel compilada para node:test (packages/web/tsconfig.test.json)
 packages/web/dist-test/
+
+# tarball distribuível (`npm run pack:dist`)
+dist-pack/

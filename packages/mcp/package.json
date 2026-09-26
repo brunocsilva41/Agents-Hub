@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "MCP server do Agents-Hub: dá a qualquer agente as ferramentas para chamar, observar e controlar os outros.",
+  "license": "UNLICENSED",
   "exports": {
     ".": "./dist/index.js"
   },

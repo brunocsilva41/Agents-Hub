@@ -4,7 +4,7 @@ import { createServer as criarTcp, type Socket } from 'node:net';
 import { describe, test } from 'node:test';
 import { TIMEOUT_DO_HOOK_SEC } from '@agents-hub/daemon';
 import { decideToolCall, modoDeFalhaEfetivo } from './hook.js';
-import { avisoDeTimeoutDoHook, mergeHooks } from './hooks-install.js';
+import { avisoDeTimeoutDoHook, hookCommand, hookInstalado, mergeHooks } from './hooks-install.js';
 
 /**
  * Porta inexistente de propósito: exercita o caminho de "daemon indisponível",
@@ -222,5 +222,28 @@ describe('timeout do hook instalado', () => {
 
   test('sem hook do Hub instalado, não há aviso', () => {
     assert.equal(avisoDeTimeoutDoHook({}), null);
+  });
+});
+
+// Item 5.7: o hook passa a apontar para `bin.js` (entrada leve, com a flag do
+// SQLite quando o Node precisa). Instalações antigas gravaram `main.js`.
+describe('comando do hook instalado', () => {
+  test('aponta para bin.js da própria instalação', () => {
+    assert.match(hookCommand(), /[\\/]bin\.js" hook$/);
+  });
+
+  test('reinstalar sobre a entrada antiga (main.js) substitui em vez de duplicar', () => {
+    const antiga = mergeHooks({}, '"node" "C:/x/main.js" hook');
+    const nova = mergeHooks(antiga, '"node" "C:/y/bin.js" hook');
+    const pre = (nova['hooks'] as { PreToolUse: Array<{ hooks: Array<{ command: string }> }> }).PreToolUse;
+    assert.equal(pre.length, 1);
+    assert.equal(pre[0]?.hooks[0]?.command, '"node" "C:/y/bin.js" hook');
+  });
+
+  test('reinstalar duas vezes com bin.js não duplica, e conta como instalado', () => {
+    const uma = mergeHooks({}, '"node" "C:/y/bin.js" hook');
+    const duas = mergeHooks(uma, '"node" "C:/y/bin.js" hook');
+    assert.equal((duas['hooks'] as { PreToolUse: unknown[] }).PreToolUse.length, 1);
+    assert.equal(hookInstalado(duas), true);
   });
 });

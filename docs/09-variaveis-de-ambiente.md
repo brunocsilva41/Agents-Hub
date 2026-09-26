@@ -1,7 +1,10 @@
 # Variáveis de ambiente
 
 Seis variáveis `AGENTS_HUB_*` configuram o Hub de fora — todas lidas e
-validadas num lugar só, [`packages/daemon/src/env.ts`](../packages/daemon/src/env.ts).
+validadas num lugar só, [`packages/core/src/hub-env.ts`](../packages/core/src/hub-env.ts)
+(`readHubEnv`), usado pelo daemon, pela CLI (via `loadConfig`) e pelo MCP
+server. Valor inválido é recusado com o nome da variável, em uma linha (sem
+stack trace), por qualquer comando.
 Antes deste módulo existir, cada entrypoint lia `process.env` cru, e uma
 variável mal formada (ex. `AGENTS_HUB_PORT=abc`) virava `NaN` silencioso em vez
 de erro — o daemon subia mesmo assim, só que numa porta aleatória escolhida
@@ -31,16 +34,23 @@ recusar subir com um erro explícito, em vez de escutar numa porta aleatória.
 AGENTS_HUB_PORT=5050 hub daemon
 ```
 
-Vale tanto para `hub daemon` (o caminho que o autostart usa) quanto para
-`node packages/daemon/dist/main.js` chamado direto.
+Vale para TODOS os comandos, não só para o daemon: `loadConfig` aplica a
+variável (precedência: padrão < `config.json` < `AGENTS_HUB_PORT` < override
+explícito no código). Então `AGENTS_HUB_PORT=5050 hub status` fala com a 5050,
+o autostart sobe o daemon na 5050, o hook do gate consulta a 5050 e
+`hub mcp install` grava `AGENTS_HUB_URL` com a 5050. Antes, só `hub daemon`
+lia a variável e o resto da CLI ficava sondando a 4747.
 
 ## `AGENTS_HUB_NO_AUTOSTART`
 
 Quando o daemon não está no ar, todo comando da CLI sobe ele sozinho (ver
 `packages/cli/src/daemon-control.ts`). `AGENTS_HUB_NO_AUTOSTART=1` desliga essa
 conveniência — útil em CI ou quando você quer controlar o ciclo de vida do
-daemon manualmente. Qualquer outro valor (inclusive `0` ou ausente) mantém o
-autostart ligado.
+daemon manualmente. `0` ou ausente mantém o autostart ligado; qualquer outro
+valor (`sim`, `true`) é recusado, em vez de ser lido como "não" em silêncio.
+
+Não confundir com `hub autostart enable`, que sobe o daemon **no login do
+Windows** (ver [docs/13-instalacao.md](13-instalacao.md)).
 
 ```bash
 AGENTS_HUB_NO_AUTOSTART=1 hub status   # falha em vez de subir o daemon sozinho

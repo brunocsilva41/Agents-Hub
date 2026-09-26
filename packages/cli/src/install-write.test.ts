@@ -123,7 +123,7 @@ describe('hub hooks install claude --write — nunca perde a config do usuário'
     assert.equal(doc.hooks.Stop.length, 1, 'outros eventos de hook preservados');
     assert.equal(doc.hooks.PreToolUse.length, 2);
     assert.equal(doc.hooks.PreToolUse[0]?.hooks[0]?.command, 'meu-hook.sh', 'hook do usuário preservado');
-    assert.match(doc.hooks.PreToolUse[1]?.hooks[0]?.command ?? '', /main\.js" hook$/);
+    assert.match(doc.hooks.PreToolUse[1]?.hooks[0]?.command ?? '', /bin\.js" hook$/);
 
     const [b1, ...resto] = backupsDe(file);
     assert.equal(resto.length, 0);
