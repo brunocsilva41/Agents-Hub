@@ -43,6 +43,20 @@ import { discoverCommand, importCommand } from './discover-cmd.js';
 import { auditCommand, policyCommand } from './policy-cmd.js';
 import { readOperatorToken } from '@agents-hub/client/operator-token';
 import { smokeTestAll, type SmokeOutcome } from './doctor-smoke.js';
+// Item 5.6: comandos de ciclo de vida, exportação e manutenção.
+import { HELP_CICLO_DE_VIDA } from './lifecycle-help.js';
+import { versionCommand } from './version-cmd.js';
+import { JSON_COMMANDS, jsonCommand } from './json-cmd.js';
+import { initCommand, perguntarNoTerminal } from './init-cmd.js';
+import { openCommand } from './open-cmd.js';
+import { logsCommand } from './logs-cmd.js';
+import { restartCommand } from './restart-cmd.js';
+import { updateCommand } from './update-cmd.js';
+import { exportCommand } from './export-cmd.js';
+import { costCommand } from './cost-cmd.js';
+import { mergeCommand } from './merge-cmd.js';
+import { backupCommand, restoreCommand } from './backup-cmd.js';
+import { comErro } from './cmd-util.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
 const NEWLINE = String.fromCharCode(10);
@@ -59,6 +73,8 @@ export interface Args {
  * faltou o objetivo — que estava lá o tempo todo.
  */
 const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh']);
+// Item 5.6 (init/logs/open/update/export/cost/merge/restore).
+for (const f of ['yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw']) BOOLEAN_FLAGS.add(f);
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -194,6 +210,7 @@ ${bold('MCP — dar ao agente o poder de chamar os outros')}
   hub mcp install <agente> --write   grava a config (merge, backup versionado .bak-<data>)
       --project <caminho>    para agentes com config por projeto (Claude Code)
 
+${HELP_CICLO_DE_VIDA}
 ${dim('Alvo do --agent aceita id (codex) ou capability (cap:test-writing).')}
 `;
 
@@ -204,11 +221,27 @@ async function main(): Promise<void> {
   // bloqueante e roda a ferramenta. O hook lê a config por conta própria e
   // aplica o modo de falha se ela não abrir.
   if (args.command === 'hook') return runHook(args);
+  // `--version` responde mesmo com config quebrada; só pergunta ao daemon se der.
+  if (args.command === '--version' || args.command === '-v' || args.command === 'version') {
+    let cliente: HubClient | null = null;
+    try {
+      cliente = new HubClient(baseUrl(loadConfig()));
+    } catch {
+      cliente = null;
+    }
+    await versionCommand(args, cliente);
+    return;
+  }
   const config = loadConfig();
   // Token de operador (item 1.6): lido a cada requisição, do arquivo que o
   // daemon cria — ele pode nascer depois deste cliente (autostart). O hook
   // do agente (`runHook`) NÃO usa este cliente: monta o próprio, sem token.
   const client = new HubClient(baseUrl(config), { token: () => readOperatorToken(config.home) });
+
+  // `--json` uniforme nos comandos de leitura (item 5.6): só JSON no stdout.
+  if (args.flags['json'] === true && JSON_COMMANDS.has(args.command)) {
+    return withDaemon(() => jsonCommand(client, args, { home: config.home, url: baseUrl(config) }));
+  }
 
   switch (args.command) {
     case 'daemon':
@@ -302,6 +335,35 @@ async function main(): Promise<void> {
       return withDaemon(() => showBudget(client, args));
     case 'workflow':
       return withDaemon(() => workflowCommand(client, args));
+    // ------------------------------------------- item 5.6 (ver *-cmd.ts)
+    case 'init':
+      return comErro(() =>
+        initCommand(client, args, {
+          ensureDaemon: () => ensureDaemon(client),
+          url: baseUrl(config),
+          ...(process.stdin.isTTY && process.stdout.isTTY ? { ask: perguntarNoTerminal } : {}),
+        }).then(() => undefined),
+      );
+    case 'open':
+      return withDaemon(() => openCommand(baseUrl(config), args));
+    case 'logs':
+      return comErro(() => logsCommand(config.logDir, args));
+    case 'restart':
+      return comErro(() => restartCommand(client, args, { start: () => ensureDaemon(client) }));
+    case 'update':
+      return comErro(() => updateCommand(args).then(() => undefined));
+    case 'export':
+      return withDaemon(() => exportCommand(client, args));
+    case 'cost':
+      return withDaemon(() => costCommand(client, args).then(() => undefined));
+    case 'merge':
+    case 'apply':
+      return withDaemon(() => mergeCommand(client, args).then(() => undefined));
+    case 'backup':
+      // Não sobe o daemon: parado, o backup é feito aqui mesmo.
+      return comErro(() => backupCommand(client, config, args));
+    case 'restore':
+      return comErro(() => restoreCommand(client, config, args));
     case 'help':
     case '--help':
     case '-h':

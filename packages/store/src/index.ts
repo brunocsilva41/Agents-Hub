@@ -1,6 +1,14 @@
 export { openDatabase, migrate, type Db } from './db.js';
 export { MIGRATIONS, type Migration } from './migrations.js';
 export { SqliteUnitOfWork } from './repositories.js';
+export {
+  backupDatabase,
+  restoreDatabase,
+  conferirBanco,
+  backupFileName,
+  type BackupResult,
+  type RestoreResult,
+} from './backup.js';
 
 import { openDatabase } from './db.js';
 import { SqliteUnitOfWork } from './repositories.js';

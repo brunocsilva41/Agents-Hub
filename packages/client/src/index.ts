@@ -349,6 +349,11 @@ export class HubClient {
     return this.#post('/maintenance/sweep', {});
   }
 
+  /** Backup consistente do banco (`VACUUM INTO`); `out` é caminho absoluto. */
+  backup(out?: string): Promise<{ backup: { path: string; bytes: number; schemaVersion: number } }> {
+    return this.#post('/maintenance/backup', out === undefined ? {} : { out });
+  }
+
   // ------------------------------------------------------------ observação
   async events(
     sessionId: string,

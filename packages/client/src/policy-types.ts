@@ -45,6 +45,7 @@ export type AuditKindSummary =
   | 'project.import'
   | 'project.folders'
   | 'maintenance.sweep'
+  | 'maintenance.backup'
   | 'daemon.shutdown';
 
 export interface AuditEntrySummary {
