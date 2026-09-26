@@ -1,6 +1,37 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { filtrarEnvDeProjeto } from './agent-env.js';
+import { filtrarEnvDeProjeto, variaveisLidasPeloAgente, variavelDoAgente } from './agent-env.js';
+
+describe('variáveis que cada agente lê de fato', () => {
+  test('claude lê ANTHROPIC_*, nunca OPENAI_* nem MODEL', () => {
+    const nomes = variaveisLidasPeloAgente('claude').map((v) => v.nome);
+    assert.ok(nomes.includes('ANTHROPIC_BASE_URL'));
+    assert.ok(!nomes.some((n) => n.startsWith('OPENAI_')));
+    assert.ok(!nomes.includes('MODEL'));
+  });
+
+  test('nenhum agente anuncia a variável genérica MODEL (sem consumidor em adapter nenhum)', () => {
+    for (const id of ['claude', 'openclaude', 'antigravity', 'codex', 'opencode', 'kimi', 'copilot', 'cursor', 'mimo']) {
+      assert.ok(!variaveisLidasPeloAgente(id).some((v) => v.nome === 'MODEL'), id);
+    }
+  });
+
+  test('toda variável da tabela passa pela lista de permissão', () => {
+    // Uma variável que o filtro recusa seria gravada e descartada ao carregar:
+    // outro controle fantasma.
+    for (const id of ['claude', 'openclaude', 'antigravity', 'codex', 'opencode', 'kimi']) {
+      for (const v of variaveisLidasPeloAgente(id)) {
+        assert.deepEqual(filtrarEnvDeProjeto({ [v.nome]: 'x' }).recusadas, [], `${id}:${v.nome}`);
+      }
+    }
+  });
+
+  test('agente sem variável conhecida devolve vazio/null', () => {
+    assert.deepEqual(variaveisLidasPeloAgente('copilot'), []);
+    assert.equal(variavelDoAgente('codex', 'model'), null);
+    assert.equal(variavelDoAgente('antigravity', 'model'), 'GEMINI_MODEL');
+  });
+});
 
 describe('ambiente que o projeto pode passar ao agente', () => {
   test('variáveis de provedor passam', () => {

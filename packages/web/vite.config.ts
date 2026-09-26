@@ -1,26 +1,9 @@
 import { defineConfig, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
-
-/** Rotas do daemon — em desenvolvimento o Vite as repassa; em produção o
- *  próprio daemon serve esta build, então tudo já é a mesma origem. */
-const API_ROUTES = [
-  '/health',
-  '/agents',
-  '/approvals',
-  '/projects',
-  '/sessions',
-  '/tasks',
-  '/graph',
-  '/budget',
-  '/events',
-  '/context',
-];
-
-// Ficam FORA de propósito, mesmo existindo no daemon: `/shutdown`,
-// `/maintenance/sweep` e `/hooks/pretooluse`. Repassá-las pelo servidor de
-// desenvolvimento daria a qualquer página aberta no navegador um caminho para
-// derrubar o Hub ou responder por um gate de segurança. `/api/tasks` também
-// fica de fora: é a superfície de automação externa, não a da interface.
+// Rotas do daemon repassadas em desenvolvimento — e as que ficam de fora de
+// propósito (`/shutdown`, `/maintenance`, `/hooks`, `/api`). A lista vive em
+// módulo próprio para ter teste (`src/logic/api-routes.test.ts`).
+import { API_ROUTES } from './src/logic/api-routes';
 
 const target = process.env['AGENTS_HUB_URL'] ?? 'http://127.0.0.1:4747';
 

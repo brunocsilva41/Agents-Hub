@@ -1,4 +1,4 @@
-import { HubApiError, HubClient } from '@agents-hub/client';
+import { HubClient } from '@agents-hub/client';
 import type { AgentDiscovery, ImportKind, ImportResult } from '@agents-hub/core';
 
 /**
@@ -132,57 +132,24 @@ export interface ImportRequest {
   includeEnv?: boolean;
 }
 
-/**
- * Estas rotas ainda não estão no `HubClient` (pacote fora da área da UI), então
- * falam com a API por aqui. O tratamento de erro espelha o do cliente: o
- * `HubApiError` carrega `details.issues`, que `describeError` já sabe exibir.
+/*
+ * Estas três passavam por um `fetch` próprio, de quando as rotas ainda não
+ * estavam no `HubClient`. Agora estão (`discovery`, `discoverAgent`,
+ * `importFromAgent`, que também valida o id do projeto no caminho) — uma cópia
+ * a menos do tratamento de erro para envelhecer (vistoria 2026-09-25, 03).
  */
-async function call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${window.location.origin}${path}`, {
-    method,
-    ...(body === undefined
-      ? {}
-      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  });
-  const text = await response.text();
-  let parsed: Record<string, unknown> = {};
-  if (text.length > 0) {
-    try {
-      parsed = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new HubApiError(
-        `o Hub respondeu algo que não é JSON (HTTP ${response.status}).`,
-        'RESPOSTA_NAO_JSON',
-        response.status,
-      );
-    }
-  }
-  if (!response.ok) {
-    const error = parsed['error'] as { code?: string; message?: string; details?: unknown } | undefined;
-    throw new HubApiError(
-      error?.message ?? (text || `HTTP ${response.status}`),
-      error?.code ?? String(response.status),
-      response.status,
-      error?.details,
-    );
-  }
-  return parsed as T;
-}
 
 /** Lista o que cada CLI instalado já tem (leitura apenas, sem segredos). */
 export function fetchDiscovery(): Promise<{ agents: AgentDiscovery[] }> {
-  return call('GET', '/discovery');
+  return hub.discovery();
 }
 
 /** Relê um agente do disco, ignorando o cache do daemon. */
 export function refreshDiscovery(agentId: string): Promise<AgentDiscovery> {
-  return call<AgentDiscovery | { agent: AgentDiscovery }>(
-    'GET',
-    `/discovery/${encodeURIComponent(agentId)}?refresh=1`,
-  ).then((r) => ('agent' in r ? r.agent : r));
+  return hub.discoverAgent(agentId, true).then((r) => r.agent);
 }
 
 /** Prévia (`dryRun: true`) ou aplicação (`dryRun: false`) da importação. */
 export function importFromAgent(projectId: string, request: ImportRequest): Promise<ImportResult> {
-  return call('POST', `/projects/${encodeURIComponent(projectId)}/import`, request);
+  return hub.importFromAgent(projectId, request);
 }

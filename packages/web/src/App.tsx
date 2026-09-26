@@ -6,6 +6,8 @@ import { FlowList } from './components/FlowList';
 import { SessionModal } from './components/SessionModal';
 import { ProjectModal } from './components/ProjectModal';
 import { SettingsView } from './components/SettingsView';
+import { Onboarding } from './components/Onboarding';
+import { precisaDeBoasVindas } from './logic/settings-form';
 import { SidePanel } from './components/SidePanel';
 import { Timeline } from './components/Timeline';
 import { Toasts } from './components/Toasts';
@@ -34,6 +36,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [flowsOpen, setFlowsOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [boasVindasDispensadas, setBoasVindasDispensadas] = useState(false);
 
   const selected: SessionSummary | null = useMemo(
     () => (selectedId ? state.sessions.find((s) => s.id === selectedId) ?? null : null),
@@ -241,10 +244,25 @@ export function App() {
         onResolved={() => state.refresh()}
       />
 
+      {/* Primeira execução, sem projeto: guia para registrar e ver agentes. */}
+      {precisaDeBoasVindas(state.ready, state.projects.length) &&
+        !boasVindasDispensadas &&
+        activeTab !== 'settings' && (
+          <Onboarding
+            onNewProject={() => setProjectModalOpen(true)}
+            onVerAgentes={() => setActiveTab('settings')}
+            onDispensar={() => setBoasVindasDispensadas(true)}
+          />
+        )}
+
       {/* 2. Main Body Content Area */}
       {activeTab === 'settings' ? (
         <main className="tab-view-container">
-          <SettingsView agents={state.agents} projects={state.projects} />
+          <SettingsView
+            agents={state.agents}
+            projects={state.projects}
+            onNewProject={() => setProjectModalOpen(true)}
+          />
         </main>
       ) : activeTab === 'swarm' ? (
         <main className="tab-view-container">

@@ -1,0 +1,14 @@
+// Compila só a lógica pura do painel (src/logic) e seus testes node:test para
+// dist-test/, que `npm test` roda (scripts/run-tests.mjs). O bundle do
+// navegador continua a cargo do Vite, com o tsconfig.json ao lado.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist-test",
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/logic/**/*.ts"],
+  "references": [{ "path": "../core" }, { "path": "../client" }]
+}
