@@ -36,11 +36,16 @@ export const QUEUE_HIGH_WATER_MARK = 1000;
 export const QUEUE_LOW_WATER_MARK = 200;
 export const QUEUE_HARD_CAP = 5000;
 
+/** Quanto um CLI tem para sair sozinho depois do SIGINT antes de a árvore morrer. */
+const ESPERA_SIGINT_MS = 5_000;
+
 interface InternalHandle extends RunHandle {
   child: ChildProcessWithoutNullStreams;
   queue: AsyncQueue<MappedEvent>;
   settle: (outcome: RunOutcome) => void;
   canceled: boolean;
+  /** O turno foi parado a pedido (interrupt/pause) — a sessão continua. */
+  interrupted: boolean;
   clearTimers: () => void;
   touch: () => void;
   /** Caminho do `{{promptFile}}` desta run, se o manifesto usa esse modo — apagado em `settle`. */
@@ -142,17 +147,41 @@ export class ProcessAgentAdapter implements AgentAdapter {
     });
   }
 
-  /** Para o turno atual preservando o processo, quando o agente entende SIGINT. */
+  /**
+   * Para o TURNO atual. A sessão continua: quem chamou (o `SessionManager`)
+   * deixa a sessão `idle`/`paused` e a retoma depois por `send` — resume
+   * nativo quando o agente tem (`session.strategy: native`), replay do
+   * histórico quando não.
+   *
+   * O processo de um CLI one-shot É o turno, então parar o turno é encerrar o
+   * processo. No Windows não existe SIGINT entregável a outro processo: a
+   * árvore é morta direto. Em POSIX vai SIGINT (o CLI costuma gravar a
+   * sessão e sair limpo) e, se ele ignorar, a árvore morre depois de
+   * `ESPERA_SIGINT_MS` — um turno "interrompido" que segue rodando seria pior
+   * que nenhum.
+   *
+   * O desfecho sai com `reason: 'interrupted'`, nunca `canceled`: é o que
+   * separa "parei o turno" de "matei a sessão" para quem lê o `done`.
+   */
   async interrupt(handle: RunHandle): Promise<void> {
     const internal = this.#handles.get(handle.id);
     if (!internal) return;
+    internal.interrupted = true;
     if (process.platform === 'win32') {
-      // Windows não tem SIGINT entregável a outro processo de forma confiável:
-      // degradamos para cancelamento, e o manifesto avisa disso em `caveats`.
-      await this.cancel(handle);
+      await killTree(internal.child);
       return;
     }
     internal.child.kill('SIGINT');
+    let timer: NodeJS.Timeout | undefined;
+    const saiu = await Promise.race([
+      internal.done.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), ESPERA_SIGINT_MS);
+        timer.unref?.();
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!saiu) await killTree(internal.child);
   }
 
   async cancel(handle: RunHandle): Promise<void> {
@@ -287,6 +316,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
       child,
       queue,
       canceled: false,
+      interrupted: false,
       settle: (outcome) => {
         if (settled) return;
         settled = true;
@@ -451,9 +481,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
       handle.settle({
         exitCode: code,
         signal: signal as NodeJS.Signals | null,
-        reason: handle.canceled ? 'canceled' : 'exit',
+        reason: handle.canceled ? 'canceled' : handle.interrupted ? 'interrupted' : 'exit',
         error:
-          code === 0 || handle.canceled
+          code === 0 || handle.canceled || handle.interrupted
             ? null
             : `processo terminou com código ${code}${tail.length > 0 ? `: ${tail.slice(-5).join(' | ')}` : ''}`,
         nativeSessionId: discoveredNativeId,

@@ -39,6 +39,7 @@ import {
 } from './mcp-install.js';
 import { workflowCommand } from './workflow-cmd.js';
 import { pauseCommand } from './pause-cmd.js';
+import { interruptCommand } from './interrupt-cmd.js';
 import { discoverCommand, importCommand } from './discover-cmd.js';
 import { auditCommand, policyCommand } from './policy-cmd.js';
 import { readOperatorToken } from '@agents-hub/client/operator-token';
@@ -154,8 +155,8 @@ ${bold('Sessões')}
   hub watch <sessionId>                       acompanha uma sessão ao vivo
   hub watch --root <rootId>                   acompanha o fluxo inteiro, todos os agentes
   hub send <sessionId> "texto"                fala com uma sessão
-  hub interrupt <sessionId>                   para o turno atual
-  hub pause <sessionId>                       pausa a sessão sem encerrá-la
+  hub interrupt <sessionId>                   para o turno atual; a sessão fica ociosa (retome com send)
+  hub pause <sessionId>                       para o turno e pausa a sessão (retome com send)
   hub cancel <sessionId>                      encerra a sessão e seus filhos
 
 ${bold('Delegação e custo')}
@@ -249,10 +250,7 @@ async function main(): Promise<void> {
     case 'send':
       return withDaemon(() => send(client, args));
     case 'interrupt':
-      return withDaemon(async () => {
-        await client.interrupt(required(args.positional[0], 'sessionId'));
-        console.log(green('turno interrompido'));
-      });
+      return withDaemon(() => interruptCommand(client, args));
     case 'pause':
       return withDaemon(() => pauseCommand(client, args));
     case 'cancel':

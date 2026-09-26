@@ -730,15 +730,17 @@ export class HubServer {
       // `interrupted: false` quer dizer que a sessão existe e não havia turno
       // em andamento. Não é erro, mas quem clicou precisa saber que nada
       // aconteceu — senão o botão parece ter funcionado.
-      const interrupted = await this.sessions.interrupt(
-        param(params['id'], SessionIdSchema, 'id'),
-      );
-      sendJson(res, 200, { ok: true, interrupted });
+      // `state` é o estado DEPOIS da interrupção (`idle` quando parou um
+      // turno): quem chamou vê que a sessão segue viva e retomável por send.
+      const sessionId = param(params['id'], SessionIdSchema, 'id');
+      const interrupted = await this.sessions.interrupt(sessionId);
+      sendJson(res, 200, { ok: true, interrupted, state: this.sessions.getSession(sessionId).state });
     });
 
     this.#route('POST', '/sessions/:id/pause', async (_req, res, params) => {
-      await this.sessions.pause(param(params['id'], SessionIdSchema, 'id'));
-      sendJson(res, 200, { ok: true });
+      const sessionId = param(params['id'], SessionIdSchema, 'id');
+      await this.sessions.pause(sessionId);
+      sendJson(res, 200, { ok: true, state: this.sessions.getSession(sessionId).state });
     });
 
     this.#route('POST', '/sessions/:id/cancel', async (req, res, params) => {

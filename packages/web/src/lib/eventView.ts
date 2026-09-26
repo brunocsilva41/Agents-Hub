@@ -79,6 +79,10 @@ export function describeEvent(event: EventEnvelope): EventView {
       return { text: '… turno iniciado', kind: 'lifecycle', verbose: true };
 
     case 'turn.completed':
+      // Turno parado a pedido (interrupt/pause): a sessão segue viva.
+      if (p['interrupted'] === true) {
+        return { text: `⏹ ${str(p['message']) || 'turno interrompido'}`, kind: 'lifecycle', verbose: false };
+      }
       return {
         text: `✓ turno concluído${event.cost?.usd ? ` — US$ ${event.cost.usd.toFixed(4)}` : ''}`,
         kind: 'lifecycle',

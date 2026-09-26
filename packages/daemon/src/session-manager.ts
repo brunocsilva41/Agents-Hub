@@ -13,7 +13,6 @@ import {
   failureContext,
   nextStep,
   novaTentativa,
-  sleep,
   validationPassed,
   inheritMode,
   isTerminalSessionState,
@@ -97,12 +96,20 @@ import {
   resumoDaChamada,
 } from './pretool-gate.js';
 import { runValidation } from './validation.js';
+import { CicloDeVida, esperarAbortavel, type PedidoDeParada } from './session-lifecycle.js';
 import type { WorktreeManager } from './worktree.js';
 import { ProjectRegistry, type RepoConfigStatus } from './project-registry.js';
 import { policyFor as resolvePolicyFor, projectPolicyFor } from './effective-policy.js';
 
 /** Quebra de linha literal para montar prompt sem brigar com escapes. */
 const NEWLINE_PROMPT = String.fromCharCode(10);
+
+/**
+ * Quanto cancel/interrupt/pause esperam o pump fechar a sessão antes de
+ * responder. Com teto: um adapter cujo stream não fecha não pode pendurar a
+ * rota HTTP (o cancelamento então fecha a sessão por conta própria).
+ */
+const ESPERA_DO_FECHAMENTO_MS = 10_000;
 
 export interface StartSessionInput {
   projectId: string;
@@ -119,6 +126,13 @@ export interface StartSessionResult {
   budget: BudgetSnapshot;
   /** Presente quando a delegação ficou retida esperando sua decisão. */
   approval?: Approval;
+}
+
+/** O que `start()` já fez e precisa desfazer se lançar no meio. */
+interface InicioFeito {
+  reserva?: { ledger: BudgetLedger; taskId: string };
+  worktree?: { projectPath: string; path: string };
+  sessao?: { session: Session; task: Task };
 }
 
 interface LiveRun {
@@ -174,6 +188,13 @@ export class SessionManager {
    * desligamento precisa esperá-los antes de `store.close()`.
    */
   readonly #pumps = new Set<Promise<void>>();
+
+  /**
+   * Pedidos de parada (cancel/interrupt/pause) anotados ANTES de mexer no
+   * processo, fechamentos em andamento (validação/revisão/backoff) e o pump
+   * de cada sessão — ver `session-lifecycle.ts`.
+   */
+  readonly #ciclo = new CicloDeVida();
 
   /**
    * Teto da espera do gate pré-execução por uma decisão humana.
@@ -348,6 +369,14 @@ export class SessionManager {
     // isso sem precisar espalhar a liberação por cada `return`/`throw`.
     this.#reserveSlot(sessionId, agentId);
 
+    // O que já foi feito e precisa ser desfeito se algo lançar no meio do
+    // caminho (agente não instalado, gate do Codex recusado, projeto não-git,
+    // spawn que falhou): sem isto ficavam sessão `running` sem processo, task
+    // `working`, worktree no disco e — em delegação — a fatia do orçamento
+    // reservada para sempre, e a próxima delegação legítima dava
+    // BUDGET_EXCEEDED.
+    const feito: InicioFeito = {};
+
     try {
       // --- grafo: profundidade e ciclo (ADR 03) -----------------------------
       const graph = parent
@@ -383,6 +412,7 @@ export class SessionManager {
         tokens: brief.budget.tokens ?? undefined,
         seconds: brief.budget.seconds ?? undefined,
       });
+      feito.reserva = { ledger, taskId };
     }
     this.#persistLedger(ledger);
 
@@ -394,6 +424,7 @@ export class SessionManager {
       sessionId,
       isolation,
     });
+    if (worktree.isolated) feito.worktree = { projectPath: project.path, path: worktree.path };
 
     const session: Session = {
       id: sessionId,
@@ -434,6 +465,7 @@ export class SessionManager {
       this.store.sessions.create(session);
       this.store.tasks.create(task);
     });
+    feito.sessao = { session, task };
     this.bus.registerSession(sessionId, rootId);
 
     this.#avisarConfigDoProjetoQuebrada(session, taskId, project);
@@ -515,6 +547,9 @@ export class SessionManager {
       await this.#launch(session, task, renderBriefAsPrompt(brief, this.#contextoDoProjeto(session)), null);
 
       return { session, task, budget: ledger.snapshot() };
+    } catch (err) {
+      await this.#desfazerInicio(err, feito);
+      throw err;
     } finally {
       // Se `#launch` chegou a rodar, a run real já está em `#runs` — liberar a
       // reserva aqui não abre brecha nenhuma porque não existe `await` entre o
@@ -1231,6 +1266,18 @@ export class SessionManager {
       );
     }
 
+    // Processo já saiu e o Hub está validando o resultado ou esperando o
+    // backoff de uma nova tentativa: um turno novo agora rodaria em paralelo
+    // com isso, e o desfecho da validação sobrescreveria o dele.
+    if (this.#ciclo.emFechamento(sessionId)) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${sessionId} está fechando o turno anterior (validação/revisão/nova tentativa). ` +
+          'Aguarde o desfecho antes de enviar.',
+        { sessionId, state: session.state },
+      );
+    }
+
     const task = this.#latestTask(sessionId);
     const canResume =
       adapter.manifest.session.strategy === 'native' && session.nativeSessionId !== null;
@@ -1251,7 +1298,26 @@ export class SessionManager {
     // o evento (estrutural para o painel) faz a UI reler o estado — que o
     // `#launch` troca de `paused`/`idle` para `running` sem evento próprio.
     this.#emitUserMessage(session, task.id, text);
-    await this.#launch(session, task, prompt, canResume ? session.nativeSessionId : null);
+
+    // Retomar depois de interrupt/pause: a task esperava a próxima instrução
+    // (`input_required`) e volta a trabalhar. Se o agente não subir, a sessão
+    // e a task voltam ao que eram — continuam retomáveis, nada é encerrado
+    // por uma falha de spawn num turno de continuação.
+    const retomando = task.state === 'input_required' && (session.state === 'idle' || session.state === 'paused');
+    if (retomando) this.store.tasks.update(task.id, { state: 'working' });
+    try {
+      await this.#launch(session, task, prompt, canResume ? session.nativeSessionId : null, {
+        continuacao: true,
+      });
+    } catch (err) {
+      // `running` sem processo seria a sessão fantasma de novo: sem run
+      // viva, o estado honesto é `idle` (retomável por outro `send`).
+      this.store.sessions.update(sessionId, {
+        state: session.state === 'running' ? 'idle' : session.state,
+      });
+      if (retomando) this.store.tasks.update(task.id, { state: 'input_required' });
+      throw err;
+    }
     return { mode: canResume ? 'resume' : 'replay' };
   }
 
@@ -1270,7 +1336,8 @@ export class SessionManager {
   }
 
   /**
-   * Interrompe o turno em andamento.
+   * Interrompe o turno em andamento e deixa a sessão `idle`, retomável por
+   * `send` (resume nativo quando o agente tem, replay quando não).
    *
    * Devolve `false` quando a sessão existe mas não tinha nada rodando — e isso
    * precisa chegar a quem pediu. A versão anterior consultava `#runs` ANTES de
@@ -1278,18 +1345,65 @@ export class SessionManager {
    * `POST /sessions/ses_naoexiste/interrupt` respondia `{ok:true}` com 200.
    * Sucesso relatado sobre coisa nenhuma, e divergente dos irmãos `cancel` e
    * `pause`, que devolviam 404 para o mesmo id.
+   *
+   * Só devolve depois de o pump fechar o turno: quem lê a sessão logo em
+   * seguida já a vê `idle`, não `running` com processo morto.
    */
   async interrupt(sessionId: string): Promise<boolean> {
     // Validar primeiro: id desconhecido é erro do chamador, não silêncio.
     const session = this.#session(sessionId);
+    this.#exigirNaoTerminal(session, 'interromper o turno');
 
     const live = this.#runs.get(sessionId);
     if (!live) return false;
 
-    await this.registry.get(session.agentId).interrupt(live.handle);
+    await this.#pararTurno(session, live, { tipo: 'interrupt', motivo: 'interrompido pelo usuário' });
     return true;
   }
 
+  /**
+   * Para o turno de uma run viva sem encerrar a sessão (interrupt/pause).
+   *
+   * O pedido é anotado ANTES de mexer no processo: no Windows parar o turno é
+   * matar a árvore, e sem a anotação o pump leria "processo morto" como falha
+   * — era assim que `hub pause` terminava em `failed`.
+   */
+  async #pararTurno(session: Session, live: LiveRun, pedido: PedidoDeParada): Promise<void> {
+    const acao = pedido.tipo === 'pause' ? 'pausar' : 'interromper o turno';
+    // Agente parado no gate ou em estouro de orçamento: parar o turno por
+    // cima da pendência deixaria sessão ociosa com aprovação aberta.
+    this.#exigirSemAprovacaoPendente(session, acao);
+
+    const adapter = this.registry.get(session.agentId);
+    // Sem como retomar, "interromper" seria encerrar com outro nome — e é
+    // exatamente a mentira que este método existe para não contar.
+    if (adapter.manifest.session.strategy === 'none') {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `O agente "${session.agentId}" não retoma sessão (session.strategy: none): não é possível ${acao} ` +
+          'sem perder o turno. Use cancel para encerrar a sessão.',
+        { sessionId: session.id, agentId: session.agentId, acao },
+      );
+    }
+
+    this.#ciclo.pedir(session.id, pedido);
+    await adapter.interrupt(live.handle);
+    await this.#ciclo.aguardarPump(session.id, ESPERA_DO_FECHAMENTO_MS);
+  }
+
+  /**
+   * Cancela a sessão (e a subárvore dela).
+   *
+   * O pedido é anotado ANTES de matar a run, e quem fecha a sessão é um
+   * caminho só (`#encerrarCancelada`): sessão `killed`, task `canceled`. Antes,
+   * `cancel` gravava `killed` e o pump da mesma run, terminando logo depois,
+   * via o desfecho `canceled`, passava pelo pipeline de falha e sobrescrevia
+   * com `failed` — 6 de 8 vezes na medição, sempre com a task `failed`.
+   *
+   * Também alcança o que acontece DEPOIS de o processo sair: validação,
+   * revisão e backoff de retry são abortados (o comando/revisor morre), em vez
+   * de o cancelado voltar como `completed` ao fim da validação.
+   */
   async cancel(sessionId: string, reason = 'cancelado pelo usuário', visited = new Set<string>()): Promise<void> {
     if (visited.has(sessionId)) return;
     visited.add(sessionId);
@@ -1304,33 +1418,58 @@ export class SessionManager {
       if (visited.size === 1) this.#exigirNaoTerminal(session, 'cancelar');
       return;
     }
+
+    this.#ciclo.pedir(sessionId, { tipo: 'cancel', motivo: reason });
     const live = this.#runs.get(sessionId);
     if (live) await this.registry.get(session.agentId).cancel(live.handle);
+    this.#ciclo.abortarFechamento(sessionId);
 
     // Cancelar um pai cancela a subárvore: deixar filhos órfãos rodando é como
     // agentes continuam gastando orçamento de um fluxo que você já abortou.
+    // Qualquer filho não terminal — pausado e ocioso também seguram orçamento.
     for (const child of this.store.sessions.children(sessionId)) {
-      if (child.state === 'running' || child.state === 'waiting_approval') {
+      if (!isTerminalSessionState(child.state)) {
         await this.cancel(child.id, `pai ${sessionId} cancelado`, visited);
       }
     }
 
-    this.#emit({
-      sessionId,
-      taskId: null,
-      agentId: session.agentId,
-      type: 'session.ended',
-      payload: { reason, state: 'killed' },
-    });
-    await this.#finish(sessionId, 'killed', reason);
+    // O pump fecha a sessão depois de drenar os eventos da run morta. Sem run
+    // (sessão ociosa, pausada, aguardando aprovação) ou com um adapter cujo
+    // stream não fecha, fecha aqui — `#encerrarCancelada` é idempotente.
+    await this.#ciclo.aguardarPump(sessionId, ESPERA_DO_FECHAMENTO_MS);
+    await this.#encerrarCancelada(sessionId, reason);
   }
 
+  /**
+   * Pausa a sessão: para o turno em andamento (se houver) e a deixa `paused`,
+   * retomável por `send`. Mesmo mecanismo de `interrupt`, outro estado final.
+   */
   async pause(sessionId: string): Promise<void> {
     // Sem esta checagem, pausar uma sessão `completed` a devolvia para
     // `paused` — e uma sessão pausada aceita resume, então uma conversa
     // encerrada com sucesso voltava a rodar.
-    this.#exigirNaoTerminal(this.#session(sessionId), 'pausar');
-    await this.interrupt(sessionId);
+    const session = this.#session(sessionId);
+    this.#exigirNaoTerminal(session, 'pausar');
+    if (session.state === 'paused') return;
+
+    // Processo já saiu e o Hub está validando/revisando o resultado: não há
+    // turno para parar, e "pausar" agora seria sobrescrito pelo desfecho.
+    if (this.#ciclo.emFechamento(sessionId)) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${sessionId} está fechando o turno (validação/revisão/nova tentativa); ` +
+          'não é possível pausar agora. Aguarde o desfecho ou cancele.',
+        { sessionId, state: session.state },
+      );
+    }
+
+    const live = this.#runs.get(sessionId);
+    if (live) {
+      await this.#pararTurno(session, live, { tipo: 'pause', motivo: 'pausado pelo usuário' });
+      return;
+    }
+
+    this.#exigirSemAprovacaoPendente(session, 'pausar');
     this.store.sessions.update(sessionId, { state: 'paused' });
   }
 
@@ -1629,7 +1768,10 @@ export class SessionManager {
    * transformava uma falha pequena numa grande.
    */
   async shutdown(): Promise<void> {
-    const sessions = [...this.#runs.keys()];
+    // Inclui as sessões em fechamento (validação/revisão/backoff): a run já
+    // saiu de `#runs`, mas o comando de validação ou o revisor ainda estão
+    // vivos — e ficavam órfãos depois que o daemon saía.
+    const sessions = [...new Set([...this.#runs.keys(), ...this.#ciclo.sessoesEmFechamento()])];
     const desfechos = await Promise.allSettled(
       sessions.map((id) => this.cancel(id, 'daemon encerrando')),
     );
@@ -1660,51 +1802,70 @@ export class SessionManager {
 
   // ---------------------------------------------------------------- internos
 
+  /**
+   * Sobe a run de uma sessão.
+   *
+   * `continuacao`: a sessão já existia e só ganha um turno novo (`send`). Se o
+   * agente não subir, quem chamou devolve a sessão ao estado anterior — ela
+   * continua retomável. Em todo outro caminho (sessão nova, delegação
+   * aprovada, retry, fallback, handoff) não sobra nada rodando: a sessão
+   * termina `failed` com o motivo, a task `failed`, a reserva do orçamento
+   * volta para o fluxo e o worktree ainda limpo é liberado.
+   */
   async #launch(
     session: Session,
     task: Task,
     prompt: string,
     nativeSessionId: string | null,
+    opcoes: { continuacao?: boolean } = {},
   ): Promise<void> {
     const adapter = this.registry.get(session.agentId);
     const manifest = adapter.manifest;
-    const gate = this.#codexGate(session.agentId, session.mode, session.id);
 
-    const ctx: RunContext = {
-      sessionId: session.id,
-      taskId: task.id,
-      agentId: session.agentId,
-      workdir: session.workdir,
-      mode: session.mode,
-      env: this.#envDoProjeto(session),
-      timeoutSeconds: Math.min(
-        manifest.defaults.timeoutSeconds,
-        this.config.policy.taskTimeoutSeconds,
-      ),
-      heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
-      extraArgs: gate.extraArgs,
-    };
+    let ctx!: RunContext;
+    let handle: RunHandle;
+    try {
+      const gate = this.#codexGate(session.agentId, session.mode, session.id);
 
-    if (gate.aviso) {
-      this.#emit({
+      ctx = {
         sessionId: session.id,
         taskId: task.id,
         agentId: session.agentId,
-        type: 'log',
-        payload: { stream: 'gate', level: 'warn', text: gate.aviso },
-      });
+        workdir: session.workdir,
+        mode: session.mode,
+        env: this.#envDoProjeto(session),
+        timeoutSeconds: Math.min(
+          manifest.defaults.timeoutSeconds,
+          this.config.policy.taskTimeoutSeconds,
+        ),
+        heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
+        extraArgs: gate.extraArgs,
+      };
+
+      if (gate.aviso) {
+        this.#emit({
+          sessionId: session.id,
+          taskId: task.id,
+          agentId: session.agentId,
+          type: 'log',
+          payload: { stream: 'gate', level: 'warn', text: gate.aviso },
+        });
+      }
+
+      // O vínculo sessão→raiz vive em memória no barramento. Depois de um
+      // restart do daemon, retomar uma sessão sem reidratá-lo deixaria o
+      // `watch --root` e o painel cegos para os eventos dela — sem erro nenhum,
+      // só silêncio, que é o pior tipo de falha de observabilidade.
+      this.bus.registerSession(session.id, session.rootId);
+      this.store.sessions.update(session.id, { state: 'running' });
+
+      handle = nativeSessionId
+        ? await adapter.resume(ctx, nativeSessionId, prompt)
+        : await adapter.start(ctx, prompt);
+    } catch (err) {
+      if (!opcoes.continuacao) await this.#falhaAoLancar(session, task, err);
+      throw err;
     }
-
-    // O vínculo sessão→raiz vive em memória no barramento. Depois de um
-    // restart do daemon, retomar uma sessão sem reidratá-lo deixaria o
-    // `watch --root` e o painel cegos para os eventos dela — sem erro nenhum,
-    // só silêncio, que é o pior tipo de falha de observabilidade.
-    this.bus.registerSession(session.id, session.rootId);
-    this.store.sessions.update(session.id, { state: 'running' });
-
-    const handle = nativeSessionId
-      ? await adapter.resume(ctx, nativeSessionId, prompt)
-      : await adapter.start(ctx, prompt);
 
     // PID real da run, quando o adapter souber (processo dedicado por
     // sessão). `null` para o OpenCode, cujo processo é o servidor
@@ -1732,6 +1893,111 @@ export class SessionManager {
       this.#pumps.delete(drenando);
     });
     this.#pumps.add(drenando);
+    this.#ciclo.registrarPump(session.id, drenando);
+
+    // Um cancelamento que chegou enquanto o agente subia (no `await` acima)
+    // não achou run para matar. Mata agora; o pump fecha a sessão como
+    // cancelada.
+    if (this.#ciclo.cancelada(session.id)) await adapter.cancel(handle);
+  }
+
+  /**
+   * Desfaz uma sessão cujo agente não chegou a subir (ou cuja subida foi
+   * recusada). Idempotente: sessão já terminal não é tocada.
+   */
+  async #falhaAoLancar(session: Session, task: Task, err: unknown): Promise<void> {
+    const atual = this.store.sessions.get(session.id);
+    if (!atual || isTerminalSessionState(atual.state)) return;
+
+    const motivo = err instanceof Error ? err.message : String(err);
+    const codigo = err instanceof HubError ? err.code : null;
+    const tarefa = this.store.tasks.get(task.id) ?? task;
+    if (!isTerminalTaskState(tarefa.state)) {
+      this.store.tasks.update(task.id, {
+        state: 'failed',
+        attempts: closeLastAttempt(tarefa.attempts, 'permanent', motivo),
+      });
+    }
+
+    // A fatia reservada para esta delegação volta para o fluxo: ela nunca
+    // vai ser gasta.
+    const ledger = this.#ledger(atual.rootId);
+    ledger.release(task.id);
+    this.#persistLedger(ledger);
+
+    this.#emit({
+      sessionId: atual.id,
+      taskId: task.id,
+      agentId: atual.agentId,
+      type: 'error',
+      payload: {
+        priority: 'high',
+        phase: 'launch',
+        code: codigo,
+        message: `o agente ${atual.agentId} não pôde ser iniciado: ${motivo}`,
+      },
+    });
+    this.#emit({
+      sessionId: atual.id,
+      taskId: task.id,
+      agentId: atual.agentId,
+      type: 'session.ended',
+      payload: { reason: `falha ao iniciar o agente: ${motivo}`, state: 'failed', code: codigo },
+    });
+
+    // Antes de `#finish`: um aviso de worktree retido emitido depois dele
+    // perderia o roteamento pela raiz.
+    await this.#liberarWorktree(atual);
+    await this.#concludeSession(atual, tarefa, 'failed', motivo);
+  }
+
+  /** Desfaz o que `start()` deixou para trás quando algo lançou no meio. */
+  async #desfazerInicio(err: unknown, feito: InicioFeito): Promise<void> {
+    try {
+      if (feito.sessao) await this.#falhaAoLancar(feito.sessao.session, feito.sessao.task, err);
+      if (feito.reserva) {
+        feito.reserva.ledger.release(feito.reserva.taskId);
+        this.#persistLedger(feito.reserva.ledger);
+      }
+      if (feito.worktree) {
+        await this.worktrees
+          .release({ projectPath: feito.worktree.projectPath, worktreePath: feito.worktree.path })
+          .catch(() => undefined);
+      }
+    } catch (limpeza) {
+      // O erro original é o que importa para quem chamou; a limpeza falhar
+      // vira log, não troca a mensagem.
+      console.error(
+        `[agents-hub] falha ao desfazer o início da sessão: ${(limpeza as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Libera o worktree de uma sessão que termina sem ter produzido nada.
+   * `release` não força: worktree com arquivo alterado fica (o reaper decide).
+   */
+  async #liberarWorktree(session: Session): Promise<void> {
+    if (session.isolation !== 'worktree') return;
+    const project = this.store.projects.get(session.projectId);
+    if (!project || path.resolve(project.path) === path.resolve(session.workdir)) return;
+    try {
+      const r = await this.worktrees.release({
+        projectPath: project.path,
+        worktreePath: session.workdir,
+      });
+      if (!r.removed) {
+        this.#emit({
+          sessionId: session.id,
+          taskId: null,
+          agentId: session.agentId,
+          type: 'log',
+          payload: { level: 'warn', text: `worktree mantido em ${session.workdir}: ${r.reason ?? ''}` },
+        });
+      }
+    } catch {
+      /* o reaper tenta de novo depois da retenção */
+    }
   }
 
   /**
@@ -1862,6 +2128,25 @@ export class SessionManager {
     ledger.settle(task.id, { seconds: elapsedSeconds });
     this.#persistLedger(ledger);
 
+    // Quem parou esta run anotou o motivo ANTES de mexer no processo
+    // (`session-lifecycle.ts`): o desfecho do processo sozinho não distingue
+    // cancelamento de interrupção de falha. Antes, o cancelamento caía aqui
+    // como `canceled`, passava pelo pipeline de falha e sobrescrevia o
+    // `killed` gravado por `cancel` com `failed` (6 de 8 vezes, na corrida).
+    const pedido = this.#ciclo.pedido(session.id);
+    if (pedido?.tipo === 'cancel') {
+      await this.#encerrarCancelada(session.id, pedido.motivo);
+      return;
+    }
+    if (pedido) {
+      await this.#encerrarTurnoInterrompido(session, task, pedido, outcome);
+      return;
+    }
+
+    // Outro caminho já fechou a sessão: o desfecho desta run não a reescreve.
+    const sessaoAtual = this.store.sessions.get(session.id);
+    if (!sessaoAtual || isTerminalSessionState(sessaoAtual.state)) return;
+
     const current = this.store.tasks.get(task.id);
     // A task já está esperando decisão humana (orçamento estourado ou ação
     // barrada pela vigilância): o fim do processo não pode sobrescrever esse
@@ -1884,7 +2169,140 @@ export class SessionManager {
       return;
     }
 
-    await this.#settle(session, current ?? task, outcome, elapsedSeconds);
+    // A run saiu de `#runs`, mas a sessão ainda não acabou: validação, revisão
+    // e backoff de retry acontecem aqui. O fechamento fica registrado para
+    // `cancel`/`shutdown` conseguirem abortá-lo (matando o comando de
+    // validação ou o revisor) em vez de o cancelado "ressuscitar" como
+    // `completed` no fim da validação.
+    const fechamento = this.#ciclo.abrirFechamento(session.id);
+    try {
+      await this.#settle(session, current ?? task, outcome, elapsedSeconds, fechamento.signal);
+    } catch (err) {
+      // Rede de segurança: exceção no fechamento (ex.: substituto do fallback
+      // que não subiu) não pode deixar a sessão `running` sem processo nem
+      // virar rejeição sem dono.
+      const depois = this.store.sessions.get(session.id);
+      if (depois && !isTerminalSessionState(depois.state) && !this.#runs.has(session.id)) {
+        await this.#falhaAoLancar(depois, this.store.tasks.get(task.id) ?? task, err);
+      }
+    } finally {
+      this.#ciclo.fecharFechamento(session.id, fechamento);
+    }
+
+    // Cancelado no meio do fechamento: `#settle` parou no ponto de checagem
+    // seguinte sem gravar desfecho; fecha como cancelada aqui.
+    const pedidoTardio = this.#ciclo.pedido(session.id);
+    if (pedidoTardio?.tipo === 'cancel' && !this.#runs.has(session.id)) {
+      await this.#encerrarCancelada(session.id, pedidoTardio.motivo);
+    }
+  }
+
+  /**
+   * Fecha uma sessão cancelada: sessão `killed`, task `canceled` (o estado
+   * A2A que existia e nunca era gravado), pai avisado com `canceled` — não
+   * com `failed`, que faria quem delegou tentar de novo algo que o usuário
+   * mandou parar.
+   *
+   * É o ÚNICO caminho de fechamento de um cancelamento: chamado pelo pump
+   * quando a run morre (depois de drenar os eventos dela, para nenhum evento
+   * chegar depois de `#finish` e perder o roteamento pela raiz) ou pelo
+   * próprio `cancel` quando não havia run. Idempotente.
+   */
+  async #encerrarCancelada(sessionId: string, motivo: string): Promise<void> {
+    const session = this.store.sessions.get(sessionId);
+    if (!session || isTerminalSessionState(session.state)) {
+      this.#ciclo.esquecer(sessionId);
+      return;
+    }
+
+    const task = this.#latestTaskOrNull(sessionId);
+    if (task && !isTerminalTaskState(task.state)) {
+      const aberta = task.attempts.at(-1)?.endedAt === null;
+      this.store.tasks.update(task.id, {
+        state: 'canceled',
+        ...(aberta ? { attempts: closeLastAttempt(task.attempts, 'canceled', motivo) } : {}),
+      });
+      const ledger = this.#ledger(session.rootId);
+      ledger.release(task.id);
+      this.#persistLedger(ledger);
+    }
+
+    this.#emit({
+      sessionId,
+      taskId: task?.id ?? null,
+      agentId: session.agentId,
+      type: 'session.ended',
+      payload: { reason: motivo, state: 'killed' },
+    });
+
+    if (session.parentId) {
+      const parent = this.store.sessions.get(session.parentId);
+      if (parent) {
+        this.#emit({
+          sessionId: parent.id,
+          taskId: task?.id ?? null,
+          agentId: parent.agentId,
+          type: 'delegation.completed',
+          payload: {
+            childSessionId: session.id,
+            agentId: session.agentId,
+            state: 'canceled',
+            error: motivo,
+          },
+        });
+      }
+    }
+
+    await this.#finish(sessionId, 'killed', motivo);
+    this.#ciclo.esquecer(sessionId);
+  }
+
+  /**
+   * Fecha um TURNO parado a pedido (interrupt/pause) sem encerrar a sessão.
+   *
+   * No Windows parar o turno é matar o processo (não há SIGINT entregável), e
+   * esse desfecho caía no pipeline de falha: `hub interrupt` respondia
+   * "interrompido" e a sessão terminava `failed`, irrecuperável. Aqui a sessão
+   * fica `idle` (interrupt) ou `paused` (pause), a task `input_required` —
+   * esperando a próxima instrução — e `send` a retoma: resume nativo quando o
+   * agente tem, replay do histórico quando não. A tentativa continua aberta:
+   * interromper não é falhar, e não pode gastar retry.
+   */
+  async #encerrarTurnoInterrompido(
+    session: Session,
+    task: Task,
+    pedido: PedidoDeParada,
+    outcome: RunOutcome,
+  ): Promise<void> {
+    this.#ciclo.esquecer(session.id);
+    const atual = this.store.sessions.get(session.id);
+    if (!atual || isTerminalSessionState(atual.state)) return;
+
+    const estado = pedido.tipo === 'pause' ? 'paused' : 'idle';
+    const tarefa = this.store.tasks.get(task.id);
+    this.store.transaction(() => {
+      this.store.sessions.update(session.id, { state: estado, pid: null });
+      if (tarefa && !isTerminalTaskState(tarefa.state)) {
+        this.store.tasks.update(tarefa.id, { state: 'input_required' });
+      }
+    });
+
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'turn.completed',
+      payload: {
+        reason: 'interrupted',
+        interrupted: true,
+        state: estado,
+        exitCode: outcome.exitCode,
+        outcomeClass: 'interrupted',
+        message:
+          `turno interrompido (${pedido.motivo}) — sessão ${estado === 'paused' ? 'pausada' : 'ociosa'}; ` +
+          'envie uma mensagem para retomar',
+      },
+    });
   }
 
   /**
@@ -1900,7 +2318,13 @@ export class SessionManager {
     task: Task,
     outcome: RunOutcome,
     elapsedSeconds: number,
+    signal?: AbortSignal,
   ): Promise<void> {
+    // Pontos de checagem depois de cada `await` longo: um `cancel` no meio da
+    // validação/revisão aborta o sinal e a sessão não pode, na volta, gravar
+    // `completed` (ou `failed`) por cima do pedido — quem fecha é o pump.
+    const cancelada = (): boolean => this.#ciclo.cancelada(session.id);
+
     const outcomeClass = classifyOutcome(outcome);
     let attempts = closeLastAttempt(task.attempts, outcomeClass, outcome.error);
 
@@ -1926,14 +2350,18 @@ export class SessionManager {
       validation = await runValidation(this.policyFor(session).policy.validation, {
         workdir: session.workdir,
         acceptanceCriteria: task.brief.acceptanceCriteria,
+        ...(signal ? { signal } : {}),
       });
+      if (cancelada()) return;
 
       // O portão de revisão roda DEPOIS do comando: reprovar no build é barato
       // e determinístico, e não faz sentido pagar uma sessão de modelo para
       // revisar código que nem compila.
       if (validationPassed(validation)) {
         const artefatos = await this.#capturarMudancas(session, task);
-        const revisao = await this.#revisar(session, task, artefatos);
+        if (cancelada()) return;
+        const revisao = await this.#revisar(session, task, artefatos, signal);
+        if (cancelada()) return;
 
         if (revisao && !revisao.passed) {
           validation = {
@@ -2000,7 +2428,7 @@ export class SessionManager {
     this.store.tasks.update(task.id, { attempts });
 
     if (step.kind === 'retry') {
-      await this.#retry(session, task, step.agentId, step.backoffMs, step.reason, validation);
+      await this.#retry(session, task, step.agentId, step.backoffMs, step.reason, validation, signal);
       return;
     }
 
@@ -2034,6 +2462,7 @@ export class SessionManager {
     backoffMs: number,
     reason: string,
     validation: ValidationOutcome | null,
+    signal?: AbortSignal,
   ): Promise<void> {
     this.#emit({
       sessionId: session.id,
@@ -2043,11 +2472,15 @@ export class SessionManager {
       payload: { level: 'warn', text: `nova tentativa em ${backoffMs}ms — ${reason}` },
     });
 
-    await sleep(backoffMs);
+    // Abortável: um cancelamento no meio do backoff não espera os segundos
+    // restantes, e quem fecha a sessão (task `canceled`) é o pump — antes a
+    // task ficava `working` para sempre.
+    await esperarAbortavel(backoffMs, signal);
+    if (this.#ciclo.cancelada(session.id)) return;
 
-    // A sessão pode ter sido cancelada enquanto esperávamos o backoff.
+    // A sessão pode ter terminado enquanto esperávamos o backoff.
     const fresh = this.store.sessions.get(session.id);
-    if (!fresh || fresh.state === 'killed' || fresh.state === 'waiting_approval') return;
+    if (!fresh || isTerminalSessionState(fresh.state) || fresh.state === 'waiting_approval') return;
 
     // Checa o teto e já reserva a vaga na mesma operação síncrona — mesma
     // correção de `start()`. Sem isto, duas tentativas de retry concorrentes
@@ -2094,6 +2527,9 @@ export class SessionManager {
         canResume ? feedback : `${renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(fresh))}\n\n${feedback}`,
         canResume ? fresh.nativeSessionId : null,
       );
+    } catch {
+      // `#launch` já fechou a sessão como `failed` (agente sumiu entre as
+      // tentativas, por exemplo). Relançar aqui só viraria rejeição no pump.
     } finally {
       this.#releaseSlot(session.id);
     }
@@ -2217,6 +2653,11 @@ export class SessionManager {
     error: string | null,
     options: { silentParent?: boolean } = {},
   ): Promise<void> {
+    // Sessão já fechada (cancelada, por exemplo): o pai já ouviu o desfecho
+    // verdadeiro e não pode receber um segundo, contraditório.
+    const gravada = this.store.sessions.get(session.id);
+    if (gravada && isTerminalSessionState(gravada.state)) return;
+
     // Numa troca de agente o pai não deve ouvir "falhou": a tarefa dele
     // continua viva, só mudou de mãos.
     if (session.parentId && options.silentParent !== true) {
@@ -2515,6 +2956,9 @@ export class SessionManager {
   async #finish(sessionId: string, state: Session['state'], _reason?: string): Promise<void> {
     const session = this.store.sessions.get(sessionId);
     if (!session) return;
+    // Estado terminal não se reescreve: era assim que um `killed` gravado por
+    // `cancel` virava `failed` quando o pump da mesma run terminava depois.
+    if (isTerminalSessionState(session.state)) return;
 
     // `pid: null` no mesmo update que encerra: um PID sem sessão viva
     // associada não pode sobreviver no banco depois que a sessão termina
@@ -2597,6 +3041,7 @@ export class SessionManager {
     session: Session,
     task: Task,
     artefatos: string[],
+    signal?: AbortSignal,
   ): Promise<ValidationOutcome | null> {
     const politica = this.policyFor(session).policy.validation.review;
     if (!politica.enabled) return null;
@@ -2641,7 +3086,7 @@ export class SessionManager {
       revisor = alternativa;
     }
 
-    return this.#executarRevisao(session, task, revisor);
+    return this.#executarRevisao(session, task, revisor, signal);
   }
 
   /**
@@ -2655,6 +3100,7 @@ export class SessionManager {
     session: Session,
     task: Task,
     revisorId: string,
+    signal?: AbortSignal,
   ): Promise<ValidationOutcome> {
     const adapter = this.registry.get(revisorId);
     const diff = await captureDiff(
@@ -2737,7 +3183,15 @@ export class SessionManager {
         });
       }
 
+      // Cancelamento/desligamento no meio da revisão mata o revisor: sem isto
+      // ele seguia vivo (e órfão, quando o daemon saía).
+      if (signal?.aborted) throw new Error('revisão abortada: sessão encerrada');
       const handle = await adapter.start(ctx, prompt);
+      const matarRevisor = (): void => {
+        void adapter.cancel(handle);
+      };
+      signal?.addEventListener('abort', matarRevisor, { once: true });
+      if (signal?.aborted) matarRevisor();
       const textos: string[] = [];
       // Revisão nova, sessão nativa nova: acumulado começa do zero.
       const custos = new TurnCostTracker();
@@ -2765,6 +3219,7 @@ export class SessionManager {
       if (aberto) ledger.charge(usoDoCusto(aberto), escopo);
 
       await handle.done;
+      signal?.removeEventListener('abort', matarRevisor);
       this.#persistLedger(this.#ledger(session.rootId));
 
       return interpretarRevisao(textos.join(' '), revisorId);

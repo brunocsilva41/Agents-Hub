@@ -77,4 +77,4 @@ defaults:
 caveats:
   - "O Hub define `--permission-mode` conforme o modo da sessão; `bypassPermissions` nunca é usado."
   - "Em modo supervised o Claude entra em `plan`: analisa e propõe, mas não altera arquivo nenhum."
-  - "No Windows, `interrupt` degrada para cancelamento: SIGINT não é entregável de forma confiável."
+  - "No Windows, `interrupt`/`pause` encerram o processo do turno (SIGINT não é entregável); a sessão fica ociosa/pausada e `send` a retoma com `--resume`."
