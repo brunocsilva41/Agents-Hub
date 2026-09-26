@@ -16,6 +16,7 @@ import {
   AddFolderSchema,
   CreateProjectSchema,
   DelegateSchema,
+  FolderIdSchema,
   HandoffSessionSchema,
   ResolveApprovalSchema,
   SendMessageSchema,
@@ -161,12 +162,15 @@ export class HubServer {
       const match = route.pattern.exec(url.pathname);
       if (!match) continue;
 
-      const params: Record<string, string> = {};
-      route.keys.forEach((key, i) => {
-        params[key] = decodeURIComponent(match[i + 1] ?? '');
-      });
-
       try {
+        // Dentro do `try`: `decodeURIComponent('%E0')` lança URIError, e fora
+        // daqui isso virava rejeição não tratada — o processo do daemon caía
+        // com um GET qualquer. Segmento mal codificado é erro de quem chamou.
+        const params: Record<string, string> = {};
+        route.keys.forEach((key, i) => {
+          params[key] = decodeParam(match[i + 1] ?? '', key);
+        });
+
         await route.handler(req, res, params);
       } catch (err) {
         sendError(res, err);
@@ -353,7 +357,7 @@ export class HubServer {
     this.#route('DELETE', '/projects/:id/folders/:folderId', (_req, res, params) => {
       this.sessions.removeProjectFolder(
         param(params['id'], ProjectIdSchema, 'id'),
-        params['folderId'] ?? '',
+        param(params['folderId'], FolderIdSchema, 'folderId'),
       );
       sendJson(res, 200, { ok: true });
     });
@@ -420,7 +424,7 @@ export class HubServer {
     });
 
     this.#route('POST', '/sessions/:id/detach', async (_req, res, params) => {
-      await this.sessions.detach(params['id'] ?? '');
+      await this.sessions.detach(param(params['id'], SessionIdSchema, 'id'));
       sendJson(res, 200, { ok: true });
     });
 
@@ -455,7 +459,9 @@ export class HubServer {
     });
 
     this.#route('GET', '/sessions/:id/tasks', (_req, res, params) => {
-      sendJson(res, 200, { tasks: this.sessions.listTasks(params['id'] ?? '') });
+      sendJson(res, 200, {
+        tasks: this.sessions.listTasks(param(params['id'], SessionIdSchema, 'id')),
+      });
     });
 
     this.#route('GET', '/tasks/:id', (_req, res, params) => {
@@ -481,7 +487,7 @@ export class HubServer {
     });
 
     this.#route('GET', '/sessions/:id', (_req, res, params) => {
-      const id = params['id'] ?? '';
+      const id = param(params['id'], SessionIdSchema, 'id');
       sendJson(res, 200, {
         session: this.sessions.getSession(id),
         live: this.sessions.isLive(id),
@@ -517,7 +523,7 @@ export class HubServer {
     });
 
     this.#route('POST', '/sessions/:id/pause', async (_req, res, params) => {
-      await this.sessions.pause(params['id'] ?? '');
+      await this.sessions.pause(param(params['id'], SessionIdSchema, 'id'));
       sendJson(res, 200, { ok: true });
     });
 
@@ -571,7 +577,9 @@ export class HubServer {
     });
 
     this.#route('GET', '/approvals/:id', (_req, res, params) => {
-      sendJson(res, 200, { approval: this.sessions.getApproval(params['id'] ?? '') });
+      sendJson(res, 200, {
+        approval: this.sessions.getApproval(param(params['id'], ApprovalIdSchema, 'id')),
+      });
     });
 
     this.#route('POST', '/approvals/:id', async (req, res, params) => {
@@ -632,11 +640,15 @@ export class HubServer {
 
     // ------------------------------------------------------------- grafo e custo
     this.#route('GET', '/graph/:rootId', (_req, res, params) => {
-      sendJson(res, 200, { graph: this.sessions.graph(params['rootId'] ?? '') });
+      sendJson(res, 200, {
+        graph: this.sessions.graph(param(params['rootId'], SessionIdSchema, 'rootId')),
+      });
     });
 
     this.#route('GET', '/budget/:rootId', (_req, res, params) => {
-      sendJson(res, 200, { budget: this.sessions.budget(params['rootId'] ?? '') });
+      sendJson(res, 200, {
+        budget: this.sessions.budget(param(params['rootId'], SessionIdSchema, 'rootId')),
+      });
     });
 
     // ------------------------------------------------------------- stream SSE
@@ -741,6 +753,7 @@ export function statusFor(code: string): number {
     case 'TIMEOUT':
       return 504;
     case 'INVALID_QUERY':
+    case 'INVALID_ID':
       return 400;
     case 'AGENT_NOT_INSTALLED':
     case 'AGENT_NOT_AUTHENTICATED':
@@ -775,15 +788,28 @@ async function readBody<T>(req: IncomingMessage, schema: ZodType<T>): Promise<T>
 }
 
 /** Valida um parâmetro de rota antes de ele virar consulta ao banco. */
+/**
+ * Parâmetro de rota validado. Id malformado é 400 (`INVALID_ID`), nunca um 404
+ * silencioso nem um 422 de corpo: quem mandou `../shutdown` no lugar de um id
+ * precisa ouvir que o problema é o formato, não que "não achou".
+ */
 function param<T>(valor: string | undefined, schema: ZodType<T>, nome: string): T {
   const parsed = schema.safeParse(valor ?? '');
   if (!parsed.success) {
-    throw new HubError('INVALID_BRIEF', `parâmetro "${nome}" inválido`, {
+    throw new HubError('INVALID_ID', `parâmetro "${nome}" inválido`, {
       valor,
       message: parsed.error.issues[0]?.message,
     });
   }
   return parsed.data;
+}
+
+function decodeParam(bruto: string, nome: string): string {
+  try {
+    return decodeURIComponent(bruto);
+  } catch {
+    throw new HubError('INVALID_ID', `parâmetro "${nome}" mal codificado`, { valor: bruto });
+  }
 }
 
 async function readJson<T>(req: IncomingMessage): Promise<T> {

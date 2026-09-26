@@ -13,8 +13,10 @@ import type {
   SessionSummary,
   TaskSummary,
 } from './types.js';
+import { idSegment } from './ids.js';
 
 export * from './types.js';
+export * from './ids.js';
 
 export interface BriefInput {
   agent: string;
@@ -56,6 +58,11 @@ export interface TaskStatus {
  * Único ponto de contato com o Hub para CLI, MCP server e Web UI — os três
  * consomem exatamente as mesmas rotas, o que garante por construção que
  * nenhuma superfície tenha um poder que as outras não têm (ADR 01.2).
+ *
+ * Todo id que entra num caminho passa por `idSegment` (ver `ids.ts`): formato
+ * validado e segmento codificado. Os métodos que fazem isso são `async` de
+ * propósito — id inválido vira promessa rejeitada, não exceção síncrona que
+ * escaparia de um `.catch()` encadeado por quem chama.
  */
 export class HubClient {
   readonly base: string;
@@ -93,8 +100,8 @@ export class HubClient {
     return this.#get(`/sessions${queryOf(filter)}`);
   }
 
-  session(id: string): Promise<{ session: SessionSummary; live: boolean }> {
-    return this.#get(`/sessions/${id}`);
+  async session(id: string): Promise<{ session: SessionSummary; live: boolean }> {
+    return this.#get(`/sessions/${idSegment(id, 'ses')}`);
   }
 
   startSession(body: { projectId: string; brief: BriefInput; title?: string }): Promise<{
@@ -116,54 +123,54 @@ export class HubClient {
     return this.#post('/sessions/adopt', body);
   }
 
-  detach(sessionId: string): Promise<{ ok: boolean }> {
-    return this.#post(`/sessions/${sessionId}/detach`, {});
+  async detach(sessionId: string): Promise<{ ok: boolean }> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/detach`, {});
   }
 
-  delegate(sessionId: string, brief: BriefInput): Promise<DelegationResult> {
-    return this.#post(`/sessions/${sessionId}/delegate`, { brief });
+  async delegate(sessionId: string, brief: BriefInput): Promise<DelegationResult> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/delegate`, { brief });
   }
 
-  send(sessionId: string, text: string): Promise<{ mode: 'live' | 'resume' | 'replay' }> {
-    return this.#post(`/sessions/${sessionId}/send`, { text });
+  async send(sessionId: string, text: string): Promise<{ mode: 'live' | 'resume' | 'replay' }> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/send`, { text });
   }
 
-  interrupt(sessionId: string): Promise<{ ok: boolean }> {
-    return this.#post(`/sessions/${sessionId}/interrupt`, {});
+  async interrupt(sessionId: string): Promise<{ ok: boolean }> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/interrupt`, {});
   }
 
-  pause(sessionId: string): Promise<{ ok: boolean }> {
-    return this.#post(`/sessions/${sessionId}/pause`, {});
+  async pause(sessionId: string): Promise<{ ok: boolean }> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/pause`, {});
   }
 
-  cancel(sessionId: string, reason?: string): Promise<{ ok: boolean }> {
-    return this.#post(`/sessions/${sessionId}/cancel`, { reason });
+  async cancel(sessionId: string, reason?: string): Promise<{ ok: boolean }> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/cancel`, { reason });
   }
 
-  handoff(
+  async handoff(
     sessionId: string,
     agentId: string,
     reason?: string,
   ): Promise<{ ok: boolean; session: SessionSummary }> {
-    return this.#post(`/sessions/${sessionId}/handoff`, { agentId, reason });
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/handoff`, { agentId, reason });
   }
 
   // ------------------------------------------------------------------- tasks
-  task(taskId: string): Promise<TaskStatus> {
-    return this.#get(`/tasks/${taskId}`);
+  async task(taskId: string): Promise<TaskStatus> {
+    return this.#get(`/tasks/${idSegment(taskId, 'tsk')}`);
   }
 
   /** O que a sessão mudou no código, em patch unificado. */
-  diff(sessionId: string): Promise<{ diff: string | null; path?: string; message?: string }> {
-    return this.#get(`/sessions/${sessionId}/diff`);
+  async diff(sessionId: string): Promise<{ diff: string | null; path?: string; message?: string }> {
+    return this.#get(`/sessions/${idSegment(sessionId, 'ses')}/diff`);
   }
 
-  artifacts(sessionId: string): Promise<{ artifacts: ArtifactSummary[] }> {
-    return this.#get(`/sessions/${sessionId}/artifacts`);
+  async artifacts(sessionId: string): Promise<{ artifacts: ArtifactSummary[] }> {
+    return this.#get(`/sessions/${idSegment(sessionId, 'ses')}/artifacts`);
   }
 
-  tasks(sessionId: string): Promise<{ tasks: TaskSummary[] }> {
-    return this.#get(`/sessions/${sessionId}/tasks`);
+  async tasks(sessionId: string): Promise<{ tasks: TaskSummary[] }> {
+    return this.#get(`/sessions/${idSegment(sessionId, 'ses')}/tasks`);
   }
 
   // -------------------------------------------------------------- aprovações
@@ -171,16 +178,16 @@ export class HubClient {
     return this.#get(`/approvals${queryOf({ sessionId })}`);
   }
 
-  approval(id: string): Promise<{ approval: ApprovalSummary }> {
-    return this.#get(`/approvals/${id}`);
+  async approval(id: string): Promise<{ approval: ApprovalSummary }> {
+    return this.#get(`/approvals/${idSegment(id, 'apv')}`);
   }
 
-  resolveApproval(
+  async resolveApproval(
     id: string,
     decision: 'approved' | 'denied',
     by?: string,
   ): Promise<{ approval: ApprovalSummary }> {
-    return this.#post(`/approvals/${id}`, { decision, by });
+    return this.#post(`/approvals/${idSegment(id, 'apv')}`, { decision, by });
   }
 
   // ------------------------------------------------- gate pré-execução
@@ -220,11 +227,11 @@ export class HubClient {
   }
 
   // ------------------------------------------------------------ observação
-  events(
+  async events(
     sessionId: string,
     options: { since?: number; limit?: number } = {},
   ): Promise<{ events: EventEnvelope[] }> {
-    return this.#get(`/sessions/${sessionId}/events${queryOf(options)}`);
+    return this.#get(`/sessions/${idSegment(sessionId, 'ses')}/events${queryOf(options)}`);
   }
 
   context(ref: string): Promise<{ ref: string; events: EventEnvelope[] }> {
@@ -234,46 +241,46 @@ export class HubClient {
   // ------------------------------------------------------------- projetos
 
   /** Pastas que compõem o projeto, principal primeiro. */
-  folders(projectId: string): Promise<{ folders: ProjectFolder[] }> {
-    return this.#get(`/projects/${encodeURIComponent(projectId)}/folders`);
+  async folders(projectId: string): Promise<{ folders: ProjectFolder[] }> {
+    return this.#get(`/projects/${idSegment(projectId, 'prj')}/folders`);
   }
 
-  addFolder(
+  async addFolder(
     projectId: string,
     folderPath: string,
     label?: string,
   ): Promise<{ folder: ProjectFolder }> {
-    return this.#post(`/projects/${encodeURIComponent(projectId)}/folders`, {
+    return this.#post(`/projects/${idSegment(projectId, 'prj')}/folders`, {
       path: folderPath,
       ...(label === undefined ? {} : { label }),
     });
   }
 
-  removeFolder(projectId: string, folderId: string): Promise<{ ok: true }> {
+  async removeFolder(projectId: string, folderId: string): Promise<{ ok: true }> {
     return this.#send(
       'DELETE',
-      `/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(folderId)}`,
+      `/projects/${idSegment(projectId, 'prj')}/folders/${idSegment(folderId, 'pfd')}`,
     );
   }
 
   /** Memória e prompts por agente do projeto. */
-  projectContext(projectId: string): Promise<{ context: ProjectContextDto }> {
-    return this.#get(`/projects/${encodeURIComponent(projectId)}/context`);
+  async projectContext(projectId: string): Promise<{ context: ProjectContextDto }> {
+    return this.#get(`/projects/${idSegment(projectId, 'prj')}/context`);
   }
 
-  saveProjectContext(
+  async saveProjectContext(
     projectId: string,
     context: ProjectContextDto,
   ): Promise<{ context: ProjectContextDto }> {
-    return this.#send('PUT', `/projects/${encodeURIComponent(projectId)}/context`, context);
+    return this.#send('PUT', `/projects/${idSegment(projectId, 'prj')}/context`, context);
   }
 
-  graph(rootId: string): Promise<{ graph: GraphSummary[] }> {
-    return this.#get(`/graph/${rootId}`);
+  async graph(rootId: string): Promise<{ graph: GraphSummary[] }> {
+    return this.#get(`/graph/${idSegment(rootId, 'ses')}`);
   }
 
-  budget(rootId: string): Promise<{ budget: BudgetSummary }> {
-    return this.#get(`/budget/${rootId}`);
+  async budget(rootId: string): Promise<{ budget: BudgetSummary }> {
+    return this.#get(`/budget/${idSegment(rootId, 'ses')}`);
   }
 
   /** URL do SSE — o navegador usa `EventSource`, o Node usa `stream()`. */
