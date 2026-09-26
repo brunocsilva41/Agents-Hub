@@ -6,6 +6,18 @@
 
 Última atualização: 2026-09-26, por Claude Opus 5.5 (sessão de execução do GOAL).
 
+## PAUSA (2026-09-27, pedida pelo usuário)
+Onda 4 interrompida no meio: 8 agentes parados, NADA dela mesclado na main. Os worktrees ficam em .claude/worktrees/ com o trabalho parcial (podem ter commits ou mudanças não commitadas):
+- 8.1 docs reconciliadas → worktree-agent-a30e0a2e8e1d1a585
+- 8.2/8.4 SECURITY + guia de instalação → worktree-agent-ab29ef9421e9e3906
+- 8.3 demo ampliada + smoke MCP + verify sem typecheck duplicado → worktree-agent-ad414d227ae286ab6
+- MCP escopo por fluxo (R08-14), R08-11/15/16, R11-05 codex supervised, R14-14 → worktree-agent-ac1689ba843343ec9
+- BAIXOs core/store/daemon (R09-08/12/13/16/17/19, R13-17/19, R02-12, R06-13/14) → worktree-agent-af469884fcc640a66
+- BAIXOs CLI (R14-11, R07-18/21/22/23/24, R07-11/20/07 resto) → worktree-agent-a9933f24877fff844
+- MÉDIO/BAIXO web (R03-12/16/24/25/27/28, DAG) → worktree-agent-aa75a8055376c3aa2
+- Correções do teste real (gate do Claude por --settings [ALTO], motivo de erro/quota, deny de orçamento pós-turno, ruído da CLI, tokens do Copilot) → worktree-agent-a552bbd98674e83c4
+Ao retomar: ver o que cada worktree já tem (git -C <wt> log main..HEAD; git -C <wt> status) e relançar/terminar; depois 7.2 (ESLint/formatador), rodada 2 de teste real (gate Claude + retomada), instalação limpa, verify 3x.
+
 ## Inventário
 Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL contou só grafias acentuadas) em [INVENTARIO.md](INVENTARIO.md), com ID R<nn>-<seq> e item do GOAL. Estado marcado a partir dos itens concluídos. Placar atual: CRÍT 3/3, ALTO 16/52, MÉD 11/104, BAIXO 7/66.
 
