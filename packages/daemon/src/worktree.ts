@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, rmdirSync, unlinkSync } from 'node:fs';
 import { symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -56,6 +56,23 @@ export interface ReleaseResult {
 const DEPENDENCIAS_LIGADAS = ['node_modules', '.venv', 'vendor'];
 
 /**
+ * Desfaz UM link (junction/symlink) sem seguir o alvo.
+ *
+ * `unlinkSync` remove o próprio ponto de reparse/symlink; em algumas
+ * combinações de SO/versão um junction de diretório só sai com `rmdirSync`
+ * (que, num junction, também remove só o link — nunca o conteúdo do alvo,
+ * porque não é recursivo). Nunca usar `rmSync({ recursive: true })` aqui: em
+ * versões do Node/Windows ele atravessa o junction e apaga o alvo.
+ */
+function desligarLink(caminho: string): void {
+  try {
+    unlinkSync(caminho);
+  } catch {
+    rmdirSync(caminho);
+  }
+}
+
+/**
  * Isolamento por git worktree (ADR 01.3).
  *
  * Cada sessão ganha um checkout próprio com branch próprio. Dois agentes
@@ -70,9 +87,14 @@ export class WorktreeManager {
    * privilégio de administrador ou de condições de disco específicas do SO.
    * Em produção é sempre `node:fs/promises#symlink`.
    */
+  /**
+   * `desligarFn` idem: injetável só para testar a recusa quando um link não
+   * pode ser desfeito (link em uso, permissão) — em produção é `desligarLink`.
+   */
   constructor(
     private readonly root: string,
     private readonly symlinkFn: typeof symlink = symlink,
+    private readonly desligarFn: (caminho: string) => void = desligarLink,
   ) {}
 
   async isGitRepo(dir: string): Promise<boolean> {
@@ -189,6 +211,18 @@ export class WorktreeManager {
     force?: boolean;
   }): Promise<ReleaseResult> {
     if (!existsSync(params.worktreePath)) return { removed: true };
+
+    // CRÍTICO: o `git worktree remove` do Git for Windows SEGUE o junction de
+    // `node_modules` e apaga o conteúdo do diretório REAL do projeto. Todo
+    // link de primeiro nível sai antes do git rodar; se algum não sair, a
+    // remoção é recusada — o reaper tenta de novo na próxima passada.
+    const recusa = this.#desfazerLinks(params.worktreePath);
+    if (recusa !== null) {
+      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      console.error(`[worktree] remoção de ${params.worktreePath} recusada: ${recusa}`);
+      return { removed: false, reason: recusa };
+    }
+
     try {
       await execFileAsync(
         'git',
@@ -202,8 +236,60 @@ export class WorktreeManager {
       // remoção e perder algo que você queria ver — mas o motivo real (não só
       // "não removido") importa pra quem decide se isso é normal (ainda dentro
       // da janela de retenção não é nem chamado) ou uma falha de verdade.
+      //
+      // Os links foram desfeitos antes da tentativa: religa as dependências
+      // para o worktree retido continuar utilizável (build/testes) durante a
+      // inspeção.
+      await this.#ligarDependencias(params.projectPath, params.worktreePath);
       return { removed: false, reason: (err as Error).message };
     }
+  }
+
+  /**
+   * Desfaz todo symlink/junction de primeiro nível do worktree SEM seguir o
+   * alvo (`lstat`, não `stat`). Cobre as dependências ligadas por
+   * `#ligarDependencias` e, por defesa em profundidade, qualquer outro link
+   * que um agente ou ferramenta tenha criado ali.
+   *
+   * Devolve `null` se o worktree ficou sem links de primeiro nível, ou o
+   * motivo se algum não pôde ser desfeito — nesse caso o chamador NÃO pode
+   * rodar `git worktree remove`.
+   */
+  #desfazerLinks(worktreePath: string): string | null {
+    let entradas: string[];
+    try {
+      entradas = readdirSync(worktreePath);
+    } catch (err) {
+      return `não foi possível listar ${worktreePath} para desfazer links: ${(err as Error).message}`;
+    }
+
+    const falhas: string[] = [];
+    for (const nome of entradas) {
+      const caminho = path.join(worktreePath, nome);
+      try {
+        if (!lstatSync(caminho).isSymbolicLink()) continue;
+      } catch (err) {
+        falhas.push(`"${nome}": lstat falhou: ${(err as Error).message}`);
+        continue;
+      }
+      try {
+        this.desligarFn(caminho);
+      } catch (err) {
+        falhas.push(`"${nome}": ${(err as Error).message}`);
+        continue;
+      }
+      // Confirma que o link saiu mesmo — não basta a chamada não ter lançado.
+      let aindaExiste = true;
+      try {
+        lstatSync(caminho);
+      } catch {
+        aindaExiste = false;
+      }
+      if (aindaExiste) falhas.push(`"${nome}": link continua no disco após a remoção`);
+    }
+
+    if (falhas.length === 0) return null;
+    return `links não puderam ser desfeitos (git worktree remove seguiria o alvo): ${falhas.join('; ')}`;
   }
 
   async listStale(projectPath: string): Promise<string[]> {
