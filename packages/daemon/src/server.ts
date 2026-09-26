@@ -102,6 +102,8 @@ type Handler = (
 
 interface Route {
   method: string;
+  /** Padrão como foi registrado (`/projects/:id/context`), para introspecção. */
+  path: string;
   pattern: RegExp;
   keys: string[];
   handler: Handler;
@@ -200,7 +202,16 @@ export class HubServer {
         return '([^/]+)';
       })}$`,
     );
-    this.#routes.push({ method, pattern, keys, handler, operator: opts.operator === true });
+    this.#routes.push({ method, path, pattern, keys, handler, operator: opts.operator === true });
+  }
+
+  /**
+   * Tabela de rotas registradas, na ordem de despacho. Existe para os testes
+   * provarem que TODA rota `operator: true` responde 401 sem token e que não
+   * há duas rotas com o mesmo método+padrão (a segunda nunca seria alcançada).
+   */
+  routeTable(): Array<{ method: string; path: string; operator: boolean }> {
+    return this.#routes.map(({ method, path, operator }) => ({ method, path, operator }));
   }
 
   async #dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
