@@ -68,10 +68,10 @@ describe('mergeHooks / hookInstalado', () => {
     for (const t of ['Read', 'Glob', 'Grep']) assert.ok(!re.test(t), t);
   });
 
-  test('hookCommand usa o node atual e o main.js desta CLI, entre aspas', () => {
+  test('hookCommand usa o node atual e o bin.js desta CLI (entrada instalada, item 5.7), entre aspas', () => {
     const cmd = hookCommand();
     assert.ok(cmd.startsWith(`"${process.execPath}" "`));
-    assert.ok(cmd.endsWith('main.js" hook'));
+    assert.ok(cmd.endsWith('bin.js" hook'));
     assert.equal(hookInstalado(mergeHooks({}, cmd)), true, 'o comando real é reconhecido como nosso');
   });
 
