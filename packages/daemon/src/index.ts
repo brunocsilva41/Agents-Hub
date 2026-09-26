@@ -1,6 +1,7 @@
 export {
   loadConfig,
   saveConfig,
+  ligarBypassDoGateCodex,
   defaultHome,
   baseUrl,
   cliHookEntrypoint,
@@ -53,10 +54,24 @@ export {
   mcpTargets,
   resolveConfigPath,
   addMcpServers,
+  upsertMcpServer,
   existingServerNames,
+  jsonEntry,
+  tomlSection,
+  substituirServidorToml,
   type ConfigFormat,
   type McpTarget,
   type PortableMcpServer,
   type McpMergeOutcome,
+  type McpUpsertOutcome,
 } from './mcp-config.js';
+export {
+  backupVersionado,
+  carimboDeBackup,
+  gravarAtomico,
+  gravarComBackup,
+  lerJsonDeConfig,
+  lerJsonParaExibir,
+  type JsonDeConfig,
+} from './safe-write.js';
 export { DiscoveryService, ImportService, type DiscoverFn } from './absorption.js';

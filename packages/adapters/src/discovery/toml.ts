@@ -4,12 +4,21 @@
  * (básicas, literais, multilinha), números, booleanos, arrays e tabelas inline.
  * Datas viram string crua. Lança Error em sintaxe inválida; o chamador vira
  * isso em warning.
+ *
+ * Chave ou tabela declarada duas vezes (ex.: `env = {...}` inline E
+ * `[mcp_servers.x.env]`) é erro, como no parser do próprio Codex — o
+ * instalador de MCP reparseia a saída com isto para provar que não gerou um
+ * config.toml que o Codex recusaria ao iniciar.
  */
 
 type Table = Record<string, unknown>;
 
 class Parser {
   private i = 0;
+  /** Tabelas abertas por cabeçalho `[x]` — não podem ser abertas de novo. */
+  private readonly declared = new WeakSet<object>();
+  /** Tabelas inline e arrays literais: valores fechados, não se estendem. */
+  private readonly frozen = new WeakSet<object>();
   constructor(private readonly s: string) {}
 
   parse(): Table {
@@ -38,7 +47,7 @@ class Parser {
         this.endOfLine();
         let t = current;
         for (const seg of path.slice(0, -1)) t = this.child(t, seg);
-        t[path[path.length - 1]!] = value;
+        this.assign(t, path[path.length - 1]!, value);
       }
     }
   }
@@ -48,12 +57,20 @@ class Parser {
     throw new Error(`TOML inválido (linha ${line}): ${msg}`);
   }
 
+  private assign(t: Table, key: string, value: unknown): void {
+    if (Object.prototype.hasOwnProperty.call(t, key)) this.fail(`chave '${key}' definida duas vezes`);
+    t[key] = value;
+  }
+
   private child(t: Table, key: string): Table {
     const existing = t[key];
     if (existing === undefined) {
       const n: Table = {};
       t[key] = n;
       return n;
+    }
+    if (existing && typeof existing === 'object' && this.frozen.has(existing)) {
+      this.fail(`'${key}' já foi definido como valor inline e não pode ser estendido`);
     }
     if (Array.isArray(existing)) return existing[existing.length - 1] as Table;
     if (existing && typeof existing === 'object') return existing as Table;
@@ -63,11 +80,23 @@ class Parser {
   private descend(root: Table, path: string[], isArray: boolean): Table {
     let t = root;
     path.forEach((seg, idx) => {
-      if (idx === path.length - 1 && isArray) {
+      const last = idx === path.length - 1;
+      if (last && isArray) {
+        const existing = t[seg];
+        if (existing !== undefined && (!Array.isArray(existing) || this.frozen.has(existing))) {
+          this.fail(`'${path.join('.')}' já foi definido e não é array de tabelas`);
+        }
         const arr = (t[seg] ??= []) as Table[];
         const n: Table = {};
         arr.push(n);
         t = n;
+      } else if (last) {
+        const existing = t[seg];
+        if (existing !== undefined && (Array.isArray(existing) || this.declared.has(existing as object))) {
+          this.fail(`tabela [${path.join('.')}] declarada duas vezes`);
+        }
+        t = this.child(t, seg);
+        this.declared.add(t);
       } else {
         t = this.child(t, seg);
       }
@@ -209,6 +238,7 @@ class Parser {
         this.skipBlank();
         if (this.s[this.i] === ']') {
           this.i++;
+          this.frozen.add(arr);
           return arr;
         }
         arr.push(this.value());
@@ -224,6 +254,7 @@ class Parser {
         this.skipInline();
         if (this.s[this.i] === '}') {
           this.i++;
+          this.frozen.add(tbl);
           return tbl;
         }
         const path = this.keyPath();
@@ -234,7 +265,7 @@ class Parser {
         const v = this.value();
         let t = tbl;
         for (const seg of path.slice(0, -1)) t = this.child(t, seg);
-        t[path[path.length - 1]!] = v;
+        this.assign(t, path[path.length - 1]!, v);
         this.skipInline();
         if (this.s[this.i] === ',') this.i++;
         else if (this.s[this.i] !== '}') this.fail("esperado ',' ou '}'");

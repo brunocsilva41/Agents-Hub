@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { baseUrl, loadConfig, saveConfig, modoExigeGate } from '@agents-hub/daemon';
+import { baseUrl, loadConfig, ligarBypassDoGateCodex, modoExigeGate } from '@agents-hub/daemon';
 import { HubApiError, HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
 import { runDaemon } from './daemon-run.js';
@@ -13,6 +13,7 @@ import {
   hookCommand,
   hookInstalado,
   lerConfig,
+  lerConfigParaGravar,
   mergeHooks,
 } from './hooks-install.js';
 import {
@@ -118,7 +119,7 @@ ${bold('Agentes')}
   hub import <agente> [--project <caminho>] [--kinds instructions,env,mcp] [--to ag1,ag2] [--write]
                                     traz o ambiente do agente para o projeto. SEM --write só imprime o plano.
       --kinds              padrão: instructions,env (mcp entra quando há --to)
-      --to <ag1,ag2>       agentes que receberão os servidores MCP descobertos (merge + backup .bak)
+      --to <ag1,ag2>       agentes que receberão os servidores MCP descobertos (merge + backup versionado .bak-<data>)
       --overwrite          substitui instrução/variável que o projeto já tem
       --include-env        copia o env dos servidores MCP (valores reais; padrão: só nomes, sem copiar)
 
@@ -172,7 +173,7 @@ ${bold('Workflows (DAG de múltiplos agentes)')}
 ${bold('MCP — dar ao agente o poder de chamar os outros')}
   hub mcp                            mostra o estado do registro em cada agente
   hub mcp show <agente>              imprime o trecho de config para colar
-  hub mcp install <agente> --write   grava a config (com backup .bak e merge)
+  hub mcp install <agente> --write   grava a config (merge, backup versionado .bak-<data>)
       --project <caminho>    para agentes com config por projeto (Claude Code)
 
 ${dim('Alvo do --agent aceita id (codex) ou capability (cap:test-writing).')}
@@ -315,7 +316,7 @@ async function runHook(
 
 /**
  * `hub mcp install --write` já protege sua escrita de config com try/catch
- * (ver `mcpCommand`) — `gravarConfig`/`installCodexGate`/`saveConfig`, chamados
+ * (ver `mcpCommand`) — `gravarConfig`/`installCodexGate`/`ligarBypassDoGateCodex`, chamados
  * dentro de `hooksCommand`, fazem o mesmo tipo de I/O (`mkdirSync`,
  * `copyFileSync`, `writeFileSync`) e podem lançar por permissão negada, disco
  * cheio ou caminho inválido. Sem esta borda, o processo crashava com stack
@@ -385,8 +386,12 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
   const destino =
     projeto && alvo.configProjeto ? alvo.configProjeto(path.resolve(projeto)) : alvo.configUsuario;
 
-  const atual = lerConfig(destino);
+  // Lança (sem gravar nada) se o arquivo existe e não parseia por inteiro —
+  // `hooksCommandSeguro` mostra o erro e sai com 1. Vale também para o dry-run:
+  // mostrar "só o hook do Hub" escondia que a config da pessoa seria perdida.
+  const { doc: atual, avisos } = lerConfigParaGravar(destino);
   const novo = mergeHooks(atual, hookCommand());
+  for (const aviso of avisos) console.log(yellow(`⚠ ${aviso}`));
 
   if (args.flags['write'] !== true) {
     console.log(dim(`destino: ${destino}${NEWLINE}`));
@@ -395,9 +400,13 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
     return;
   }
 
-  const backup = gravarConfig(destino, novo);
+  const gravacao = gravarConfig(destino, atual, novo);
+  if (gravacao.acao === 'inalterado') {
+    console.log(`${green('gate já estava instalado')} em ${bold(destino)} ${dim('(nada gravado)')}`);
+    return;
+  }
   console.log(`${green('gate instalado')} em ${bold(destino)}`);
-  if (backup) console.log(dim(`backup: ${backup}`));
+  if (gravacao.backup) console.log(dim(`backup: ${gravacao.backup}`));
   console.log(
     dim(
       'a partir da próxima sessão, Bash/Write/Edit passam pela política do Hub antes de rodar.',
@@ -427,8 +436,15 @@ async function installCodexGate(args: Args, config: ReturnType<typeof loadConfig
     return;
   }
 
-  saveConfig({ ...config, codexGate: { ...config.codexGate, bypassHookTrust: true } });
+  // Só a chave `codexGate.bypassHookTrust` muda; o resto do config.json fica
+  // como a pessoa escreveu (sem congelar defaults), com backup versionado.
+  const gravacao = ligarBypassDoGateCodex(config.home);
+  if (gravacao.action === 'unchanged') {
+    console.log(`${green('gate do Codex já estava ligado')} em ${bold(destino)} ${dim('(nada gravado)')}`);
+    return;
+  }
   console.log(`${green('gate do Codex ligado')} — gravado em ${bold(destino)}`);
+  if (gravacao.backup) console.log(dim(`backup: ${gravacao.backup}`));
   console.log(
     dim(
       'a partir da próxima sessão do Codex, cada invocação leva --dangerously-bypass-hook-trust ' +
@@ -1275,6 +1291,7 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
     console.log(`${green('✓')} ${target.label}: ${verb}`);
     console.log(`   ${dim(outcome.path)}`);
     if (outcome.backup) console.log(`   ${dim(`backup: ${outcome.backup}`)}`);
+    for (const aviso of outcome.avisos) console.log(`   ${yellow('⚠')} ${dim(aviso)}`);
     if (!target.verified) {
       console.log(
         `   ${yellow('⚠')} ${dim('formato não confirmado para este agente — teste antes de confiar')}`,

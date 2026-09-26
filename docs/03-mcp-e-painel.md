@@ -47,7 +47,7 @@ Sem a adoção, o filho nasceria órfão: sem pai de quem herdar política, sem 
 ```bash
 hub mcp                            # o que está registrado onde
 hub mcp show codex                 # imprime o trecho para colar
-hub mcp install codex --write      # grava, com backup .bak e merge
+hub mcp install codex --write      # grava: merge, backup versionado .bak-YYYYMMDD-HHMMSS, escrita atômica
 ```
 
 O padrão é **imprimir, não gravar**: são arquivos de configuração de outra ferramenta. Com `--write`, o Hub faz backup e faz merge da própria seção, preservando o que você já tinha ajustado (modelo, sandbox, aprovações).

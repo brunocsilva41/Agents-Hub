@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+
+/** O único backup versionado (`<arquivo>.bak-*`) ao lado de `file`. */
+function unicoBackup(file: string): string {
+  const nomes = readdirSync(path.dirname(file)).filter((n) => n.startsWith(`${path.basename(file)}.bak-`));
+  assert.equal(nomes.length, 1, `esperava 1 backup, achei ${nomes.join(', ')}`);
+  return path.join(path.dirname(file), nomes[0]!);
+}
 import type { AgentDiscovery, ImportResult } from '@agents-hub/core';
 import type { AgentRegistry } from '@agents-hub/adapters';
 import {
@@ -300,7 +307,7 @@ describe('ImportService', () => {
     assert.ok(doc.mcpServers['antigo'], 'entrada existente NÃO é apagada');
     assert.deepEqual(doc.mcpServers['web'], { url: 'https://mcp.exemplo.dev/mcp' });
     assert.ok(!('agents-hub' in doc.mcpServers), 'o Hub não é reimportado');
-    assert.equal(readFileSync(`${cursorFile}.bak`, 'utf8'), original, '.bak é o estado anterior');
+    assert.equal(readFileSync(unicoBackup(cursorFile), 'utf8'), original, 'backup é o estado anterior');
     assert.ok(r.skipped.some((s) => s.what === 'mcp:fs → cursor' && /já existe/.test(s.reason)));
 
     // segunda execução: nada novo, nada duplicado
@@ -322,7 +329,7 @@ describe('ImportService', () => {
     assert.ok(novo.startsWith(original), 'conteúdo original intacto no início');
     assert.equal((novo.match(/\[mcp_servers\.fs\]/g) ?? []).length, 1, 'fs não duplicado');
     assert.ok(novo.includes('[mcp_servers.web]') && novo.includes('url = "https://mcp.exemplo.dev/mcp"'));
-    assert.equal(readFileSync(`${tomlFile}.bak`, 'utf8'), original);
+    assert.equal(readFileSync(unicoBackup(tomlFile), 'utf8'), original);
   });
 
   test('mcp: sem includeEnv, NENHUM valor de env é copiado nem exposto', async () => {
