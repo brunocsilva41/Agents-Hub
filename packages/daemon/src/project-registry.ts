@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { HubError, validarNovaPasta, type Project, type ProjectFolder, type UnitOfWork } from '@agents-hub/core';
+import { canonicalizarCaminho, mesmoCaminho } from './project-path.js';
 import { loadProjectContext, projectConfigPath, type ProjectContext } from './project-config.js';
 import {
   evaluateRepoTrust,
@@ -49,17 +50,23 @@ export class ProjectRegistry {
       throw new HubError('PROJECT_FOLDER_CONFLICT', formato.motivo, { path: dir });
     }
 
-    const absolute = path.resolve(dir);
+    // Grafia do disco (8.3 expandido, caixa real): o mesmo diretório escrito
+    // de outro jeito não pode virar outro projeto — ver `canonicalizarCaminho`.
+    const absolute = canonicalizarCaminho(dir);
 
     // Idempotência ANTES da checagem de sobreposição, e a ordem importa:
     // registrar o mesmo projeto duas vezes é uso normal (a CLI faz isso a cada
     // `hub start`), e a pasta dele conflita consigo mesma. Validar primeiro
     // fazia a segunda chamada falhar com "esta pasta já pertence ao projeto X"
     // — sendo X o próprio projeto que o chamador queria de volta.
-    const existing = this.store.projects.getByPath(absolute);
+    // Registros antigos podem ter outra grafia (gravados antes da
+    // canonicalização): comparar também pela chave, não só pela string exata.
+    const existing =
+      this.store.projects.getByPath(absolute) ??
+      this.store.projects.list().find((p) => mesmoCaminho(p.path, absolute));
     if (existing) return existing;
 
-    const veredito = validarNovaPasta(absolute, this.store.projects.allFolders());
+    const veredito = validarNovaPasta(absolute, this.#pastasCanonicas());
     if (!veredito.ok) {
       throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
     }
@@ -84,6 +91,11 @@ export class ProjectRegistry {
 
   list(): Project[] {
     return this.store.projects.list();
+  }
+
+  /** Pastas registradas na grafia do disco — registros antigos podem estar em 8.3. */
+  #pastasCanonicas(): ProjectFolder[] {
+    return this.store.projects.allFolders().map((f) => ({ ...f, path: canonicalizarCaminho(f.path) }));
   }
 
   /** Projeto por id, ou erro — nunca `null` seguindo adiante em silêncio. */
@@ -179,12 +191,16 @@ export class ProjectRegistry {
   addFolder(projectId: string, dir: string, label?: string): ProjectFolder {
     const project = this.get(projectId);
 
-    // Mesma razão de `register`: validar o bruto, resolver depois.
-    const veredito = validarNovaPasta(dir, this.store.projects.allFolders());
-    if (!veredito.ok) {
-      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: dir });
+    // Mesma razão de `register`: validar o formato do bruto, resolver depois.
+    const formato = validarNovaPasta(dir, []);
+    if (!formato.ok) {
+      throw new HubError('PROJECT_FOLDER_CONFLICT', formato.motivo, { path: dir });
     }
-    const absolute = path.resolve(dir);
+    const absolute = canonicalizarCaminho(dir);
+    const veredito = validarNovaPasta(absolute, this.#pastasCanonicas());
+    if (!veredito.ok) {
+      throw new HubError('PROJECT_FOLDER_CONFLICT', veredito.motivo, { path: absolute });
+    }
 
     return this.store.projects.addFolder({
       projectId: project.id,

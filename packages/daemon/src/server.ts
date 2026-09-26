@@ -963,16 +963,18 @@ export class HubServer {
     });
 
     // ------------------------------------------------------------- grafo e custo
+    // Raiz inexistente é 404 (SESSION_NOT_FOUND via `getSession`), não um
+    // grafo vazio ou um orçamento zerado que parecem "fluxo sem gasto".
     this.#route('GET', '/graph/:rootId', (_req, res, params) => {
-      sendJson(res, 200, {
-        graph: this.sessions.graph(param(params['rootId'], SessionIdSchema, 'rootId')),
-      });
+      const rootId = param(params['rootId'], SessionIdSchema, 'rootId');
+      this.sessions.getSession(rootId);
+      sendJson(res, 200, { graph: this.sessions.graph(rootId) });
     });
 
     this.#route('GET', '/budget/:rootId', (_req, res, params) => {
-      sendJson(res, 200, {
-        budget: this.sessions.budget(param(params['rootId'], SessionIdSchema, 'rootId')),
-      });
+      const rootId = param(params['rootId'], SessionIdSchema, 'rootId');
+      this.sessions.getSession(rootId);
+      sendJson(res, 200, { budget: this.sessions.budget(rootId) });
     });
 
     // ------------------------------------------------------------- stream SSE
@@ -983,6 +985,10 @@ export class HubServer {
       // Presente-e-inválido é erro (400), não "sem filtro" — ver o
       // comentário de `parseSseSince`. Lançado ANTES do `res.writeHead`.
       const since = parseSseSince(url.searchParams.get('since'));
+      // Sessão/raiz inexistente: 404 antes de abrir o stream. Antes, o stream
+      // abria e ficava mudo para sempre — `hub watch <id errado>` travava.
+      if (sessionId !== undefined) this.sessions.getSession(sessionId);
+      if (rootId !== undefined) this.sessions.getSession(rootId);
 
       if (!this.#acceptSseConnection(res)) return;
 

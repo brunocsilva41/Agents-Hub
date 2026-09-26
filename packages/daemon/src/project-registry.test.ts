@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, beforeEach, describe, test } from 'node:test';
@@ -32,7 +32,9 @@ describe('ProjectRegistry', () => {
   let reg: ProjectRegistry;
 
   before(() => {
-    raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-projreg-'));
+    // Canônico: o registro normaliza caminhos (nome 8.3 → longo, item 5.5), e
+    // o TEMP do Windows costuma vir em 8.3 (`BRUNOS~1`).
+    raiz = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'hub-projreg-')));
   });
 
   after(() => {

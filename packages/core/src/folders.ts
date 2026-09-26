@@ -31,6 +31,11 @@ export function normalizarCaminho(bruto: string): string {
   return path.resolve(bruto.trim());
 }
 
+function mesmaGrafia(a: string, b: string): boolean {
+  const win = typeof process !== 'undefined' && process.platform === 'win32';
+  return win ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 /**
  * A pasta candidata pode ser registrada, dadas as que já existem?
  *
@@ -60,7 +65,10 @@ export function validarNovaPasta(
   for (const existente of existentes) {
     const outra = normalizarCaminho(existente.path);
 
-    if (candidata === outra) {
+    // No Windows o FS não diferencia caixa: `C:\Repo` e `c:\repo` são a MESMA
+    // pasta. Comparar a string exata fazia cair no `isInside` abaixo (que já
+    // ignora caixa no win32) e a mensagem dizia "está DENTRO" dela mesma.
+    if (mesmaGrafia(candidata, outra)) {
       return {
         ok: false,
         motivo: `esta pasta já pertence ao projeto ${existente.projectId}`,

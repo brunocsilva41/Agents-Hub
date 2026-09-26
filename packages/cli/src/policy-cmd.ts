@@ -1,5 +1,6 @@
 import path from 'node:path';
 import type { AuditEntrySummary, AuditKindSummary, AuditQuery, HubClient, PolicyDoc } from './client.js';
+import { projetoQueContem } from './project-resolve.js';
 import { bold, cyan, dim, green, red, yellow } from './render.js';
 
 interface Args {
@@ -270,7 +271,8 @@ async function acharProjeto(client: HubClient, flag: string | boolean): Promise<
   if (/^prj_/i.test(alvo)) return alvo;
   const { projects } = await client.projects();
   const caminho = path.resolve(alvo);
-  const achado = projects.find((p) => p.path === caminho);
+  // Subpasta, 8.3 e caixa diferente também acham o projeto (ver project-resolve).
+  const achado = projetoQueContem(projects, caminho);
   if (!achado) throw new Error(`nenhum projeto registrado em ${caminho}`);
   return achado.id;
 }

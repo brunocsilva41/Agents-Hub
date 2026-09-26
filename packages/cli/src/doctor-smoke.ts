@@ -34,9 +34,17 @@ export interface SmokeOptions {
   timeoutMs?: number;
   /** Intervalo entre polls. */
   pollMs?: number;
+  /** Teto de custo POR sessão de smoke (padrão `SMOKE_ORCAMENTO_USD`). */
+  budgetUsd?: number;
 }
 
 export const SMOKE_OBJECTIVE_PADRAO = 'responda apenas com a palavra OK';
+/**
+ * Teto mínimo por agente: o objetivo é trivial, e um agente que passa disto
+ * num "responda OK" é sinal de problema — o Hub para e pede aprovação, e o
+ * smoke cancela a sessão em vez de liberar mais gasto.
+ */
+export const SMOKE_ORCAMENTO_USD = 0.1;
 const TIMEOUT_PADRAO_MS = 90_000;
 const POLL_PADRAO_MS = 1500;
 const TERMINAIS = new Set(['completed', 'failed', 'canceled', 'rejected']);
@@ -72,6 +80,7 @@ export async function smokeTestAgent(
     // falhar em supervised por alguma restrição própria, isso também é sinal
     // útil — não queremos mascarar isso rodando em modo mais permissivo.
     supervision: 'supervised',
+    budget: { usd: options.budgetUsd ?? SMOKE_ORCAMENTO_USD },
   };
 
   let sessionId: string;
@@ -110,11 +119,22 @@ export async function smokeTestAgent(
       break;
     }
 
+    // Parou pedindo decisão humana (orçamento estourado, ação arriscada): o
+    // smoke não aprova nada — encerra para não liberar gasto além do teto.
+    if (task?.state === 'input_required') {
+      outcome.finalState = 'input_required';
+      outcome.error = 'a sessão parou pedindo aprovação (orçamento do smoke ou ação arriscada); encerrada sem aprovar';
+      await client.cancel(sessionId, 'smoke: encerrado sem aprovar').catch(() => undefined);
+      break;
+    }
+
     await new Promise((r) => setTimeout(r, pollMs));
   }
 
   if (outcome.finalState === null) {
     outcome.error = `sem estado terminal em ${Math.round(timeoutMs / 1000)}s`;
+    // Não deixa uma sessão real rodando (e gastando) depois do veredito.
+    await client.cancel(sessionId, 'smoke: tempo esgotado').catch(() => undefined);
   }
 
   if (!outcome.costCaptured) {
@@ -133,21 +153,24 @@ export async function smokeTestAgent(
 }
 
 /**
- * Roda o smoke test de vários agentes com concorrência baixa — mesma
- * justificativa de `Registry.probeAll` (`packages/adapters/src/registry.ts`):
- * no Windows, subir vários CLIs de uma vez faz eles se atropelarem em disco e
- * antivírus.
+ * Roda o smoke test de vários agentes — por padrão UM POR VEZ: no Windows,
+ * subir vários CLIs de uma vez faz eles se atropelarem em disco e antivírus
+ * (mesma razão de `Registry.probeAll`), e em série o gasto de cada agente
+ * aparece antes de o próximo começar.
  */
 export async function smokeTestAll(
   client: HubClient,
   agentIds: string[],
   options: SmokeOptions,
-  concurrency = 2,
+  concurrency = 1,
+  onOutcome?: (outcome: SmokeOutcome) => void,
 ): Promise<SmokeOutcome[]> {
   const results: SmokeOutcome[] = [];
   for (let i = 0; i < agentIds.length; i += concurrency) {
     const batch = agentIds.slice(i, i + concurrency);
-    results.push(...(await Promise.all(batch.map((id) => smokeTestAgent(client, id, options)))));
+    const lote = await Promise.all(batch.map((id) => smokeTestAgent(client, id, options)));
+    for (const outcome of lote) onOutcome?.(outcome);
+    results.push(...lote);
   }
   return results;
 }

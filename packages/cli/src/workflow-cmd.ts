@@ -10,6 +10,7 @@ import {
   type WorkflowStepResult,
 } from '@agents-hub/core';
 import type { HubClient, TaskStatus } from './client.js';
+import { resolverProjeto } from './project-resolve.js';
 import { bold, cyan, dim, green, red, yellow } from './render.js';
 
 interface Args {
@@ -112,7 +113,8 @@ ${bold('Uso:')}
       return;
     }
 
-    const { project } = await client.addProject(projectPath);
+    // Subpasta de projeto registrado usa o projeto (antes: PROJECT_FOLDER_CONFLICT).
+    const project = await resolverProjeto(client, projectPath);
 
     console.log(bold(`\n🚀 Iniciando workflow: ${workflow.name}`));
     console.log(`Projeto: ${cyan(project.name)} (${dim(project.path)})`);

@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { baseUrl, loadConfig, ligarBypassDoGateCodex, modoExigeGate } from '@agents-hub/daemon';
-import { HubApiError, HubClient, type BriefInput, type GraphSummary, type ProbeSummary } from './client.js';
+import { HubApiError, HubClient, type BriefInput } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
 import { runDaemon } from './daemon-run.js';
 import { decideToolCall, lerStdin, type HookInput } from './hook.js';
@@ -21,10 +21,8 @@ import {
   bold,
   cyan,
   dim,
-  formatTokens,
   green,
   red,
-  renderGraph,
   stateBadge,
   yellow,
 } from './render.js';
@@ -43,7 +41,10 @@ import { interruptCommand } from './interrupt-cmd.js';
 import { discoverCommand, importCommand } from './discover-cmd.js';
 import { auditCommand, policyCommand } from './policy-cmd.js';
 import { readOperatorToken } from '@agents-hub/client/operator-token';
-import { smokeTestAll, type SmokeOutcome } from './doctor-smoke.js';
+import { doctorCommand, statusCommand } from './doctor-cmd.js';
+import { resolveProjectId } from './project-resolve.js';
+import { budgetCommand, graphCommand, sendCommand, watchCommand } from './session-follow.js';
+import { lerBudgetUsd, startCommand } from './start-cmd.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
 const NEWLINE = String.fromCharCode(10);
@@ -59,7 +60,7 @@ export interface Args {
  * consome o objetivo como valor de `--detach` e o comando falha dizendo que
  * faltou o objetivo — que estava lá o tempo todo.
  */
-const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh']);
+const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh', 'yes']);
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -114,8 +115,10 @@ ${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar
   hub hook [--dialect codex]         uso interno: o agente chama, não você
 
 ${bold('Agentes')}
-  hub doctor                        checa quais agentes estão instalados
-  hub doctor --smoke                abre sessão real em cada agente instalado (GASTA TOKENS/CRÉDITOS)
+  hub doctor                        instalado, versão, auth e quem está quebrado (sem gastar nada)
+  hub doctor --smoke [--agent <id>] [--yes]
+                                    sessão real em cada agente, um por vez, teto US$ 0,10 cada, num
+                                    projeto descartável (GASTA TOKENS/CRÉDITOS; pede confirmação)
   hub agents                        lista agentes, capabilities e limitações
   hub discover [--agent <id>] [--json] [--refresh]
                                     o que cada CLI já tem: instalado, versão, auth, modelo padrão,
@@ -146,11 +149,12 @@ ${bold('Projetos')}
 
 ${bold('Sessões')}
   hub start --agent <id> "objetivo"          abre uma sessão-raiz e acompanha ao vivo
-      --project <caminho>    projeto (padrão: diretório atual)
+      --project <caminho>    projeto (padrão: diretório atual; subpasta de projeto usa o projeto)
       --budget-usd <n>       teto de custo do fluxo inteiro
       --mode <supervised|semi|autonomous>
       --isolation <worktree|none>
       --detach               não acompanha o stream
+      ${dim('saída: 0 concluída · 1 falhou/cancelada · 2 parada esperando aprovação (vale para watch/send)')}
   hub sessions                                lista sessões
   hub watch <sessionId>                       acompanha uma sessão ao vivo
   hub watch --root <rootId>                   acompanha o fluxo inteiro, todos os agentes
@@ -224,13 +228,13 @@ async function main(): Promise<void> {
     case 'stop':
       return stopDaemon(client);
     case 'status':
-      return withDaemon(() => status(client, config.home));
+      return withDaemon(async () => void (await statusCommand(client, config.home)));
     case 'health':
       return withDaemon(async () => {
         console.log(JSON.stringify(await client.health(), null, 2));
       });
     case 'doctor':
-      return withDaemon(() => doctor(client, args));
+      return withDaemon(async () => void (await doctorCommand(client, args, { home: config.home })));
     case 'agents':
       return withDaemon(() => listAgents(client));
     case 'discover':
@@ -242,13 +246,13 @@ async function main(): Promise<void> {
     case 'project':
       return withDaemon(() => projectCommand(client, args));
     case 'start':
-      return withDaemon(() => start(client, args));
+      return withDaemon(async () => void (await startCommand(client, args)));
     case 'sessions':
       return withDaemon(() => listSessions(client));
     case 'watch':
-      return withDaemon(() => watch(client, args));
+      return withDaemon(async () => void (await watchCommand(client, args)));
     case 'send':
-      return withDaemon(() => send(client, args));
+      return withDaemon(async () => void (await sendCommand(client, args)));
     case 'interrupt':
       return withDaemon(() => interruptCommand(client, args));
     case 'pause':
@@ -295,9 +299,9 @@ async function main(): Promise<void> {
     case 'artifacts':
       return withDaemon(() => showArtifacts(client, args));
     case 'graph':
-      return withDaemon(() => showGraph(client, args));
+      return withDaemon(() => graphCommand(client, args));
     case 'budget':
-      return withDaemon(() => showBudget(client, args));
+      return withDaemon(() => budgetCommand(client, args));
     case 'workflow':
       return withDaemon(() => workflowCommand(client, args));
     case 'help':
@@ -564,103 +568,6 @@ function extractIssues(details: unknown): Array<{ path: string; message: string 
 
 // ---------------------------------------------------------------- comandos
 
-async function doctor(client: HubClient, args: Args): Promise<void> {
-  console.log(dim('checando agentes…\n'));
-  const { probes } = await client.probeAgents();
-  const { agents } = await client.agents();
-  const hints = new Map(agents.map((a) => [a.id, a]));
-
-  const ordered = [...probes].sort((a, b) => Number(b.installed) - Number(a.installed));
-  for (const probe of ordered) {
-    const agent = hints.get(probe.agentId);
-    console.log(
-      `${statusIcon(probe)} ${bold(probe.agentId.padEnd(13))} ${
-        probe.installed ? dim(probe.version ?? 'versão desconhecida') : red('não instalado')
-      }`,
-    );
-    if (probe.installed && probe.binPath) console.log(`   ${dim(probe.binPath)}`);
-    if (!probe.installed && agent?.loginHint) console.log(`   ${dim(agent.loginHint)}`);
-    if (probe.error) console.log(`   ${yellow(probe.error)}`);
-  }
-
-  const installed = probes.filter((p) => p.installed).length;
-  console.log(
-    `\n${installed} de ${probes.length} agentes disponíveis. ${dim(
-      'Autenticação não é verificada aqui: checar custaria uma chamada real ao provedor.',
-    )}`,
-  );
-
-  // Gate pré-execução: instalação antiga (timeout 10 s) deixa a ação que pede
-  // aprovação rodar sem ela. Só leitura das configs dos agentes.
-  for (const alvo of HOOK_TARGETS) {
-    const aviso = avisoDeTimeoutDoHook(lerConfig(alvo.configUsuario));
-    if (aviso) {
-      console.log(
-        `
-${yellow(`⚠ ${alvo.id}: ${aviso}`)}
-   ${dim('corrija com:')} ${bold(`hub hooks install ${alvo.id} --write`)}`,
-      );
-    }
-  }
-
-  if (args.flags['smoke'] === true) {
-    await doctorSmoke(client, args, probes);
-  }
-}
-
-/**
- * `hub doctor --smoke`: abre uma sessão real com cada agente instalado, em
- * vez de só localizar o binário. A flag já é opt-in explícito — isto NUNCA
- * roda de graça dentro do `doctor` normal, e não deve entrar em CI.
- */
-async function doctorSmoke(client: HubClient, args: Args, probes: ProbeSummary[]): Promise<void> {
-  const ids = probes.filter((p) => p.installed).map((p) => p.agentId);
-  if (ids.length === 0) {
-    console.log(`\n${dim('nenhum agente instalado — nada para testar com --smoke.')}`);
-    return;
-  }
-
-  console.log(
-    `\n${bold(yellow('⚠ --smoke abre sessões REAIS'))} com ${ids.length} agente(s): ${ids.join(', ')}.`,
-  );
-  console.log(
-    dim(
-      'Isto gasta tokens/créditos de verdade em cada provedor a cada execução ' +
-        '(o Copilot fatura em créditos, não em dólares — confira seu plano). ' +
-        'Rodando com concorrência 2 para não atropelar antivírus/binários no Windows.',
-    ),
-  );
-  console.log();
-
-  const projectId = await resolveProjectId(client, args.flags['project']);
-  const outcomes = await smokeTestAll(client, ids, { projectId }, 2);
-
-  for (const outcome of outcomes) {
-    console.log(renderSmokeOutcome(outcome));
-  }
-
-  const ok = outcomes.filter((o) => o.finalState === 'completed').length;
-  console.log(`\n${ok} de ${outcomes.length} agentes completaram uma sessão real com sucesso.`);
-}
-
-function renderSmokeOutcome(outcome: SmokeOutcome): string {
-  const icon = outcome.finalState === 'completed' ? green('✓') : red('✗');
-  const flag = (v: boolean) => (v ? green('sim') : red('não'));
-  const linhas = [
-    `${icon} ${bold(outcome.agentId.padEnd(13))} processo:${flag(outcome.processStarted)}  ` +
-      `turn.completed:${flag(outcome.turnCompleted)}  custo:${flag(outcome.costCaptured)}  ` +
-      `nativeSessionId:${flag(outcome.nativeSessionIdCaptured)}`,
-  ];
-  if (outcome.finalState) linhas.push(`   ${dim(`estado final: ${outcome.finalState}`)}`);
-  if (outcome.error) linhas.push(`   ${yellow(outcome.error)}`);
-  return linhas.join(NEWLINE);
-}
-
-function statusIcon(probe: ProbeSummary): string {
-  if (!probe.installed) return red('✗');
-  return probe.error ? yellow('!') : green('✓');
-}
-
 async function listAgents(client: HubClient): Promise<void> {
   const { agents } = await client.agents();
   for (const agent of agents) {
@@ -866,22 +773,6 @@ async function projectPrompt(client: HubClient, args: Args, projectRef: string |
 }
 
 /**
- * Espelha `lerOrcamento` de `workflow-cmd.ts`: sem isto, `--budget-usd abc`
- * só falhava depois de um round-trip HTTP completo, com "Brief inválido"
- * genérico (achado do audit corrigido junto — ver `extractIssues`). Falhar
- * localmente é imediato e não depende do daemon estar de pé.
- */
-function lerBudgetUsd(flag: string | boolean | undefined): number | undefined | Error {
-  if (flag === undefined) return undefined;
-  if (typeof flag === 'boolean') return new Error('--budget-usd precisa de um valor em dólares');
-  const n = Number(flag);
-  if (!Number.isFinite(n) || n <= 0) {
-    return new Error(`--budget-usd inválido: "${flag}"`);
-  }
-  return n;
-}
-
-/**
  * `hub project folders` — o client já tinha `folders`/`removeFolder` e o
  * daemon já tinha as rotas (a Web usa `folders` via `ProjectModal` para
  * vincular pastas extras a um projeto), mas nenhuma CLI as expunha: quem
@@ -926,74 +817,6 @@ async function projectFolders(client: HubClient, rest: string[]): Promise<void> 
   console.log(`${NEWLINE}${dim('desvincule com:')} ${bold('hub project folders remove <folderId>')}`);
 }
 
-async function resolveProjectId(client: HubClient, flag: string | boolean | undefined): Promise<string> {
-  const target = path.resolve(typeof flag === 'string' ? flag : process.cwd());
-  const { projects } = await client.projects();
-  const found = projects.find((p) => p.path === target || p.id === flag);
-  if (found) return found.id;
-  // Registrar na hora evita o passo cerimonial de "adicione o projeto antes".
-  const { project } = await client.addProject(target);
-  return project.id;
-}
-
-async function start(client: HubClient, args: Args): Promise<void> {
-  const objective = args.positional.join(' ').trim();
-  if (objective.length === 0) {
-    console.error(red('faltou o objetivo: hub start --agent claude "refatore o módulo X"'));
-    process.exitCode = 1;
-    return;
-  }
-
-  const agent = args.flags['agent'];
-  if (typeof agent !== 'string') {
-    console.error(red('--agent é obrigatório: você escolhe o principal a cada sessão (ADR 04.1)'));
-    process.exitCode = 1;
-    return;
-  }
-
-  const budgetUsd = lerBudgetUsd(args.flags['budget-usd']);
-  if (budgetUsd instanceof Error) {
-    console.error(red(budgetUsd.message));
-    process.exitCode = 1;
-    return;
-  }
-
-  const projectId = await resolveProjectId(client, args.flags['project']);
-  const brief: BriefInput = {
-    agent,
-    objective,
-    isolation:
-      args.flags['isolation'] === 'none'
-        ? 'none'
-        : args.flags['isolation'] === 'container'
-          ? 'container'
-          : 'worktree',
-  };
-  if (isSupervision(args.flags['mode'])) brief.supervision = args.flags['mode'];
-  if (budgetUsd !== undefined) brief.budget = { usd: budgetUsd };
-
-  const result = await client.startSession({ projectId, brief });
-  console.log(`${green('sessão iniciada')} ${bold(result.session.id)} ${dim(`(${agent})`)}`);
-  console.log(dim(`worktree: ${result.session.workdir}`));
-  // O modo nunca passa do padrão do agente: `--mode autonomous` num agente
-  // `semi` roda em `semi`. Reduzir é o lado seguro, mas não em silêncio.
-  if (brief.supervision !== undefined && result.session.mode !== brief.supervision) {
-    console.log(
-      yellow(
-        `⚠ modo "${brief.supervision}" pedido, mas a sessão roda em "${result.session.mode}" — o padrão do agente ${result.session.agentId} limita o modo`,
-      ),
-    );
-  }
-
-  if (args.flags['detach'] === true) {
-    console.log(dim(`acompanhe com: hub watch ${result.session.id}`));
-    return;
-  }
-
-  console.log();
-  await streamUntilDone(client, { rootId: result.session.rootId }, { taskId: result.task.id });
-}
-
 async function listSessions(client: HubClient): Promise<void> {
   const { sessions } = await client.sessions();
   if (sessions.length === 0) {
@@ -1009,34 +832,6 @@ async function listSessions(client: HubClient): Promise<void> {
     );
     if (session.title) console.log(`${indent}   ${dim(session.title)}`);
   }
-}
-
-async function watch(client: HubClient, args: Args): Promise<void> {
-  const rootFlag = args.flags['root'];
-  if (typeof rootFlag === 'string') {
-    await streamUntilDone(client, { rootId: rootFlag });
-    return;
-  }
-  const sessionId = required(args.positional[0], 'sessionId');
-  await streamUntilDone(client, { sessionId });
-}
-
-async function send(client: HubClient, args: Args): Promise<void> {
-  const sessionId = required(args.positional[0], 'sessionId');
-  const text = args.positional.slice(1).join(' ');
-  if (text.length === 0) {
-    console.error(red('uso: hub send <sessionId> "sua mensagem"'));
-    process.exitCode = 1;
-    return;
-  }
-  const { mode } = await client.send(sessionId, text);
-  const explanation: Record<string, string> = {
-    live: 'injetada na run em andamento',
-    resume: 'sessão nativa retomada',
-    replay: 'turno novo (o agente não guarda sessão nativa)',
-  };
-  console.log(dim(`${explanation[mode] ?? mode}\n`));
-  await streamUntilDone(client, { sessionId });
 }
 
 async function delegate(client: HubClient, args: Args): Promise<void> {
@@ -1106,39 +901,6 @@ async function showArtifacts(client: HubClient, args: Args): Promise<void> {
   }
 }
 
-async function showGraph(client: HubClient, args: Args): Promise<void> {
-  const rootId = required(args.positional[0], 'rootId');
-  const { graph } = await client.graph(rootId);
-  if (graph.length === 0) {
-    console.log(dim('nenhuma sessão neste fluxo.'));
-    return;
-  }
-  for (const line of renderGraph(graph)) console.log(line);
-  console.log(`\n${dim('total do fluxo:')} US$ ${totalUsd(graph).toFixed(4)}`);
-}
-
-function totalUsd(nodes: GraphSummary[]): number {
-  return nodes.reduce((sum, node) => sum + node.usd + totalUsd(node.children), 0);
-}
-
-async function showBudget(client: HubClient, args: Args): Promise<void> {
-  const rootId = required(args.positional[0], 'rootId');
-  const { budget } = await client.budget(rootId);
-  const pct = Math.round(budget.pressure * 100);
-  const bar = '█'.repeat(Math.min(30, Math.round(budget.pressure * 30))).padEnd(30, '░');
-  const color = pct >= 90 ? red : pct >= 60 ? yellow : green;
-
-  console.log(`${color(bar)} ${pct}%`);
-  console.log(
-    `${dim('custo:  ')} US$ ${budget.consumed.usd.toFixed(4)} / ${budget.limits.usd.toFixed(2)}`,
-  );
-  console.log(
-    `${dim('tokens: ')} ${formatTokens(budget.consumed.tokens)} / ${formatTokens(budget.limits.tokens)}`,
-  );
-  console.log(`${dim('tempo:  ')} ${budget.consumed.seconds}s / ${budget.limits.seconds}s`);
-  if (budget.exhausted) console.log(red('\norçamento esgotado — tasks entram em espera por você'));
-}
-
 /** Encerra o daemon sem caçar PID — ele sobe sozinho, então precisa morrer sozinho. */
 async function stopDaemon(client: HubClient): Promise<void> {
   try {
@@ -1152,46 +914,6 @@ async function stopDaemon(client: HubClient): Promise<void> {
     }
     console.error(red(message));
     process.exitCode = 1;
-  }
-}
-
-/** Uma tela com tudo que importa saber antes de começar a trabalhar. */
-async function status(client: HubClient, home: string): Promise<void> {
-  const [saude, { agents }, { sessions }, { approvals }] = await Promise.all([
-    client.health(),
-    client.agents(),
-    client.sessions(),
-    client.approvals(),
-  ]);
-
-  const disponiveis = agents.filter((a) => a.probe?.installed === true);
-  const vivas = sessions.filter((s) => s.state === 'running' || s.state === 'waiting_approval');
-
-  // `home` vem do config local da CLI: o `/health` deixou de expor o caminho
-  // do usuário.
-  console.log(`${green('●')} daemon no ar ${dim(`v${saude.version} · ${home}`)}`);
-  console.log(
-    `${dim('agentes:  ')} ${disponiveis.length}/${agents.length} disponíveis ${dim(
-      disponiveis.map((a) => a.id).join(', '),
-    )}`,
-  );
-  console.log(`${dim('sessões:  ')} ${vivas.length} ativa(s) de ${sessions.length} no histórico`);
-
-  for (const sessao of vivas.slice(0, 8)) {
-    console.log(
-      `   ${stateBadge(sessao.state)} ${bold(sessao.id)} ${cyan(sessao.agentId)} ${dim(
-        sessao.title ?? '',
-      )}`,
-    );
-  }
-
-  if (approvals.length > 0) {
-    console.log(
-      `
-${yellow(`⏸ ${approvals.length} aprovação(ões) esperando você`)} ${dim(
-        '— hub approvals',
-      )}`,
-    );
   }
 }
 
@@ -1349,10 +1071,6 @@ function isRegistered(configPath: string): boolean {
   } catch {
     return false;
   }
-}
-
-function isSupervision(value: unknown): value is 'supervised' | 'semi' | 'autonomous' {
-  return value === 'supervised' || value === 'semi' || value === 'autonomous';
 }
 
 function required(value: string | undefined, name: string): string {

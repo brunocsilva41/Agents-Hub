@@ -180,6 +180,19 @@ export class WorktreeManager {
     }
   }
 
+  /** `HEAD` aponta para algum commit? Falso num `git init` recém-feito. */
+  async #temCommit(dir: string): Promise<boolean> {
+    try {
+      await execFileAsync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+        cwd: dir,
+        maxBuffer: GIT_MAX_BUFFER,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async create(params: {
     projectPath: string;
     projectName: string;
@@ -204,6 +217,19 @@ export class WorktreeManager {
         'ILLEGAL_STATE',
         `O projeto em ${params.projectPath} não é um repositório git; use isolation="none" ou rode "git init"`,
         { projectPath: params.projectPath },
+      );
+    }
+
+    // Repositório recém-criado (`git init` sem commit): o worktree nasce de um
+    // commit e não há nenhum. Antes, o erro cru do git ("fatal: invalid
+    // reference: HEAD") chegava ao usuário sem dizer o que fazer.
+    if (params.baseRef === undefined && !(await this.#temCommit(params.projectPath))) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `O repositório em ${params.projectPath} ainda não tem nenhum commit, e o worktree isolado ` +
+          'nasce de um commit. Faça o commit inicial (git add -A && git commit -m "inicial") ' +
+          'ou rode sem isolamento (--isolation none: o agente trabalha direto na pasta do projeto).',
+        { projectPath: params.projectPath, motivo: 'repositorio-sem-commit' },
       );
     }
 
