@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -20,18 +19,6 @@ import { createHub, type Hub } from './hub.js';
 const TOKEN_ARG = 'sk-ant-SEGREDOARGS1234567890abcdef';
 const BEARER = 'bearerSEGREDO-abcdefghijklmnop';
 const SIG = 'SEGREDOLONGO123';
-
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const a = srv.address();
-      const porta = typeof a === 'object' && a ? a.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 interface Resposta {
   status: number;
@@ -150,12 +137,11 @@ defaults:
       warnings: [],
     });
 
-    porta = await portaLivre();
     hub = createHub(
-      { home: path.join(raiz, 'hubhome'), manifestsDir: manifestos, port: porta, webRoot },
+      { home: path.join(raiz, 'hubhome'), manifestsDir: manifestos, port: 0, webRoot },
       { discoverAgent: fake, homeDir: path.join(raiz, 'home') },
     );
-    await hub.start();
+    porta = (await hub.start()).port;
   });
 
   after(async () => {

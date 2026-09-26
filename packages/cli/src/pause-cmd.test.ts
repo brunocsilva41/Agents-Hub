@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -15,22 +14,6 @@ interface Args {
   flags: Record<string, string | boolean>;
 }
 
-/**
- * `port: 0` não basta: a guarda de borda compara o `Host` da requisição contra
- * `config.port`, que só é conhecido depois do `listen`. Reservamos uma porta
- * livre antes de montar o Hub, mesma técnica de `sse-http.test.ts`.
- */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 /**
  * `hub pause` era a rota órfã do audit: existia no daemon (`sessions.pause`,
@@ -53,7 +36,7 @@ describe('hub pause (CLI)', () => {
       home: raiz,
       manifestsDir: manifestos,
       webRoot: path.join(raiz, 'sem-web'),
-      port: await portaLivre(),
+      port: 0,
     });
     const { host, port } = await hub.start();
     client = new HubClient(`http://${host}:${port}`);

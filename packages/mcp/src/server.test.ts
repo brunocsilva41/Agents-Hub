@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -13,22 +12,6 @@ import { HubClient } from '@agents-hub/client';
 import { CallerIdentity } from './caller.js';
 import { buildMcpServer } from './server.js';
 
-/**
- * `port: 0` não basta: a guarda de borda do daemon compara o `Host` da
- * requisição contra `config.port`, só conhecido depois do `listen`. Mesma
- * técnica de `sse-http.test.ts` no pacote do daemon.
- */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 interface ToolTextResult {
   content: Array<{ type: string; text: string }>;
@@ -106,7 +89,7 @@ defaults:
     hub = createHub({
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
-      port: await portaLivre(),
+      port: 0,
     });
     const { host, port } = await hub.start();
     hubClient = new HubClient(`http://${host}:${port}`);

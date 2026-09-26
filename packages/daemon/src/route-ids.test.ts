@@ -1,24 +1,10 @@
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { createHub, type Hub } from './hub.js';
-
-/** Ver `sse-http.test.ts`: a guarda compara o Host contra a porta configurada. */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 /**
  * `fetch` normaliza `..` e corta `#` — exatamente o que fazia o traversal
@@ -68,9 +54,8 @@ describe('daemon: id malformado em parâmetro de rota é 400, não 404', () => {
     raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-route-ids-'));
     const manifestos = path.join(raiz, 'manifests');
     mkdirSync(manifestos, { recursive: true });
-    porta = await portaLivre();
-    hub = createHub({ home: path.join(raiz, 'home'), manifestsDir: manifestos, port: porta });
-    await hub.start();
+    hub = createHub({ home: path.join(raiz, 'home'), manifestsDir: manifestos, port: 0 });
+    porta = (await hub.start()).port;
   });
 
   after(async () => {

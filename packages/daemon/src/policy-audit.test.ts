@@ -3,24 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { createServer } from 'node:net';
 import { DEFAULT_POLICY, type AuditEntry, type AuditFilter } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 import { instanteDoFiltro } from './operator-routes.js';
 import { PROJECT_CONFIG_RELATIVE } from './project-config.js';
 import type { PolicyView, ProjectPolicyView } from './policy-service.js';
 
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const a = srv.address();
-      const porta = typeof a === 'object' && a ? a.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 class HttpError extends Error {
   constructor(readonly status: number, body: string) {
@@ -135,8 +123,7 @@ defaults:
       'utf8',
     );
 
-    const porta = await portaLivre();
-    hub = createHub({ home: path.join(raiz, 'home'), manifestsDir: manifestos, port: porta });
+    hub = createHub({ home: path.join(raiz, 'home'), manifestsDir: manifestos, port: 0 });
     const { host, port } = await hub.start();
     const base = `http://${host}:${port}`;
     operador = new Api(base, () => hub.operatorToken);

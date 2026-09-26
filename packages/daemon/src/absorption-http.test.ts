@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -9,17 +8,6 @@ import { createHub, type Hub } from './hub.js';
 
 const SEGREDO = 'SEGREDO-HTTP-plantado-9876543210';
 
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const a = srv.address();
-      const porta = typeof a === 'object' && a ? a.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 function manifesto(id: string, script: string): string {
   const s = script.replace(/\\/g, '\\\\');
@@ -105,7 +93,7 @@ describe('GET /discovery e POST /projects/:id/import', () => {
     };
 
     hub = createHub(
-      { home: path.join(raiz, 'hubhome'), manifestsDir: manifestos, port: await portaLivre() },
+      { home: path.join(raiz, 'hubhome'), manifestsDir: manifestos, port: 0 },
       { discoverAgent: fake, homeDir: home },
     );
     const { host, port } = await hub.start();
