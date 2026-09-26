@@ -1,6 +1,9 @@
 import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { parseJsonTolerant } from '@agents-hub/adapters';
+// Subcaminho, não o índice: `config.ts` importa este arquivo, e o hook do gate
+// (que lê a config a cada Bash/Edit/Write do agente) pagava ~140 ms para
+// carregar registry, mappers e manifestos que não usa.
+import { parseJsonTolerant } from '@agents-hub/adapters/discovery-util';
 
 /**
  * Escrita segura em config que NÃO é nossa (settings.json do Claude,

@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Contrato de adapter, registry dirigido por manifesto e mappers de evento por agente.",
+  "license": "UNLICENSED",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./discovery-util": "./dist/discovery/util.js"
   },
   "types": "./dist/index.d.ts",
   "dependencies": {

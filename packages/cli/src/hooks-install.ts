@@ -66,9 +66,27 @@ export const HOOK_TARGETS: AlvoDeHook[] = [
   },
 ];
 
-/** Caminho absoluto do `main.js` desta CLI — não depende de `hub` estar no PATH. */
+/**
+ * Caminho absoluto da entrada (`bin.js`) desta CLI — não depende de `hub` estar
+ * no PATH.
+ *
+ * Instalado pelo pacote (`npm i -g agents-hub-x.y.z.tgz`), aponta para dentro
+ * da instalação global — caminho que não muda entre atualizações, e não para
+ * um clone que pode ser movido ou apagado. Rodando do clone, aponta para o
+ * clone (é o que existe). `bin.js` e não `main.js`: é o caminho leve do hook,
+ * que não carrega o daemon nem `node:sqlite`.
+ */
 export function hookEntrypoint(): string {
-  return fileURLToPath(new URL('./main.js', import.meta.url));
+  return fileURLToPath(new URL('./bin.js', import.meta.url));
+}
+
+/**
+ * O comando é nosso? Instalações anteriores gravaram `main.js" hook`; as novas,
+ * `bin.js" hook`. Reconhecer as duas é o que faz reinstalar SUBSTITUIR a
+ * entrada antiga em vez de deixar duas (e o hook rodar duas vezes).
+ */
+export function comandoDoHub(command: string | undefined): boolean {
+  return command !== undefined && /(?:main|bin)\.js" hook\b/.test(command);
 }
 
 export function hookCommand(): string {
@@ -98,7 +116,7 @@ export function mergeHooks(
     : [];
 
   const semONosso = preToolUse.filter(
-    (entrada) => !entrada.hooks?.some((h) => h.command?.includes('main.js" hook')),
+    (entrada) => !entrada.hooks?.some((h) => comandoDoHub(h.command)),
   );
 
   // Timeout MAIOR que a espera do daemon por aprovação humana. Era 10 s contra
@@ -121,7 +139,7 @@ export function hookInstalado(config: Record<string, unknown>): boolean {
   const preToolUse = Array.isArray(hooks['PreToolUse'])
     ? (hooks['PreToolUse'] as EntradaDeHook[])
     : [];
-  return preToolUse.some((e) => e.hooks?.some((h) => h.command?.includes('main.js" hook')));
+  return preToolUse.some((e) => e.hooks?.some((h) => comandoDoHub(h.command)));
 }
 
 /**
@@ -138,7 +156,7 @@ export function avisoDeTimeoutDoHook(config: Record<string, unknown>): string | 
     ? (hooks['PreToolUse'] as EntradaDeHook[])
     : [];
   const nossos = preToolUse.flatMap((e) =>
-    (e.hooks ?? []).filter((h) => h.command?.includes('main.js" hook')),
+    (e.hooks ?? []).filter((h) => comandoDoHub(h.command)),
   );
   if (nossos.length === 0) return null;
 

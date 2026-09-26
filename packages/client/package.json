@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Cliente da API do daemon, compartilhado por CLI, MCP server e Web UI.",
+  "license": "UNLICENSED",
   "exports": {
     ".": "./dist/index.js",
     "./operator-token": "./dist/operator-token.js"

@@ -1,5 +1,7 @@
 import { HubClient } from '@agents-hub/client';
-import { actionsOfToolCall, TETO_HTTP_DO_HOOK_MS } from '@agents-hub/daemon';
+// Subcaminho, não o índice do daemon: o hook roda a cada Bash/Edit/Write do
+// agente, e o índice arrasta store/`node:sqlite`, adapters e o servidor HTTP.
+import { actionsOfToolCall, TETO_HTTP_DO_HOOK_MS } from '@agents-hub/daemon/pretool-gate';
 
 /**
  * Ponte entre o hook `PreToolUse` do agente e a política do Hub.

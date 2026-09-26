@@ -27,9 +27,14 @@ cursor [running]  US$ 0.0000 · 0 tok      ← agente externo, adotado como raiz
 
 ## Começando
 
+Requer Node ≥ 22.5 e git. Instalação a partir do clone, como pacote global (não depende do clone depois de instalado):
+
 ```bash
-npm install && npm run build && npm link --workspace @agents-hub/cli
+npm ci && npm run build && npm run pack:dist
+npm i -g ./dist-pack/agents-hub-0.1.0.tgz
 ```
+
+Para desenvolver no próprio Hub, `npm link --workspace @agents-hub/cli` no lugar das duas últimas linhas (aí hooks e MCP gravados nos agentes apontam para o clone). Detalhes, autostart no login (`hub autostart enable`) e o teste de instalação: [docs/13-instalacao.md](docs/13-instalacao.md).
 
 Pronto — `hub` está no PATH. **Não existe passo "suba o daemon"**: ele nasce sozinho quando algum comando precisa e sobrevive ao terminal que você fechar.
 
@@ -252,3 +257,7 @@ python scripts/mcp-smoke.py --delegate codex   # delega de verdade
 ```
 
 Como contribuir, e o que precisa ser verdade para um item do roadmap receber `[x]`: [CONTRIBUTING.md](CONTRIBUTING.md). Modelo de ameaça e o que o Hub explicitamente **não** garante: [SECURITY.md](SECURITY.md).
+
+## Licença
+
+**TODO: a licença ainda não foi escolhida** (decisão do dono do projeto). Até lá, todos os `package.json` declaram `"license": "UNLICENSED"` e nenhuma licença de uso é concedida a terceiros.

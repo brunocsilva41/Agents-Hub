@@ -3,7 +3,8 @@ import { closeSync, mkdirSync, openSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HubClient } from '@agents-hub/client';
-import { loadConfig } from '@agents-hub/daemon';
+import { loadConfig, readHubEnv } from '@agents-hub/daemon';
+import { flagsDoNodeParaDaemon } from './node-runtime.js';
 
 /**
  * Onde o daemon autostartado escreve.
@@ -32,7 +33,9 @@ export async function ensureDaemon(
 ): Promise<'ja-estava' | 'iniciado'> {
   if (await responde(client)) return 'ja-estava';
 
-  if (process.env['AGENTS_HUB_NO_AUTOSTART'] === '1') {
+  // Validada como as outras `AGENTS_HUB_*`: `AGENTS_HUB_NO_AUTOSTART=sim`
+  // lança com o nome da variável, em vez de ser lida como "não" em silêncio.
+  if (readHubEnv().AGENTS_HUB_NO_AUTOSTART === '1') {
     throw new Error(
       'daemon não está rodando e AGENTS_HUB_NO_AUTOSTART=1 impede subir sozinho. Rode: hub daemon',
     );
@@ -42,9 +45,10 @@ export async function ensureDaemon(
     process.stderr.write('subindo o daemon…\n');
   }
 
-  // `main.js` é este mesmo executável: reusar o próprio caminho evita depender
-  // de instalação global ou de o `hub` estar no PATH.
-  const entrada = fileURLToPath(new URL('./main.js', import.meta.url));
+  // `bin.js` é a entrada deste mesmo executável: reusar o próprio caminho evita
+  // depender de instalação global ou de o `hub` estar no PATH. `bin.js` e não
+  // `main.js`: é ele que silencia o `ExperimentalWarning` do SQLite no log.
+  const entrada = fileURLToPath(new URL('./bin.js', import.meta.url));
 
   // A saída do daemon vai para arquivo, não para o vazio.
   //
@@ -64,7 +68,11 @@ export async function ensureDaemon(
   const arquivoDeLog = path.join(logDir, `daemon-${new Date().toISOString().slice(0, 10)}.log`);
   const log = openSync(arquivoDeLog, 'a');
 
-  const filho = spawn(process.execPath, [entrada, 'daemon'], {
+  // `--experimental-sqlite` quando o Node em uso exige (22.5–22.12): sem ela o
+  // daemon autostartado morria com ERR_UNKNOWN_BUILTIN_MODULE e a CLI esperava
+  // 30 s por nada. O `bin.js` também se reexecutaria com a flag, mas passar
+  // aqui evita um processo intermediário vivo pelo tempo de vida do daemon.
+  const filho = spawn(process.execPath, argsDoAutostart(entrada, process.versions.node), {
     detached: true,
     stdio: ['ignore', log, log],
     windowsHide: true,
@@ -91,6 +99,11 @@ export async function ensureDaemon(
     `o daemon não respondeu a tempo. O que ele escreveu está em ${arquivoDeLog} — ` +
       'ou rode `hub daemon` num terminal para ver ao vivo.',
   );
+}
+
+/** Argumentos do `node` que sobe o daemon desacoplado. Exportada para teste. */
+export function argsDoAutostart(entrada: string, versaoDoNode: string): string[] {
+  return [...flagsDoNodeParaDaemon(versaoDoNode), entrada, 'daemon'];
 }
 
 async function responde(client: HubClient): Promise<boolean> {
