@@ -53,6 +53,15 @@ portão e tem prioridade sobre o que você estava fazendo.
 > pacote porque esse é a build do Vite, apagada a cada `vite build`. Regra da
 > casa: decisão de estado ou de regra num componente vai para `logic/` com
 > teste; o componente só despacha e desenha.
+>
+> **Testes do painel (`packages/web`):** a lógica que não depende de navegador
+> — mescla/paginação da timeline, agendador de recarga, estado dos botões,
+> árvore do grafo, avisos — mora em `packages/web/src/lib/` e tem testes
+> `*.test.ts` com `node:test`. O `tsc -b` da raiz compila essa pasta por
+> `packages/web/tsconfig.test.json` para `packages/web/dist-test/` (não `dist/`,
+> que é a build do Vite), e `scripts/run-tests.mjs` coleta de lá também. Código
+> em `src/lib/` não pode importar React nem tocar DOM; imports relativos entre
+> esses módulos levam `.js`, como no resto do monorepo.
 
 ---
 

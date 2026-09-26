@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { HubApiError } from '@agents-hub/client';
+import { capToasts, toastTtlMs, type ToastKind } from './lib/toastPolicy';
 
 export interface Toast {
   id: number;
-  kind: 'error' | 'ok';
+  /** `warn`: a ação respondeu, mas não fez o que o botão promete. */
+  kind: ToastKind;
   title: string;
   detail: string | null;
 }
@@ -27,11 +29,13 @@ function emit(): void {
 
 export function pushToast(toast: Omit<Toast, 'id'>): number {
   const id = nextId++;
-  toasts = [...toasts, { ...toast, id }];
+  // Teto de avisos na tela: sem ele, falhas repetidas empilhavam toasts fixos
+  // por cima do painel direito e do botão Enviar.
+  toasts = capToasts([...toasts, { ...toast, id }]);
   emit();
-  // Sucesso é confirmação passageira; erro fica até alguém fechar, porque é o
-  // único registro de que a ação não aconteceu.
-  if (toast.kind === 'ok') window.setTimeout(() => dismissToast(id), 4000);
+  // Todo aviso some sozinho. Erro dura mais (é o único registro de que a ação
+  // não aconteceu), mas não para sempre — antes ficava até alguém clicar.
+  window.setTimeout(() => dismissToast(id), toastTtlMs(toast.kind));
   return id;
 }
 

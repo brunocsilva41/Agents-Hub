@@ -13,5 +13,7 @@
     "allowImportingTsExtensions": false,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+  // Os testes da lógica pura rodam em Node (tsconfig.test.json), não no Vite.
+  "exclude": ["src/**/*.test.ts", "src/lib/fakeClock.ts"]
 }

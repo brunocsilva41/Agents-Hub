@@ -24,3 +24,6 @@ session-export-*.zip
 # `AAAA-MM-DD-HHMMSS-*.txt` na raiz) e notas soltas de sessão: mesmo motivo.
 /*.txt
 .claude/worktrees/
+
+# lógica pura do painel compilada para node:test (packages/web/tsconfig.test.json)
+packages/web/dist-test/

@@ -582,6 +582,12 @@ export class HubServer {
           param(params['id'], SessionIdSchema, 'id'),
           inteiroOpcional(url.searchParams.get('since'), Number.MAX_SAFE_INTEGER),
           inteiroOpcional(url.searchParams.get('limit'), 5000) ?? 500,
+          {
+            // `tail=1`: os N mais recentes. `before=S`: os N anteriores a S. O
+            // painel abre pelo fim e pagina para trás ao rolar para cima.
+            beforeSeq: inteiroOpcional(url.searchParams.get('before'), Number.MAX_SAFE_INTEGER),
+            newest: url.searchParams.get('tail') === '1',
+          },
         ),
       });
     });

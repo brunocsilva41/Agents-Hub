@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import type { AgentSummary, BriefInput, ProjectSummary } from '@agents-hub/client';
-import { useAction } from '../actions';
+import { pushToast, useAction } from '../actions';
 import { agentColor, hub } from '../hub';
+import { delegationFeedback } from '../lib/sessionControls';
 
 interface Props {
   agents: AgentSummary[];
   delegateFrom: { sessionId: string; agentId: string } | null;
   defaultAgentId?: string;
+  /** Projeto filtrado na barra lateral — a sessão nova nasce nele, não no primeiro da lista. */
+  defaultProjectId?: string;
   onClose: () => void;
   onCreated: (sessionId: string) => void;
   onNewProject: () => void;
@@ -50,13 +53,14 @@ export function SessionModal({
   agents,
   delegateFrom,
   defaultAgentId,
+  defaultProjectId,
   onClose,
   onCreated,
   onNewProject,
 }: Props): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsFailed, setProjectsFailed] = useState(false);
-  const [projectId, setProjectId] = useState('');
+  const [projectId, setProjectId] = useState(defaultProjectId ?? '');
   const [agent, setAgent] = useState(
     // Padrão: o primeiro agente INSTALADO. Abrir o formulário já apontando para
     // um agente ausente é oferecer um caminho que não leva a lugar nenhum.
@@ -76,7 +80,10 @@ export function SessionModal({
       .projects()
       .then(({ projects: list }) => {
         setProjects(list);
-        setProjectId((current) => current || list[0]?.id || '');
+        // O pré-selecionado (projeto filtrado) só vale se ainda existir.
+        setProjectId((current) =>
+          current && list.some((p) => p.id === current) ? current : list[0]?.id || '',
+        );
       })
       .catch(() => {
         // Erro engolido em silêncio mostrava "Nenhum projeto registrado" —
@@ -128,13 +135,16 @@ export function SessionModal({
       async () => {
         if (delegateFrom) {
           const result = await hub.delegate(delegateFrom.sessionId, brief);
+          // Retida pela política não é "iniciada": o aviso diz o que houve.
+          const { kind, title, detail } = delegationFeedback(result);
+          pushToast({ kind, title, detail });
           onCreated(result.sessionId);
         } else {
           const result = await hub.startSession({ projectId, brief });
           onCreated(result.session.id);
         }
       },
-      delegateFrom ? 'Delegação iniciada.' : 'Sessão iniciada com sucesso.',
+      delegateFrom ? undefined : 'Sessão iniciada com sucesso.',
     );
   };
 

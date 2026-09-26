@@ -68,6 +68,10 @@ export interface EventRepository {
     sessionId?: string;
     taskId?: string;
     sinceSeq?: number;
+    /** Só `seq` menor que este (página para trás); implica `newest`. */
+    beforeSeq?: number;
+    /** Os `limit` mais recentes em vez dos primeiros; a ordem devolvida segue crescente. */
+    newest?: boolean;
     types?: EventType[];
     limit?: number;
   }): EventEnvelope[];

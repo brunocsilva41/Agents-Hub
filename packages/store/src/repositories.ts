@@ -414,6 +414,17 @@ class SqliteEventRepository implements EventRepository {
     sessionId?: string;
     taskId?: string;
     sinceSeq?: number;
+    /** Só eventos com `seq` MENOR que este — página "para trás" da timeline. */
+    beforeSeq?: number;
+    /**
+     * Pega os `limit` MAIS RECENTES (ainda devolvidos em ordem crescente).
+     *
+     * Sem isto a única leitura possível era "os primeiros N": numa sessão com
+     * mais de 500 eventos o painel mostrava o começo e nunca o fim. Implícito
+     * quando `beforeSeq` vem — pedir "antes de X" quer os vizinhos de X, não o
+     * começo da sessão.
+     */
+    newest?: boolean;
     types?: EventType[];
     limit?: number;
   }): EventEnvelope[] {
@@ -431,15 +442,23 @@ class SqliteEventRepository implements EventRepository {
       clauses.push('seq > ?');
       params.push(filter.sinceSeq);
     }
+    if (typeof filter.beforeSeq === 'number') {
+      clauses.push('seq < ?');
+      params.push(filter.beforeSeq);
+    }
     if (filter.types && filter.types.length > 0) {
       clauses.push(`type IN (${filter.types.map(() => '?').join(', ')})`);
       params.push(...filter.types);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const limit = Math.min(filter.limit ?? 500, 5000);
+    const newest = filter.newest === true || typeof filter.beforeSeq === 'number';
+    const order = newest ? 'session_id DESC, seq DESC' : 'session_id, seq';
     const rows = this.db
-      .prepare(`SELECT * FROM events ${where} ORDER BY session_id, seq LIMIT ?`)
+      .prepare(`SELECT * FROM events ${where} ORDER BY ${order} LIMIT ?`)
       .all(...params, limit) as Row[];
+    // Quem lê espera ordem crescente sempre; só a SELEÇÃO muda com `newest`.
+    if (newest) rows.reverse();
     return rows.map(mapEvent);
   }
 

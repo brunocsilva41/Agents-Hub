@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agents-hub/client';
+import { describeError, pushToast } from '../actions';
 import { hub, STATE_LABEL } from '../hub';
+import { sendFeedback } from '../lib/sessionControls';
 
 interface Props {
   session: SessionSummary;
@@ -49,10 +51,18 @@ export function Composer({ session, encerrada }: Props) {
     setSending(true);
     setError(null);
     try {
-      await hub.send(session.id, message.trim());
+      const { mode } = await hub.send(session.id, message.trim());
       setMessage('');
+      // A fala aparece na timeline pelo evento `user.message` do daemon; aqui
+      // só se avisa quando a entrega não foi a óbvia (turno novo com replay).
+      const feedback = sendFeedback(mode);
+      if (feedback) pushToast(feedback);
     } catch (err) {
-      setError((err as Error).message);
+      // Mesmo padrão das outras ações: erro local E aviso global, que continua
+      // visível se o compositor sair da tela.
+      const { title, detail } = describeError(err);
+      setError(detail ? `${title} (${detail})` : title);
+      pushToast({ kind: 'error', title, detail });
     } finally {
       setSending(false);
     }
@@ -83,7 +93,9 @@ export function Composer({ session, encerrada }: Props) {
             placeholder={
               encerrada
                 ? `Sessão ${STATE_LABEL[session.state] ?? session.state} — abra uma nova para continuar`
-                : `Falar com ${session.agentId}…  (Pressione Enter para enviar, Shift+Enter para nova linha)`
+                : session.state === 'paused'
+                  ? `Sessão pausada — enviar uma mensagem retoma ${session.agentId}`
+                  : `Falar com ${session.agentId}…  (Pressione Enter para enviar, Shift+Enter para nova linha)`
             }
             disabled={sending || encerrada}
           />

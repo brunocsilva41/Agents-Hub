@@ -1202,6 +1202,7 @@ export class SessionManager {
     const live = this.#runs.get(sessionId);
 
     if (live && live.handle.supportsLiveSend) {
+      this.#emitUserMessage(session, live.taskId, text);
       await adapter.send(live.handle, text);
       return { mode: 'live' };
     }
@@ -1242,8 +1243,26 @@ export class SessionManager {
           message: text,
         });
 
+    // Antes do `#launch`: a fala do usuário precede o que o agente responde, e
+    // o evento (estrutural para o painel) faz a UI reler o estado — que o
+    // `#launch` troca de `paused`/`idle` para `running` sem evento próprio.
+    this.#emitUserMessage(session, task.id, text);
     await this.#launch(session, task, prompt, canResume ? session.nativeSessionId : null);
     return { mode: canResume ? 'resume' : 'replay' };
+  }
+
+  /**
+   * Registra na timeline o que foi pedido. Sem isto a conversa tinha um lado
+   * só: relendo o histórico, não havia como saber o que o agente respondia.
+   */
+  #emitUserMessage(session: Session, taskId: string | null, text: string): void {
+    this.#emit({
+      sessionId: session.id,
+      taskId,
+      agentId: session.agentId,
+      type: 'user.message',
+      payload: { text },
+    });
   }
 
   /**
@@ -1534,8 +1553,13 @@ export class SessionManager {
     return this.store.sessions.list(filter);
   }
 
-  listEvents(sessionId: string, sinceSeq?: number, limit?: number): EventEnvelope[] {
-    return this.store.events.list({ sessionId, sinceSeq, limit });
+  listEvents(
+    sessionId: string,
+    sinceSeq?: number,
+    limit?: number,
+    page: { beforeSeq?: number; newest?: boolean } = {},
+  ): EventEnvelope[] {
+    return this.store.events.list({ sessionId, sinceSeq, limit, ...page });
   }
 
   graph(rootId: string): GraphNode[] {

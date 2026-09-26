@@ -9,22 +9,10 @@ import type {
   SessionSummary,
 } from '@agents-hub/client';
 import { hub, isLiveState, mostUrgentState } from './hub';
-
-/** Eventos que mudam a ESTRUTURA do fluxo e obrigam a recarregar o grafo. */
-const STRUCTURAL = new Set([
-  'session.started',
-  'session.ended',
-  'delegation.requested',
-  'delegation.completed',
-  'approval.requested',
-  'approval.resolved',
-  'turn.completed',
-  'budget.exceeded',
-  'budget.warning',
-  'error',
-]);
-
-const MAX_EVENTS_PER_SESSION = 3000;
+import { EventHistory } from './lib/eventHistory';
+import type { HistoryState } from './lib/eventMerge';
+import { isStructural, patchSessionsFromEvent } from './lib/hubEvents';
+import { createRefetchScheduler, type RefetchScheduler } from './lib/refetchScheduler';
 
 /**
  * Um fluxo: a raiz e tudo que nasceu dela, resumido sem nenhuma chamada extra.
@@ -54,30 +42,43 @@ export interface HubState {
   sessions: SessionSummary[];
   flows: FlowSummary[];
   approvals: ApprovalSummary[];
+  /** Timeline carregada da sessão (histórico pelo fim + o que chegou ao vivo). */
   eventsOf: (sessionId: string) => EventEnvelope[];
   /** `true` quando a última tentativa de buscar o histórico desta sessão falhou. */
   eventsFailedFor: (sessionId: string) => boolean;
+  /** Situação do histórico: carregando, falhou, há mais antigos, próxima tentativa. */
+  historyOf: (sessionId: string) => HistoryState;
+  /** Pede ao daemon a página anterior ao evento mais antigo carregado. */
+  loadOlder: (sessionId: string) => void;
+  /** "Tentar de novo" depois que as tentativas automáticas acabaram. */
+  retryEvents: (sessionId: string) => void;
   /**
-   * Sobe a cada rajada de eventos estruturais. Quem depende de grafo ou
-   * orçamento observa este número em vez de refazer tudo a cada evento.
+   * Sobe em recargas GERAIS (reconexão, evento de sessão ainda desconhecida).
+   * Para grafo/orçamento de um fluxo use `revisionOf`, que também sobe quando
+   * chega evento estrutural DAQUELE fluxo — e só dele.
    */
   revision: number;
+  revisionOf: (rootId: string | null) => number;
   refresh: () => Promise<void>;
   error: string | null;
 }
+
+/** Marca de "não sei de que fluxo é" — força recarga geral de grafo/orçamento. */
+const ANY_ROOT = '*';
 
 /**
  * Estado vivo do Hub.
  *
  * Um único `EventSource` sem filtro alimenta tudo: a timeline cresce de forma
- * incremental (barato) e só eventos ESTRUTURAIS marcam o índice como velho
- * (caro). Recarregar tudo a cada token que chega derrubaria a UI numa sessão
- * falante.
+ * incremental (barato) e só eventos ESTRUTURAIS pedem recarga do índice (caro).
  *
- * O índice — sessões, agentes, aprovações — são três requisições fixas. Grafo e
- * orçamento NÃO moram aqui: são caros por raiz e quase sempre desnecessários,
- * então quem precisa deles pede em `useFlowGraph`/`useBudget`, para o fluxo que
- * está de fato na tela.
+ * A recarga passa por um agendador (`createRefetchScheduler`): uma rajada vira
+ * UMA busca de `/sessions` + `/approvals`, nunca duas em voo. `/agents` (que
+ * sonda binários) e `/projects` só na carga inicial, na reconexão e em
+ * `refresh()` explícito — evento de sessão não muda nenhum dos dois. Grafo e
+ * orçamento sobem de revisão só no fluxo que recebeu o evento. Medido antes:
+ * 253 requisições em 15 min — 4 GETs duplicados por evento mais `/graph` por
+ * fluxo.
  */
 export function useHubState(): HubState {
   const [connected, setConnected] = useState(false);
@@ -86,21 +87,40 @@ export function useHubState(): HubState {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [approvals, setApprovals] = useState<ApprovalSummary[]>([]);
-  const [events, setEvents] = useState<Record<string, EventEnvelope[]>>({});
-  const [eventsFailed, setEventsFailed] = useState<Record<string, boolean>>({});
+  const [historyVersion, setHistoryVersion] = useState(0);
   const [revision, setRevision] = useState(0);
+  const [rootRevisions, setRootRevisions] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const reloadTimer = useRef<number | null>(null);
+  // Instância única pela vida da página. Sem `dispose` no desmonte: o
+  // StrictMode desmonta e remonta em desenvolvimento, e um histórico
+  // descartado ali pararia de responder para sempre.
+  const [history] = useState(
+    () =>
+      new EventHistory({
+        fetch: (sessionId, options) => hub.events(sessionId, options).then((r) => r.events),
+        onChange: () => setHistoryVersion((v) => v + 1),
+      }),
+  );
 
-  const refresh = useCallback(async () => {
+  const sessionsRef = useRef<SessionSummary[]>([]);
+  sessionsRef.current = sessions;
+  const touchedRoots = useRef<Set<string>>(new Set());
+
+  /** Índice completo: carga inicial, reconexão e depois de ações do usuário. */
+  const loadFull = useCallback(async (withAgents: boolean) => {
     try {
-      const [{ sessions: list }, { agents: agentList }, { approvals: pending }, { projects: projectList }] =
-        await Promise.all([hub.sessions(), hub.agents(), hub.approvals(), hub.projects()]);
+      const [{ sessions: list }, { approvals: pending }, { projects: projectList }, agentList] =
+        await Promise.all([
+          hub.sessions(),
+          hub.approvals(),
+          hub.projects(),
+          withAgents ? hub.agents().then((r) => r.agents) : Promise.resolve(null),
+        ]);
       setSessions(list);
-      setAgents(agentList);
       setApprovals(pending);
       setProjects(projectList);
+      if (agentList) setAgents(agentList);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
@@ -109,29 +129,67 @@ export function useHubState(): HubState {
     }
   }, []);
 
-  /** Recarga agrupada: uma rajada de eventos estruturais vira uma só chamada. */
-  const scheduleReload = useCallback(() => {
-    if (reloadTimer.current !== null) return;
-    reloadTimer.current = window.setTimeout(() => {
-      reloadTimer.current = null;
-      setRevision((n) => n + 1);
-      void refresh();
-    }, 400);
-  }, [refresh]);
+  /** Recarga barata disparada por eventos: só o que evento de sessão muda. */
+  const loadForEvents = useCallback(async () => {
+    const roots = [...touchedRoots.current];
+    touchedRoots.current.clear();
+    try {
+      const [{ sessions: list }, { approvals: pending }] = await Promise.all([
+        hub.sessions(),
+        hub.approvals(),
+      ]);
+      setSessions(list);
+      setApprovals(pending);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+    if (roots.includes(ANY_ROOT)) setRevision((n) => n + 1);
+    const specific = roots.filter((r) => r !== ANY_ROOT);
+    if (specific.length > 0) {
+      setRootRevisions((prev) => {
+        const next = { ...prev };
+        for (const root of specific) next[root] = (next[root] ?? 0) + 1;
+        return next;
+      });
+    }
+  }, []);
+
+  const schedulerRef = useRef<RefetchScheduler | null>(null);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    const scheduler = createRefetchScheduler(loadForEvents, { delayMs: 300, maxWaitMs: 1500 });
+    schedulerRef.current = scheduler;
+    return () => {
+      scheduler.dispose();
+      if (schedulerRef.current === scheduler) schedulerRef.current = null;
+    };
+  }, [loadForEvents]);
+
+  const refresh = useCallback(() => loadFull(false), [loadFull]);
+
+  useEffect(() => {
+    void loadFull(true);
+  }, [loadFull]);
 
   useEffect(() => {
     const source = new EventSource(hub.streamUrl());
+    let dropped = false;
 
-    source.onopen = () => setConnected(true);
+    source.onopen = () => {
+      setConnected(true);
+      if (dropped) {
+        // Voltou de uma queda: o SSE global não tem replay. Recarrega o índice,
+        // repõe o buraco das timelines abertas e invalida grafo/orçamento.
+        dropped = false;
+        void loadFull(true);
+        void history.resync();
+        setRevision((n) => n + 1);
+      }
+    };
     source.onerror = () => {
       setConnected(false);
-      // O EventSource reconecta sozinho; ao voltar, recarregamos para preencher
-      // o buraco de eventos que passaram enquanto estávamos fora.
-      scheduleReload();
+      dropped = true;
     };
     source.onmessage = (message: MessageEvent<string>) => {
       let event: EventEnvelope;
@@ -141,52 +199,54 @@ export function useHubState(): HubState {
         return;
       }
 
-      setEvents((current) => {
-        const existing = current[event.sessionId] ?? [];
-        // Reconexão do SSE reenvia eventos: deduplicar por seq evita a timeline
-        // aparecer duplicada depois de uma queda de conexão. A busca de trás
-        // para frente acha o duplicado nas primeiras comparações, porque o que
-        // volta na reconexão é sempre o fim da fila.
-        for (let i = existing.length - 1; i >= 0; i -= 1) {
-          if (existing[i]?.seq === event.seq) return current;
-        }
-        const next = [...existing, event].slice(-MAX_EVENTS_PER_SESSION);
-        return { ...current, [event.sessionId]: next };
-      });
+      history.pushLive(event);
 
-      if (STRUCTURAL.has(event.type)) scheduleReload();
+      if (isStructural(event)) {
+        // O que o próprio evento afirma entra já; a verdade do daemon chega na
+        // recarga agrupada logo depois.
+        setSessions((prev) => patchSessionsFromEvent(prev, event) as SessionSummary[]);
+        const root = sessionsRef.current.find((s) => s.id === event.sessionId)?.rootId;
+        touchedRoots.current.add(root ?? ANY_ROOT);
+        schedulerRef.current?.request();
+      }
     };
 
     return () => {
       source.close();
-      if (reloadTimer.current !== null) {
-        window.clearTimeout(reloadTimer.current);
-        reloadTimer.current = null;
-      }
     };
-  }, [scheduleReload]);
+  }, [history, loadFull]);
 
-  const requestedRef = useRef<Set<string>>(new Set());
-
-  const eventsOf = useCallback((sessionId: string) => {
-    if (!sessionId) return [];
-    if (!events[sessionId] && !requestedRef.current.has(sessionId)) {
-      requestedRef.current.add(sessionId);
-      hub.events(sessionId).then(({ events: list }) => {
-        setEventsFailed((prev) => (prev[sessionId] ? { ...prev, [sessionId]: false } : prev));
-        setEvents((prev) => ({ ...prev, [sessionId]: list }));
-      }).catch(() => {
-        // Falha de rede não pode virar "sessão sem eventos" — a timeline vazia
-        // é indistinguível de "ainda não fez nada" sem este sinal à parte.
-        setEventsFailed((prev) => ({ ...prev, [sessionId]: true }));
-      });
-    }
-    return events[sessionId] ?? [];
-  }, [events]);
+  // `historyVersion` nas dependências troca a identidade destas funções quando
+  // qualquer timeline muda — é o que faz o `useMemo` da timeline recalcular.
+  const eventsOf = useCallback(
+    (sessionId: string) => {
+      if (!sessionId) return [];
+      if (history.history(sessionId).status === 'idle') {
+        // Fora do render: a busca notifica o React, e notificar durante o
+        // render de quem pediu é o que o React proíbe.
+        queueMicrotask(() => history.ensure(sessionId));
+      }
+      return history.events(sessionId);
+    },
+    [history, historyVersion],
+  );
 
   const eventsFailedFor = useCallback(
-    (sessionId: string) => eventsFailed[sessionId] === true,
-    [eventsFailed],
+    (sessionId: string) => history.history(sessionId).status === 'failed',
+    [history, historyVersion],
+  );
+
+  const historyOf = useCallback(
+    (sessionId: string) => history.history(sessionId),
+    [history, historyVersion],
+  );
+
+  const loadOlder = useCallback((sessionId: string) => void history.loadOlder(sessionId), [history]);
+  const retryEvents = useCallback((sessionId: string) => history.retry(sessionId), [history]);
+
+  const revisionOf = useCallback(
+    (rootId: string | null) => revision + (rootId ? rootRevisions[rootId] ?? 0 : 0),
+    [revision, rootRevisions],
   );
 
   /**
@@ -240,7 +300,11 @@ export function useHubState(): HubState {
       approvals,
       eventsOf,
       eventsFailedFor,
+      historyOf,
+      loadOlder,
+      retryEvents,
       revision,
+      revisionOf,
       refresh,
       error,
     }),
@@ -254,7 +318,11 @@ export function useHubState(): HubState {
       approvals,
       eventsOf,
       eventsFailedFor,
+      historyOf,
+      loadOlder,
+      retryEvents,
       revision,
+      revisionOf,
       refresh,
       error,
     ],
@@ -353,4 +421,43 @@ export function mergeFlowEvents(streams: readonly EventEnvelope[][]): EventEnvel
     for (const event of stream) byId.set(event.id, event);
   }
   return [...byId.values()].sort((a, b) => a.ts.localeCompare(b.ts) || a.seq - b.seq);
+}
+
+/** Situação agregada do histórico de uma ou mais sessões mostradas juntas. */
+export interface TimelineStatus {
+  loading: boolean;
+  failed: boolean;
+  hasMoreBefore: boolean;
+  loadingOlder: boolean;
+  olderFailed: boolean;
+  /** A tentativa automática mais próxima, ou `null` quando não há nenhuma. */
+  retryAt: number | null;
+  loadOlder: () => void;
+  retry: () => void;
+}
+
+/**
+ * Junta o estado do histórico das sessões na tela ("Esta sessão" é uma só;
+ * "Fluxo inteiro", as irmãs). Carregar anteriores pede a página de cada uma
+ * que ainda tem o que dar; tentar de novo refaz só as que falharam.
+ */
+export function timelineStatus(state: HubState, sessionIds: readonly string[]): TimelineStatus {
+  const entries = sessionIds.map((id) => [id, state.historyOf(id)] as const);
+  const retries = entries
+    .map(([, h]) => h.nextRetryAt)
+    .filter((t): t is number => t !== null);
+  return {
+    loading: entries.some(([, h]) => h.status === 'idle' || h.status === 'loading'),
+    failed: entries.some(([, h]) => h.status === 'failed'),
+    hasMoreBefore: entries.some(([, h]) => h.hasMoreBefore),
+    loadingOlder: entries.some(([, h]) => h.loadingOlder),
+    olderFailed: entries.some(([, h]) => h.olderFailed),
+    retryAt: retries.length > 0 ? Math.min(...retries) : null,
+    loadOlder: () => {
+      for (const [id, h] of entries) if (h.hasMoreBefore) state.loadOlder(id);
+    },
+    retry: () => {
+      for (const [id, h] of entries) if (h.status === 'failed') state.retryEvents(id);
+    },
+  };
 }

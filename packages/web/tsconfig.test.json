@@ -1,14 +1,18 @@
-// Compila só a lógica pura do painel (src/logic) e seus testes node:test para
-// dist-test/, que `npm test` roda (scripts/run-tests.mjs). O bundle do
-// navegador continua a cargo do Vite, com o tsconfig.json ao lado.
+// Compila só a lógica pura do painel (src/logic e src/lib) e seus testes
+// node:test para dist-test/, que `npm test` roda (scripts/run-tests.mjs).
+//
+// O que mora nessas pastas não pode depender de React nem tocar DOM — é isso
+// que permite testá-lo sem jsdom. Sai em dist-test/ e não em dist/: dist/ é a
+// build do Vite que o daemon serve, e o Vite a apaga a cada build.
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist-test",
+    "tsBuildInfoFile": "dist-test/.tsbuildinfo",
     "lib": ["ES2023", "DOM"],
     "types": ["node"]
   },
-  "include": ["src/logic/**/*.ts"],
+  "include": ["src/logic/**/*.ts", "src/lib/**/*.ts"],
   "references": [{ "path": "../core" }, { "path": "../client" }]
 }

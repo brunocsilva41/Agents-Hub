@@ -16,7 +16,7 @@ import { AgentSwarmView } from './components/AgentSwarmView';
 import { DagCanvasView } from './components/DagCanvasView';
 import { TelemetryView } from './components/TelemetryView';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
-import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES } from './useHubState';
+import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES, timelineStatus } from './useHubState';
 
 type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'settings';
 
@@ -74,11 +74,18 @@ export function App() {
     return siblings.some((s) => state.eventsFailedFor(s.id));
   }, [selected, scope, siblings, state]);
 
+  // Histórico das sessões na tela: carregando, há anteriores, próxima tentativa.
+  const timeline = useMemo(() => {
+    if (!selected) return null;
+    return timelineStatus(state, scope === 'session' ? [selected.id] : siblings.map((s) => s.id));
+  }, [selected, scope, siblings, state]);
+
   // Orçamento da sessão ativa: o ledger é chaveado pela RAIZ do fluxo, não pela
   // sessão selecionada — buscar por `selected.id` numa sub-sessão delegada
   // criava (ou lia) um ledger órfão, sempre zerado. `useBudget` já busca pela
   // raiz correta.
-  const budget = useBudget(selected?.rootId ?? selected?.id ?? null, state.revision);
+  const budgetRoot = selected?.rootId ?? selected?.id ?? null;
+  const budget = useBudget(budgetRoot, state.revisionOf(budgetRoot));
 
   const toggleFlow = (rootId: string) => {
     setExpanded((prev) => {
@@ -240,7 +247,11 @@ export function App() {
       <Approvals
         approvals={state.approvals}
         sessions={state.sessions}
-        onSelectSession={selectSession}
+        onSelectSession={(id) => {
+          // O banner aparece em todas as abas: "ver a sessão" precisa levar à timeline.
+          selectSession(id);
+          setActiveTab('timeline');
+        }}
         onResolved={() => state.refresh()}
       />
 
@@ -368,7 +379,7 @@ export function App() {
                 expanded={expanded}
                 onToggle={toggleFlow}
                 onSelect={selectSession}
-                revision={state.revision}
+                revisionOf={state.revisionOf}
               />
             </div>
           </aside>
@@ -451,8 +462,16 @@ export function App() {
                 events={events}
                 showVerbose={verbose}
                 showAgent={scope === 'flow'}
-                loading={!state.ready}
+                loading={!state.ready || (timeline?.loading ?? false)}
                 failed={eventsFailed}
+                unselected={state.ready && !selected}
+                resetKey={`${selected?.id ?? ''}:${scope}`}
+                hasMoreBefore={timeline?.hasMoreBefore ?? false}
+                loadingOlder={timeline?.loadingOlder ?? false}
+                olderFailed={timeline?.olderFailed ?? false}
+                onLoadOlder={timeline?.loadOlder}
+                retryAt={timeline?.retryAt ?? null}
+                onRetry={timeline?.retry}
               />
 
               {selected && (
@@ -486,6 +505,7 @@ export function App() {
           agents={state.agents}
           delegateFrom={modal.delegateFrom}
           defaultAgentId={modal.defaultAgentId}
+          defaultProjectId={selectedProjectId !== 'all' ? selectedProjectId : undefined}
           onClose={() => setModal(null)}
           onCreated={(sessionId) => {
             setModal(null);
