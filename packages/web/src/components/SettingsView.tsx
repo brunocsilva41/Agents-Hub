@@ -28,8 +28,9 @@ import { DiscoveryPanel } from './DiscoveryPanel';
  *    apenas por esta tela. Nunca chegavam a lugar nenhum. O de sandbox era o
  *    pior: um controle de segurança que não fazia nada.
  *
- * Agora tudo vem e vai pelo daemon, que grava em `.agents-hub/config.yaml` do
- * projeto. Por isso a tela é POR PROJETO: é onde a configuração de fato mora.
+ * Agora tudo vem e vai pelo daemon, que grava no banco do Hub, POR PROJETO
+ * (item 1.9 do GOAL: fora do repositório, para não se confundir com o
+ * `.agents-hub/config.yaml` versionado, que só vale com `hub project trust`).
  */
 
 type Aba = 'prompts' | 'memory' | 'models' | 'sandbox' | 'discovery';
@@ -204,8 +205,10 @@ export function SettingsView({ agents, projects, onNewProject }: Props): React.J
         <div>
           <h2 className="settings-title">Configurações do projeto</h2>
           <p className="settings-subtitle">
-            Gravadas em <code>.agents-hub/config.yaml</code> do projeto, versionadas junto do
-            código. Valem para o painel, para a CLI e para as sessões que um agente delega a outro.
+            Gravadas no Hub desta máquina, por projeto (fora do repositório). Valem para o
+            painel, para a CLI e para as sessões que um agente delega a outro. O
+            <code>.agents-hub/config.yaml</code> do repositório só vale depois de{' '}
+            <code>hub project trust</code>.
           </p>
         </div>
         <div className="settings-header-actions">
@@ -468,12 +471,11 @@ export function SettingsView({ agents, projects, onNewProject }: Props): React.J
                   </button>
                 </div>
                 <div className="help help-warn">
-                  ⚠️ Vai para <code>.agents-hub/config.yaml</code>, que é <strong>versionado junto
-                  do código</strong>. Uma chave de API real aqui vaza para qualquer pessoa que
-                  clonar o repositório. Para um servidor local (Ollama, LM Studio) que aceita
+                  ⚠️ Fica gravada em <strong>texto puro</strong> no banco do Hub desta máquina
+                  (fora do repositório). Para um servidor local (Ollama, LM Studio) que aceita
                   qualquer valor, prefira um texto qualquer como <code>ollama</code> — não uma
-                  chave de verdade. Se precisar de uma chave real, mantenha-a fora do projeto (por
-                  exemplo, no ambiente do próprio daemon) em vez de gravar aqui.
+                  chave de verdade. Se precisar de uma chave real, prefira o login nativo do CLI
+                  ou o ambiente do próprio daemon em vez de gravar aqui.
                 </div>
               </div>
               )}

@@ -216,14 +216,16 @@ policy:
     command: npx tsc -b
 ```
 
-O projeto só pode **apertar** a política global, nunca afrouxar — orçamento, timeouts, retries e concorrência só descem; allow lists só encolhem; deny lists só crescem. E `validation.command`/revisão viram processo na sua máquina, então só valem depois que **você** marcar o projeto como confiável (a marca fica no banco do Hub, fora do repo):
+O projeto só pode **apertar** a política global, nunca afrouxar — orçamento, timeouts, retries e concorrência só descem; allow lists só encolhem; deny lists só crescem. E os campos do arquivo que mudam o que a sua máquina **faz** — `validation.command`/revisão (viram processo), `env` (ex.: `ANTHROPIC_BASE_URL`, que decide para onde vão o código e a credencial do agente), `prompts` e `memory` (instruções ao agente) — só valem depois que **você** marcar o projeto como confiável (a marca fica no banco do Hub, fora do repo):
 
 ```bash
-hub project trust [projeto]     # libera validation.command/revisão do config.yaml
+hub project trust [projeto]     # mostra e confia no conteúdo sensível ATUAL do config.yaml
 hub project untrust [projeto]   # volta ao padrão: ignorados, com aviso na timeline
 ```
 
-Sem isso, um `.agents-hub/config.yaml` num repo clonado viraria execução arbitrária. Detalhes em [docs/04-resiliencia-e-politica.md](docs/04-resiliencia-e-politica.md).
+A confiança é *trust-on-first-use*: o Hub guarda o hash do conteúdo confiado. Se o repositório mudar esses campos depois (um `git pull` que troca a URL, por exemplo), a confiança fica **suspensa** — os campos voltam a ser ignorados, com aviso — até você rodar `hub project trust` de novo.
+
+Sem isso, um `.agents-hub/config.yaml` num repo clonado viraria execução arbitrária ou desviaria o tráfego do agente. O que **você** configura pelo Hub (painel, `hub project env`, `hub project prompt`, `hub import`) mora no banco do Hub, fora do repositório, e vale sem `trust`. Detalhes em [docs/04-resiliencia-e-politica.md](docs/04-resiliencia-e-politica.md).
 
 ## Decisões
 

@@ -78,12 +78,11 @@ import {
 import {
   contextForAgent,
   envForAgent,
-  ignoredExecFieldsWarning,
   loadProjectContext,
   loadProjectOverrides,
-  saveProjectContext,
   type ProjectContext,
 } from './project-config.js';
+import { effectiveProjectContext, repoTrustWarning } from './repo-trust.js';
 import { captureBaseline, captureDiff, loadBaseline, saveBaseline } from './diff-capture.js';
 import { capturarMudancas } from './artifact-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
@@ -93,7 +92,7 @@ import { actionsOfToolCall, combineVerdicts, resumoDaChamada } from './pretool-g
 const ESPERA_PADRAO_DO_GATE_MS = 60_000;
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
-import { ProjectRegistry } from './project-registry.js';
+import { ProjectRegistry, type RepoConfigStatus } from './project-registry.js';
 import { policyFor as resolvePolicyFor, projectPolicyFor } from './effective-policy.js';
 
 /** Quebra de linha literal para montar prompt sem brigar com escapes. */
@@ -235,7 +234,8 @@ export class SessionManager {
   #contextoDoProjeto(session: Session): ContextoDoProjeto {
     const project = this.store.projects.get(session.projectId);
     if (!project) return {};
-    return contextForAgent(loadProjectContext(project.path).ctx, session.agentId);
+    // Repositório só se confiável (e não suspenso); o do usuário (Hub) sempre.
+    return contextForAgent(effectiveProjectContext(this.store, project).ctx, session.agentId);
   }
 
   /**
@@ -248,7 +248,7 @@ export class SessionManager {
   #envDoProjeto(session: Session): Record<string, string> {
     const project = this.store.projects.get(session.projectId);
     if (!project) return {};
-    return envForAgent(loadProjectContext(project.path).ctx, session.agentId);
+    return envForAgent(effectiveProjectContext(this.store, project).ctx, session.agentId);
   }
 
   /**
@@ -269,12 +269,17 @@ export class SessionManager {
     }
   }
 
-  /** Memória e prompts do projeto, como estão no arquivo. */
+  /** Contexto que o usuário configurou pelo Hub — ver `ProjectRegistry.getContext`. */
   getProjectContext(projectId: string): ProjectContext {
     return this.#projects.getContext(projectId);
   }
 
-  /** Grava memória e prompts, preservando o bloco de política do arquivo. */
+  /** Estado do `config.yaml` do repositório — ver `ProjectRegistry.repoStatus`. */
+  getProjectRepoStatus(projectId: string): RepoConfigStatus {
+    return this.#projects.repoStatus(projectId);
+  }
+
+  /** Grava o contexto do usuário no banco do Hub (fora do repositório). */
   setProjectContext(projectId: string, ctx: ProjectContext): ProjectContext {
     return this.#projects.setContext(projectId, ctx);
   }
@@ -2220,16 +2225,21 @@ export class SessionManager {
    * painel da sessão, exatamente onde a política "deveria" estar mais apertada
    * e não está. Chamado uma vez no nascimento da sessão, não a cada gate.
    *
-   * Também avisa quando o YAML declara campos que viram processo
-   * (`validation.command`, revisão) e eles foram IGNORADOS por o projeto não
-   * ser confiável — sem isto, quem configurou `npm test` no repo veria o
-   * portão de validação simplesmente não rodar, sem saber por quê.
+   * Também avisa quando o YAML declara campos sensíveis (`validation.command`,
+   * revisão, `env`, `prompts`, `memory`) e eles foram IGNORADOS por o projeto
+   * não ser confiável ou por a confiança estar suspensa (o conteúdo mudou
+   * depois de confiado) — sem isto, quem configurou `npm test` ou um Ollama
+   * no repo veria o efeito simplesmente não acontecer, sem saber por quê.
    */
   #avisarConfigDoProjetoQuebrada(session: Session, taskId: string, project: Project): void {
-    const overrides = loadProjectOverrides(project.path, { trusted: project.trusted === true });
+    const { trust } = effectiveProjectContext(this.store, project);
+    const overrides = loadProjectOverrides(project.path, { trusted: trust.state === 'trusted' });
     const contexto = loadProjectContext(project.path);
 
-    if (overrides.ignoredExecFields.length > 0) {
+    // Campos sensíveis do repo (execução, env, prompts, memória) ignorados por
+    // falta de confiança ou por confiança suspensa — ver `repo-trust.ts`.
+    const aviso = repoTrustWarning(project.path, trust);
+    if (aviso !== null) {
       this.#emit({
         sessionId: session.id,
         taskId,
@@ -2237,7 +2247,9 @@ export class SessionManager {
         type: 'log',
         payload: {
           level: 'warn',
-          text: ignoredExecFieldsWarning(project.path, overrides.ignoredExecFields),
+          text: aviso,
+          repoTrust: trust.state,
+          ignoredRepoFields: trust.sensitiveFields,
           ignoredExecFields: overrides.ignoredExecFields,
         },
       });

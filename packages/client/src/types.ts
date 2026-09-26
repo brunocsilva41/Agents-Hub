@@ -26,8 +26,14 @@ export interface ProjectSummary {
   path: string;
   defaultBranch: string;
   createdAt: string;
-  /** Confiado pelo usuário: `validation.command`/revisão do config.yaml do repo valem. */
+  /**
+   * Confiado pelo usuário: os campos sensíveis do config.yaml do repo
+   * (`validation.command`/revisão, `env`, `prompts`, `memory`) valem —
+   * enquanto o conteúdo for o confiado (ver `RepoConfigStatusDto.trust`).
+   */
   trusted?: boolean;
+  /** Hash do conteúdo sensível confiado (trust-on-first-use). */
+  trustedHash?: string | null;
 }
 
 export interface SessionSummary {
@@ -146,6 +152,19 @@ export interface ProjectFolder {
 }
 
 /** Memória e instruções por agente, guardadas no projeto. */
+/** Estado do `.agents-hub/config.yaml` do repositório (item 1.9 do GOAL). */
+export interface RepoConfigStatusDto {
+  path: string;
+  /** `suspended`: confiado, mas o conteúdo sensível mudou depois — reconfirme. */
+  trust: 'untrusted' | 'trusted' | 'suspended';
+  /** Campos sensíveis que o repositório declara. */
+  sensitiveFields: string[];
+  /** Aviso quando campos do repositório estão sendo ignorados. */
+  warning: string | null;
+  /** O que o repositório declara (para revisar antes de confiar). */
+  context: ProjectContextDto;
+}
+
 export interface ProjectContextDto {
   memory?: string;
   prompts?: Record<string, string>;

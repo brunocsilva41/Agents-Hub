@@ -1,5 +1,6 @@
 import { PolicyEngine, type PolicyDocument, type Session, type UnitOfWork } from '@agents-hub/core';
 import { loadProjectOverrides, mergeProjectPolicy } from './project-config.js';
+import { evaluateRepoTrust } from './repo-trust.js';
 
 /**
  * Resolução de política efetiva (pai→filho e projeto→global), extraída de
@@ -22,8 +23,10 @@ export interface EffectivePolicyDeps {
 export function projectPolicyFor(deps: EffectivePolicyDeps, projectId: string): PolicyDocument {
   const project = deps.store.projects.get(projectId);
   if (!project) return deps.globalPolicy;
-  // Confiança vem do registro (banco do Hub), nunca do próprio repositório.
-  const trusted = project.trusted === true;
+  // Confiança vem do registro (banco do Hub), nunca do próprio repositório —
+  // e só vale enquanto o conteúdo sensível for o que o usuário confiou
+  // (trust-on-first-use, `repo-trust.ts`).
+  const trusted = evaluateRepoTrust(project).state === 'trusted';
   return mergeProjectPolicy(
     deps.globalPolicy,
     loadProjectOverrides(project.path, { trusted }).overrides,

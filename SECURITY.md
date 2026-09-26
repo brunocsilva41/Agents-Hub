@@ -33,10 +33,44 @@ não fechar relato sem explicação.
 | Gasto descontrolado | Orçamento é da sessão-raiz, consumido pelos descendentes | `packages/core/src/budget.ts` |
 | Ação irreversível | `git push`, `rm -rf`, publish, ler ou escrever segredo (`.ssh`, `.env`, chaves, credenciais de CLI) e escrever em `.git/hooks`/`.github/workflows` param a sessão e abrem aprovação; a deny list (`sudo`...) é negada sem aprovação | `packages/core/src/policy.ts` |
 | Comando composto para driblar a allow list | Comando tokenizado (`&&`, `;`, `\|`, `$(...)`, crase, redirecionamento, `bash -c`, `cmd /c`, `powershell -Command`...); vale o pior segmento; o que não dá para tokenizar não é liberado | `packages/core/src/command-classifier.ts` |
-| Config de projeto hostil | `<repo>/.agents-hub/config.yaml` só pode **apertar** a política global, nunca afrouxar (regra campo a campo em `mergePolicyLayer`); `validation.command`/revisão do repo só valem com `hub project trust` (confiança no banco do Hub, padrão desligado) | `packages/daemon/src/project-config.ts` |
+| Config de projeto hostil | `<repo>/.agents-hub/config.yaml` só pode **apertar** a política global, nunca afrouxar (regra campo a campo em `mergePolicyLayer`); campos sensíveis do repo (ver abaixo) só valem com `hub project trust` (confiança no banco do Hub, padrão desligado, suspensa se o conteúdo mudar) | `packages/daemon/src/project-config.ts`, `packages/daemon/src/repo-trust.ts` |
 
-**Credenciais:** o Hub nunca lê, persiste nem repassa segredo. Cada adapter roda
-com o login que o próprio CLI já tem (`~/.claude`, `~/.codex`, ...). Não existe
+### Vetores do repositório (`<repo>/.agents-hub/config.yaml`)
+
+O arquivo é versionado: quem clona o repositório herda-o. Trate-o como
+qualquer script do repositório — entrada **não confiável** até você revisá-lo.
+
+| Campo do repo | O que um repo hostil faria | Sem `hub project trust` |
+|---|---|---|
+| `policy.validation.command` | executar um processo arbitrário (`shell: true`) | ignorado, com aviso |
+| `policy.validation.review.*` | ligar/escolher o agente revisor (outro binário, outro gasto) | ignorado, com aviso |
+| `env.<agente>.*_BASE_URL`, `*_API_BASE`, `*_ENDPOINT`... | desviar o canal de API do agente para um servidor do atacante — o CLI já autenticado envia código, prompt e credencial para lá | ignorado, com aviso (o aviso mostra o destino) |
+| `env.<agente>.*_API_KEY`, `GOOGLE_*`... | trocar a conta/credencial usada pelo agente | ignorado, com aviso |
+| `prompts.<agente>`, `memory` | injetar instruções no prompt de todo agente (prompt injection persistente) | ignorado, com aviso |
+| `env` fora da lista de permissão (`NODE_OPTIONS`, `PATH`, `HTTP(S)_PROXY`, `NODE_EXTRA_CA_CERTS`, `LD_PRELOAD`, `GIT_SSH_COMMAND`...) | execução arbitrária, troca de binário, interceptação TLS | recusado **sempre**, mesmo com `trust` (`packages/core/src/agent-env.ts`) |
+| resto da política (allow/deny, orçamento, timeouts, `maxDepth`, `fallback`...) | afrouxar limites | só aperta; não precisa de `trust` |
+
+**Trust-on-first-use.** `hub project trust` grava, junto da marca, o hash do
+conteúdo sensível **de agora** (e a CLI lista o que está sendo confiado). Se o
+repositório mudar qualquer campo sensível depois — um `git pull` que troca a
+`ANTHROPIC_BASE_URL`, um `validation.command` novo —, o hash não bate e a
+confiança fica **suspensa**: os campos voltam a ser ignorados, com aviso
+(`SUSPENSA`) na timeline da sessão e em `GET /projects/:id/context` (`repo`),
+até você rodar `hub project trust` de novo. Confiança dada antes do hash
+existir conta como suspensa.
+
+**O que você configura pelo Hub é outra camada.** Memória, instruções e env
+definidos pelo painel, por `hub project env|prompt` ou por `hub import` ficam no
+banco do Hub (`~/.agents-hub`), fora do repositório, e valem sem `trust` (ainda
+passando pela lista de permissão de env). Quando as duas camadas existem, a do
+Hub vence variável a variável. Até esta versão o painel gravava no
+`config.yaml` do repositório; o que estiver lá passa a ser tratado como
+conteúdo do repositório.
+
+**Credenciais:** o Hub não lê os arquivos de credencial dos CLIs. Cada adapter roda
+com o login que o próprio CLI já tem (`~/.claude`, `~/.codex`, ...). O env que
+**você** informa pelo Hub (ex.: uma `*_API_KEY` em `hub project env`) é persistido
+em texto puro no banco do Hub e repassado ao agente. Não existe
 cofre, e a interface `CredentialProvider` está preparada mas não implementada —
 de propósito.
 

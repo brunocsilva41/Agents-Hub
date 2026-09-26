@@ -181,6 +181,24 @@ export function candidatoDePolitica(parsed: Record<string, unknown>): unknown {
   return resto;
 }
 
+/**
+ * Campos de execução do YAML do repositório SEM o filtro de confiança — só
+ * para calcular o hash do conteúdo sensível (`repo-trust.ts`). Nunca use o
+ * retorno para montar política.
+ */
+export function rawRepoExecFields(projectPath: string): {
+  command?: unknown;
+  reviewEnabled?: unknown;
+  reviewAgent?: unknown;
+} {
+  const validation = lerOverridesBrutos(projectPath).loaded.overrides.validation;
+  const campos: { command?: unknown; reviewEnabled?: unknown; reviewAgent?: unknown } = {};
+  if (validation?.command !== undefined) campos.command = validation.command;
+  if (validation?.review?.enabled !== undefined) campos.reviewEnabled = validation.review.enabled;
+  if (validation?.review?.agent !== undefined) campos.reviewAgent = validation.review.agent;
+  return campos;
+}
+
 /** Leitura crua (sem o filtro de confiança), com o cache por mtime+size. */
 function lerOverridesBrutos(projectPath: string): {
   loaded: Omit<LoadedProjectOverrides, 'ignoredExecFields'>;
@@ -352,7 +370,14 @@ export function loadProjectContext(projectPath: string): LoadedProjectContext {
 }
 
 /**
- * Grava memória e prompts, preservando o resto do arquivo.
+ * Grava memória e prompts no `config.yaml` DO REPOSITÓRIO, preservando o resto
+ * do arquivo.
+ *
+ * O Hub NÃO usa mais isto para o que o usuário configura pelo painel/CLI
+ * (item 1.9 do GOAL): o que ele grava aqui vira conteúdo do repositório e só
+ * vale com `hub project trust`. O contexto do usuário mora no banco
+ * (`ProjectRegistry.setContext`). Fica como utilitário para quem QUER
+ * versionar as regras da casa junto do código.
  *
  * Reescrever o YAML inteiro a partir do que a tela conhece apagaria o bloco
  * `policy` — que é onde vivem os limites de segurança do projeto e que nenhuma

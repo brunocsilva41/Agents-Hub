@@ -94,6 +94,29 @@ export interface Project {
    * clonado não pode se declarar confiável sozinho. Ausente = `false`.
    */
   trusted?: boolean;
+  /**
+   * Hash do conteúdo SENSÍVEL do `.agents-hub/config.yaml` no instante em que
+   * a confiança foi dada (trust-on-first-use, item 1.9 do GOAL): `env`,
+   * `prompts`, `memory`, `validation.command`/revisão. Se o repositório muda
+   * esse conteúdo depois, o hash deixa de bater e a confiança fica SUSPENSA
+   * até o usuário reconfirmar. `null` com `trusted` = confiança anterior ao
+   * hash, também suspensa.
+   */
+  trustedHash?: string | null;
+}
+
+/**
+ * Contexto do projeto configurado PELO USUÁRIO através do Hub (painel,
+ * `hub project env|prompt`, `hub import`). Mora no banco do Hub, não no
+ * repositório — por isso é confiável sem `hub project trust`, ao contrário do
+ * que vem de `<repo>/.agents-hub/config.yaml`.
+ */
+export interface ProjectHubContext {
+  memory?: string;
+  /** Instruções por `agentId`. */
+  prompts?: Record<string, string>;
+  /** Variáveis de ambiente por `agentId` (ainda passam pela lista de permissão). */
+  env?: Record<string, Record<string, string>>;
 }
 
 /**

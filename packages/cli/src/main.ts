@@ -135,7 +135,8 @@ ${bold('Projetos')}
   hub project prompt [projeto] --agent <id> --clear           apaga a instrução
   hub project folders [projeto]                               lista as pastas vinculadas ao projeto
   hub project folders remove [projeto] <folderId>             desvincula uma pasta
-  hub project trust [projeto]                                 confia no projeto: libera validation.command/revisão do config.yaml do repo
+  hub project trust [projeto]                                 confia no config.yaml do repo (validation.command, revisão, env, prompts, memory)
+                                                              ${dim('se o conteúdo mudar depois, a confiança é suspensa: rode de novo')}
   hub project untrust [projeto]                               retira a confiança (padrão: não confiável)
       ${dim('[projeto] aceita id ou caminho; sem ele, usa o diretório atual (registra se preciso).')}
 
@@ -657,10 +658,12 @@ async function projectAdd(client: HubClient, dir: string | undefined): Promise<v
 /**
  * `hub project trust|untrust [projeto]` — confiança explícita NESTA máquina.
  *
- * Sem ela, `validation.command` e a revisão declarados no
- * `.agents-hub/config.yaml` do repositório são ignorados: viram processo, e o
- * arquivo é versionado — clonar um repo malicioso não pode bastar para
- * executar código. A marca fica no banco do Hub, fora do repositório.
+ * Sem ela, os campos sensíveis do `.agents-hub/config.yaml` do repositório
+ * (`validation.command`, revisão, `env` — ex. `ANTHROPIC_BASE_URL` —,
+ * `prompts`, `memory`) são ignorados: o arquivo é versionado, e clonar um repo
+ * malicioso não pode bastar para executar código nem desviar o tráfego do
+ * agente. A marca fica no banco do Hub, fora do repositório, com o hash do
+ * conteúdo confiado: se ele mudar, a confiança fica suspensa até rodar de novo.
  */
 async function projectTrust(
   client: HubClient,
@@ -668,13 +671,23 @@ async function projectTrust(
   trusted: boolean,
 ): Promise<void> {
   const projectId = await resolveProjectId(client, projectRef);
-  const { project } = await client.setProjectTrusted(projectId, trusted);
+  const { project, repo } = await client.setProjectTrusted(projectId, trusted);
+  const campos = repo?.sensitiveFields ?? [];
   if (trusted) {
     console.log(`${green('confiável')} ${bold(project.name)} ${dim(project.id)}`);
-    console.log(dim('validation.command e revisão do .agents-hub/config.yaml deste projeto passam a valer.'));
+    if (campos.length === 0) {
+      console.log(dim('o .agents-hub/config.yaml deste projeto não declara campos sensíveis agora.'));
+    } else {
+      // Mostrar O QUE foi confiado: é o conteúdo de agora que fica valendo.
+      console.log(dim('passam a valer (conteúdo de agora do .agents-hub/config.yaml):'));
+      for (const campo of campos) console.log(`  ${campo}`);
+    }
+    console.log(dim('se o repositório mudar esses campos, a confiança fica suspensa até você rodar isto de novo.'));
   } else {
     console.log(`${yellow('não confiável')} ${bold(project.name)} ${dim(project.id)}`);
-    console.log(dim('validation.command e revisão do .agents-hub/config.yaml deste projeto serão ignorados.'));
+    console.log(
+      dim('validation.command, revisão, env, prompts e memory do .agents-hub/config.yaml deste projeto serão ignorados.'),
+    );
   }
 }
 
@@ -682,7 +695,7 @@ async function projectTrust(
  * Nomes que sugerem segredo — só para avisar antes de gravar, nunca para
  * bloquear. O daemon já filtra `NODE_OPTIONS`/`PATH`/etc. na entrada
  * (`filtrarEnvDeProjeto`); isto aqui é outra coisa: uma chave de API
- * LEGÍTIMA (aceita pelo filtro) ainda vai parar num arquivo VERSIONADO.
+ * LEGÍTIMA (aceita pelo filtro) fica gravada em texto puro no banco do Hub.
  */
 function pareceSegredo(chave: string): boolean {
   const c = chave.toUpperCase();
@@ -690,9 +703,9 @@ function pareceSegredo(chave: string): boolean {
 }
 
 const AVISO_ARQUIVO_VERSIONADO =
-  '.agents-hub/config.yaml é versionado junto do código — uma chave de API real aqui ' +
-  'vaza para quem clonar o repositório. Para servidor local (Ollama, LM Studio) um valor ' +
-  'qualquer costuma bastar; para chave de verdade, mantenha-a fora do projeto.';
+  'o valor fica em texto puro no banco do Hub (~/.agents-hub), fora do repositório. ' +
+  'Para servidor local (Ollama, LM Studio) um valor qualquer costuma bastar; para chave ' +
+  'de verdade, prefira o login nativo do CLI do agente.';
 
 /** `hub project env` — lista, define ou remove variáveis de ambiente por agente. */
 async function projectEnv(client: HubClient, args: Args, projectRef: string | undefined): Promise<void> {
@@ -701,9 +714,11 @@ async function projectEnv(client: HubClient, args: Args, projectRef: string | un
   const setFlag = typeof args.flags['set'] === 'string' ? args.flags['set'] : undefined;
   const unsetFlag = typeof args.flags['unset'] === 'string' ? args.flags['unset'] : undefined;
 
-  const { context } = await client.projectContext(projectId);
+  const { context, repo } = await client.projectContext(projectId);
 
   if (setFlag === undefined && unsetFlag === undefined) {
+    // O do repositório só vale com confiança — o aviso diz o que está ignorado.
+    if (repo?.warning) console.error(yellow(`aviso: ${repo.warning}`));
     const env = context.env ?? {};
     const agentIds = agentId !== undefined ? [agentId] : Object.keys(env);
     if (agentIds.length === 0) {
