@@ -3,7 +3,13 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { parse as parseYamlText } from 'yaml';
 import { z } from 'zod';
-import { HubApiError, type BriefInput, type HubClient } from '@agents-hub/client';
+import {
+  HubApiError,
+  hubIdPattern,
+  type BriefInput,
+  type HubClient,
+  type HubIdPrefix,
+} from '@agents-hub/client';
 import {
   parseWorkflow,
   runWorkflow,
@@ -35,6 +41,18 @@ interface ToolResult {
 
 const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
 const fail = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
+
+/**
+ * Id do Hub como argumento de tool. O argumento vem do modelo — texto livre —
+ * e o client monta a URL com ele: `session_id: "../shutdown#"` já chegou a
+ * `POST /shutdown` e derrubou o daemon, com a tool respondendo sucesso. O
+ * padrão é o mesmo que o client aplica (`hubIdPattern`), declarado aqui para
+ * a recusa acontecer na validação de entrada da tool e aparecer no schema.
+ */
+const idArg = (prefixo: HubIdPrefix): z.ZodString =>
+  z
+    .string()
+    .regex(hubIdPattern(prefixo), `id inválido: esperado "${prefixo}_" seguido de letras e números`);
 
 /**
  * As tools que o Hub dá a QUALQUER agente.
@@ -235,7 +253,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
       description:
         'Estado atual de uma tarefa delegada: se terminou, o que produziu, quanto custou ' +
         'e quanto resta do orçamento do fluxo. Não bloqueia.',
-      inputSchema: { task_id: z.string().describe('o task_id devolvido por hub_agent_call') },
+      inputSchema: { task_id: idArg('tsk').describe('o task_id devolvido por hub_agent_call') },
       annotations: { readOnlyHint: true },
     },
     async ({ task_id }): Promise<ToolResult> => {
@@ -259,7 +277,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Ao estourar o timeout, a tarefa continua rodando: só a espera termina. ' +
         'Defaults to 300 seconds if not specified. Use 0 for no timeout (wait indefinitely - use with caution).',
       inputSchema: {
-        task_id: z.string(),
+        task_id: idArg('tsk'),
         timeout_seconds: z
           .number()
           .int()
@@ -309,7 +327,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Use para acompanhar de perto uma delegação em andamento e interromper cedo se ' +
         'ela estiver indo para o lado errado.',
       inputSchema: {
-        session_id: z.string().describe('o session_id devolvido por hub_agent_call'),
+        session_id: idArg('ses').describe('o session_id devolvido por hub_agent_call'),
         since: z
           .number()
           .int()
@@ -346,7 +364,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'validar o que foi de fato alterado em vez de confiar só no resumo da task ' +
         '(hub_agent_status) ou no log de eventos (hub_agent_events).',
       inputSchema: {
-        session_id: z.string().describe('a sessão cujo diff você quer ver'),
+        session_id: idArg('ses').describe('a sessão cujo diff você quer ver'),
       },
       annotations: { readOnlyHint: true },
     },
@@ -373,7 +391,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'agente estiver claramente no caminho errado — deixar rodando só queima orçamento ' +
         'do fluxo, que é compartilhado com você.',
       inputSchema: {
-        session_id: z.string(),
+        session_id: idArg('ses'),
         reason: z.string().optional().describe('por que está cancelando (fica na auditoria)'),
       },
       annotations: { destructiveHint: true },
@@ -399,7 +417,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'que o agente pare o que está fazendo agora mas continue disponível para receber ' +
         'uma nova instrução com hub_session_send, sem perder o estado acumulado.',
       inputSchema: {
-        session_id: z.string().describe('a sessão cujo turno atual deve parar'),
+        session_id: idArg('ses').describe('a sessão cujo turno atual deve parar'),
       },
       annotations: { destructiveHint: false },
     },
@@ -430,7 +448,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'e tudo que ela delegou. Use quando quiser segurar o trabalho por um tempo sem perder ' +
         'o estado, para retomar depois com hub_session_send.',
       inputSchema: {
-        session_id: z.string().describe('a sessão a pausar'),
+        session_id: idArg('ses').describe('a sessão a pausar'),
       },
       annotations: { destructiveHint: false },
     },
@@ -452,7 +470,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
       description:
         'Manda uma mensagem para uma sessão delegada — corrigir o rumo, dar contexto novo ' +
         'ou responder uma dúvida — sem perder o trabalho já feito.',
-      inputSchema: { session_id: z.string(), text: z.string().min(1) },
+      inputSchema: { session_id: idArg('ses'), text: z.string().min(1) },
     },
     async ({ session_id, text }): Promise<ToolResult> => {
       try {
@@ -478,7 +496,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Transfere o controle da sessão para outro agente em tempo de execução. ' +
         'O agente anterior é interrompido e o novo agente assume a sessão com todo o histórico acumulado como contexto.',
       inputSchema: {
-        session_id: z.string().describe('id da sessão a ser transferida'),
+        session_id: idArg('ses').describe('id da sessão a ser transferida'),
         target_agent: z.string().describe('id ou capability do agente de destino (ex: "codex" ou "cap:refactor")'),
         reason: z.string().optional().describe('motivo da transferência para constar no contexto'),
       },
@@ -540,8 +558,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Árvore de quem chamou quem no fluxo atual, com estado e custo por nó. ' +
         'Mostra também quanto do orçamento compartilhado já foi consumido.',
       inputSchema: {
-        root_id: z
-          .string()
+        root_id: idArg('ses')
           .optional()
           .describe('raiz do fluxo; se omitido, usa o fluxo do qual você faz parte'),
       },
@@ -600,7 +617,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
       description:
         'Quanto o fluxo inteiro já consumiu e quanto resta. O orçamento é compartilhado ' +
         'entre você e todos os agentes que você acionar — consulte antes de delegar tarefas caras.',
-      inputSchema: { root_id: z.string().optional() },
+      inputSchema: { root_id: idArg('ses').optional() },
       annotations: { readOnlyHint: true },
     },
     async ({ root_id }): Promise<ToolResult> => {

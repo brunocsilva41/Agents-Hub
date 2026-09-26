@@ -17,6 +17,8 @@ export type HubErrorCode =
   | 'FOLDER_IS_PRIMARY'
   | 'INVALID_BRIEF'
   | 'INVALID_QUERY'
+  /** Id em parâmetro de rota fora do formato `<prefixo>_<alfanumérico>`. */
+  | 'INVALID_ID'
   | 'POLICY_DENIED'
   | 'APPROVAL_REQUIRED'
   | 'BUDGET_EXCEEDED'

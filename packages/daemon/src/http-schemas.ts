@@ -22,6 +22,15 @@ export const SessionIdSchema = hubId('ses');
 export const TaskIdSchema = hubId('tsk');
 export const ApprovalIdSchema = hubId('apv');
 export const ProjectIdSchema = hubId('prj');
+/**
+ * Pasta de projeto. Exceção histórica: a migração 2 criou as pastas principais
+ * como `pfd_` + id do projeto, então `pfd_prj_...` também é id legítimo.
+ */
+export const FolderIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^pfd_(?:prj_)?[a-z0-9]+$/i, 'id deve começar com "pfd_"');
 
 export const BudgetInputSchema = z
   .object({

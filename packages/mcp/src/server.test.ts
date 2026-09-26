@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -361,5 +362,91 @@ steps:
 
     assert.equal(result.isError, undefined, textOf(result));
     assert.match(textOf(result), /não alterou nenhum arquivo/i);
+  });
+});
+
+/**
+ * Path traversal pelo argumento da tool (vistoria 08, seção 1): o client
+ * montava `/sessions/${id}/cancel` sem validar nem codificar, e
+ * `session_id: "../shutdown#"` resolvia para `POST /shutdown` — o daemon caía e
+ * a tool respondia "sessão encerrada". Roda contra um servidor HTTP falso que
+ * registra os caminhos, justamente para o teste vermelho não derrubar nada.
+ */
+describe('MCP: id malformado em argumento de tool', () => {
+  let fake: HttpServer;
+  let client: Client;
+  const recebidos: string[] = [];
+
+  before(async () => {
+    fake = createHttpServer((req, res) => {
+      recebidos.push(`${req.method} ${req.url}`);
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, interrupted: false, mode: 'live' }));
+      });
+    });
+    await new Promise<void>((resolve) => fake.listen(0, '127.0.0.1', resolve));
+    const endereco = fake.address();
+    const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
+    const hubClient = new HubClient(`http://127.0.0.1:${porta}`);
+    const caller = new CallerIdentity(hubClient, 'agente-mcp', os.tmpdir(), newId('ses'));
+    const server = buildMcpServer(hubClient, caller);
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'teste-traversal', version: '0.0.1' });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  });
+
+  after(async () => {
+    await client.close();
+    await new Promise<void>((resolve) => fake.close(() => resolve()));
+  });
+
+  /** O SDK pode recusar a entrada como resultado `isError` ou como exceção. */
+  async function chamar(name: string, args: Record<string, unknown>): Promise<ToolTextResult> {
+    try {
+      return (await client.callTool({ name, arguments: args })) as ToolTextResult;
+    } catch (err) {
+      return { content: [{ type: 'text', text: (err as Error).message }], isError: true };
+    }
+  }
+
+  test('hub_agent_cancel com session_id="../shutdown#" devolve erro e não chega a /shutdown', async () => {
+    recebidos.length = 0;
+    const result = await chamar('hub_agent_cancel', { session_id: '../shutdown#' });
+    assert.equal(result.isError, true, `deveria falhar, veio: ${textOf(result)}`);
+    assert.doesNotMatch(textOf(result), /encerrada/);
+    assert.deepEqual(recebidos, [], 'nenhuma requisição deveria ter saído');
+  });
+
+  test('todas as tools com id recusam traversal sem requisição', async () => {
+    recebidos.length = 0;
+    const chamadas: Array<[string, Record<string, unknown>]> = [
+      ['hub_agent_status', { task_id: '../shutdown#' }],
+      ['hub_agent_wait', { task_id: '../shutdown#', timeout_seconds: 1 }],
+      ['hub_agent_events', { session_id: '../shutdown#' }],
+      ['hub_session_diff', { session_id: '../shutdown#' }],
+      ['hub_session_interrupt', { session_id: '../shutdown#' }],
+      ['hub_session_pause', { session_id: '../shutdown#' }],
+      ['hub_session_send', { session_id: '../shutdown#', text: 'oi' }],
+      ['hub_session_handoff', { session_id: '../shutdown#', target_agent: 'codex' }],
+      ['hub_graph', { root_id: '../shutdown#' }],
+      ['hub_budget', { root_id: '../shutdown#' }],
+    ];
+    const { tools } = await client.listTools();
+    const existentes = new Set(tools.map((t) => t.name));
+    for (const [nome, args] of chamadas) {
+      assert.ok(existentes.has(nome), `tool ${nome} não existe — ajuste o teste`);
+      const result = await chamar(nome, args);
+      assert.equal(result.isError, true, `${nome} deveria falhar, veio: ${textOf(result)}`);
+    }
+    assert.deepEqual(recebidos, []);
+  });
+
+  test('id válido segue normalmente até o daemon', async () => {
+    recebidos.length = 0;
+    const result = await chamar('hub_agent_cancel', { session_id: 'ses_abc123' });
+    assert.equal(result.isError, undefined, textOf(result));
+    assert.deepEqual(recebidos, ['POST /sessions/ses_abc123/cancel']);
   });
 });

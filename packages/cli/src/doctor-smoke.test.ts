@@ -48,7 +48,8 @@ function montarDaemonFalso(): { server: Server; sessions: Map<string, SessaoFals
           }
 
           seq += 1;
-          const id = `sess-${agentId}-${seq}`;
+          // Formato de id do Hub (`ses_` + alfanumérico): o client recusa qualquer outro.
+          const id = `ses_${agentId.replace(/[^a-z0-9]/gi, '')}${seq}`;
           sessions.set(id, {
             agentId,
             nativeSessionId: null,
