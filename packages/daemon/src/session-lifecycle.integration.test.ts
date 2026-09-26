@@ -175,7 +175,7 @@ interface Ambiente {
 
 async function montar(
   nome: string,
-  opcoes: { validacao?: boolean; http?: boolean; backoffMs?: number } = {},
+  opcoes: { validacao?: boolean; http?: boolean; backoffMs?: number; validacaoMs?: number } = {},
 ): Promise<Ambiente> {
   const raiz = mkdtempSync(path.join(os.tmpdir(), `hub-ciclo-${nome}-`));
   const manifestos = path.join(raiz, 'manifests');
@@ -219,7 +219,7 @@ async function montar(
       watch: { pauseOn: [], flagOn: [] },
       validation: {
         ...DEFAULT_POLICY.validation,
-        command: opcoes.validacao ? `node "${valida}" "${pidValidacao}" 4000` : null,
+        command: opcoes.validacao ? `node "${valida}" "${pidValidacao}" ${opcoes.validacaoMs ?? 4000}` : null,
       },
     },
   });
@@ -428,7 +428,9 @@ describe('2.1 — cancelar durante a validação', () => {
 
 describe('2.1 — desligar durante a validação', () => {
   test('shutdown mata o comando de validação em vez de deixá-lo órfão', async () => {
-    const amb = await montar('shutdown', { validacao: true });
+    // Validação longa: o PID só pode estar morto porque o desligamento o matou,
+    // não porque o comando terminou sozinho enquanto o daemon esperava.
+    const amb = await montar('shutdown', { validacao: true, validacaoMs: 60_000 });
     try {
       rmSync(amb.pidValidacao, { force: true });
       await iniciar(amb, 'rapido');
@@ -436,8 +438,10 @@ describe('2.1 — desligar durante a validação', () => {
       const pid = Number(readFileSync(amb.pidValidacao, 'utf8'));
       assert.ok(vivo(pid));
 
+      const t0 = Date.now();
       await amb.hub.shutdown();
       assert.equal(vivo(pid), false, 'validação órfã depois do desligamento');
+      assert.ok(Date.now() - t0 < 20_000, 'o desligamento não pode esperar a validação inteira');
     } finally {
       try {
         rmSync(amb.raiz, { recursive: true, force: true });
