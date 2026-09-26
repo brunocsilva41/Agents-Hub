@@ -2,6 +2,8 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { BudgetLimits } from './budget.js';
 import { type SessionMode, MODE_RANK, narrowestMode } from './domain.js';
+import { type CommandPolicyView, classifyCommand } from './command-classifier.js';
+import { fragmentMatches, matchSecretPath, matchSensitivePath } from './sensitive-paths.js';
 
 /**
  * Níveis de risco (ADR 02.4). Toda ação de agente é classificada em um deles
@@ -331,6 +333,12 @@ export const DEFAULT_POLICY: PolicyDocument = {
     irreversible: 'approve',
   },
   commands: {
+    // Casamento por PALAVRA (`cat` não casa `catalog`), cada segmento de um
+    // comando composto precisa passar por si. O que só lê (`ls`, `cat`,
+    // `git status`...) sai como risco `read`; o resto, `exec`. Comandos que
+    // escrevem arquivo (`mkdir`, `cp`, `mv`, `touch`) nem precisam estar aqui:
+    // são classificados pelo alvo, como a ferramenta Write. Rede (`curl`)
+    // também não: depende de `network.allowDomains`.
     allow: [
       'git status',
       'git diff',
@@ -340,30 +348,110 @@ export const DEFAULT_POLICY: PolicyDocument = {
       'git add',
       'git commit',
       'git stash',
+      'git fetch',
+      'git pull',
+      'git checkout',
+      'git switch',
+      'git merge',
+      'git rebase',
+      'git reset',
+      'git rev-parse',
+      'git ls-files',
+      'git blame',
+      'git grep',
+      'git describe',
+      'git shortlog',
+      'git remote',
+      'git tag',
+      'git mv',
+      'git rm',
+      'git restore',
+      'git worktree',
+      'git cherry-pick',
       'npm test',
       'npm run',
       'npm ci',
+      'npm install',
+      'npm i',
+      'npm ls',
       'npx tsc',
+      'tsc',
+      'vitest',
+      'jest',
+      'eslint',
+      'prettier',
       'node',
       'pnpm test',
       'pnpm run',
+      'pnpm install',
+      'pnpm i',
       'yarn test',
+      'yarn install',
+      'yarn build',
       'python',
+      'pip install',
       'pytest',
       'go test',
+      'go build',
+      'go vet',
+      'go run',
+      'go mod',
       'cargo test',
+      'cargo build',
+      'cargo check',
+      'cargo run',
+      'cargo fmt',
+      'cargo clippy',
+      'make',
+      'cmake',
+      'docker ps',
+      'docker images',
+      'docker build',
       'ls',
+      'dir',
       'cat',
+      'type',
+      'head',
+      'tail',
+      'wc',
+      'sort',
+      'uniq',
+      'cut',
+      'diff',
+      'jq',
+      'sed',
+      'awk',
+      'tree',
+      'which',
+      'where',
       'rg',
       'grep',
       'find',
       'echo',
+      'printf',
+      'Get-ChildItem',
+      'Get-Content',
+      'Select-String',
     ],
-    deny: ['sudo', 'shutdown', 'reboot', 'mkfs', 'diskpart', 'format ', 'reg delete'],
+    deny: [
+      'sudo',
+      'doas',
+      'shutdown',
+      'reboot',
+      'halt',
+      'poweroff',
+      'mkfs',
+      'diskpart',
+      'format',
+      'reg delete',
+    ],
   },
   paths: {
     allowWriteOutsideWorkdir: false,
-    denyFragments: ['.git/config', '.ssh', '.aws', '.env', 'id_rsa', 'credentials'],
+    // Somam-se aos caminhos sensíveis embutidos (`sensitive-paths.ts`: `.ssh`,
+    // `.env*`, `*.pem`, credenciais de CLI, `.git/hooks`, `.github/workflows`,
+    // settings de agentes...), que valem sempre e não se removem por config.
+    denyFragments: ['.git/config', '.git/hooks', '.github/workflows', '.ssh', '.aws', '.env', 'id_rsa', 'credentials'],
   },
   network: {
     allowDomains: [],
@@ -410,32 +498,13 @@ export function watchForMode(watch: WatchPolicy, mode: SessionMode): WatchPolicy
   };
 }
 
-/**
- * Comandos cujo efeito não dá para desfazer — sempre passam por aprovação.
- *
- * Todos os padrões usam a flag `i` (case-insensitive): PowerShell (comum no
- * Windows) e vários shells não diferenciam maiúsculas/minúsculas em nomes de
- * comando, então `Git Push`/`NPM Publish`/etc. precisam bater igual a
- * `git push`/`npm publish`.
+/*
+ * As regras de comando (tokenização, irreversíveis, wrappers, interpretadores)
+ * moram em `command-classifier.ts`; os caminhos sensíveis embutidos, em
+ * `sensitive-paths.ts`. Antes, aqui havia uma lista de regex ancoradas em `^`
+ * e a allow list casava por `startsWith` — `git status && git push` passava
+ * como "git status" (vistoria 2026-09-25, achado 1.1).
  */
-const IRREVERSIBLE_PATTERNS: RegExp[] = [
-  /^git\s+push\b/i,
-  /^git\s+reset\s+--hard\b/i,
-  /^git\s+clean\s+-[a-z]*f/i,
-  /^git\s+branch\s+-D\b/i,
-  /^git\s+tag\s+-d\b/i,
-  /^rm\s+-[a-z]*r[a-z]*f?\b/i,
-  /^rm\s+-[a-z]*f/i,
-  /^npm\s+publish\b/i,
-  /^pnpm\s+publish\b/i,
-  /^yarn\s+publish\b/i,
-  /^docker\s+(rm|rmi|system\s+prune)\b/i,
-  /^kubectl\s+delete\b/i,
-  /^terraform\s+(apply|destroy)\b/i,
-  /^gh\s+(pr\s+merge|release\s+create|repo\s+delete)\b/i,
-  /^aws\s+/i,
-  /^Remove-Item\b/i,
-];
 
 /** Ações que o Hub intercepta e classifica antes de deixar acontecer. */
 export type GuardedAction =
@@ -452,10 +521,29 @@ export interface PolicyVerdict {
   reason: string;
 }
 
+/** Resultado de `classify`: nível de risco e, se casou a deny list, `denied`. */
+export interface RiskClassification {
+  risk: RiskLevel;
+  reason: string;
+  /**
+   * A ação casou a deny list. `decide` devolve `deny` incondicionalmente —
+   * "sempre negado, mesmo em modo autônomo" é o contrato de `commands.deny`,
+   * e antes ela virava `irreversible` → `approve`, ou seja, um clique liberava.
+   * A vigilância reativa (que só vê o que já rodou) trata como `irreversible`.
+   */
+  denied?: boolean;
+}
+
 export interface PolicyContext {
   /** Diretório onde a sessão pode escrever livremente (worktree ou repo). */
   workdir: string;
   mode: SessionMode;
+  /**
+   * Diretórios de trabalho do PRÓPRIO agente fora do workdir (ex.: planos do
+   * Claude em `~/.claude/plans`). Escrever ali é risco `read`: não afeta
+   * projeto nem sistema. Ver `agentOwnDirs`.
+   */
+  agentDirs?: readonly string[];
 }
 
 export class PolicyEngine {
@@ -466,42 +554,24 @@ export class PolicyEngine {
   }
 
   /** Classifica a ação em um nível de risco, sem ainda decidir nada. */
-  classify(action: GuardedAction, ctx: PolicyContext): { risk: RiskLevel; reason: string } {
+  classify(action: GuardedAction, ctx: PolicyContext): RiskClassification {
     switch (action.kind) {
       case 'file.read':
-        return { risk: 'read', reason: 'leitura de arquivo' };
+        return this.#classifyRead(path.resolve(action.path), ctx);
 
-      case 'file.write': {
-        const target = path.resolve(action.path);
-        // Comparação case-insensitive: Windows e o padrão do macOS (APFS) têm
-        // sistema de arquivos insensível a maiúsculas/minúsculas, então
-        // `.ENV`/`ID_RSA`/`Credentials` são o MESMO arquivo físico que
-        // `.env`/`id_rsa`/`credentials` e precisam ser bloqueados igual.
-        const normalizedTarget = target.replaceAll('\\', '/').toLowerCase();
-        const fragment = this.policy.paths.denyFragments.find((f) =>
-          normalizedTarget.includes(f.toLowerCase()),
-        );
-        if (fragment) {
-          return { risk: 'irreversible', reason: `caminho sensível (${fragment})` };
-        }
-        if (!isInside(ctx.workdir, target) && !this.policy.paths.allowWriteOutsideWorkdir) {
-          return { risk: 'escalate', reason: 'escrita fora do diretório da sessão' };
-        }
-        return { risk: 'write', reason: 'escrita dentro do diretório da sessão' };
-      }
+      case 'file.write':
+        return this.#classifyWrite(path.resolve(action.path), ctx);
 
       case 'command': {
-        const cmd = action.command.trim();
-        const denied = this.policy.commands.deny.find((d) => cmd.startsWith(d));
-        if (denied) return { risk: 'irreversible', reason: `comando na deny list (${denied})` };
-
-        if (IRREVERSIBLE_PATTERNS.some((re) => re.test(cmd))) {
-          return { risk: 'irreversible', reason: 'comando com efeito irreversível' };
-        }
-        const allowed = this.policy.commands.allow.find((a) => cmd.startsWith(a));
-        if (allowed) return { risk: 'exec', reason: `comando na allow list (${allowed})` };
-
-        return { risk: 'escalate', reason: 'comando fora da allow list' };
+        const view: CommandPolicyView = {
+          workdir: ctx.workdir,
+          allow: this.policy.commands.allow,
+          deny: this.policy.commands.deny,
+          allowDomains: this.policy.network.allowDomains,
+          classifyWrite: (abs) => this.#classifyWrite(abs, ctx),
+          classifyRead: (abs) => this.#classifyRead(abs, ctx),
+        };
+        return classifyCommand(action.command, view);
       }
 
       case 'network': {
@@ -524,11 +594,53 @@ export class PolicyEngine {
   }
 
   /**
+   * Leitura: livre, exceto segredo (`~/.ssh`, `.env`, `*.pem`, credenciais de
+   * CLI...). Segredo lido é `irreversible` — vazar não se desfaz, então pede
+   * aprovação em todos os modos e para a sessão na vigilância.
+   */
+  #classifyRead(target: string, ctx: PolicyContext): RiskClassification {
+    const secret = matchSecretPath(relativeIfInside(ctx.workdir, target));
+    if (secret) return { risk: 'irreversible', reason: `leitura de segredo (${secret.label})` };
+    return { risk: 'read', reason: 'leitura de arquivo' };
+  }
+
+  #classifyWrite(target: string, ctx: PolicyContext): RiskClassification {
+    // O casamento usa o caminho RELATIVO ao workdir quando está dentro dele:
+    // os worktrees moram em `~/.agents-hub/worktrees/...`, e o absoluto faria
+    // toda escrita legítima casar `.agents-hub`.
+    const rel = relativeIfInside(ctx.workdir, target);
+    const sensitive = matchSensitivePath(rel);
+    if (sensitive) {
+      return { risk: 'irreversible', reason: `caminho sensível (${sensitive.label})` };
+    }
+    // Comparação case-insensitive: Windows e o padrão do macOS (APFS) têm
+    // sistema de arquivos insensível a maiúsculas/minúsculas, então
+    // `.ENV`/`ID_RSA`/`Credentials` são o MESMO arquivo físico que
+    // `.env`/`id_rsa`/`credentials` e precisam ser bloqueados igual. O
+    // fragmento casa por fronteira de segmento (`.env` não pega `.environment`).
+    const normalized = rel.replaceAll('\\', '/').toLowerCase();
+    const fragment = this.policy.paths.denyFragments.find((f) => fragmentMatches(normalized, f));
+    if (fragment) {
+      return { risk: 'irreversible', reason: `caminho sensível (${fragment})` };
+    }
+    if (ctx.agentDirs?.some((d) => isInside(d, target))) {
+      return { risk: 'read', reason: 'escrita no diretório de trabalho do próprio agente (plano)' };
+    }
+    if (!isInside(ctx.workdir, target) && !this.policy.paths.allowWriteOutsideWorkdir) {
+      return { risk: 'escalate', reason: 'escrita fora do diretório da sessão' };
+    }
+    return { risk: 'write', reason: 'escrita dentro do diretório da sessão' };
+  }
+
+  /**
    * Decide o que fazer. O modo de supervisão é um *overlay*: só endurece,
    * nunca afrouxa o que a política já definiu.
    */
   decide(action: GuardedAction, ctx: PolicyContext): PolicyVerdict {
-    const { risk, reason } = this.classify(action, ctx);
+    const { risk, reason, denied } = this.classify(action, ctx);
+    // Deny list é proibição, não pedido de aprovação: nenhum modo e nenhum
+    // `policy.risk` a transforma em `approve`/`allow`.
+    if (denied) return { risk, decision: 'deny', reason };
     const base = this.policy.risk[risk];
     const byMode = decisionForMode(risk, ctx.mode);
     return { risk, decision: narrowestDecision(base, byMode), reason };
@@ -623,6 +735,11 @@ export function inheritMode(parent: SessionMode, requested?: SessionMode): Sessi
 export function isInside(parentDir: string, target: string): boolean {
   const rel = path.relative(path.resolve(parentDir), path.resolve(target));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/** Caminho relativo ao workdir se estiver dentro dele; senão, o absoluto. */
+function relativeIfInside(workdir: string, target: string): string {
+  return isInside(workdir, target) ? path.relative(path.resolve(workdir), target) : target;
 }
 
 function safeHost(url: string): string | null {

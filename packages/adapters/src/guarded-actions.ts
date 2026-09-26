@@ -92,12 +92,14 @@ export function avaliarVigilancia(
   mode: SessionMode,
   engine: PolicyEngine,
   watch: WatchPolicy,
+  /** Diretórios de trabalho do próprio agente (ver `agentOwnDirs` no core). */
+  agentDirs: readonly string[] = [],
 ): VigilanciaVeredito {
   const actions = guardedActionsOf(mapped, workdir);
   const flagged: VeredictoDeAcao[] = [];
 
   for (const action of actions) {
-    const { risk, reason } = engine.classify(action, { workdir, mode });
+    const { risk, reason } = engine.classify(action, { workdir, mode, agentDirs });
 
     if (watch.pauseOn.includes(risk)) {
       return { outcome: 'paused', flagged, pausedBy: { action, risk, reason } };
