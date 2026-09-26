@@ -17,6 +17,7 @@ import {
   CreateProjectSchema,
   AgentIdParamSchema,
   ImportSchema,
+  ProjectTrustSchema,
   DelegateSchema,
   HandoffSessionSchema,
   ResolveApprovalSchema,
@@ -352,6 +353,19 @@ export class HubServer {
     this.#route('POST', '/projects', async (req, res) => {
       const body = await readBody(req, CreateProjectSchema);
       sendJson(res, 201, { project: this.sessions.registerProject(body.path, body.name) });
+    });
+
+    // Confiança no projeto: libera `validation.command`/revisão do
+    // `.agents-hub/config.yaml` do repositório (que viram processo). Mora no
+    // banco do Hub, fora do repo — ver `ProjectRegistry.setTrusted`.
+    this.#route('POST', '/projects/:id/trust', async (req, res, params) => {
+      const body = await readBody(req, ProjectTrustSchema);
+      sendJson(res, 200, {
+        project: this.sessions.setProjectTrusted(
+          param(params['id'], ProjectIdSchema, 'id'),
+          body.trusted,
+        ),
+      });
     });
 
     // Pastas do projeto. Um projeto agrupa N pastas; a sessão roda em UMA

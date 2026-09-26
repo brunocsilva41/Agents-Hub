@@ -66,7 +66,7 @@ class SqliteProjectRepository implements ProjectRepository {
   constructor(private readonly db: Db) {}
 
   create(input: Omit<Project, 'id' | 'createdAt'>): Project {
-    const project: Project = { ...input, id: newId('prj'), createdAt: nowIso() };
+    const project: Project = { ...input, id: newId('prj'), createdAt: nowIso(), trusted: false };
     this.db
       .prepare(
         `INSERT INTO projects (id, name, path, default_branch, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -78,6 +78,11 @@ class SqliteProjectRepository implements ProjectRepository {
   get(id: string): Project | null {
     const row = one<Row>(this.db.prepare('SELECT * FROM projects WHERE id = ?'), id);
     return row ? mapProject(row) : null;
+  }
+
+  setTrusted(id: string, trusted: boolean): Project | null {
+    this.db.prepare('UPDATE projects SET trusted = ? WHERE id = ?').run(trusted ? 1 : 0, id);
+    return this.get(id);
   }
 
   getByPath(p: string): Project | null {
@@ -651,6 +656,8 @@ function mapProject(row: Row): Project {
     path: str(row['path']),
     defaultBranch: str(row['default_branch']),
     createdAt: str(row['created_at']),
+    // Mesmo cuidado de `isPrimary`: só `1` é verdadeiro.
+    trusted: Number(row['trusted']) === 1,
   };
 }
 

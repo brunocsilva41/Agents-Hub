@@ -20,7 +20,9 @@ import type { GraphNode } from './graph.js';
  */
 
 export interface ProjectRepository {
-  create(input: Omit<Project, 'id' | 'createdAt'>): Project;
+  create(input: Omit<Project, 'id' | 'createdAt' | 'trusted'>): Project;
+  /** Marca/desmarca o projeto como confiável (ver `Project.trusted`). */
+  setTrusted(id: string, trusted: boolean): Project | null;
   get(id: string): Project | null;
   getByPath(path: string): Project | null;
   list(): Project[];

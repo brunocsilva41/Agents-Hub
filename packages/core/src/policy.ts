@@ -178,6 +178,69 @@ export const PartialPolicyDocumentSchema = PolicyDocumentSchema.deepPartial();
 export type PartialPolicyDocument = z.infer<typeof PartialPolicyDocumentSchema>;
 
 /**
+ * Campos da política que, vindos de uma camada, viram PROCESSO na máquina de
+ * quem roda o Hub — não são limite, são instrução de execução.
+ *
+ * - `validation.command`: rodado com `shell: true` no worktree ao fim de cada
+ *   task, fora do gate de comandos (é o próprio Hub quem executa, não o
+ *   agente). Vindo de um `.agents-hub/config.yaml` versionado, clonar um
+ *   repositório malicioso bastaria para executar código arbitrário.
+ * - `validation.review.enabled` / `validation.review.agent`: ligam e escolhem
+ *   uma sessão inteira de agente (processo de CLI de modelo, com custo) por
+ *   task.
+ *
+ * Sob `clampToBase` estes campos da camada são IGNORADOS, a menos que o
+ * chamador declare `trustExecFields` — o que só acontece quando o usuário
+ * marcou o projeto como confiável fora do repositório (registro do projeto no
+ * banco do Hub). Ver `mergeProjectPolicy` no daemon.
+ */
+export const EXEC_POLICY_FIELDS = [
+  'validation.command',
+  'validation.review.enabled',
+  'validation.review.agent',
+] as const;
+
+export type ExecPolicyField = (typeof EXEC_POLICY_FIELDS)[number];
+
+/** Quais campos de execução esta camada declara (para avisar quando forem ignorados). */
+export function execFieldsDeclared(layer: PartialPolicyDocument): ExecPolicyField[] {
+  const declarados: ExecPolicyField[] = [];
+  if (layer.validation?.command !== undefined) declarados.push('validation.command');
+  if (layer.validation?.review?.enabled !== undefined) declarados.push('validation.review.enabled');
+  if (layer.validation?.review?.agent !== undefined) declarados.push('validation.review.agent');
+  return declarados;
+}
+
+/** Remove da camada os campos de execução — o que sobra é só limite. */
+export function withoutExecFields(layer: PartialPolicyDocument): PartialPolicyDocument {
+  if (layer.validation === undefined) return layer;
+  const { command: _command, review, ...restoValidation } = layer.validation;
+  const validation: NonNullable<PartialPolicyDocument['validation']> = { ...restoValidation };
+  if (review !== undefined) {
+    const { enabled: _enabled, agent: _agent, ...restoReview } = review;
+    if (Object.keys(restoReview).length > 0) validation.review = restoReview;
+  }
+  const semValidation = { ...layer };
+  delete semValidation.validation;
+  return Object.keys(validation).length > 0 ? { ...semValidation, validation } : semValidation;
+}
+
+/** Teto numérico: sob clamp a camada só pode DIMINUIR. */
+function menorOuBase(base: number, layer: number | undefined): number {
+  return layer === undefined ? base : Math.min(base, layer);
+}
+
+/** Allow list: sob clamp só encolhe — a camada filtra, nunca acrescenta. */
+function subconjunto(base: string[], layer: string[] | undefined): string[] {
+  return layer === undefined ? base : layer.filter((x) => base.includes(x));
+}
+
+/** Deny list: sob clamp só cresce — a camada soma, nunca remove. */
+function uniao<T>(base: T[], layer: T[] | undefined): T[] {
+  return [...new Set([...base, ...(layer ?? [])])];
+}
+
+/**
  * Funde uma camada parcial de política sobre uma base, campo a campo —
  * inclusive dentro de objetos aninhados como `validation.review`.
  *
@@ -188,128 +251,194 @@ export type PartialPolicyDocument = z.infer<typeof PartialPolicyDocumentSchema>;
  * descer um nível a mais do que parecia.
  *
  * `opts.clampToBase` é o comportamento de `mergeProjectPolicy`: a config de
- * projeto só pode APERTAR a política global, nunca afrouxar (ver o comentário
- * lá). Sem a opção, a config global funde livre — não há "mais restritivo que
- * o quê" no topo da hierarquia.
+ * projeto só pode APERTAR a política global, nunca afrouxar. Sem a opção, a
+ * config global funde livre — não há "mais restritivo que o quê" no topo da
+ * hierarquia.
+ *
+ * REGRA DE CADA CAMPO sob `clampToBase` (monotônica: o resultado nunca é mais
+ * permissivo que `base`, qualquer que seja `layer`). Achado ALTO da vistoria
+ * 2026-09-25: antes, orçamento, timeouts, retries e `fallback` fundiam livres,
+ * e `validation.command` do repositório era aceito sempre que a global não
+ * tinha um — um repo clonado conseguia AUMENTAR orçamento/timeouts/retries e
+ * executar código.
+ *
+ * | campo                              | regra                                   |
+ * |------------------------------------|-----------------------------------------|
+ * | maxDepth                           | min(base, layer)                        |
+ * | maxConcurrency                     | min(base, layer)                        |
+ * | maxConcurrencyPerAgent             | min(base, layer)                        |
+ * | taskTimeoutSeconds                 | min(base, layer)                        |
+ * | sessionTimeoutSeconds              | min(base, layer)                        |
+ * | heartbeatTimeoutSeconds            | min(base, layer) (morre mais cedo)      |
+ * | defaultBudget.usd/tokens/seconds   | min(base, layer), cada um               |
+ * | risk.<nível>                       | decisão mais restrita (narrowestDecision)|
+ * | commands.allow                     | subconjunto da base (só encolhe)        |
+ * | commands.deny                      | união (só cresce)                       |
+ * | paths.allowWriteOutsideWorkdir     | AND lógico (só desliga)                 |
+ * | paths.denyFragments                | união (só cresce)                       |
+ * | network.allowDomains               | subconjunto da base (só encolhe)        |
+ * | retries.max                        | min(base, layer)                        |
+ * | retries.backoffMs                  | min(base, layer) — o `sleep` do backoff |
+ * |                                    | não é limitado por timeout algum; um    |
+ * |                                    | valor enorme congelaria a sessão, e o   |
+ * |                                    | número de tentativas continua ≤ base    |
+ * | fallback.<capability>              | subconjunto da cadeia da base, na ordem |
+ * |                                    | da camada; capability que a base não    |
+ * |                                    | tem é ignorada (não cria agente novo)   |
+ * | watch.pauseOn / watch.flagOn       | união (só cresce)                       |
+ * | validation.commandTimeoutSeconds   | min(base, layer)                        |
+ * | validation.command                 | CAMPO DE EXECUÇÃO: ignorado; com        |
+ * |                                    | `trustExecFields`, string da camada     |
+ * |                                    | substitui a base (null não desliga a    |
+ * |                                    | validação que a base já exige)          |
+ * | validation.review.enabled          | CAMPO DE EXECUÇÃO: ignorado; com        |
+ * |                                    | `trustExecFields`, base OR camada       |
+ * |                                    | (projeto não desliga revisão global)    |
+ * | validation.review.agent            | CAMPO DE EXECUÇÃO: ignorado; com        |
+ * |                                    | `trustExecFields`, camada ?? base       |
+ *
+ * Um campo novo em `PolicyDocument` TEM que ganhar linha nesta tabela e regra
+ * abaixo — `...base` no retorno garante só que ele não vem da camada.
  */
 export function mergePolicyLayer(
   base: PolicyDocument,
   layer: PartialPolicyDocument,
-  opts: { clampToBase?: boolean } = {},
+  opts: { clampToBase?: boolean; trustExecFields?: boolean } = {},
 ): PolicyDocument {
   const clamp = opts.clampToBase ?? false;
+  if (clamp) return clampLayer(base, layer, opts.trustExecFields ?? false);
 
-  const maxDepth = clamp
-    ? Math.min(base.maxDepth, layer.maxDepth ?? base.maxDepth)
-    : (layer.maxDepth ?? base.maxDepth);
-  const maxConcurrency = clamp
-    ? Math.min(base.maxConcurrency, layer.maxConcurrency ?? base.maxConcurrency)
-    : (layer.maxConcurrency ?? base.maxConcurrency);
-  const maxConcurrencyPerAgent = clamp
-    ? Math.min(
-        base.maxConcurrencyPerAgent,
-        layer.maxConcurrencyPerAgent ?? base.maxConcurrencyPerAgent,
-      )
-    : (layer.maxConcurrencyPerAgent ?? base.maxConcurrencyPerAgent);
-
-  const commandsAllow =
-    layer.commands?.allow !== undefined
-      ? clamp
-        ? layer.commands.allow.filter((c) => base.commands.allow.includes(c))
-        : layer.commands.allow
-      : base.commands.allow;
-  const commandsDeny = clamp
-    ? [...new Set([...base.commands.deny, ...(layer.commands?.deny ?? [])])]
-    : (layer.commands?.deny ?? base.commands.deny);
-
-  const watchPauseOn = clamp
-    ? [...new Set([...base.watch.pauseOn, ...(layer.watch?.pauseOn ?? [])])]
-    : (layer.watch?.pauseOn ?? base.watch.pauseOn);
-  const watchFlagOn = clamp
-    ? [...new Set([...base.watch.flagOn, ...(layer.watch?.flagOn ?? [])])]
-    : (layer.watch?.flagOn ?? base.watch.flagOn);
-
-  // `risk` sob clamp: layer NUNCA pode afrouxar uma decisão da base (achado
-  // CRÍTICO de auditoria — antes disto, `{ ...base.risk, ...layer.risk }`
-  // deixava a camada de projeto sobrescrever `irreversible`/`escalate` de
-  // `approve` para `allow` sem nenhuma restrição, contradizendo a garantia
-  // documentada em SECURITY.md de que config de projeto só pode apertar.
-  // `narrowestDecision` já existe para isto — é a mesma regra que a
-  // delegação pai→filho usa (`intersect()` mais abaixo).
-  const riskMerged = clamp
-    ? (Object.keys(base.risk) as RiskLevel[]).reduce<Record<RiskLevel, Decision>>(
-        (acc, level) => {
-          acc[level] = narrowestDecision(base.risk[level], layer.risk?.[level] ?? base.risk[level]);
-          return acc;
-        },
-        {} as Record<RiskLevel, Decision>,
-      )
-    : ({ ...base.risk, ...(layer.risk ?? {}) } as Record<RiskLevel, Decision>);
-
+  // Sem clamp (config global sobre o padrão): a camada substitui campo a campo.
   return {
     ...base,
-    maxDepth,
-    maxConcurrency,
-    maxConcurrencyPerAgent,
+    maxDepth: layer.maxDepth ?? base.maxDepth,
+    maxConcurrency: layer.maxConcurrency ?? base.maxConcurrency,
+    maxConcurrencyPerAgent: layer.maxConcurrencyPerAgent ?? base.maxConcurrencyPerAgent,
     taskTimeoutSeconds: layer.taskTimeoutSeconds ?? base.taskTimeoutSeconds,
     sessionTimeoutSeconds: layer.sessionTimeoutSeconds ?? base.sessionTimeoutSeconds,
     heartbeatTimeoutSeconds: layer.heartbeatTimeoutSeconds ?? base.heartbeatTimeoutSeconds,
     defaultBudget: { ...base.defaultBudget, ...(layer.defaultBudget ?? {}) },
-    risk: riskMerged,
+    risk: { ...base.risk, ...(layer.risk ?? {}) } as Record<RiskLevel, Decision>,
     commands: {
-      allow: commandsAllow,
-      deny: commandsDeny,
+      allow: layer.commands?.allow ?? base.commands.allow,
+      deny: layer.commands?.deny ?? base.commands.deny,
     },
     paths: {
-      // Mesma regra da fila acima: sob clamp, layer só pode DESLIGAR
-      // (`true` → `false`), nunca ligar o que a base não já permitia — AND
-      // lógico, igual ao merge pai→filho na delegação (`intersect()` mais
-      // abaixo). Antes desta correção, `layer.paths?.allowWriteOutsideWorkdir
-      // ?? base...` deixava a camada de projeto ligar escrita fora do
-      // worktree incondicionalmente.
-      allowWriteOutsideWorkdir: clamp
-        ? base.paths.allowWriteOutsideWorkdir &&
-          (layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir)
-        : (layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir),
-      denyFragments: clamp
-        ? [...new Set([...base.paths.denyFragments, ...(layer.paths?.denyFragments ?? [])])]
-        : (layer.paths?.denyFragments ?? base.paths.denyFragments),
+      allowWriteOutsideWorkdir:
+        layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir,
+      denyFragments: layer.paths?.denyFragments ?? base.paths.denyFragments,
     },
     network: {
-      allowDomains:
-        layer.network?.allowDomains !== undefined
-          ? clamp
-            ? layer.network.allowDomains.filter((d) => base.network.allowDomains.includes(d))
-            : layer.network.allowDomains
-          : base.network.allowDomains,
+      allowDomains: layer.network?.allowDomains ?? base.network.allowDomains,
     },
     retries: { ...base.retries, ...(layer.retries ?? {}) },
     fallback: { ...base.fallback, ...(layer.fallback ?? {}) } as Record<string, string[]>,
     watch: {
-      pauseOn: watchPauseOn as RiskLevel[],
-      flagOn: watchFlagOn as RiskLevel[],
+      pauseOn: (layer.watch?.pauseOn ?? base.watch.pauseOn) as RiskLevel[],
+      flagOn: (layer.watch?.flagOn ?? base.watch.flagOn) as RiskLevel[],
     },
     validation: {
-      command: clamp
-        ? (base.validation.command ?? layer.validation?.command ?? null)
-        : (layer.validation?.command !== undefined
-            ? layer.validation.command
-            : base.validation.command),
-      commandTimeoutSeconds: clamp
-        ? Math.min(
-            base.validation.commandTimeoutSeconds,
-            layer.validation?.commandTimeoutSeconds ?? base.validation.commandTimeoutSeconds,
-          )
-        : (layer.validation?.commandTimeoutSeconds ?? base.validation.commandTimeoutSeconds),
+      command:
+        layer.validation?.command !== undefined ? layer.validation.command : base.validation.command,
+      commandTimeoutSeconds:
+        layer.validation?.commandTimeoutSeconds ?? base.validation.commandTimeoutSeconds,
       review: {
-        enabled: clamp
-          ? base.validation.review.enabled || (layer.validation?.review?.enabled ?? false)
-          : (layer.validation?.review?.enabled ?? base.validation.review.enabled),
+        enabled: layer.validation?.review?.enabled ?? base.validation.review.enabled,
         agent:
           layer.validation?.review?.agent !== undefined
             ? layer.validation.review.agent
             : base.validation.review.agent,
       },
+    },
+  };
+}
+
+/** O ramo `clampToBase` de `mergePolicyLayer` — ver a tabela lá. */
+function clampLayer(
+  base: PolicyDocument,
+  layer: PartialPolicyDocument,
+  trustExecFields: boolean,
+): PolicyDocument {
+  // `risk`: a camada NUNCA afrouxa uma decisão da base (achado CRÍTICO de
+  // 2026-09-22 — antes `{ ...base.risk, ...layer.risk }` deixava o projeto
+  // trocar `irreversible` de `approve` para `allow`). Mesma regra da
+  // delegação pai→filho (`intersect()` mais abaixo).
+  const risk = (Object.keys(base.risk) as RiskLevel[]).reduce<Record<RiskLevel, Decision>>(
+    (acc, level) => {
+      acc[level] = narrowestDecision(base.risk[level], layer.risk?.[level] ?? base.risk[level]);
+      return acc;
+    },
+    {} as Record<RiskLevel, Decision>,
+  );
+
+  // `fallback`: só as capabilities que a base já tem, e só com agentes que a
+  // cadeia da base já aceitava — o projeto reordena ou corta, não acrescenta.
+  const fallback: Record<string, string[]> = { ...base.fallback };
+  for (const [capability, cadeia] of Object.entries(layer.fallback ?? {})) {
+    const daBase = base.fallback[capability];
+    if (daBase === undefined || cadeia === undefined) continue;
+    fallback[capability] = cadeia.filter((agente) => daBase.includes(agente));
+  }
+
+  // Campos de execução: sem confiança explícita do usuário, a camada não
+  // chega neles. Com confiança, ainda não podem DESLIGAR o que a base exige.
+  const v = layer.validation;
+  const command =
+    trustExecFields && typeof v?.command === 'string' ? v.command : base.validation.command;
+  const reviewEnabled =
+    base.validation.review.enabled || (trustExecFields && v?.review?.enabled === true);
+  const reviewAgent =
+    trustExecFields && v?.review?.agent !== undefined
+      ? v.review.agent
+      : base.validation.review.agent;
+
+  return {
+    ...base,
+    maxDepth: menorOuBase(base.maxDepth, layer.maxDepth),
+    maxConcurrency: menorOuBase(base.maxConcurrency, layer.maxConcurrency),
+    maxConcurrencyPerAgent: menorOuBase(base.maxConcurrencyPerAgent, layer.maxConcurrencyPerAgent),
+    taskTimeoutSeconds: menorOuBase(base.taskTimeoutSeconds, layer.taskTimeoutSeconds),
+    sessionTimeoutSeconds: menorOuBase(base.sessionTimeoutSeconds, layer.sessionTimeoutSeconds),
+    heartbeatTimeoutSeconds: menorOuBase(
+      base.heartbeatTimeoutSeconds,
+      layer.heartbeatTimeoutSeconds,
+    ),
+    defaultBudget: {
+      usd: menorOuBase(base.defaultBudget.usd, layer.defaultBudget?.usd),
+      tokens: menorOuBase(base.defaultBudget.tokens, layer.defaultBudget?.tokens),
+      seconds: menorOuBase(base.defaultBudget.seconds, layer.defaultBudget?.seconds),
+    },
+    risk,
+    commands: {
+      allow: subconjunto(base.commands.allow, layer.commands?.allow),
+      deny: uniao(base.commands.deny, layer.commands?.deny),
+    },
+    paths: {
+      // AND lógico: a camada só DESLIGA, nunca liga o que a base não permitia.
+      allowWriteOutsideWorkdir:
+        base.paths.allowWriteOutsideWorkdir &&
+        (layer.paths?.allowWriteOutsideWorkdir ?? base.paths.allowWriteOutsideWorkdir),
+      denyFragments: uniao(base.paths.denyFragments, layer.paths?.denyFragments),
+    },
+    network: {
+      allowDomains: subconjunto(base.network.allowDomains, layer.network?.allowDomains),
+    },
+    retries: {
+      max: menorOuBase(base.retries.max, layer.retries?.max),
+      backoffMs: menorOuBase(base.retries.backoffMs, layer.retries?.backoffMs),
+    },
+    fallback,
+    watch: {
+      pauseOn: uniao<RiskLevel>(base.watch.pauseOn, layer.watch?.pauseOn),
+      flagOn: uniao<RiskLevel>(base.watch.flagOn, layer.watch?.flagOn),
+    },
+    validation: {
+      command,
+      commandTimeoutSeconds: menorOuBase(
+        base.validation.commandTimeoutSeconds,
+        v?.commandTimeoutSeconds,
+      ),
+      review: { enabled: reviewEnabled, agent: reviewAgent },
     },
   };
 }

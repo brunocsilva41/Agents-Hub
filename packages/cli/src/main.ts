@@ -134,6 +134,8 @@ ${bold('Projetos')}
   hub project prompt [projeto] --agent <id> --clear           apaga a instrução
   hub project folders [projeto]                               lista as pastas vinculadas ao projeto
   hub project folders remove [projeto] <folderId>             desvincula uma pasta
+  hub project trust [projeto]                                 confia no projeto: libera validation.command/revisão do config.yaml do repo
+  hub project untrust [projeto]                               retira a confiança (padrão: não confiável)
       ${dim('[projeto] aceita id ou caminho; sem ele, usa o diretório atual (registra se preciso).')}
 
 ${bold('Sessões')}
@@ -603,7 +605,8 @@ async function listProjects(client: HubClient): Promise<void> {
     return;
   }
   for (const project of projects) {
-    console.log(`${bold(project.name)} ${dim(project.id)}\n   ${dim(project.path)}`);
+    const confianca = project.trusted ? ` ${yellow('[confiável]')}` : '';
+    console.log(`${bold(project.name)} ${dim(project.id)}${confianca}\n   ${dim(project.path)}`);
   }
 }
 
@@ -618,9 +621,13 @@ async function projectCommand(client: HubClient, args: Args): Promise<void> {
       return projectPrompt(client, args, rest[0]);
     case 'folders':
       return projectFolders(client, rest);
+    case 'trust':
+      return projectTrust(client, rest[0], true);
+    case 'untrust':
+      return projectTrust(client, rest[0], false);
     default:
       console.error(
-        red('uso: hub project <add|env|prompt> ...') + '\n' + dim('veja "hub help" para os detalhes de cada um.'),
+        red('uso: hub project <add|env|prompt|folders|trust|untrust> ...') + '\n' + dim('veja "hub help" para os detalhes de cada um.'),
       );
       process.exitCode = 1;
   }
@@ -629,6 +636,30 @@ async function projectCommand(client: HubClient, args: Args): Promise<void> {
 async function projectAdd(client: HubClient, dir: string | undefined): Promise<void> {
   const { project } = await client.addProject(path.resolve(dir ?? process.cwd()));
   console.log(`${green('registrado')} ${bold(project.name)} ${dim(project.id)}`);
+}
+
+/**
+ * `hub project trust|untrust [projeto]` — confiança explícita NESTA máquina.
+ *
+ * Sem ela, `validation.command` e a revisão declarados no
+ * `.agents-hub/config.yaml` do repositório são ignorados: viram processo, e o
+ * arquivo é versionado — clonar um repo malicioso não pode bastar para
+ * executar código. A marca fica no banco do Hub, fora do repositório.
+ */
+async function projectTrust(
+  client: HubClient,
+  projectRef: string | undefined,
+  trusted: boolean,
+): Promise<void> {
+  const projectId = await resolveProjectId(client, projectRef);
+  const { project } = await client.setProjectTrusted(projectId, trusted);
+  if (trusted) {
+    console.log(`${green('confiável')} ${bold(project.name)} ${dim(project.id)}`);
+    console.log(dim('validation.command e revisão do .agents-hub/config.yaml deste projeto passam a valer.'));
+  } else {
+    console.log(`${yellow('não confiável')} ${bold(project.name)} ${dim(project.id)}`);
+    console.log(dim('validation.command e revisão do .agents-hub/config.yaml deste projeto serão ignorados.'));
+  }
 }
 
 /**

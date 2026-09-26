@@ -202,7 +202,14 @@ policy:
     command: npx tsc -b
 ```
 
-O projeto só pode **apertar** a política global, nunca afrouxar — senão um `.agents-hub/config.yaml` num repo clonado viraria execução arbitrária. Detalhes em [docs/04-resiliencia-e-politica.md](docs/04-resiliencia-e-politica.md).
+O projeto só pode **apertar** a política global, nunca afrouxar — orçamento, timeouts, retries e concorrência só descem; allow lists só encolhem; deny lists só crescem. E `validation.command`/revisão viram processo na sua máquina, então só valem depois que **você** marcar o projeto como confiável (a marca fica no banco do Hub, fora do repo):
+
+```bash
+hub project trust [projeto]     # libera validation.command/revisão do config.yaml
+hub project untrust [projeto]   # volta ao padrão: ignorados, com aviso na timeline
+```
+
+Sem isso, um `.agents-hub/config.yaml` num repo clonado viraria execução arbitrária. Detalhes em [docs/04-resiliencia-e-politica.md](docs/04-resiliencia-e-politica.md).
 
 ## Decisões
 

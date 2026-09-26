@@ -2,11 +2,14 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import path from 'node:path';
 import { parseDocument, parse as parseYaml, YAMLMap, type Document } from 'yaml';
 import {
+  execFieldsDeclared,
   filtrarEnvDeProjeto,
   HubError,
   mergePolicyLayer,
   PartialPolicyDocumentSchema,
+  withoutExecFields,
   type ContextoDoProjeto,
+  type ExecPolicyField,
   type PolicyDocument,
 } from '@agents-hub/core';
 
@@ -58,6 +61,31 @@ interface Cached {
 export interface LoadedProjectOverrides {
   overrides: ProjectPolicyOverrides;
   error: string | null;
+  /**
+   * Campos que viram processo (`EXEC_POLICY_FIELDS`) declarados no YAML e
+   * DESCARTADOS porque o projeto não é confiável. Vazio quando confiável ou
+   * quando o YAML não declara nenhum. Ver `ignoredExecFieldsWarning`.
+   */
+  ignoredExecFields: ExecPolicyField[];
+}
+
+/** Como ler a config do projeto. */
+export interface LoadProjectOverridesOptions {
+  /**
+   * O usuário marcou o projeto como confiável (registro do Hub, fora do
+   * repositório). Sem isto, `validation.command` e revisão do YAML são
+   * descartados — ver `EXEC_POLICY_FIELDS` em `@agents-hub/core`.
+   */
+  trusted?: boolean;
+}
+
+/** Texto do aviso quando campos de execução do repo foram descartados. */
+export function ignoredExecFieldsWarning(projectPath: string, fields: string[]): string {
+  return (
+    `${projectConfigPath(projectPath)} declara ${fields.join(', ')}, que executa(m) processo ` +
+    'na sua máquina — IGNORADO(S) porque este projeto não está marcado como confiável. ' +
+    'Revise o arquivo e, se confiar nele, rode "hub project trust <projeto>".'
+  );
 }
 
 const cache = new Map<string, Cached | null>();
@@ -101,13 +129,43 @@ export function projectConfigPath(projectPath: string): string {
  * afrouxa a política sozinho), mas isso não pode acontecer em silêncio — quem
  * editou o arquivo errado precisa de um sinal de que a política "apertada"
  * que ele esperava não está valendo. Por isso o retorno inclui `error`.
+ *
+ * Campos que viram processo (`validation.command`, revisão) só passam se
+ * `opts.trusted` — confiança que o usuário dá FORA do repositório. Sem ela
+ * são descartados e listados em `ignoredExecFields` (achado ALTO da vistoria
+ * 2026-09-25: clonar um repo com `validation.command` executava o comando).
  */
-export function loadProjectOverrides(projectPath: string): LoadedProjectOverrides {
+export function loadProjectOverrides(
+  projectPath: string,
+  opts: LoadProjectOverridesOptions = {},
+): LoadedProjectOverrides {
+  const lido = lerOverridesBrutos(projectPath);
+  if (opts.trusted === true) return { ...lido.loaded, ignoredExecFields: [] };
+
+  const ignorados = execFieldsDeclared(lido.loaded.overrides);
+  if (ignorados.length === 0) return { ...lido.loaded, ignoredExecFields: [] };
+
+  // Log só quando o arquivo foi (re)lido — esta função roda a cada gate.
+  if (lido.fresco) {
+    console.warn(`[project-config] ${ignoredExecFieldsWarning(projectPath, ignorados)}`);
+  }
+  return {
+    overrides: withoutExecFields(lido.loaded.overrides) as ProjectPolicyOverrides,
+    error: lido.loaded.error,
+    ignoredExecFields: ignorados,
+  };
+}
+
+/** Leitura crua (sem o filtro de confiança), com o cache por mtime+size. */
+function lerOverridesBrutos(projectPath: string): {
+  loaded: Omit<LoadedProjectOverrides, 'ignoredExecFields'>;
+  fresco: boolean;
+} {
   const file = projectConfigPath(projectPath);
 
   if (!existsSync(file)) {
     cache.set(file, null);
-    return { overrides: {}, error: null };
+    return { loaded: { overrides: {}, error: null }, fresco: false };
   }
 
   const stat = statSync(file);
@@ -121,7 +179,7 @@ export function loadProjectOverrides(projectPath: string): LoadedProjectOverride
   // `stat`), então fecha essa janela sem precisar reler o arquivo em toda
   // chamada.
   if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-    return { overrides: cached.overrides, error: null };
+    return { loaded: { overrides: cached.overrides, error: null }, fresco: false };
   }
 
   try {
@@ -142,12 +200,12 @@ export function loadProjectOverrides(projectPath: string): LoadedProjectOverride
         .join('; ');
       const message = `${file}: política do projeto inválida (${detalhe}) — caindo na política global`;
       console.error(`[project-config] ${message}`);
-      return { overrides: {}, error: message };
+      return { loaded: { overrides: {}, error: message }, fresco: true };
     }
 
     const overrides = validado.data as ProjectPolicyOverrides;
     cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, overrides });
-    return { overrides, error: null };
+    return { loaded: { overrides, error: null }, fresco: true };
   } catch (err) {
     // Um YAML quebrado não pode derrubar o daemon nem, pior, silenciosamente
     // afrouxar a política: caímos no global, que é o lado seguro. Mas
@@ -155,7 +213,7 @@ export function loadProjectOverrides(projectPath: string): LoadedProjectOverride
     cache.set(file, null);
     const message = `${file}: YAML inválido (${(err as Error).message}) — caindo na política global`;
     console.error(`[project-config] ${message}`);
-    return { overrides: {}, error: message };
+    return { loaded: { overrides: {}, error: message }, fresco: true };
   }
 }
 
@@ -369,16 +427,27 @@ export function contextForAgent(ctx: ProjectContext, agentId: string): ContextoD
  * `maxDepth` e `maxConcurrency` só descem; a allow list de comandos só perde
  * itens; a deny list só ganha. Se um repositório pudesse elevar o próprio teto,
  * bastaria um `.agents-hub/config.yaml` malicioso num repo clonado para o Hub
- * passar a executar o que ele quisesse.
+ * passar a executar o que ele quisesse. A regra campo a campo está na tabela
+ * de `mergePolicyLayer` (`@agents-hub/core`).
+ *
+ * `opts.trusted` (confiança dada pelo usuário no registro do projeto, fora do
+ * repo) é o ÚNICO jeito de o YAML definir campos que viram processo —
+ * `validation.command` e a revisão. Sem ela, esses campos são ignorados mesmo
+ * que tenham chegado até aqui (defesa em profundidade além do filtro de
+ * `loadProjectOverrides`).
  */
 export function mergeProjectPolicy(
   global: PolicyDocument,
   overrides: ProjectPolicyOverrides,
+  opts: LoadProjectOverridesOptions = {},
 ): PolicyDocument {
   // `mergePolicyLayer` com `clampToBase` é o mesmo merge campo a campo (inclusive
   // aninhado, como `validation.review`) que a config global usa, só que com o
   // travamento de segurança: o projeto pode apertar, nunca afrouxar.
-  return mergePolicyLayer(global, overrides, { clampToBase: true });
+  return mergePolicyLayer(global, overrides, {
+    clampToBase: true,
+    trustExecFields: opts.trusted === true,
+  });
 }
 
 export function clearProjectConfigCache(): void {

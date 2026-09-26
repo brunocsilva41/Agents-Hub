@@ -26,6 +26,7 @@ export { serveStatic } from './static.js';
 export { WorktreeReaper, type SweepResult } from './reaper.js';
 export {
   loadProjectOverrides,
+  ignoredExecFieldsWarning,
   loadProjectContext,
   mergeProjectPolicy,
   projectConfigPath,
@@ -33,6 +34,7 @@ export {
   PROJECT_CONFIG_RELATIVE,
   type ProjectPolicyOverrides,
   type LoadedProjectOverrides,
+  type LoadProjectOverridesOptions,
 } from './project-config.js';
 export { runValidation } from './validation.js';
 export { interpretarRevisao } from './review-verdict.js';
