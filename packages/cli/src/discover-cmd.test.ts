@@ -180,7 +180,7 @@ describe('hub discover / import — contra o daemon', () => {
       },
     );
     const { host, port } = await hub.start();
-    client = new HubClient(`http://${host}:${port}`);
+    client = new HubClient(`http://${host}:${port}`, { token: hub.operatorToken });
   });
 
   after(async () => {

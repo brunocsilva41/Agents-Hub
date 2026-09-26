@@ -17,3 +17,6 @@ export * from './ports.js';
 export * from './workflow.js';
 
 export * from './discovery.js';
+export * from './operator-token.js';
+export * from './audit.js';
+export { policyLeaves, diffPolicy, loosenedFields, clampedFields } from './policy-edit.js';

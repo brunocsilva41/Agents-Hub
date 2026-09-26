@@ -40,6 +40,8 @@ import {
 import { workflowCommand } from './workflow-cmd.js';
 import { pauseCommand } from './pause-cmd.js';
 import { discoverCommand, importCommand } from './discover-cmd.js';
+import { auditCommand, policyCommand } from './policy-cmd.js';
+import { readOperatorToken } from '@agents-hub/client/operator-token';
 import { smokeTestAll, type SmokeOutcome } from './doctor-smoke.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
@@ -169,6 +171,18 @@ ${bold('Aprovações e manutenção')}
   hub approve <id>                   libera e a sessão continua de onde parou
   hub deny <id>                      nega e encerra a sessão
   hub prune                          recolhe worktrees de sessões já expiradas
+  ${dim('approve/deny/prune/stop e as edições abaixo exigem o token de <AGENTS_HUB_HOME>/operator-token (a CLI lê sozinha)')}
+
+${bold('Política e auditoria')}
+  hub policy [show] [--project [p]] [--json]     camadas (global/projeto) e a política efetiva
+  hub policy set <campo> <valor> [--project [p]] ex.: set defaultBudget.usd 2 · set maxDepth 2
+  hub policy unset <campo> [--project [p]]       volta o campo ao nível de baixo
+  hub policy allow|deny add|rm <prefixo> [--project [p]]
+                                                 allow/deny list de comandos (projeto só aperta)
+  hub policy mode <risco> <allow|approve|deny> [--project [p]]
+                                                 decisão por nível: read|write|exec|escalate|irreversible|budget
+  hub audit [sessionId] [--project [p]] [--kind k] [--since 2h|ISO] [--until ISO] [--limit n] [--json]
+                                                 quem decidiu o quê: gate, aprovações, política, confiança
 
 ${bold('Workflows (DAG de múltiplos agentes)')}
   hub workflow validate <arquivo.yaml>       valida sintaxe, dependências e ciclos
@@ -191,7 +205,10 @@ async function main(): Promise<void> {
   // aplica o modo de falha se ela não abrir.
   if (args.command === 'hook') return runHook(args);
   const config = loadConfig();
-  const client = new HubClient(baseUrl(config));
+  // Token de operador (item 1.6): lido a cada requisição, do arquivo que o
+  // daemon cria — ele pode nascer depois deste cliente (autostart). O hook
+  // do agente (`runHook`) NÃO usa este cliente: monta o próprio, sem token.
+  const client = new HubClient(baseUrl(config), { token: () => readOperatorToken(config.home) });
 
   switch (args.command) {
     case 'daemon':
@@ -268,6 +285,10 @@ async function main(): Promise<void> {
       return withDaemon(() => decide(client, args, 'denied'));
     case 'prune':
       return withDaemon(() => prune(client));
+    case 'policy':
+      return withDaemon(() => policyCommand(client, args, resolveProjectId));
+    case 'audit':
+      return withDaemon(() => auditCommand(client, args));
     case 'mcp':
       // Não exige daemon: registrar a config é offline.
       return mcpCommand(args, config);

@@ -20,6 +20,8 @@ export const API_ROUTES: readonly string[] = [
   '/events',
   '/context',
   '/discovery',
+  '/policy',
+  '/audit',
 ];
 
 /**

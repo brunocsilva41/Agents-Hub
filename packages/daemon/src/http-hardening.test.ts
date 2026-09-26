@@ -196,11 +196,19 @@ defaults:
     });
     assert.equal(texto.status, 415);
 
-    const ok = await http('POST', '/maintenance/sweep', { headers: { 'content-length': '0' } });
+    // `sweep` exige o token de operador (item 1.6); o que se mede aqui é a
+    // guarda de borda deixar passar o cliente local legítimo.
+    const auth = { authorization: `Bearer ${hub.operatorToken}` };
+    const ok = await http('POST', '/maintenance/sweep', { headers: { 'content-length': '0', ...auth } });
     assert.equal(ok.status, 200, ok.body);
 
     const mesma = await http('POST', '/maintenance/sweep', {
-      headers: { origin: `http://127.0.0.1:${porta}`, 'content-length': '0', 'sec-fetch-site': 'same-origin' },
+      headers: {
+        origin: `http://127.0.0.1:${porta}`,
+        'content-length': '0',
+        'sec-fetch-site': 'same-origin',
+        ...auth,
+      },
     });
     assert.equal(mesma.status, 200, mesma.body);
   });
@@ -284,7 +292,7 @@ defaults:
     const id = (JSON.parse(ok.body) as { project: { id: string } }).project.id;
 
     const pasta = await http('POST', `/projects/${id}/folders`, {
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${hub.operatorToken}` },
       body: JSON.stringify({ path: path.join(raiz, 'outra-que-nao-existe') }),
     });
     assert.equal(pasta.status, 400, pasta.body);

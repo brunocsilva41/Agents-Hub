@@ -147,6 +147,50 @@ Três checagens antes de qualquer rota, cada uma fechando um caminho distinto:
 
 Cliente fora do navegador (CLI, MCP server, `curl`) não manda `Origin` e passa. **Isso é proposital:** um processo local já roda como você e não ganharia nada atacando o Hub. Quem precisa ser barrado é a página remota.
 
+### Token de operador (item 1.6)
+
+As rotas que mudam política ou segurança exigem o token de `<AGENTS_HUB_HOME>/operator-token` (401 `UNAUTHORIZED` sem ele). Lista, modelo de ameaça e limites em [SECURITY.md](../SECURITY.md#o-token-de-operador-não-é-fronteira-contra-o-seu-próprio-usuário). Resumo de quem autentica como:
+
+| Cliente | Como recebe o token | `by`/autor na auditoria |
+|---|---|---|
+| CLI (`hub approve`, `hub policy`, `hub stop`...) | lê o arquivo a cada chamada (`@agents-hub/client/operator-token`) | `cli:<usuário>` |
+| Web UI servida pelo daemon | cookie `hub_operator` (`HttpOnly; SameSite=Strict`) ao carregar `/` | `web` |
+| Web UI em `vite dev` (porta 4748) | o proxy do Vite lê o arquivo e injeta `Authorization` + `X-Hub-Client: web` | `web` |
+| MCP server, hook do agente, agente | **não recebe** | — |
+
 ### Validação na borda
 
 Todo corpo e todo parâmetro de rota passam por schema antes de chegar ao domínio. Ids do Hub têm prefixo (`ses_`, `tsk_`, `apv_`, `prj_`) e são validados por formato — `../../etc/passwd` não chega perto de virar consulta. Os schemas são `strict`: campo desconhecido é **recusado**, não ignorado, para um typo em cliente não passar despercebido. Query param numérico com lixo vira ausência, senão chegaria ao SQL como comparação que nunca casa e devolveria vazio em silêncio.
+
+## 7. Editor de política e auditoria (item 1.10)
+
+A política tem duas camadas editáveis, as mesmas que o daemon funde para decidir:
+
+| Camada | Arquivo | Regra |
+|---|---|---|
+| Global | `<AGENTS_HUB_HOME>/config.json`, chave `policy` | funde livre sobre o padrão (topo da hierarquia); gravar lista em `loosened` o que ficou mais permissivo |
+| Projeto | `<repo>/.agents-hub/config.yaml`, chave `policy` | **só aperta** (clamp do item 0.7, `mergeProjectPolicy`); gravar lista em `clamped` o que não vale e em `ignoredExecFields` os campos de execução sem `hub project trust` |
+
+"Modos" aqui são as decisões por nível de risco (`risk.read|write|exec|escalate|irreversible|budget` → `allow|approve|deny`) e a vigilância (`watch.pauseOn|flagOn`); o modo da sessão (`supervised|semi|autonomous`) continua escolhido ao abrir a sessão. Toda camada passa por `PartialPolicyDocumentSchema.strict()`: campo inexistente é 422, nunca gravado e ignorado.
+
+| Rota | Token | Corpo / query | Resposta |
+|---|---|---|---|
+| `GET /policy[?projectId=prj_x]` | não | — | `{ policy: { global: {file, layer, effective}, project: {projectId, path, file, trusted, error, layer, effective, clamped, ignoredExecFields} \| null } }` |
+| `PUT /policy` | sim | `{ "policy": <camada parcial> }` (substitui a camada inteira; `{}` remove) | `{ policy, loosened: string[], backup: string \| null }` |
+| `PUT /projects/:id/policy` | sim | `{ "policy": <camada parcial> }` (preserva memória/prompts/env/comentários do YAML) | `{ project, clamped: string[], ignoredExecFields: string[] }` |
+| `GET /audit` | não | `sessionId`, `projectId`, `kind`, `since`, `until` (ISO ou `30m`/`2h`/`7d`), `limit` (≤ 5000, padrão 200) | `{ entries: AuditEntry[] }`, mais recente primeiro |
+
+`AuditEntry` = `{ id, ts, actor, kind, sessionId, projectId, approvalId, action, decision, risk, reason, detail }`. `kind`: `gate.decision` (toda decisão do gate pré-execução numa sessão do Hub, autor `gate`), `approval.requested` (autor `gate` ou `policy`), `approval.resolved` (autor = quem decidiu: `cli:<usuário>`, `web`, `tempo esgotado`), `policy.updated`, `project.trust`, `project.context`, `project.import` (só aplicado), `project.folders`, `maintenance.sweep`, `daemon.shutdown`. Tabela própria (`audit_log`, migração 6), só-acréscimo, fora da retenção de eventos.
+
+No cliente (`@agents-hub/client`): `policy(projectId?)`, `setGlobalPolicy(layer)`, `setProjectPolicy(projectId, layer)`, `audit(query)`. Na CLI:
+
+```bash
+hub policy show [--project [p]] [--json]
+hub policy set defaultBudget.usd 2 [--project [p]]
+hub policy unset maxDepth [--project [p]]
+hub policy deny add "npm publish" [--project [p]]
+hub policy allow rm "npm install"
+hub policy mode exec approve --project
+hub audit --since 2h
+hub audit ses_abc --kind approval.resolved --json
+```

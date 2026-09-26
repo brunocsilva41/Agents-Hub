@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
+import { ensureOperatorToken } from './operator-auth.js';
 import { ESPERA_DO_GATE_MS, TETO_HTTP_DO_HOOK_MS, TIMEOUT_DO_HOOK_SEC } from './pretool-gate.js';
 
 /**
@@ -101,9 +102,15 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     caminho: string,
     corpo?: unknown,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
+    // O teste faz o papel do operador (CLI): rotas de aprovação exigem o
+    // token do item 1.6. Idempotente — reaproveita o arquivo do daemon.
+    const token = ensureOperatorToken(path.join(raiz, 'home')).token;
     const resposta = await fetch(`${base}${caminho}`, {
       method,
-      headers: corpo === undefined ? {} : { 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(corpo === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
       ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
     });
     const texto = await resposta.text();

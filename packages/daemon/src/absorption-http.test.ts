@@ -61,7 +61,12 @@ describe('GET /discovery e POST /projects/:id/import', () => {
   let chamadas = 0;
 
   const post = (url: string, body: unknown): Promise<Response> =>
-    fetch(`${baseUrl}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    fetch(`${baseUrl}${url}`, {
+      method: 'POST',
+      // Import exige o token de operador (item 1.6).
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hub.operatorToken}` },
+      body: JSON.stringify(body),
+    });
 
   before(async () => {
     raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-abs-http-'));

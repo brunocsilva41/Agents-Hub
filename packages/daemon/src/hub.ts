@@ -9,6 +9,9 @@ import {
 import { createStore } from '@agents-hub/store';
 import type { UnitOfWork } from '@agents-hub/core';
 import { DiscoveryService, ImportService, type DiscoverFn } from './absorption.js';
+import { AuditTrail } from './audit.js';
+import { ensureOperatorToken } from './operator-auth.js';
+import { PolicyService } from './policy-service.js';
 import { InMemoryEventBus } from './bus.js';
 import { loadConfig, type HubConfig } from './config.js';
 import { EventRetentionCompactor } from './event-retention.js';
@@ -26,6 +29,14 @@ export interface Hub {
   reaper: WorktreeReaper;
   eventRetention: EventRetentionCompactor;
   server: HubServer;
+  /** Trilha de auditoria (item 1.10). */
+  audit: AuditTrail;
+  /**
+   * Token de operador de `<home>/operator-token` (item 1.6). Exposto para
+   * testes e para a própria CLI em processo; NUNCA vai para o ambiente de
+   * agente nenhum.
+   */
+  operatorToken: string;
   /**
    * Coloca o daemon no ar: liga a porta, reconcilia o que ficou para trás e
    * começa a recolher worktree. Nesta ordem, e a ordem é a razão de existir.
@@ -80,7 +91,16 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
     ...(deps.discoveryTtlMs !== undefined ? { ttlMs: deps.discoveryTtlMs } : {}),
   });
   const importer = new ImportService(discovery, { home: homeDir });
-  const server = new HubServer(config, sessions, registry, bus, reaper, discovery, importer);
+  const audit = new AuditTrail(store, bus);
+  // Começa a ouvir já na montagem: aprovações abertas na reconciliação da
+  // subida também entram na trilha.
+  audit.start();
+  const operatorToken = ensureOperatorToken(config.home).token;
+  const server = new HubServer(config, sessions, registry, bus, reaper, discovery, importer, {
+    token: operatorToken,
+    audit,
+    policy: new PolicyService(config, store),
+  });
 
   const hub: Hub = {
     config,
@@ -91,6 +111,8 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
     reaper,
     eventRetention,
     server,
+    audit,
+    operatorToken,
 
     /**
      * A porta É o lock de instância — e por isso ela vem primeiro.
@@ -141,6 +163,7 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
       // Derruba o `opencode serve` que o Hub subiu — nunca um que já existia.
       if (opencode) await opencode.close();
       await server.close();
+      audit.stop();
       store.close();
     },
   };

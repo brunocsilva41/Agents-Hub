@@ -89,3 +89,19 @@ export {
   type JsonDeConfig,
 } from './safe-write.js';
 export { DiscoveryService, ImportService, type DiscoverFn } from './absorption.js';
+export {
+  ensureOperatorToken,
+  operatorTokenPath,
+  authenticateOperator,
+  type OperatorIdentity,
+  type OperatorTokenFile,
+} from './operator-auth.js';
+export { AuditTrail } from './audit.js';
+export {
+  PolicyService,
+  parsePolicyLayer,
+  type PolicyView,
+  type PolicyLayerView,
+  type ProjectPolicyView,
+} from './policy-service.js';
+export { instanteDoFiltro } from './operator-routes.js';

@@ -33,6 +33,7 @@ não fechar relato sem explicação.
 | Gasto descontrolado | Orçamento é da sessão-raiz, consumido pelos descendentes | `packages/core/src/budget.ts` |
 | Ação irreversível | `git push`, `rm -rf`, publish, ler ou escrever segredo (`.ssh`, `.env`, chaves, credenciais de CLI) e escrever em `.git/hooks`/`.github/workflows` param a sessão e abrem aprovação; a deny list (`sudo`...) é negada sem aprovação | `packages/core/src/policy.ts` |
 | Comando composto para driblar a allow list | Comando tokenizado (`&&`, `;`, `\|`, `$(...)`, crase, redirecionamento, `bash -c`, `cmd /c`, `powershell -Command`...); vale o pior segmento; o que não dá para tokenizar não é liberado | `packages/core/src/command-classifier.ts` |
+| Agente/processo aprovando a própria ação, afrouxando política ou derrubando o daemon por HTTP | Token de operador em `<AGENTS_HUB_HOME>/operator-token` (só do usuário) exigido nas rotas de política/segurança; `by` da aprovação vem da origem autenticada; token nunca vai ao ambiente do agente e é "segredo" para o gate | `packages/daemon/src/operator-auth.ts` |
 | Config de projeto hostil | `<repo>/.agents-hub/config.yaml` só pode **apertar** a política global, nunca afrouxar (regra campo a campo em `mergePolicyLayer`); campos sensíveis do repo (ver abaixo) só valem com `hub project trust` (confiança no banco do Hub, padrão desligado, suspensa se o conteúdo mudar) | `packages/daemon/src/project-config.ts`, `packages/daemon/src/repo-trust.ts` |
 
 ### Vetores do repositório (`<repo>/.agents-hub/config.yaml`)
@@ -232,12 +233,36 @@ Além disso, `node_modules`, `.venv` e `vendor` são **ligados por junction** ao
 projeto principal, para o portão de validação conseguir rodar. Dois agentes
 executando builds que escrevem em `node_modules/.cache` colidem de verdade.
 
-### O daemon não tem autenticação
+### O token de operador não é fronteira contra o seu próprio usuário
 
-`127.0.0.1:4747` é protegido por ser loopback e pelas checagens de `Host` e
-`Origin`. **Qualquer processo local rodando com o seu usuário pode dirigir o
-Hub** — criar sessão, aprovar uma ação retida, encerrar o daemon. Não há token,
-não há authz.
+`127.0.0.1:4747` é protegido por ser loopback, pelas checagens de `Host` e
+`Origin` e, nas rotas que mudam política ou segurança, pelo **token de
+operador** (item 1.6 do GOAL): um segredo aleatório que o daemon grava em
+`<AGENTS_HUB_HOME>/operator-token` (0600 no POSIX; no Windows, ACL sem herança
+só com o seu usuário, via `icacls`). Exigido (`Authorization: Bearer <token>`
+ou `X-Hub-Token`) em:
+
+- `POST /approvals/:id` — e `by` passa a ser `cli:<usuário>` ou `web`, nunca o corpo;
+- `POST /shutdown`, `POST /maintenance/sweep`;
+- `PUT /policy`, `PUT /projects/:id/policy`, `PUT /projects/:id/context`;
+- `POST /projects/:id/trust`, `POST /projects/:id/import` (também a prévia);
+- `POST /projects/:id/folders`, `DELETE /projects/:id/folders/:folderId`.
+
+A CLI lê o arquivo; a Web UI servida pelo daemon recebe o token por cookie
+`HttpOnly; SameSite=Strict` ao ser carregada pelo navegador (só em navegação de
+documento — `Sec-Fetch-Dest: document`); em `vite dev` o proxy lê o arquivo e
+injeta o header. O MCP server e o hook do agente não têm o token, e o daemon
+não o coloca em variável de ambiente (há teste provando que o ambiente do
+agente não o contém). O arquivo é classificado como segredo: agente com gate
+que tenta lê-lo cai em aprovação.
+
+O que continua valendo: **um processo do seu usuário que leia o arquivo por
+fora do gate** (agente sem hook, ou script qualquer) tem o token. Sem sandbox
+de sistema, nada no espaço do usuário fecha isso. Criar/delegar/cancelar
+sessão continua sem token (é o que o MCP do agente usa). E cookie não isola por
+porta: outro servidor local em `127.0.0.1` recebe o cookie do painel se você o
+abrir no mesmo navegador. Para trocar o token: apague o arquivo e reinicie o
+daemon.
 
 Isso é aceitável para um daemon local e **não é aceitável exposto na rede ou por
 túnel**. Expor `AGENTS_HUB_PORT`/`host` para fora do loopback sem antes existir

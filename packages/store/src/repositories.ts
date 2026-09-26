@@ -7,6 +7,9 @@ import {
   type Artifact,
   type ApprovalRepository,
   type ArtifactRepository,
+  type AuditEntry,
+  type AuditFilter,
+  type AuditRepository,
   type BudgetLimits,
   type BudgetRecord,
   type BudgetRepository,
@@ -647,6 +650,69 @@ class SqliteBudgetRepository implements BudgetRepository {
   }
 }
 
+/** Teto de linhas por consulta de auditoria, venha o `limit` que vier. */
+const AUDIT_MAX_LIMIT = 5000;
+
+class SqliteAuditRepository implements AuditRepository {
+  constructor(private readonly db: Db) {}
+
+  append(entry: AuditEntry): AuditEntry {
+    this.db
+      .prepare(
+        `INSERT INTO audit_log
+         (id, ts, actor, kind, session_id, project_id, approval_id, action, decision, risk, reason, detail_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        entry.id,
+        entry.ts,
+        entry.actor,
+        entry.kind,
+        entry.sessionId,
+        entry.projectId,
+        entry.approvalId,
+        entry.action,
+        entry.decision,
+        entry.risk,
+        entry.reason,
+        toJson(entry.detail),
+      );
+    return entry;
+  }
+
+  list(filter: AuditFilter = {}): AuditEntry[] {
+    const where: string[] = [];
+    const params: SqlValue[] = [];
+    if (filter.sessionId) {
+      where.push('session_id = ?');
+      params.push(filter.sessionId);
+    }
+    if (filter.projectId) {
+      where.push('project_id = ?');
+      params.push(filter.projectId);
+    }
+    if (filter.kind) {
+      where.push('kind = ?');
+      params.push(filter.kind);
+    }
+    if (filter.since) {
+      where.push('ts >= ?');
+      params.push(filter.since);
+    }
+    if (filter.until) {
+      where.push('ts < ?');
+      params.push(filter.until);
+    }
+    const limit = Math.min(Math.max(1, Math.trunc(filter.limit ?? 200)), AUDIT_MAX_LIMIT);
+    params.push(limit);
+    const sql =
+      `SELECT * FROM audit_log${where.length > 0 ? ` WHERE ${where.join(' AND ')}` : ''}` +
+      // `rowid` desempata eventos no mesmo milissegundo na ordem de gravação.
+      ' ORDER BY ts DESC, rowid DESC LIMIT ?';
+    return (this.db.prepare(sql).all(...params) as Row[]).map(mapAudit);
+  }
+}
+
 export class SqliteUnitOfWork implements UnitOfWork {
   readonly projects: ProjectRepository;
   readonly sessions: SessionRepository;
@@ -655,6 +721,7 @@ export class SqliteUnitOfWork implements UnitOfWork {
   readonly approvals: ApprovalRepository;
   readonly artifacts: ArtifactRepository;
   readonly budgets: BudgetRepository;
+  readonly audit: AuditRepository;
 
   #depth = 0;
 
@@ -666,6 +733,7 @@ export class SqliteUnitOfWork implements UnitOfWork {
     this.approvals = new SqliteApprovalRepository(db);
     this.artifacts = new SqliteArtifactRepository(db);
     this.budgets = new SqliteBudgetRepository(db);
+    this.audit = new SqliteAuditRepository(db);
   }
 
   /** Transações aninhadas viram uma só — a mais externa comanda. */
@@ -787,6 +855,23 @@ function mapApproval(row: Row): Approval {
     requestedAt: str(row['requested_at']),
     resolvedAt: strOrNull(row['resolved_at']),
     resolvedBy: strOrNull(row['resolved_by']),
+  };
+}
+
+function mapAudit(row: Row): AuditEntry {
+  return {
+    id: str(row['id']),
+    ts: str(row['ts']),
+    actor: str(row['actor']),
+    kind: str(row['kind']) as AuditEntry['kind'],
+    sessionId: strOrNull(row['session_id']),
+    projectId: strOrNull(row['project_id']),
+    approvalId: strOrNull(row['approval_id']),
+    action: str(row['action']),
+    decision: strOrNull(row['decision']),
+    risk: strOrNull(row['risk']),
+    reason: strOrNull(row['reason']),
+    detail: fromJson<Record<string, unknown>>(row['detail_json'], {}),
   };
 }
 

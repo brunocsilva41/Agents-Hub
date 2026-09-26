@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Cliente da API do daemon, compartilhado por CLI, MCP server e Web UI.",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./operator-token": "./dist/operator-token.js"
   },
   "types": "./dist/index.d.ts",
   "dependencies": {
