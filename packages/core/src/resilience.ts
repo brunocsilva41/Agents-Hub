@@ -90,6 +90,14 @@ export function nextStep(
   state: ResilienceState,
   outcome: OutcomeClass,
   config: ResilienceConfig,
+  /**
+   * Por que a run acabou. `timeout` é o estouro de `taskTimeoutSeconds` (30
+   * min por padrão): repetir `retries.max` vezes no mesmo agente eram até 3
+   * execuções de 30 min seguidas (R09-19). Timeout ganha no máximo UMA nova
+   * tentativa com o mesmo agente; depois vai para o fallback. `heartbeat`
+   * (run muda) continua com o teto normal — é o caso típico de infraestrutura.
+   */
+  origem?: { reason?: RunOutcomeLike['reason'] },
 ): ResilienceStep {
   if (outcome === 'success') {
     return { kind: 'give_up', reason: 'a tentativa foi bem-sucedida; nada a decidir' };
@@ -103,7 +111,10 @@ export function nextStep(
   const attemptsHere = state.attempts.filter((a) => a.agentId === state.currentAgentId).length;
   const nextAttempt = state.attempts.length + 1;
 
-  if (outcome === 'transient' && attemptsHere <= config.maxRetries) {
+  const tetoDeRetries =
+    origem?.reason === 'timeout' ? Math.min(config.maxRetries, 1) : config.maxRetries;
+
+  if (outcome === 'transient' && attemptsHere <= tetoDeRetries) {
     return {
       kind: 'retry',
       agentId: state.currentAgentId,

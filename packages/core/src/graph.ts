@@ -86,6 +86,28 @@ export function buildGraph(
     else roots.push(node);
   }
 
+  // Ciclo de `parent_id` (A→B→A, só possível com dado corrompido): nenhum nó
+  // do ciclo é raiz, então todos sumiam da árvore — e a recursão abaixo nunca
+  // os alcançava. Nó não alcançável a partir das raízes vira raiz ele mesmo
+  // (o mais antigo do ciclo), com a aresta de volta cortada (R09-19).
+  const alcancados = new Set<GraphNode>();
+  const marcar = (n: GraphNode): void => {
+    if (alcancados.has(n)) return;
+    alcancados.add(n);
+    for (const c of n.children) marcar(c);
+  };
+  for (const r of roots) marcar(r);
+  const orfaos = [...byId.values()]
+    .filter((n) => !alcancados.has(n))
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  for (const n of orfaos) {
+    if (alcancados.has(n)) continue;
+    const pai = n.parentId ? byId.get(n.parentId) : undefined;
+    if (pai) pai.children = pai.children.filter((c) => c !== n);
+    roots.push(n);
+    marcar(n);
+  }
+
   const sortRecursive = (nodes: GraphNode[]): void => {
     nodes.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
     for (const n of nodes) sortRecursive(n.children);

@@ -572,7 +572,7 @@ class SqliteApprovalRepository implements ApprovalRepository {
 
   update(id: string, patch: Partial<Approval>): Approval {
     const current = this.get(id);
-    if (!current) throw new HubError('ILLEGAL_STATE', `Aprovação ${id} não encontrada`, { id });
+    if (!current) throw new HubError('APPROVAL_NOT_FOUND', `Aprovação ${id} não encontrada`, { id });
     const next: Approval = { ...current, ...patch, id };
     this.db
       .prepare('UPDATE approvals SET state = ?, resolved_at = ?, resolved_by = ? WHERE id = ?')

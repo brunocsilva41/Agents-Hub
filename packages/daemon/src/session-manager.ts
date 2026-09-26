@@ -1056,7 +1056,7 @@ export class SessionManager {
   getApproval(id: string): Approval {
     const approval = this.store.approvals.get(id);
     if (!approval) {
-      throw new HubError('ILLEGAL_STATE', `Aprovação ${id} não encontrada`, { id });
+      throw new HubError('APPROVAL_NOT_FOUND', `Aprovação ${id} não encontrada`, { id });
     }
     return approval;
   }
@@ -2670,6 +2670,7 @@ export class SessionManager {
         backoffMs: efetiva.retries.backoffMs,
         fallbackChain: this.#fallbackChain(session.agentId, efetiva.fallback),
       },
+      { reason: outcome.reason },
     );
 
     this.store.tasks.update(task.id, { attempts });

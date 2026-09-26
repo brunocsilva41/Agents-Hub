@@ -16,7 +16,15 @@ export function newId(prefix: IdPrefix): string {
  * e não apenas ciclo de identidade de agente.
  */
 export function objectiveHash(objective: string): string {
-  const normalized = objective.trim().toLowerCase().replace(/\s+/g, ' ');
+  // Pontuação FINAL também sai (R09-19): "Fix the bug." e "Fix the bug" são o
+  // mesmo pedido, e a diferença bastava para um ciclo escapar da detecção.
+  // Só a final: a interna muda o sentido (`a.b` vs `ab`) e faz parte das
+  // chaves já gravadas (`external:<agente>`), que precisam continuar iguais.
+  const normalized = objective
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[\s.!?;:,…"'`)\]]+$/u, '');
   return createHash('sha256').update(normalized).digest('hex').slice(0, 16);
 }
 

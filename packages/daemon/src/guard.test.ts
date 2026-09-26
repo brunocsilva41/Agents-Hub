@@ -88,9 +88,43 @@ describe('guarda de borda — o que precisa ser barrado', () => {
     assert.equal(v.status, 415, 'formulário HTML só consegue mandar estes content-types');
   });
 
-  test('POST sem content-type nenhum é recusado', () => {
-    const v = guardRequest(req('POST', { host: '127.0.0.1:4747' }), ESPERADO);
+  // Antes: "POST sem content-type nenhum é recusado", inclusive SEM corpo
+  // (sem Content-Length e sem Transfer-Encoding). Isso recusava com 415 o
+  // `curl -X POST .../shutdown` sem `-d` (vistoria 2026-09-25, R02-12) e não
+  // protegia nada: formulário HTML e `fetch` com corpo SEMPRE mandam
+  // Content-Length ou Transfer-Encoding, então continuam caindo nos testes
+  // abaixo. O que é recusado agora é CORPO sem JSON, não POST sem corpo.
+  test('POST com corpo (Content-Length > 0) e sem content-type é recusado', () => {
+    const v = guardRequest(req('POST', { host: '127.0.0.1:4747', 'content-length': '12' }), ESPERADO);
     assert.equal(v.ok, false);
+    assert.equal(v.status, 415);
+  });
+
+  test('POST com corpo em chunks e sem content-type é recusado', () => {
+    const v = guardRequest(
+      req('POST', { host: '127.0.0.1:4747', 'transfer-encoding': 'chunked' }),
+      ESPERADO,
+    );
+    assert.equal(v.ok, false);
+    assert.equal(v.status, 415);
+  });
+
+  test('POST SEM corpo (nem Content-Length nem Transfer-Encoding) e sem content-type passa', () => {
+    const v = guardRequest(req('POST', { host: '127.0.0.1:4747' }), ESPERADO);
+    assert.equal(v.ok, true, v.reason);
+  });
+
+  test('POST sem corpo continua barrado se vier de outra origem ou de outro site', () => {
+    const outraOrigem = guardRequest(
+      req('POST', { host: '127.0.0.1:4747', origin: 'http://evil.exemplo' }),
+      ESPERADO,
+    );
+    assert.equal(outraOrigem.status, 403);
+    const outroSite = guardRequest(
+      req('POST', { host: '127.0.0.1:4747', 'sec-fetch-site': 'cross-site' }),
+      ESPERADO,
+    );
+    assert.equal(outroSite.status, 403);
   });
 
   test('DNS rebinding: domínio do atacante resolvendo para 127.0.0.1', () => {

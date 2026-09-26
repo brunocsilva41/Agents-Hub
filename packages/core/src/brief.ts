@@ -8,14 +8,43 @@ import { HubError } from './errors.js';
  * transcript inteiro: o agente filho começa limpo, sem herdar os becos sem
  * saída do pai, e o custo da delegação fica previsível.
  */
+/*
+ * Tetos (vistoria 2026-09-25, R09-13). O Brief chegava sem limite nenhum: um
+ * objetivo de 1 MB, 10k critérios, `agent: '   '`, orçamento `Infinity` e
+ * artefato `../../../etc/passwd` eram válidos. Os números batem com o teto do
+ * workflow (objetivo de 50k) e ficam acima dos do `hub_agent_call` do MCP
+ * (20k / 50 itens / 2000 caracteres), que é mais apertado de propósito por
+ * vir de um modelo.
+ */
+export const LIMITE_OBJETIVO_BRIEF = 50_000;
+const LIMITE_ITENS = 200;
+const LIMITE_ITEM = 4_000;
+const item = () => z.string().trim().min(1).max(LIMITE_ITEM);
+
+/**
+ * Caminho de artefato: relativo ao diretório da sessão e sem subir dele.
+ * Absoluto (`/etc/passwd`, `C:\...`, `\\servidor\x`) e `..` em qualquer
+ * segmento são recusados — o agente leria o caminho como pedido do Hub.
+ */
+export function caminhoDeArtefatoValido(p: string): boolean {
+  if (p.includes('\0')) return false;
+  if (/^[\\/]/.test(p) || /^[a-zA-Z]:/.test(p)) return false;
+  return !p.split(/[\\/]+/).includes('..');
+}
+
 export const ArtifactRefSchema = z.object({
-  path: z.string().min(1),
+  path: z
+    .string()
+    .trim()
+    .min(1)
+    .max(1_000)
+    .refine(caminhoDeArtefatoValido, 'caminho de artefato precisa ser relativo ao projeto, sem ".."'),
   mode: z.enum(['read', 'write']).default('read'),
-  note: z.string().optional(),
+  note: z.string().max(LIMITE_ITEM).optional(),
 });
 
 export const BudgetRequestSchema = z.object({
-  usd: z.number().positive().optional(),
+  usd: z.number().finite().positive().optional(),
   tokens: z.number().int().positive().optional(),
   seconds: z.number().int().positive().optional(),
 });
@@ -45,23 +74,27 @@ export const BriefSchema = z.object({
    * Alvo da delegação: id de agente (`"codex"`) ou capability (`"cap:test-writing"`).
    * Capability só é resolvida se o roteamento por capacidade estiver habilitado.
    */
-  agent: z.string().min(1),
+  agent: z.string().trim().min(1).max(200),
 
   /** Um objetivo, no imperativo. Se precisar de "e", provavelmente são duas tasks. */
-  objective: z.string().min(8, 'o objetivo precisa ser descritivo'),
+  objective: z
+    .string()
+    .trim()
+    .min(8, 'o objetivo precisa ser descritivo')
+    .max(LIMITE_OBJETIVO_BRIEF, `o objetivo passa de ${LIMITE_OBJETIVO_BRIEF} caracteres`),
 
   /** Como o pai valida que o filho entregou. Sem isto, não há portão de validação. */
-  acceptanceCriteria: z.array(z.string().min(1)).default([]),
+  acceptanceCriteria: z.array(item()).max(LIMITE_ITENS).default([]),
 
-  constraints: z.array(z.string().min(1)).default([]),
+  constraints: z.array(item()).max(LIMITE_ITENS).default([]),
 
-  artifacts: z.array(ArtifactRefSchema).default([]),
+  artifacts: z.array(ArtifactRefSchema).max(LIMITE_ITENS).default([]),
 
   /** Ponteiros (`session:<id>#event:<seq>`), nunca conteúdo embutido. */
-  contextRefs: z.array(z.string().min(1)).default([]),
+  contextRefs: z.array(item()).max(LIMITE_ITENS).default([]),
 
   /** Fan-in de workflow: o que os passos dos quais este depende entregaram. */
-  upstream: z.array(UpstreamResultSchema).default([]),
+  upstream: z.array(UpstreamResultSchema).max(LIMITE_ITENS).default([]),
 
   budget: BudgetRequestSchema.default({}),
 
@@ -140,7 +173,9 @@ export function renderBriefAsPrompt(brief: Brief, contexto?: ContextoDoProjeto):
   if (brief.upstream.length > 0) {
     lines.push(`## O que os passos anteriores entregaram`, ``);
     for (const u of brief.upstream) {
-      lines.push(`### ${u.step} (${u.agent})`, ``, u.summary.trim(), ``);
+      // O resumo é SAÍDA de outro agente: entra como citação, linha a linha,
+      // para um "# Tarefa" dentro dele não virar cabeçalho do prompt (R09-13).
+      lines.push(`### ${umaLinha(u.step)} (${umaLinha(u.agent)})`, ``, citar(u.summary.trim()), ``);
       if (u.sessionRef) {
         lines.push(dimRef(u.sessionRef), ``);
       }
@@ -185,6 +220,19 @@ export function renderBriefAsPrompt(brief: Brief, contexto?: ContextoDoProjeto):
   );
 
   return lines.join('\n');
+}
+
+/** Texto de terceiro como bloco de citação Markdown (`> ` em cada linha). */
+function citar(texto: string): string {
+  return texto
+    .split(/\r?\n/)
+    .map((l) => (l.length > 0 ? `> ${l}` : '>'))
+    .join('\n');
+}
+
+/** Rótulo curto numa linha só (quebra de linha viraria cabeçalho novo). */
+function umaLinha(texto: string): string {
+  return texto.replace(/[\r\n]+/g, ' ');
 }
 
 /** Ponteiro para o detalhe, para quem tiver a tool de contexto do Hub. */

@@ -85,9 +85,18 @@ export function guardRequest(
 
   if (METODOS_COM_CORPO.has(req.method ?? '')) {
     const tipo = primeiro(req.headers['content-type']);
+    // HTTP/1.1: requisição sem Content-Length e sem Transfer-Encoding NÃO tem
+    // corpo (o parser do Node lê zero bytes). Antes a ausência de
+    // Content-Length contava como "tem corpo" e `curl -X POST .../shutdown`
+    // levava 415 (R02-12). Sem risco de CSRF novo: navegador manda
+    // Content-Length (ou chunked) sempre que há corpo, e Origin /
+    // Sec-Fetch-Site acima continuam valendo para POST sem corpo. Sem
+    // tamanho mas COM Content-Type declarado conta como corpo: quem declara
+    // `text/plain`/formulário está dizendo o que manda, e isso segue 415.
+    const tamanho = primeiro(req.headers['content-length']);
     const temCorpo =
-      primeiro(req.headers['content-length']) !== '0' ||
-      primeiro(req.headers['transfer-encoding']) !== null;
+      primeiro(req.headers['transfer-encoding']) !== null ||
+      (tamanho !== null ? tamanho !== '0' : tipo !== null);
 
     if (temCorpo && !ehJson(tipo)) {
       return {

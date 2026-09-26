@@ -1125,6 +1125,8 @@ export function statusFor(code: string): number {
     case 'SESSION_NOT_FOUND':
     case 'TASK_NOT_FOUND':
     case 'PROJECT_NOT_FOUND':
+    // Aprovação inexistente era ILLEGAL_STATE/400 (vistoria 2026-09-25, R13-19).
+    case 'APPROVAL_NOT_FOUND':
       return 404;
     case 'INVALID_BRIEF':
       return 422;
