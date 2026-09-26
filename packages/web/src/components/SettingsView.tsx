@@ -1,7 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useReducer, useState } from 'react';
 import type { AgentSummary, ProjectContextDto, ProjectSummary } from '@agents-hub/client';
-import { useAction } from '../actions';
+import { prefixosDeEnvPermitidos } from '@agents-hub/core/agent-env';
+import { describeError, useAction } from '../actions';
 import { agentColor, hub } from '../hub';
+import {
+  camposDeEnvDoAgente,
+  chaveEhPermitida,
+  estadoInicial,
+  extrasDoAgente,
+  podeEditar,
+  podeSalvar,
+  reduzirForm,
+  valorParaExibir,
+  variavelConhecidaDoAgente,
+} from '../logic/settings-form';
 import { DiscoveryPanel } from './DiscoveryPanel';
 
 /**
@@ -25,6 +37,8 @@ type Aba = 'prompts' | 'memory' | 'models' | 'sandbox' | 'discovery';
 interface Props {
   agents: AgentSummary[];
   projects: ProjectSummary[];
+  /** Abre o modal de registrar projeto (primeira execução, sem projetos). */
+  onNewProject?: () => void;
 }
 
 /** Endpoints locais comuns, para não obrigar a decorar a porta. */
@@ -35,126 +49,129 @@ const ENDPOINTS_SUGERIDOS = [
 ];
 
 /**
- * Espelha `PREFIXOS_PERMITIDOS` de `packages/core/src/agent-env.ts`.
- *
- * Duplicado (em vez de importado) de propósito: `@agents-hub/core` traz
- * módulos com `node:crypto`/`node:path` no seu barrel de entrada, e o bundle
- * do painel roda no navegador — importar a função em runtime arrastaria isso
- * para o build do Vite. Quem valida de verdade é o daemon, em
- * `filtrarEnvDeProjeto`; isto aqui é só a mesma lista, para orientar o
- * usuário ANTES de salvar. Se a lista mudar lá, precisa mudar aqui também.
+ * Prefixos que o daemon aceita, vindos da mesma fonte que ele usa
+ * (`@agents-hub/core/agent-env` — subcaminho sem `node:*`, seguro no bundle do
+ * navegador). Antes era uma cópia à mão que precisava ser lembrada a cada
+ * mudança lá.
  */
-const PREFIXOS_ENV_PERMITIDOS = [
-  'OPENAI_',
-  'ANTHROPIC_',
-  'AZURE_OPENAI_',
-  'OLLAMA_',
-  'GOOGLE_',
-  'GEMINI_',
-  'MISTRAL_',
-  'GROQ_',
-  'TOGETHER_',
-  'OPENROUTER_',
-  'DEEPSEEK_',
-  'MOONSHOT_',
-  'LMSTUDIO_',
-  'VLLM_',
-] as const;
+const PREFIXOS_ENV_PERMITIDOS = prefixosDeEnvPermitidos();
 
-export function SettingsView({ agents, projects }: Props): React.JSX.Element {
-  const [aba, setAba] = useState<Aba>('prompts');
+export function SettingsView({ agents, projects, onNewProject }: Props): React.JSX.Element {
   const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
+  // Sem projeto, a única aba útil é a que não depende de projeto: é por ela
+  // que a primeira execução começa (ver os agentes que a máquina já tem).
+  const [aba, setAba] = useState<Aba>(projects.length === 0 ? 'discovery' : 'prompts');
   const [agenteSelecionado, setAgenteSelecionado] = useState(agents[0]?.id ?? 'claude');
-  const [ctx, setCtx] = useState<ProjectContextDto>({});
-  const [carregando, setCarregando] = useState(false);
-  const [sujo, setSujo] = useState(false);
+  const [form, despachar] = useReducer(reduzirForm, projectId, estadoInicial);
+  const [recarga, setRecarga] = useState(0);
   const [novaChave, setNovaChave] = useState('');
   const [novoValor, setNovoValor] = useState('');
   const [mostrarChaveApi, setMostrarChaveApi] = useState(false);
   const action = useAction();
 
+  const { ctx, sujo } = form;
+  const carregando = form.status === 'carregando';
   // Sem projeto não há onde guardar: a tela precisa dizer isso, não fingir
   // que salvou em algum lugar.
   const semProjeto = projectId === '';
+  // Campos só ficam editáveis com o contexto DESTE projeto carregado. Durante
+  // a carga, o que se digitasse seria sobrescrito pela resposta; depois de uma
+  // falha, não há contexto nenhum para editar — e salvar gravaria por cima do
+  // arquivo do projeto um formulário vazio ou, antes da correção, o do
+  // projeto anterior (vistoria 2026-09-25, relatório 03, ALTO).
+  const bloqueado = !podeEditar(form);
 
-  // Guarda de cancelamento: sem isto, trocar de projeto rapidamente antes da
-  // resposta anterior chegar pode aplicar a configuração do projeto A sob o ID
-  // do projeto B (se a resposta de A chegar depois da de B) — e salvar nesse
-  // estado grava o conteúdo de A (inclusive OPENAI_API_KEY, prompts) no
-  // config.yaml de B. Mesmo padrão de SidePanel.tsx (`projectContext`).
+  // A troca zera o formulário NA HORA (`reduzirForm`), e a resposta só é
+  // aplicada se ainda for do projeto selecionado — a mesma guarda que o
+  // `cancelado` dava, agora também no caminho de erro, que antes não existia.
   useEffect(() => {
+    despachar({ tipo: 'trocar-projeto', projectId });
     if (projectId === '') return;
     let cancelado = false;
-    setCarregando(true);
     hub
       .projectContext(projectId)
       .then(({ context }) => {
-        if (!cancelado) {
-          setCtx(context);
-          setSujo(false);
-        }
+        if (!cancelado) despachar({ tipo: 'carregou', projectId, ctx: context });
       })
-      .finally(() => {
-        if (!cancelado) setCarregando(false);
+      .catch((err: unknown) => {
+        if (cancelado) return;
+        const { title, detail } = describeError(err);
+        despachar({ tipo: 'falhou', projectId, erro: detail ? `${title} (${detail})` : title });
       });
     return () => {
       cancelado = true;
     };
-  }, [projectId]);
+  }, [projectId, recarga]);
 
   useEffect(() => {
     if (projectId === '' && projects[0]) setProjectId(projects[0].id);
   }, [projects, projectId]);
 
+  // Fechar/recarregar a página com alteração não salva pergunta antes.
+  useEffect(() => {
+    if (!sujo) return;
+    const aviso = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', aviso);
+    return () => window.removeEventListener('beforeunload', aviso);
+  }, [sujo]);
+
+  const trocarProjeto = (novo: string): void => {
+    if (novo === projectId) return;
+    if (sujo && !window.confirm('Há alterações não salvas neste projeto. Descartar e trocar?')) {
+      return;
+    }
+    setProjectId(novo);
+  };
+
   const salvar = async (): Promise<void> => {
-    const ok = await action.run(
+    if (!podeSalvar(form)) return;
+    // Fotografa projeto e conteúdo: se o usuário trocar de projeto durante o
+    // POST, a resposta não pode cair no formulário do outro.
+    const alvo = projectId;
+    const conteudo = ctx;
+    await action.run(
       'salvar',
       async () => {
-        const { context } = await hub.saveProjectContext(projectId, ctx);
+        const { context } = await hub.saveProjectContext(alvo, conteudo);
         // Recarrega do que o daemon DEVOLVEU, não do que mandamos: o filtro de
         // ambiente pode ter recusado variáveis, e a tela precisa mostrar o que
         // ficou valendo de verdade.
-        setCtx(context);
+        despachar({ tipo: 'salvou', projectId: alvo, ctx: context });
       },
       'configurações salvas no projeto',
     );
-    if (ok) setSujo(false);
+  };
+
+  const editar = (mudar: (atual: ProjectContextDto) => ProjectContextDto): void => {
+    despachar({ tipo: 'editar', mudar });
   };
 
   const mudarPrompt = (agentId: string, valor: string): void => {
-    setCtx((atual) => ({ ...atual, prompts: { ...(atual.prompts ?? {}), [agentId]: valor } }));
-    setSujo(true);
+    editar((atual) => ({ ...atual, prompts: { ...(atual.prompts ?? {}), [agentId]: valor } }));
   };
 
   const mudarEnv = (agentId: string, chave: string, valor: string): void => {
-    setCtx((atual) => {
+    editar((atual) => {
       const doAgente = { ...(atual.env?.[agentId] ?? {}) };
       if (valor.trim() === '') delete doAgente[chave];
       else doAgente[chave] = valor;
       return { ...atual, env: { ...(atual.env ?? {}), [agentId]: doAgente } };
     });
-    setSujo(true);
   };
 
   const envDoAgente = ctx.env?.[agenteSelecionado] ?? {};
   const projetoAtual = projects.find((p) => p.id === projectId);
   const agenteAtual = agents.find((a) => a.id === agenteSelecionado);
 
-  const CHAVES_FIXAS = ['OPENAI_BASE_URL', 'OPENAI_API_KEY', 'MODEL'];
-  const extrasDoAgente = Object.entries(envDoAgente).filter(
-    ([chave]) => !CHAVES_FIXAS.includes(chave),
-  );
-
-  /**
-   * O daemon só recusa `PATH`/`NODE_OPTIONS`/etc. do lado de fora — aqui é só
-   * eco antecipado da mesma regra, pra não deixar o usuário digitar, salvar e
-   * só descobrir na resposta que a chave nunca ia colar.
-   */
-  const chaveEhPermitida = (chave: string): boolean => {
-    const c = chave.trim();
-    if (c === 'MODEL' || c === 'MODEL_BASE_URL') return true;
-    return PREFIXOS_ENV_PERMITIDOS.some((p) => c.startsWith(p));
-  };
+  // Só as variáveis que ESTE agente lê (tabela em `core/agent-env.ts`); o
+  // resto do env dele vai para "Outras variáveis".
+  const camposFixos = camposDeEnvDoAgente(agenteSelecionado);
+  const campoBaseUrl = camposFixos.find((c) => c.papel === 'baseUrl');
+  const campoChave = camposFixos.find((c) => c.papel === 'apiKey');
+  const campoModelo = camposFixos.find((c) => c.papel === 'model');
+  const extras = extrasDoAgente(envDoAgente, agenteSelecionado);
 
   /**
    * Risco distinto do vazamento de chave (aviso ao lado do campo "Chave"
@@ -166,18 +183,12 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
   const chaveEhBaseUrl = (chave: string): boolean => chave.trim().toUpperCase().endsWith('_BASE_URL');
 
   /**
-   * Aviso best-effort: o manifesto do agente não promete nada sobre essa
-   * variável específica. Não bloqueia — só um agente pode muito bem ler
-   * `OPENAI_*` sem isso estar documentado — mas evita o usuário configurar
-   * `ANTHROPIC_BASE_URL` num agente cujo manifesto só fala de `OPENAI_*`, ou
-   * vice-versa, sem perceber.
+   * Aviso best-effort: nem a tabela de variáveis nem o manifesto dizem que o
+   * agente lê isto. Não bloqueia — o CLI pode ler algo não documentado — mas
+   * evita configurar `OPENAI_BASE_URL` no Claude sem perceber que é inócuo.
    */
-  const variavelDocumentadaNoManifesto = (chave: string): boolean => {
-    if (!agenteAtual) return true;
-    const prefixo = chave.trim().split('_')[0] ?? '';
-    const textos = [agenteAtual.description, ...agenteAtual.caveats].join(' ').toUpperCase();
-    return textos.includes(chave.toUpperCase()) || (prefixo !== '' && textos.includes(prefixo));
-  };
+  const variavelDocumentadaNoManifesto = (chave: string): boolean =>
+    variavelConhecidaDoAgente(chave, agenteAtual);
 
   const adicionarExtra = (): void => {
     const chave = novaChave.trim();
@@ -202,7 +213,7 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
             <span>Projeto</span>
             <select
               value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              onChange={(e) => trocarProjeto(e.target.value)}
               disabled={projects.length === 0}
             >
               {projects.length === 0 && <option value="">nenhum projeto ainda</option>}
@@ -216,9 +227,17 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
           <button
             className="primary"
             onClick={() => void salvar()}
-            disabled={semProjeto || !sujo || action.busy !== null}
+            disabled={!podeSalvar(form) || action.busy !== null}
           >
-            {action.busy === 'salvar' ? 'salvando…' : sujo ? 'Salvar' : 'Salvo'}
+            {action.busy === 'salvar'
+              ? 'salvando…'
+              : form.status === 'falhou'
+                ? 'Não carregado'
+                : carregando
+                  ? 'carregando…'
+                  : sujo
+                    ? 'Salvar'
+                    : 'Salvo'}
           </button>
         </div>
       </div>
@@ -232,10 +251,29 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
         </div>
       )}
 
+      {form.status === 'falhou' && (
+        <div className="settings-erro error-banner" role="alert">
+          Não foi possível carregar a configuração de "{projetoAtual?.name ?? projectId}":{' '}
+          {form.erroCarga}. Nada foi alterado no projeto; a edição fica travada até carregar.
+          <button className="ghost" onClick={() => setRecarga((n) => n + 1)}>
+            tentar de novo
+          </button>
+        </div>
+      )}
+
       {semProjeto && (
-        <div className="settings-vazio">
-          Nenhum projeto cadastrado. Estas configurações vivem dentro de um projeto — crie um
-          primeiro, apontando para a pasta do repositório.
+        <div className="settings-vazio settings-card">
+          <h3 className="card-title">Primeiros passos</h3>
+          <p className="card-desc">
+            Prompts, memória e modelos vivem dentro de um projeto — registre a pasta do
+            repositório para configurá-los. Enquanto isso, veja em "Agentes detectados" o que cada
+            CLI já tem instalado nesta máquina.
+          </p>
+          {onNewProject && (
+            <button className="primary" onClick={onNewProject}>
+              Registrar projeto
+            </button>
+          )}
         </div>
       )}
 
@@ -301,7 +339,7 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   id="prompt-agente"
                   rows={8}
                   className="settings-textarea"
-                  disabled={semProjeto}
+                  disabled={bloqueado}
                   placeholder="Ex.: prefira mudanças pequenas e testáveis; explique a decisão antes de aplicar."
                   value={ctx.prompts?.[agenteSelecionado] ?? ''}
                   onChange={(e) => mudarPrompt(agenteSelecionado, e.target.value)}
@@ -325,7 +363,7 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   id="memoria"
                   rows={12}
                   className="settings-textarea"
-                  disabled={semProjeto}
+                  disabled={bloqueado}
                   placeholder={
                     'Ex.:\n- Nunca comitar direto em main.\n' +
                     '- Testes em Node test runner para toda rota nova.\n' +
@@ -333,8 +371,8 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   }
                   value={ctx.memory ?? ''}
                   onChange={(e) => {
-                    setCtx((a) => ({ ...a, memory: e.target.value }));
-                    setSujo(true);
+                    const memory = e.target.value;
+                    editar((a) => ({ ...a, memory }));
                   }}
                 />
                 <div className="help">
@@ -359,45 +397,70 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                 onSelect={setAgenteSelecionado}
               />
 
+              {camposFixos.length === 0 && (
+                <div className="help help-warn" style={{ marginTop: 16 }}>
+                  <strong>{agenteAtual?.name ?? agenteSelecionado}</strong> não lê nenhuma variável
+                  de provedor que o projeto possa definir — ele usa a própria configuração (login e
+                  modelo escolhidos no CLI). Não há o que ajustar aqui para este agente.
+                </div>
+              )}
+
+              {campoBaseUrl && (
               <div className="field" style={{ marginTop: 16 }}>
-                <label htmlFor="base-url">Endereço da API compatível com OpenAI</label>
+                <label htmlFor="base-url">
+                  {campoBaseUrl.rotulo} <code>{campoBaseUrl.nome}</code>
+                </label>
                 <input
                   id="base-url"
                   type="text"
-                  disabled={semProjeto}
-                  placeholder="http://localhost:11434/v1"
-                  value={envDoAgente['OPENAI_BASE_URL'] ?? ''}
-                  onChange={(e) => mudarEnv(agenteSelecionado, 'OPENAI_BASE_URL', e.target.value)}
+                  disabled={bloqueado}
+                  placeholder={
+                    campoBaseUrl.nome.startsWith('OPENAI_') ? 'http://localhost:11434/v1' : 'https://…'
+                  }
+                  value={envDoAgente[campoBaseUrl.nome] ?? ''}
+                  onChange={(e) => mudarEnv(agenteSelecionado, campoBaseUrl.nome, e.target.value)}
                 />
-                <div className="sugestoes">
-                  {ENDPOINTS_SUGERIDOS.map((s) => (
-                    <button
-                      key={s.url}
-                      className="ghost"
-                      disabled={semProjeto}
-                      onClick={() => mudarEnv(agenteSelecionado, 'OPENAI_BASE_URL', s.url)}
-                    >
-                      {s.rotulo}
-                    </button>
-                  ))}
+                {/* Os servidores locais sugeridos falam a API da OpenAI: só fazem
+                    sentido para quem lê OPENAI_BASE_URL. */}
+                {campoBaseUrl.nome.startsWith('OPENAI_') && (
+                  <div className="sugestoes">
+                    {ENDPOINTS_SUGERIDOS.map((s) => (
+                      <button
+                        key={s.url}
+                        className="ghost"
+                        disabled={bloqueado}
+                        onClick={() => mudarEnv(agenteSelecionado, campoBaseUrl.nome, s.url)}
+                      >
+                        {s.rotulo}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="help help-warn">
+                  ⚠️ Apontar esta URL para um host que você não controla envia a credencial nativa
+                  do CLI para ele. Só use um servidor local ou um destino em que você confia.
                 </div>
               </div>
+              )}
 
+              {campoChave && (
               <div className="field">
-                <label htmlFor="api-key">Chave</label>
+                <label htmlFor="api-key">
+                  {campoChave.rotulo} <code>{campoChave.nome}</code>
+                </label>
                 <div className="budget-input-wrap">
                   <input
                     id="api-key"
                     type={mostrarChaveApi ? 'text' : 'password'}
-                    disabled={semProjeto}
+                    disabled={bloqueado}
                     placeholder="ollama"
-                    value={envDoAgente['OPENAI_API_KEY'] ?? ''}
-                    onChange={(e) => mudarEnv(agenteSelecionado, 'OPENAI_API_KEY', e.target.value)}
+                    value={envDoAgente[campoChave.nome] ?? ''}
+                    onChange={(e) => mudarEnv(agenteSelecionado, campoChave.nome, e.target.value)}
                   />
                   <button
                     type="button"
                     className="ghost"
-                    disabled={semProjeto}
+                    disabled={bloqueado}
                     onClick={() => setMostrarChaveApi((v) => !v)}
                     title={mostrarChaveApi ? 'Ocultar chave' : 'Mostrar chave'}
                   >
@@ -413,47 +476,55 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   exemplo, no ambiente do próprio daemon) em vez de gravar aqui.
                 </div>
               </div>
+              )}
 
-              <div className="field">
-                <label htmlFor="modelo">Modelo</label>
-                <input
-                  id="modelo"
-                  type="text"
-                  disabled={semProjeto}
-                  placeholder="qwen2.5-coder:latest"
-                  value={envDoAgente['MODEL'] ?? ''}
-                  onChange={(e) => mudarEnv(agenteSelecionado, 'MODEL', e.target.value)}
-                />
-              </div>
+              {/* Só aparece se o agente lê uma variável de modelo. O antigo campo
+                  `MODEL` genérico não tinha consumidor em adapter nenhum. Modelo
+                  por flag do manifesto: ver TODO em `camposDeEnvDoAgente`. */}
+              {campoModelo && (
+                <div className="field">
+                  <label htmlFor="modelo">
+                    {campoModelo.rotulo} <code>{campoModelo.nome}</code>
+                  </label>
+                  <input
+                    id="modelo"
+                    type="text"
+                    disabled={bloqueado}
+                    placeholder="nome do modelo no provedor"
+                    value={envDoAgente[campoModelo.nome] ?? ''}
+                    onChange={(e) => mudarEnv(agenteSelecionado, campoModelo.nome, e.target.value)}
+                  />
+                </div>
+              )}
 
               <div className="field">
                 <label>Outras variáveis de ambiente</label>
                 <div className="help">
-                  Nem todo agente lê <code>OPENAI_*</code>. Prefixos aceitos:{' '}
+                  Prefixos aceitos pelo daemon:{' '}
                   {PREFIXOS_ENV_PERMITIDOS.map((p) => (
                     <code key={p} style={{ marginRight: 4 }}>
                       {p}*
                     </code>
                   ))}
-                  e os nomes <code>MODEL</code>/<code>MODEL_BASE_URL</code>. Ex.:{' '}
-                  <code>ANTHROPIC_BASE_URL</code> para <code>claude</code>,{' '}
-                  <code>GOOGLE_API_KEY</code>/<code>GEMINI_API_KEY</code> para agentes Google.
+                  . Aceito não quer dizer lido: cada CLI só obedece às variáveis que conhece — as
+                  que o Hub sabe que <strong>{agenteSelecionado}</strong> lê já estão acima.
                 </div>
 
-                {extrasDoAgente.length > 0 && (
+                {extras.length > 0 && (
                   <ul className="lista-env-extra">
-                    {extrasDoAgente.map(([chave, valor]) => (
+                    {extras.map(([chave, valor]) => (
                       <li key={chave}>
                         <code>{chave}</code>
-                        <span className="valor-env-extra">{valor}</span>
+                        <span className="valor-env-extra">{valorParaExibir(chave, valor)}</span>
                         {!variavelDocumentadaNoManifesto(chave) && (
                           <span className="aviso-inline">
-                            ⚠️ manifesto de "{agenteSelecionado}" não documenta esta variável
+                            ⚠️ nada indica que "{agenteSelecionado}" leia esta variável — pode não
+                            ter efeito
                           </span>
                         )}
                         <button
                           className="ghost"
-                          disabled={semProjeto}
+                          disabled={bloqueado}
                           onClick={() => mudarEnv(agenteSelecionado, chave, '')}
                         >
                           remover
@@ -467,20 +538,20 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
                   <input
                     type="text"
                     placeholder="NOME_DA_VARIAVEL"
-                    disabled={semProjeto}
+                    disabled={bloqueado}
                     value={novaChave}
                     onChange={(e) => setNovaChave(e.target.value.toUpperCase())}
                   />
                   <input
                     type="text"
                     placeholder="valor"
-                    disabled={semProjeto}
+                    disabled={bloqueado}
                     value={novoValor}
                     onChange={(e) => setNovoValor(e.target.value)}
                   />
                   <button
                     className="ghost"
-                    disabled={semProjeto || novaChave.trim() === '' || novoValor.trim() === ''}
+                    disabled={bloqueado || novaChave.trim() === '' || novoValor.trim() === ''}
                     onClick={adicionarExtra}
                   >
                     adicionar
@@ -519,6 +590,7 @@ export function SettingsView({ agents, projects }: Props): React.JSX.Element {
               agents={agents}
               projectId={projectId}
               projectName={projetoAtual?.name ?? ''}
+              onNewProject={onNewProject}
             />
           )}
         </main>

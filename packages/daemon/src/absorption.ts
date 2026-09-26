@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   filtrarEnvDeProjeto,
   HubError,
+  variavelDoAgente,
   type AgentDiscovery,
   type ImportKind,
   type ImportPlanItem,
@@ -289,19 +290,6 @@ export interface ProjectAccess {
 /** Limite de instrução por agente (o mesmo de `ProjectContextSchema`). */
 export const MAX_PROMPT_CHARS = 8_000;
 
-const MODEL_VAR: Record<string, string> = {
-  claude: 'ANTHROPIC_MODEL',
-  openclaude: 'ANTHROPIC_MODEL',
-  antigravity: 'GEMINI_MODEL',
-};
-const BASE_URL_VAR: Record<string, string> = {
-  claude: 'ANTHROPIC_BASE_URL',
-  openclaude: 'ANTHROPIC_BASE_URL',
-  antigravity: 'GOOGLE_GEMINI_BASE_URL',
-  codex: 'OPENAI_BASE_URL',
-  opencode: 'OPENAI_BASE_URL',
-};
-
 export type McpEnvReader = (server: { name: string; source: string }) => Record<string, string>;
 
 export interface ImportServiceOptions {
@@ -326,9 +314,11 @@ export class ImportService {
   ) {
     this.#targets = mcpTargets(options.home ?? os.homedir());
     this.#readMcpEnv = options.readMcpEnv ?? readMcpEnvFromSource;
+    // Mesma tabela que o painel usa para decidir que campos mostrar
+    // (`core/agent-env.ts`): importar e configurar à mão não podem divergir.
     this.#envVarNames = options.envVarNames ?? {
-      model: (id) => MODEL_VAR[id] ?? null,
-      baseUrl: (id) => BASE_URL_VAR[id] ?? null,
+      model: (id) => variavelDoAgente(id, 'model'),
+      baseUrl: (id) => variavelDoAgente(id, 'baseUrl'),
     };
   }
 

@@ -5,7 +5,11 @@
   "type": "module",
   "description": "Domínio puro do Agents-Hub: tipos, eventos, política, orçamento e grafo de chamadas. Sem I/O.",
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./agent-env": {
+      "types": "./dist/agent-env.d.ts",
+      "default": "./dist/agent-env.js"
+    }
   },
   "types": "./dist/index.d.ts",
   "dependencies": {

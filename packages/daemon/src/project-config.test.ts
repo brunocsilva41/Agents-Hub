@@ -282,4 +282,39 @@ describe('YAML de projeto quebrado — sinal visível, não silêncio', () => {
       'tipo errado precisa de sinal visível, não só cair em silêncio na política global',
     );
   });
+
+  // Vistoria 2026-09-25 (04/13): o painel grava `prompts:`/`env:`/`memory:`
+  // sem bloco `policy:`, e o arquivo inteiro era validado como política — toda
+  // sessão do projeto recebia "configuração inválida" sem nada estar errado.
+  test('config só com memory/prompts/env (sem policy:) não gera aviso de inválida', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'memory: regras\nprompts:\n  claude: seja conciso\nenv:\n  claude:\n    ANTHROPIC_MODEL: x\n',
+      'utf8',
+    );
+    const { overrides, error } = loadProjectOverrides(raiz);
+    assert.equal(error, null);
+    assert.deepEqual(overrides, {});
+  });
+
+  test('forma plana (política no topo) junto de contexto continua valendo', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'maxDepth: 2\nprompts:\n  claude: seja conciso\n',
+      'utf8',
+    );
+    const { overrides, error } = loadProjectOverrides(raiz);
+    assert.equal(error, null);
+    assert.equal(overrides.maxDepth, 2);
+  });
+
+  test('campo desconhecido no topo continua recusado mesmo sem policy:', () => {
+    writeFileSync(
+      path.join(raiz, PROJECT_CONFIG_RELATIVE),
+      'prompts:\n  claude: x\ncampoInventado: 1\n',
+      'utf8',
+    );
+    const { error } = loadProjectOverrides(raiz);
+    assert.match(String(error), /política do projeto inválida/);
+  });
 });

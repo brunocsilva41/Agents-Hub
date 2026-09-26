@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAction } from '../actions';
 import { hub } from '../hub';
+import { erroDeCaminhoDoDaemon, problemaNoCaminhoLocal } from '../logic/project-path';
 
 interface Props {
   onClose: () => void;
@@ -18,6 +19,10 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
   const [folderPath, setFolderPath] = useState('');
   const [extraFolders, setExtraFolders] = useState('');
   const [guidelines, setGuidelines] = useState('');
+  // Erro do caminho principal, mostrado junto do campo. O daemon recusa pasta
+  // inexistente/arquivo/relativo com 400 INVALID_PATH; antes aceitava e o
+  // modal dizia "projeto registrado" para uma pasta que não existe.
+  const [erroCaminho, setErroCaminho] = useState<string | null>(null);
   const action = useAction();
 
   /**
@@ -32,7 +37,12 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
    * silenciar quais ficaram de fora seria pior do que relatar.
    */
   const handleCreate = async () => {
-    if (!folderPath.trim()) return;
+    const problema = problemaNoCaminhoLocal(folderPath);
+    if (problema) {
+      setErroCaminho(problema);
+      return;
+    }
+    setErroCaminho(null);
 
     const projectName = name.trim() || nomeDaPasta(folderPath) || 'Projeto';
     const extras = extraFolders
@@ -43,7 +53,13 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
     await action.run(
       'create-project',
       async () => {
-        const { project } = await hub.addProject(folderPath.trim(), projectName);
+        let project;
+        try {
+          ({ project } = await hub.addProject(folderPath.trim(), projectName));
+        } catch (err) {
+          setErroCaminho(erroDeCaminhoDoDaemon(err));
+          throw err;
+        }
 
         const recusadas: string[] = [];
         for (const pasta of extras) {
@@ -107,8 +123,11 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
             type="text"
             placeholder="Ex: C:\Users\SeuUsuario\Projetos\MeuApp ou /var/www/app"
             value={folderPath}
+            aria-invalid={erroCaminho !== null}
+            aria-describedby={erroCaminho !== null ? 'folder-path-erro' : undefined}
             onChange={(e) => {
               setFolderPath(e.target.value);
+              setErroCaminho(null);
               if (!name) {
                 const autoName = e.target.value.trim().split(/[\\/]/).pop() || '';
                 if (autoName) setName(autoName);
@@ -116,6 +135,11 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
             }}
             autoFocus
           />
+          {erroCaminho !== null && (
+            <div id="folder-path-erro" className="aviso-inline" role="alert">
+              ⚠️ {erroCaminho}
+            </div>
+          )}
           <div className="help">
             Os agentes executarão ferramentas e criarão Git worktrees isolados dentro desta pasta.
           </div>

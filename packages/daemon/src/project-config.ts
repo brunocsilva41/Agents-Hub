@@ -156,6 +156,31 @@ export function loadProjectOverrides(
   };
 }
 
+/**
+ * Chaves de topo que NÃO são política: o contexto do projeto (ver
+ * `ProjectContext` abaixo), gravado pelo painel, por `hub project prompt/env`
+ * e pela importação no mesmo arquivo.
+ */
+const CHAVES_DE_CONTEXTO = ['memory', 'prompts', 'env'] as const;
+
+/**
+ * O que validar como política dentro do `config.yaml`.
+ *
+ * Com bloco `policy:`, só ele. Sem bloco, a forma plana (política no topo)
+ * continua aceita — mas sem as chaves de contexto. Antes, um arquivo gravado
+ * só pelo painel (`prompts:`/`env:`, sem `policy:`) era validado inteiro como
+ * política e o schema estrito recusava `prompts`: toda sessão do projeto
+ * ganhava o aviso falso "configuração inválida — caindo na política global"
+ * (vistoria 2026-09-25, relatórios 04 e 13).
+ */
+export function candidatoDePolitica(parsed: Record<string, unknown>): unknown {
+  if (parsed['policy'] !== undefined && parsed['policy'] !== null) return parsed['policy'];
+  const resto: Record<string, unknown> = { ...parsed };
+  delete resto['policy'];
+  for (const chave of CHAVES_DE_CONTEXTO) delete resto[chave];
+  return resto;
+}
+
 /** Leitura crua (sem o filtro de confiança), com o cache por mtime+size. */
 function lerOverridesBrutos(projectPath: string): {
   loaded: Omit<LoadedProjectOverrides, 'ignoredExecFields'>;
@@ -184,7 +209,7 @@ function lerOverridesBrutos(projectPath: string): {
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
-    const candidato = parsed['policy'] ?? parsed;
+    const candidato = candidatoDePolitica(parsed);
 
     // YAML sintaticamente válido, mas semanticamente fora do que
     // `PolicyDocument` permite (campo desconhecido, ou campo conhecido com

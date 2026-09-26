@@ -108,3 +108,73 @@ export function filtrarEnvDeProjeto(bruto: Record<string, unknown>): EnvFiltrado
 export function prefixosDeEnvPermitidos(): readonly string[] {
   return PREFIXOS_PERMITIDOS;
 }
+
+// ------------------------------------------------ o que cada agente LÊ de fato
+
+/**
+ * Papel de uma variável no "modelo local": para onde apontar, com que chave, e
+ * qual modelo pedir.
+ */
+export type PapelDeVariavel = 'baseUrl' | 'apiKey' | 'model';
+
+export interface VariavelDeAgente {
+  nome: string;
+  papel: PapelDeVariavel;
+}
+
+/**
+ * Variáveis de ambiente que cada CLI comprovadamente lê — fonte única para a
+ * importação (`daemon/absorption.ts`) e para o painel ("Modelos locais").
+ *
+ * A lista de permissão acima diz o que PODE passar; esta tabela diz o que TEM
+ * EFEITO. A diferença importa: oferecer `OPENAI_BASE_URL` para o Claude, ou um
+ * campo `MODEL` que nenhum adapter consome, é controle fantasma — o usuário
+ * acha que configurou e nada muda (vistoria 2026-09-25, relatórios 03 e 10).
+ * Agente fora da tabela (copilot, cursor, mimo) não lê nenhuma variável que a
+ * lista de permissão aceite: o painel não oferece campo para ele.
+ *
+ * Só entra aqui o que tem evidência (variável documentada pelo CLI ou lida pela
+ * descoberta em `adapters/src/discovery/*`). Na dúvida fica de fora: melhor não
+ * oferecer o campo do que oferecer um que não faz nada.
+ */
+const VARIAVEIS_LIDAS_POR_AGENTE: Readonly<Record<string, readonly VariavelDeAgente[]>> = {
+  claude: [
+    { nome: 'ANTHROPIC_BASE_URL', papel: 'baseUrl' },
+    { nome: 'ANTHROPIC_API_KEY', papel: 'apiKey' },
+    { nome: 'ANTHROPIC_MODEL', papel: 'model' },
+  ],
+  // Fork do Claude Code: lê as mesmas. O modo OpenAI dele depende de
+  // `CLAUDE_CODE_USE_OPENAI`, que a lista de permissão não deixa passar —
+  // oferecer `OPENAI_*` aqui seria de novo um campo sem efeito.
+  openclaude: [
+    { nome: 'ANTHROPIC_BASE_URL', papel: 'baseUrl' },
+    { nome: 'ANTHROPIC_API_KEY', papel: 'apiKey' },
+    { nome: 'ANTHROPIC_MODEL', papel: 'model' },
+  ],
+  antigravity: [
+    { nome: 'GOOGLE_GEMINI_BASE_URL', papel: 'baseUrl' },
+    { nome: 'GEMINI_API_KEY', papel: 'apiKey' },
+    { nome: 'GEMINI_MODEL', papel: 'model' },
+  ],
+  // Codex e OpenCode escolhem o modelo pela própria config/flag, não por
+  // variável de ambiente: sem campo de modelo.
+  codex: [
+    { nome: 'OPENAI_BASE_URL', papel: 'baseUrl' },
+    { nome: 'OPENAI_API_KEY', papel: 'apiKey' },
+  ],
+  opencode: [
+    { nome: 'OPENAI_BASE_URL', papel: 'baseUrl' },
+    { nome: 'OPENAI_API_KEY', papel: 'apiKey' },
+  ],
+  kimi: [{ nome: 'MOONSHOT_API_KEY', papel: 'apiKey' }],
+};
+
+/** Variáveis que o agente lê (vazia = nenhuma que o projeto possa definir). */
+export function variaveisLidasPeloAgente(agentId: string): readonly VariavelDeAgente[] {
+  return VARIAVEIS_LIDAS_POR_AGENTE[agentId] ?? [];
+}
+
+/** Nome da variável com esse papel para o agente, ou `null` se ele não lê nenhuma. */
+export function variavelDoAgente(agentId: string, papel: PapelDeVariavel): string | null {
+  return variaveisLidasPeloAgente(agentId).find((v) => v.papel === papel)?.nome ?? null;
+}

@@ -18,8 +18,11 @@ import { agentColor, fetchDiscovery, importFromAgent, refreshDiscovery } from '.
 
 interface Props {
   agents: AgentSummary[];
+  /** Vazio quando ainda não há projeto: ver e atualizar funcionam; importar não. */
   projectId: string;
   projectName: string;
+  /** Primeira execução: leva ao registro de projeto, que é o que destrava importar. */
+  onNewProject?: () => void;
 }
 
 const AUTH_LABEL: Record<AuthState, string> = {
@@ -45,7 +48,12 @@ const KIND_LABEL: Record<ImportKind, { titulo: string; sub: string }> = {
 
 const KINDS: ImportKind[] = ['instructions', 'env', 'mcp'];
 
-export function DiscoveryPanel({ agents, projectId, projectName }: Props): React.JSX.Element {
+export function DiscoveryPanel({
+  agents,
+  projectId,
+  projectName,
+  onNewProject,
+}: Props): React.JSX.Element {
   const [lista, setLista] = useState<AgentDiscovery[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -117,6 +125,21 @@ export function DiscoveryPanel({ agents, projectId, projectName }: Props): React
           {atualizando === '*' ? 'atualizando…' : 'Atualizar todos'}
         </button>
       </div>
+
+      {projectId === '' && (
+        <div className="help" role="note">
+          Ver o que cada CLI tem não depende de projeto. Para <strong>importar</strong>{' '}
+          instruções, ambiente ou MCP, registre antes a pasta do repositório como projeto.
+          {onNewProject && (
+            <>
+              {' '}
+              <button className="linkish" onClick={onNewProject}>
+                Registrar projeto
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {erro !== null && (
         <div className="settings-erro" role="alert">

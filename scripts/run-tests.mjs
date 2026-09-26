@@ -37,11 +37,16 @@ function encontrarTestes(dir) {
   return achados;
 }
 
+// `dist-test` é o do painel web: o `dist/` dele é a build do Vite (apagada a
+// cada `vite build`), então a lógica pura e os testes compilam à parte
+// (`packages/web/tsconfig.test.json`).
 const arquivos = [];
 for (const pacote of readdirSync(pacotes, { withFileTypes: true })) {
   if (!pacote.isDirectory()) continue;
-  const dist = path.join(pacotes, pacote.name, 'dist');
-  if (existsSync(dist)) arquivos.push(...encontrarTestes(dist));
+  for (const saida of ['dist', 'dist-test']) {
+    const dir = path.join(pacotes, pacote.name, saida);
+    if (existsSync(dir)) arquivos.push(...encontrarTestes(dir));
+  }
 }
 
 // Suíte vazia é o modo de falha que este script existe para impedir: quase

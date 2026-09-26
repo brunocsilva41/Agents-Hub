@@ -45,6 +45,15 @@ portão e tem prioridade sobre o que você estava fazendo.
 > Um portão que protege menos do que diz proteger é pior do que nenhum, porque
 > compra confiança sem lastro.
 
+> **Testes do painel web:** a lógica pura do painel mora em
+> `packages/web/src/logic/` (sem React, sem `window`) e é testada com o mesmo
+> `node:test`. `packages/web/tsconfig.test.json` — referenciado no
+> `tsconfig.json` da raiz, então `tsc -b` já compila — gera
+> `packages/web/dist-test/`, que `npm test` também percorre. Não é o `dist/` do
+> pacote porque esse é a build do Vite, apagada a cada `vite build`. Regra da
+> casa: decisão de estado ou de regra num componente vai para `logic/` com
+> teste; o componente só despacha e desenha.
+
 ---
 
 ## Critério de pronto
