@@ -82,6 +82,19 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 ## Fase 9 — Fechamento
 - [ ] Não iniciado
 
+## Teste real — rodada 1 (2026-09-26 23:38–23:42, daemon isolado porta 48511, home temporário, projeto git temporário)
+Prompt: "Responda apenas com a palavra OK. Não use ferramentas." `--budget-usd 0.10`, em série. Versões: claude 2.1.283, codex 0.155.0, opencode 1.18.32, agy 1.2.11, copilot 1.0.88.
+| # | Agente | Resultado | Custo registrado | Observações |
+|---|---|---|---|---|
+| 1 | claude | OK, nativeSessionId c644e32e… | US$ 0,1323 (contagem única) | turno real custa > 0,10 → aprovação de orçamento aberta corretamente; negar após turno concluído marcou `killed` (defeito); ruído: linhas vazias e rate_limit_event cru |
+| 2 | codex | FALHA por limite de uso da conta ("You've hit your usage limit") — registrado, não repetido | — | adapter ok até o modelo (threadId capturado); defeitos: motivo exibido = 1ª linha do stderr (aviso de SKILL.md), limite tratado como permanente → fallback automático |
+| 3 | claude (fallback automático do #2) | OK | US$ 0,1321 | chamada não planejada, causada pelo fallback; fallback zerado no daemon isolado depois disso |
+| 4 | opencode | OK, tarefa concluída, exit 0 | US$ 0,0000 · 2,8k tokens | modelo grátis do provedor opencode; ruído: message.delta cru, turno concluído 2x |
+| 5 | antigravity | OK — CRÍTICO 0.2 provado no binário real | US$ 0,0348 · 14,8k tokens | turno concluído 2x |
+| 6 | copilot | OK com prompt MULTILINHA (0.3 provado) | 0,37 AI Credits = US$ 0,0037 | tokens 0 (entrada não vem no JSONL); turno concluído 3x |
+Achado novo (ALTO, segurança): sessão do Claude subida pelo Hub só tem gate se o usuário instalou o hook no ~/.claude/settings.json; o Claude aceita `--settings <arquivo-ou-json>` → injetar o hook por sessão (como já é feito no Codex). Teste do gate e retomada do Claude ficam para a rodada 2, depois da correção. Codex: retomada impossível hoje (limite da conta).
+Chamadas reais na rodada 1: 6 (dentro do teto de ~10).
+
 ## Orçamento de chamadas reais a modelo usado até agora
 - Vistoria de 2026-09-25: ~9 chamadas (relatório 11), dentro do teto combinado com o usuário.
-- Nenhuma chamada real adicional feita depois disso.
+- 2026-09-26: rodada 1 = 6 chamadas (ver acima). Resta no dia: 1 rodada.
