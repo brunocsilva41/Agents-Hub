@@ -27,7 +27,8 @@ invoke:
   extraArgs: []
   env: {}
 
-  # Verificado contra `agy --help` (agy.exe real, 1.1.22): `--mode` aceita
+  # Verificado contra `agy --help` (agy.exe real, 1.1.22; reconferido no
+  # --help da 1.2.10): `--mode` aceita
   # "accept-edits" ou "plan" — mesmo par de conceitos do `--permission-mode`
   # do Claude Code. `--dangerously-skip-permissions` existe e NUNCA é usado
   # aqui, mesma política do Claude/Codex/OpenClaude: quem concede permissão é
@@ -36,6 +37,20 @@ invoke:
     supervised: ["--mode", "plan"]
     semi: ["--mode", "accept-edits"]
     autonomous: ["--mode", "accept-edits"]
+
+# Verificado contra `agy --help` (1.2.10): `--model` — "Model for the current
+# CLI session". O valor é o id que `agy models` lista (ex.: `gemini-3.1-pro-low`),
+# não o nome de exibição que o agy grava em `antigravity-cli/settings.json`.
+model:
+  supported: true
+  args: ["--model", "{{model}}"]
+  format: "id de `agy models` (ex.: gemini-3.1-pro-low)"
+
+verified:
+  status: verified
+  version: "1.2.10"
+  date: "2026-09-26"
+  notes: "flags conferidas no `agy --help` 1.2.10 (so --help/--version, sem chamada de modelo); --mode/--conversation exercitados contra o binario na 1.1.22"
 
 session:
   strategy: native
@@ -60,7 +75,8 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "VERIFICADO: validado contra o binario real `agy.exe` (v1.1.22); montagem do argv (`--output-format stream-json -p=<prompt>`) revista contra `agy --help` da v1.2.10 — na 1.2.x o `-p` sem valor anexado engolia a flag seguinte e nenhuma sessao rodava."
+  - "VERIFICADO em 1.2.10 (instalada em 2026-09-26) so por `agy --help`/`--version`: `--output-format`, `-p=<prompt>`, `--mode`, `--conversation` e `--model` existem. Execucao real com `--mode`/`--conversation` foi exercitada na 1.1.22; na 1.2.x o `-p` sem valor anexado engolia a flag seguinte e nenhuma sessao rodava (corrigido)."
+  - "Retomada com id inexistente: o agy so avisa `conversation \"...\" not found` e abre conversa NOVA (medido na vistoria de 2026-09-25) — o resume vira sessao nova em silencio."
   - "Utiliza `--output-format stream-json` com parser de eventos dedicado."
   - "Suporta retomada nativa de sessao via `--conversation <conversation_id>`."
   - "modeArgs verificado contra `agy --help`: `--mode plan` (supervised) vs `--mode accept-edits` (semi/autonomous). O binario tambem tem `--sandbox` (restringe acesso de terminal) nao usado aqui — nao testado em combinacao com `--mode` nesta verificacao, e por isso fica de fora para nao arriscar quebrar a invocacao com uma combinacao nunca exercitada."

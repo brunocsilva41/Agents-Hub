@@ -7,6 +7,8 @@ export {
   montarSpawn,
   escaparArgParaCmd,
   resolverShimNpm,
+  candidatosNoPath,
+  BIN_CACHE_NEGATIVO_MS,
   type ResolvedBin,
   type SpawnMontado,
 } from './bin-resolver.js';
@@ -21,6 +23,7 @@ export {
 export {
   ProcessAgentAdapter,
   montarInvocacao,
+  modeloDaRun,
   type EntregaDoPrompt,
   type InvocacaoMontada,
 } from './process-adapter.js';

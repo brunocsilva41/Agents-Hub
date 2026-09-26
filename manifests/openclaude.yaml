@@ -15,7 +15,7 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  # Verificado contra o binário 0.13.0: mesma forma do Claude Code.
+  # Verificado contra o binário 0.13.0 (flags reconferidas no --help 0.14.0): mesma forma do Claude Code.
   oneShot: ["-p", "--output-format", "stream-json", "--verbose"]
   resume: ["-p", "--resume", "{{nativeSessionId}}", "--output-format", "stream-json", "--verbose"]
   stdinPrompt: true
@@ -25,7 +25,7 @@ invoke:
   extraArgs: []
   env: {}
 
-  # Verificado contra `openclaude --help` (binário real 0.13.0 nesta
+  # Verificado contra `openclaude --help` (binário real 0.13.0, reconferido na 0.14.0 nesta
   # máquina): `--permission-mode` existe com o MESMO vocabulário do Claude
   # Code (choices: acceptEdits, bypassPermissions, default, dontAsk, plan,
   # auto — um superconjunto do Claude, que só usa plan/acceptEdits/
@@ -35,6 +35,19 @@ invoke:
     supervised: ["--permission-mode", "plan"]
     semi: ["--permission-mode", "acceptEdits"]
     autonomous: ["--permission-mode", "acceptEdits"]
+
+# Verificado contra `openclaude --help` (0.14.0): `--model <model>`, mesma
+# semântica do Claude Code; o provedor vem das variáveis de ambiente.
+model:
+  supported: true
+  args: ["--model", "{{model}}"]
+  format: "alias ou nome completo do modelo do provedor configurado"
+
+verified:
+  status: verified
+  version: "0.14.0"
+  date: "2026-09-26"
+  notes: "flags conferidas no `openclaude --help` 0.14.0 (so --help/--version, sem chamada de modelo)"
 
 session:
   strategy: native

@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { HubError } from '@agents-hub/core';
+import { clearBinCache } from './bin-resolver.js';
 import { ProcessAgentAdapter } from './process-adapter.js';
 import { AgentManifestSchema, type AgentAdapter, type AgentManifest, type ProbeResult } from './types.js';
 
@@ -104,6 +105,10 @@ export class AgentRegistry {
    * de agentes perfeitamente saudáveis.
    */
   async probeAll(force = false, concurrency = 2): Promise<ProbeResult[]> {
+    // Probe forçado é o "procure de novo" do usuário (`hub doctor`, botão de
+    // re-sondar): esquece também o que o `resolveBin` achou ou deixou de
+    // achar, senão um agente recém-instalado continuaria "não encontrado".
+    if (force) clearBinCache();
     const ids = this.ids();
     const results: ProbeResult[] = [];
 
@@ -120,6 +125,8 @@ export class AgentRegistry {
     if (!force) {
       const cached = this.#probes.get(agentId);
       if (cached && this.#isFresh(cached)) return cached;
+    } else {
+      clearBinCache(this.get(agentId).manifest.bin);
     }
     const result = await this.get(agentId).probe();
     this.#probes.set(agentId, result);

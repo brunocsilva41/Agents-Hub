@@ -14,8 +14,11 @@ detect:
 
 invoke:
   # O `-` final faz o Codex ler o prompt de stdin.
-  oneShot: ["exec", "--json", "-"]
-  resume: ["exec", "resume", "{{nativeSessionId}}", "--json", "-"]
+  # `--skip-git-repo-check` existe em `exec` e em `exec resume` (0.155.0): sem
+  # ele o Codex recusa rodar fora de repositório git ("Not inside a trusted
+  # directory"), o que quebrava sessões `isolation: none` em pasta sem git.
+  oneShot: ["exec", "--json", "--skip-git-repo-check", "-"]
+  resume: ["exec", "resume", "{{nativeSessionId}}", "--json", "--skip-git-repo-check", "-"]
   stdinPrompt: true
   interactive: false
   extraArgs: []
@@ -51,6 +54,20 @@ invoke:
     semi: ["-c", "sandbox_mode=\"workspace-write\""]
     autonomous: ["-c", "sandbox_mode=\"workspace-write\""]
 
+# Verificado contra `codex exec --help` E `codex exec resume --help` (0.155.0):
+# `-m, --model <MODEL>` existe nos dois subcomandos (diferente de `--sandbox`,
+# que só existe em `exec` — ver modeArgs).
+model:
+  supported: true
+  args: ["-m", "{{model}}"]
+  format: "id do modelo (ex.: o3, como no exemplo do `codex exec --help`)"
+
+verified:
+  status: verified
+  version: "0.155.0"
+  date: "2026-09-26"
+  notes: "flags conferidas no `codex exec --help` e `codex exec resume --help` 0.155.0 (so --help/--version, sem chamada de modelo)"
+
 session:
   strategy: native
 
@@ -77,5 +94,6 @@ defaults:
   supervision: semi
 
 caveats:
-  - "O Hub passa `--sandbox` conforme o modo da sessão, sobrepondo o padrão do ~/.codex/config.toml. Nunca usa `--dangerously-bypass-approvals-and-sandbox`."
+  - "O Hub passa `-c sandbox_mode=...` conforme o modo da sessão (não `--sandbox`, que não existe em `exec resume`), sobrepondo o padrão do ~/.codex/config.toml. Nunca usa `--dangerously-bypass-approvals-and-sandbox`."
+  - "`--skip-git-repo-check` vai sempre: sem ele, `isolation: none` numa pasta sem git falhava com 'Not inside a trusted directory'. Quem decide se a pasta é confiável é o Hub (projeto confiado), não a lista do Codex."
   - "Em modo supervised o Codex fica em read-only: ele NÃO conseguirá editar arquivos. Use semi ou autonomous para tarefas de escrita."

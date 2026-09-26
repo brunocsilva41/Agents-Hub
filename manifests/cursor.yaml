@@ -19,6 +19,18 @@ invoke:
   extraArgs: []
   env: {}
 
+# NÃO VERIFICADO: o `cursor-agent` não está instalado nesta máquina, então não
+# há `--help` para conferir a flag de modelo. Declarado sem suporte para o
+# painel não oferecer um controle que ninguém sabe se funciona.
+model:
+  supported: false
+
+verified:
+  status: unverified
+  version: null
+  date: "2026-09-26"
+  notes: "binario `cursor-agent` ausente nesta maquina (where cursor-agent: nao encontrado); flags deduzidas da documentacao publica, nunca conferidas"
+
 session:
   strategy: native
 
@@ -44,7 +56,9 @@ defaults:
   supervision: semi
 
 caveats:
-  - "NAO VERIFICADO: as flags aqui sao deduzidas da documentacao, nao confirmadas contra o binario."
+  - "NAO VERIFICADO: as flags aqui sao deduzidas da documentacao, nao confirmadas contra o binario. Em 2026-09-26 o `cursor-agent` continua NAO instalado nesta maquina; nada deste manifesto foi exercitado."
+  - "Sem modeArgs: supervised, semi e autonomous rodam IGUAIS no Cursor (nenhuma restricao nativa foi conferida). A unica protecao em supervised e a do proprio Hub."
+  - "Selecao de modelo desligada (`model.supported: false`) ate a flag ser conferida no `cursor-agent --help`."
   - "A IDE do Cursor estar instalada NAO basta: o agente de terminal e um binario separado (`cursor-agent`), e nesta maquina so existem `cursor` e os tuneis. Instale a CLI do Cursor para este manifesto valer."
   - "Mapper generico: eventos de ferramenta e custo ainda nao sao extraidos."
   - "session.strategy: native e aspiracional aqui: o mapper generic-json (packages/adapters/src/mappers/generic.ts) nunca preenche mapped.nativeSessionId, so produz eventos message/log/error. Sem nativeSessionId, resume() nunca e chamado de fato — todo turno cai em rebuildConversation (replay). Fechar isto de verdade exige um mapper dedicado do Cursor (item aberto no roadmap), nao uma mudanca de manifesto."

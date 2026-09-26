@@ -35,6 +35,19 @@ invoke:
     semi: ["--permission-mode", "acceptEdits"]
     autonomous: ["--permission-mode", "acceptEdits"]
 
+# Verificado contra `claude --help` (2.1.283): `--model <model>` aceita alias
+# (`sonnet`, `opus`) ou nome completo (`claude-sonnet-4-6`).
+model:
+  supported: true
+  args: ["--model", "{{model}}"]
+  format: "alias (sonnet, opus) ou nome completo do modelo"
+
+verified:
+  status: verified
+  version: "2.1.283"
+  date: "2026-09-26"
+  notes: "flags conferidas no `claude --help` 2.1.283 (so --help/--version, sem chamada de modelo)"
+
 session:
   strategy: native
 
