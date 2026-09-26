@@ -35,6 +35,8 @@ export interface HubConfig {
   opencodePort: number;
   policy: PolicyDocument;
   codexGate: CodexGateConfig;
+  /** Ver `GateConfig`. Opcional só para não quebrar quem monta `HubConfig` à mão. */
+  gate?: GateConfig;
   /**
    * Teto de conexões SSE simultâneas (`/events` + `/api/tasks/:id/events`).
    *
@@ -63,6 +65,25 @@ export interface CodexGateConfig {
 export const DEFAULT_CODEX_GATE: CodexGateConfig = {
   bypassHookTrust: false,
 };
+
+/**
+ * O que o hook do gate faz quando NÃO consegue uma resposta do daemon (fora do
+ * ar, erro, resposta inválida, demora além do teto).
+ *
+ * - `closed`: nega toda ação de risco (shell, escrita, rede); leitura passa.
+ * - `open`: libera, como se não houvesse gate.
+ * - ausente (padrão): `closed` quando a chamada vem de uma sessão do Hub
+ *   (o hook recebeu o id da sessão — `AGENTS_HUB_SESSION_ID` no Claude,
+ *   `--session` no Codex), `open` fora dela. Uma sessão do Hub prometeu
+ *   passar pela política, então o silêncio do daemon não pode virar
+ *   permissão; o Claude que você abre na mão não depende do Hub estar no ar.
+ *
+ * Mora só na config global (`~/.agents-hub/config.json`): um repositório
+ * clonado não pode afrouxar o gate de quem o abre.
+ */
+export interface GateConfig {
+  failMode?: 'open' | 'closed';
+}
 
 export const DEFAULT_MAX_SSE_CONNECTIONS = 100;
 
@@ -163,6 +184,11 @@ const HubConfigOnDiskSchema = z
         bypassHookTrust: z.boolean().optional(),
       })
       .optional(),
+    gate: z
+      .object({
+        failMode: z.enum(['open', 'closed']).optional(),
+      })
+      .optional(),
   })
   .passthrough();
 
@@ -231,6 +257,10 @@ export function loadConfig(overrides: Partial<HubConfig> = {}): HubConfig {
       ...DEFAULT_CODEX_GATE,
       ...(onDisk.codexGate ?? {}),
       ...(overrides.codexGate ?? {}),
+    },
+    gate: {
+      ...(onDisk.gate ?? {}),
+      ...(overrides.gate ?? {}),
     },
   };
 

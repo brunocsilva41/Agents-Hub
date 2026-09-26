@@ -693,7 +693,12 @@ export class HubServer {
         decision: verdict.decision,
         risk: verdict.risk,
         reason: verdict.reason,
-        explanation: explainToAgent(verdict, verdict.session?.mode ?? 'semi'),
+        // A explicação do gate diz o desfecho REAL (ninguém respondeu, humano
+        // negou, humano liberou, sessão encerrada). Recalculá-la a partir só da
+        // decisão transformava toda negação em "a política proíbe, não tente
+        // contornar" — inclusive a falta de resposta, que não é proibição.
+        explanation: verdict.explanation ?? explainToAgent(verdict, verdict.session?.mode ?? 'semi'),
+        approvalId: verdict.approvalId ?? null,
         sessionId: verdict.session?.id ?? null,
         agentId: verdict.session?.agentId ?? null,
       });

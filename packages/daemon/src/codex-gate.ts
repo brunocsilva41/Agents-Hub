@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import type { SessionMode } from '@agents-hub/core';
+import { TIMEOUT_DO_HOOK_SEC } from './pretool-gate.js';
 
 /**
  * Configuração do gate pré-execução do Codex.
@@ -100,8 +101,13 @@ export interface ConfigDoGate {
   aviso?: string;
 }
 
-/** Teto de tempo do hook. Acima disso o Codex desiste — e desistir é falhar aberto. */
-export const TIMEOUT_PADRAO_SEC = 20;
+/**
+ * Teto de tempo do hook. Acima disso o Codex desiste — e desistir é falhar
+ * aberto. Era 20 s contra 60 s de espera do daemon: toda ação que pedia
+ * aprovação humana rodava sem ela. Agora é o mesmo valor do Claude, maior que
+ * a espera do daemon — ver os três relógios em `pretool-gate.ts`.
+ */
+export const TIMEOUT_PADRAO_SEC = TIMEOUT_DO_HOOK_SEC;
 
 const cacheDeCaminhoCurto = new Map<string, string>();
 

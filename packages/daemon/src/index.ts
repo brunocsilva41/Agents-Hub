@@ -10,6 +10,7 @@ export {
   type HubConfig,
   type RetentionPolicy,
   type CodexGateConfig,
+  type GateConfig,
 } from './config.js';
 export { readHubEnv, type HubEnv } from './env.js';
 export {
@@ -51,7 +52,10 @@ export { captureDiff, persistDiff, type DiffCapture } from './diff-capture.js';
 export {
   actionsOfToolCall,
   combineVerdicts,
+  ESPERA_DO_GATE_MS,
   explainToAgent,
+  TETO_HTTP_DO_HOOK_MS,
+  TIMEOUT_DO_HOOK_SEC,
   toHookPermission,
   type HookPermission,
   type ToolCall,

@@ -9,6 +9,7 @@ import { decideToolCall, lerStdin, type HookInput } from './hook.js';
 import {
   HOOK_TARGETS,
   MATCHER_DE_RISCO,
+  avisoDeTimeoutDoHook,
   gravarConfig,
   hookCommand,
   hookInstalado,
@@ -184,6 +185,11 @@ ${dim('Alvo do --agent aceita id (codex) ou capability (cap:test-writing).')}
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // O hook vem antes de `loadConfig`: config inválida lançava aqui, o processo
+  // saía com stack trace e código 1 — que o agente trata como erro NÃO
+  // bloqueante e roda a ferramenta. O hook lê a config por conta própria e
+  // aplica o modo de falha se ela não abrir.
+  if (args.command === 'hook') return runHook(args);
   const config = loadConfig();
   const client = new HubClient(baseUrl(config));
 
@@ -193,7 +199,7 @@ async function main(): Promise<void> {
     case 'hook':
       // NAO passa por withDaemon: subir o daemon de dentro de um hook faria
       // isso acontecer a cada chamada de ferramenta do agente.
-      return runHook(config, args);
+      return runHook(args);
     case 'hooks':
       // Offline como o `mcp`: mexer em config não precisa do daemon.
       return hooksCommandSeguro(args, config);
@@ -291,10 +297,7 @@ async function main(): Promise<void> {
  * Responde ao hook do agente. Silencioso por construção: qualquer coisa fora do
  * JSON no stdout confunde quem está lendo a resposta.
  */
-async function runHook(
-  config: ReturnType<typeof loadConfig>,
-  args: Args,
-): Promise<void> {
+async function runHook(args: Args): Promise<void> {
   // O dialeto é DECLARADO por quem instala o hook, nunca farejado do payload.
   // Codex e Claude mandam entrada quase idêntica e esperam saídas opostas para
   // "permitir"; adivinhar por formato daria um erro silencioso no dia em que os
@@ -310,9 +313,30 @@ async function runHook(
     entrada = {};
   }
 
-  const { saida, codigo } = await decideToolCall(entrada, baseUrl(config), dialeto);
-  process.stdout.write(saida);
+  // Config ilegível não derruba o hook: cai no endereço padrão, e o modo de
+  // falha (fechado numa sessão do Hub) decide se o daemon não atender.
+  let url = 'http://127.0.0.1:4747';
+  let failMode: 'open' | 'closed' | undefined;
+  try {
+    const config = loadConfig();
+    url = baseUrl(config);
+    failMode = config.gate?.failMode;
+  } catch {
+    // mantém os padrões acima
+  }
+
+  // Claude recebe o id no ambiente; Codex, no próprio comando (`--session`),
+  // porque ele só repassa variáveis `CODEX_*` ao hook.
+  const sessaoNoComando = args.flags['session'];
+  const sessionId =
+    typeof sessaoNoComando === 'string' ? sessaoNoComando : process.env['AGENTS_HUB_SESSION_ID'];
+
+  const { saida, codigo } = await decideToolCall(entrada, url, dialeto, { sessionId, failMode });
+  // Sai assim que a resposta estiver escrita: se o teto do hook estourou, o
+  // `fetch` ao daemon ainda está pendurado e seguraria o processo — e o agente
+  // só lê a resposta quando o hook termina.
   process.exitCode = codigo;
+  process.stdout.write(saida, () => process.exit(codigo));
 }
 
 // ------------------------------------------------------ gate pré-execução
@@ -344,6 +368,10 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
       console.log(`${instalado ? green('●') : dim('○')} ${bold(alvo.id)} ${dim(alvo.nome)}`);
       console.log(`   ${dim(alvo.configUsuario)}`);
       console.log(`   ${dim(alvo.nota)}`);
+      const aviso = avisoDeTimeoutDoHook(alvoConfig);
+      if (aviso) {
+        console.log(`   ${yellow(`⚠ ${aviso}`)} ${dim('— reinstale:')} ${bold(`hub hooks install ${alvo.id} --write`)}`);
+      }
     }
     const codexLigado = config.codexGate.bypassHookTrust;
     console.log(`${codexLigado ? green('●') : dim('○')} ${bold('codex')} ${dim('Codex CLI')}`);
@@ -542,6 +570,19 @@ async function doctor(client: HubClient, args: Args): Promise<void> {
       'Autenticação não é verificada aqui: checar custaria uma chamada real ao provedor.',
     )}`,
   );
+
+  // Gate pré-execução: instalação antiga (timeout 10 s) deixa a ação que pede
+  // aprovação rodar sem ela. Só leitura das configs dos agentes.
+  for (const alvo of HOOK_TARGETS) {
+    const aviso = avisoDeTimeoutDoHook(lerConfig(alvo.configUsuario));
+    if (aviso) {
+      console.log(
+        `
+${yellow(`⚠ ${alvo.id}: ${aviso}`)}
+   ${dim('corrija com:')} ${bold(`hub hooks install ${alvo.id} --write`)}`,
+      );
+    }
+  }
 
   if (args.flags['smoke'] === true) {
     await doctorSmoke(client, args, probes);

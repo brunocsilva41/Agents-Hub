@@ -86,10 +86,12 @@ import { effectiveProjectContext, repoTrustWarning } from './repo-trust.js';
 import { captureBaseline, captureDiff, loadBaseline, saveBaseline } from './diff-capture.js';
 import { capturarMudancas } from './artifact-capture.js';
 import { interpretarRevisao } from './review-verdict.js';
-import { actionsOfToolCall, combineVerdicts, resumoDaChamada } from './pretool-gate.js';
-
-/** Ver `SessionManager.gateWaitMs` — o porquê deste número mora lá. */
-const ESPERA_PADRAO_DO_GATE_MS = 60_000;
+import {
+  actionsOfToolCall,
+  combineVerdicts,
+  ESPERA_DO_GATE_MS,
+  resumoDaChamada,
+} from './pretool-gate.js';
 import { runValidation } from './validation.js';
 import type { WorktreeManager } from './worktree.js';
 import { ProjectRegistry, type RepoConfigStatus } from './project-registry.js';
@@ -172,18 +174,19 @@ export class SessionManager {
   /**
    * Teto da espera do gate pré-execução por uma decisão humana.
    *
-   * Existe porque o hook do agente tem timeout próprio e **mais curto**:
-   * esperar além dele não ganha nada — o agente já desistiu do nosso lado da
-   * conversa — e deixa a sessão presa em `waiting_approval` por uma resposta
-   * que não vai mais ser lida. 60s é o timeout padrão de hook do Claude Code,
-   * que é o único agente com o gate ligado hoje.
+   * Precisa ser MENOR que o timeout que o agente dá ao hook: quando o hook
+   * estoura, o agente roda a ferramenta (medido com o `claude` real). Antes a
+   * premissa era "60s é o padrão do Claude", mas o Hub instalava o hook com
+   * 10 s — o humano tinha 10 s, não 60, e a ação rodava sem aprovação. A
+   * ordem entre os três relógios (daemon < teto HTTP do hook < timeout do
+   * hook) está em `pretool-gate.ts`.
    *
    * Público e mutável de propósito: é o único jeito de um teste exercitar o
    * caminho de timeout sem esperar um minuto. Ainda não é campo de config
    * porque não existe caso de uso real para afrouxá-lo — quem precisa de mais
    * tempo precisa, na verdade, de um modo de supervisão diferente.
    */
-  gateWaitMs = ESPERA_PADRAO_DO_GATE_MS;
+  gateWaitMs = ESPERA_DO_GATE_MS;
 
   readonly #projects: ProjectRegistry;
 
@@ -779,6 +782,23 @@ export class SessionManager {
 
     if (combinado.decision === 'allow') return { ...combinado, session };
 
+    // Sessão já encerrada (processo órfão com o id antigo no ambiente, por
+    // exemplo): abrir aprovação nela a jogaria de volta para
+    // `waiting_approval`, ressuscitando no painel algo que acabou. Não há a
+    // quem perguntar — nega, dizendo por quê.
+    if (isTerminalSessionState(session.state)) {
+      return {
+        ...combinado,
+        decision: 'deny',
+        session,
+        explanation:
+          `Agents-Hub classificou esta ação como "${combinado.risk}": ${combinado.reason}. ` +
+          `Ela precisa de aprovação humana, mas a sessão ${session.id} já terminou ` +
+          `(${session.state}) e não há aprovação a pedir. Não tente contornar — explique ao ` +
+          `usuário o que você precisava fazer.`,
+      };
+    }
+
     // `approve` = precisa de gente. A partir daqui a chamada do hook fica
     // parada, o que é exatamente o ponto: a ferramenta não roda enquanto a
     // decisão não sai.
@@ -885,19 +905,21 @@ export class SessionManager {
 
     if (input.cwd) {
       const alvo = path.resolve(input.cwd);
-      const noDiretorio = candidatas.filter((s) => path.resolve(s.workdir) === alvo);
 
-      // Sessão VIVA primeiro. Worktrees são por sessão, mas `isolation: none`
-      // faz várias dividirem o diretório do projeto — e aplicar a política de
-      // uma sessão já encerrada seria decidir por um contexto que não existe
-      // mais, possivelmente mais frouxo que o da sessão que está rodando.
-      const viva = noDiretorio
-        .filter((s) => s.state === 'running' || s.state === 'waiting_approval')
+      // Só sessão VIVA que o Hub spawnou. O diretório é a pista mais fraca:
+      // casar com sessão encerrada, ou com a raiz adotada de um agente externo
+      // (que roda no diretório do projeto e fica `running` enquanto o MCP
+      // viver), aplicava a política do Hub ao Claude que você abriu na mão
+      // naquele projeto — com aprovações que ninguém ia ver.
+      const viva = candidatas
+        .filter(
+          (s) =>
+            path.resolve(s.workdir) === alvo &&
+            (s.state === 'running' || s.state === 'waiting_approval') &&
+            !sessaoAdotada(s),
+        )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       if (viva) return viva;
-
-      const recente = noDiretorio.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-      if (recente) return recente;
     }
 
     return null;
@@ -949,6 +971,16 @@ export class SessionManager {
       type: 'approval.resolved',
       payload: { approvalId: id, decision, action: approval.action, by },
     });
+
+    // Aprovação do gate pré-execução decide UMA chamada de ferramenta, não a
+    // sessão. Antes caía nos ramos genéricos: negar (inclusive por tempo
+    // esgotado) cancelava a sessão inteira, e aprovar chamava `send` numa run
+    // one-shot viva — que lança ILLEGAL_STATE, então `hub approve` respondia
+    // erro depois de já ter liberado a ferramenta.
+    if (approval.detail['kind'] === 'tool-call') {
+      await this.#resolverChamadaDoGate(approval, decision, by);
+      return resolved;
+    }
 
     if (decision === 'denied') {
       if (approval.taskId) this.store.tasks.update(approval.taskId, { state: 'rejected' });
@@ -1030,6 +1062,89 @@ export class SessionManager {
     return resolved;
   }
 
+  /**
+   * Fecha uma aprovação do gate sem tocar no destino da sessão.
+   *
+   * O agente está parado no hook esperando esta resposta; quem entrega o
+   * desfecho a ele é o próprio `gateToolCall` (`allow`, ou `deny` com o motivo
+   * real). Aqui só se devolve a sessão ao estado em que estava antes da
+   * pergunta — `running`, task `working` — quando não sobrou outra pendência.
+   *
+   * O caso raro é a run ter morrido durante a espera (crash, reinício do
+   * daemon): aí não há hook para ler a resposta, e a sessão ficaria `running`
+   * sem processo. Relançar com uma mensagem que diz o desfecho é a mesma
+   * saída que a vigilância usa. Falhar nesse relançamento não desfaz a
+   * decisão — vira aviso na timeline, não erro para quem aprovou.
+   */
+  async #resolverChamadaDoGate(
+    approval: Approval,
+    decision: 'approved' | 'denied',
+    by: string,
+  ): Promise<void> {
+    const sessao = this.store.sessions.get(approval.sessionId);
+    if (!sessao || isTerminalSessionState(sessao.state)) return;
+
+    const outrasPendentes =
+      this.store.approvals.listPending({ sessionId: sessao.id }).length > 0;
+    if (outrasPendentes) return;
+
+    this.store.transaction(() => {
+      if (sessao.state === 'waiting_approval') {
+        this.store.sessions.update(sessao.id, { state: 'running' });
+      }
+      const task = approval.taskId ? this.store.tasks.get(approval.taskId) : null;
+      if (task && task.state === 'input_required') {
+        this.store.tasks.update(task.id, { state: 'working' });
+      }
+    });
+
+    // Run viva = agente bloqueado no hook, que vai receber a resposta. Sessão
+    // adotada não tem run do Hub: o agente externo é quem está no hook.
+    if (this.#runs.has(sessao.id) || sessaoAdotada(sessao)) return;
+
+    const texto =
+      decision === 'approved'
+        ? `A ação "${approval.action}" foi aprovada por ${by}, mas o turno anterior terminou ` +
+          `antes de receber a resposta. Se ela ainda for necessária, refaça-a e continue de onde parou.`
+        : `A ação "${approval.action}" foi negada (${by}). Não tente contorná-la: siga com o resto ` +
+          `da tarefa e diga ao usuário que esta ação ficou pendente.`;
+    try {
+      await this.send(sessao.id, texto);
+    } catch (err) {
+      this.#emit({
+        sessionId: sessao.id,
+        taskId: approval.taskId,
+        agentId: sessao.agentId,
+        type: 'log',
+        payload: {
+          level: 'warn',
+          text: `decisão registrada, mas a sessão não pôde ser retomada: ${(err as Error).message}`,
+        },
+      });
+    }
+  }
+
+  /**
+   * Recusa relançar o agente por cima de uma decisão humana pendente.
+   *
+   * `send` e `handoff` numa sessão `waiting_approval` subiam um processo novo
+   * com a aprovação ainda aberta: sessão viva, task esperando humano e
+   * pendência aberta ao mesmo tempo — e a parada de orçamento ou de
+   * vigilância contornada por uma mensagem.
+   */
+  #exigirSemAprovacaoPendente(session: Session, acao: string): void {
+    if (session.state !== 'waiting_approval') return;
+    const pendentes = this.store.approvals.listPending({ sessionId: session.id });
+    const ids = pendentes.map((a) => a.id);
+    throw new HubError(
+      'ILLEGAL_STATE',
+      `A sessão ${session.id} está aguardando aprovação` +
+        (ids.length > 0 ? ` (${ids.join(', ')})` : '') +
+        `; não é possível ${acao}. Resolva a aprovação primeiro com hub approve/deny.`,
+      { sessionId: session.id, state: session.state, approvalIds: ids, acao },
+    );
+  }
+
   #requestApproval(input: {
     session: Session;
     taskId: string | null;
@@ -1082,6 +1197,7 @@ export class SessionManager {
    */
   async send(sessionId: string, text: string): Promise<{ mode: 'live' | 'resume' | 'replay' }> {
     const session = this.#session(sessionId);
+    this.#exigirSemAprovacaoPendente(session, 'enviar mensagem');
     const adapter = this.registry.get(session.agentId);
     const live = this.#runs.get(sessionId);
 
@@ -1212,6 +1328,7 @@ export class SessionManager {
         { sessionId, state: session.state },
       );
     }
+    this.#exigirSemAprovacaoPendente(session, 'fazer handoff');
 
     // Mesma correção de `start()`/`#retry()`/`#fallback()`: checa e reserva
     // numa única operação síncrona, antes de qualquer `await` desta função.
@@ -1506,7 +1623,7 @@ export class SessionManager {
   ): Promise<void> {
     const adapter = this.registry.get(session.agentId);
     const manifest = adapter.manifest;
-    const gate = this.#codexGate(session.agentId, session.mode);
+    const gate = this.#codexGate(session.agentId, session.mode, session.id);
 
     const ctx: RunContext = {
       sessionId: session.id,
@@ -1581,10 +1698,18 @@ export class SessionManager {
    * garantido: seguir em frente sem avisar deixaria a sessão rodar sem a
    * proteção que o próprio modo prometeu, silenciosamente.
    */
-  #codexGate(agentId: string, mode: SessionMode): { extraArgs: string[]; aviso?: string } {
+  #codexGate(
+    agentId: string,
+    mode: SessionMode,
+    sessionId: string,
+  ): { extraArgs: string[]; aviso?: string } {
     if (agentId !== 'codex') return { extraArgs: [] };
 
-    const comando = `${segmentoDeComando(process.execPath)} ${segmentoDeComando(cliHookEntrypoint())} hook --dialect codex`;
+    // O Codex não repassa `AGENTS_HUB_SESSION_ID` ao hook (só `CODEX_*`), então
+    // o id vai no próprio comando. Sem ele, a correlação dependia do `cwd` — e
+    // o hook não sabia que a chamada era de uma sessão do Hub, que é o que
+    // decide falhar FECHADO se o daemon sumir.
+    const comando = `${segmentoDeComando(process.execPath)} ${segmentoDeComando(cliHookEntrypoint())} hook --dialect codex --session ${sessionId}`;
     const config = montarConfigDoGate(
       { comando, timeoutSec: TIMEOUT_PADRAO_SEC },
       this.config.codexGate.bypassHookTrust,
@@ -2504,7 +2629,7 @@ export class SessionManager {
     };
 
     try {
-      const gate = this.#codexGate(revisorId, session.mode);
+      const gate = this.#codexGate(revisorId, session.mode, session.id);
       ctx.extraArgs = gate.extraArgs;
       if (gate.aviso) {
         this.#emit({
@@ -2728,3 +2853,14 @@ export class SessionManager {
   }
 }
 
+/**
+ * Sessão adotada (`adoptExternal`): nó de controle de um agente que roda FORA
+ * do Hub, sem run própria. Reconhecida pelo `path` que a adoção grava.
+ */
+function sessaoAdotada(session: Session): boolean {
+  return (
+    session.parentId === null &&
+    session.path.length === 1 &&
+    session.path[0] === pathKey(session.agentId, `external:${session.agentId}`)
+  );
+}
