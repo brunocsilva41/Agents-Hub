@@ -25,11 +25,21 @@ export interface SweepResult {
  * testes, comparar. Apagar na hora do encerramento tira de você a única janela
  * em que isso é fácil.
  *
- * O branch `hub/<sessionId>` NUNCA é apagado por aqui: mesmo depois de o
+ * O branch `hub/<sessionId>` NUNCA é apagado por aqui, e antes de recolher o
+ * checkout o trabalho do agente é commitado nele (`preserveWork`): depois de o
  * checkout expirar, o trabalho continua acessível por `git log hub/<id>`.
+ * Antes deste commit automático a frase acima era falsa — o branch ficava no
+ * commit-base — e, pior, o worktree com trabalho nunca era recolhido.
  */
 export class WorktreeReaper {
   #timer: NodeJS.Timeout | null = null;
+  /**
+   * Passada em andamento. Largada, `setInterval` e `POST /maintenance/sweep`
+   * disparavam `sweep()` sem trava e duas passadas disputavam os mesmos
+   * diretórios ("Directory not empty", worktree meio-apagado). Quem chama
+   * durante uma passada recebe o resultado dela.
+   */
+  #emAndamento: Promise<SweepResult> | null = null;
 
   constructor(
     private readonly store: UnitOfWork,
@@ -55,7 +65,14 @@ export class WorktreeReaper {
     this.#timer = null;
   }
 
-  async sweep(now: Date = new Date()): Promise<SweepResult> {
+  sweep(now: Date = new Date()): Promise<SweepResult> {
+    this.#emAndamento ??= this.#varrer(now).finally(() => {
+      this.#emAndamento = null;
+    });
+    return this.#emAndamento;
+  }
+
+  async #varrer(now: Date): Promise<SweepResult> {
     const cutoff = now.getTime() - this.retention.worktreeDays * 24 * 60 * 60 * 1000;
     const result: SweepResult = { examined: 0, removed: [], retained: 0, failed: [] };
 
@@ -78,6 +95,7 @@ export class WorktreeReaper {
       const outcome = await this.worktrees.release({
         projectPath: project.path,
         worktreePath: session.workdir,
+        preserveWork: { sessionId: session.id },
       });
 
       if (outcome.removed) {

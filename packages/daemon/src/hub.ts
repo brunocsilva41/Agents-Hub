@@ -14,6 +14,7 @@ import { ensureOperatorToken } from './operator-auth.js';
 import { PolicyService } from './policy-service.js';
 import { InMemoryEventBus } from './bus.js';
 import { loadConfig, type HubConfig } from './config.js';
+import { AdoptedRootLeases } from './adopted-leases.js';
 import { EventRetentionCompactor } from './event-retention.js';
 import { WorktreeReaper } from './reaper.js';
 import { HubServer } from './server.js';
@@ -28,6 +29,8 @@ export interface Hub {
   sessions: SessionManager;
   reaper: WorktreeReaper;
   eventRetention: EventRetentionCompactor;
+  /** Prazo das raízes adotadas por agentes externos (item 2.8). */
+  leases: AdoptedRootLeases;
   server: HubServer;
   /** Trilha de auditoria (item 1.10). */
   audit: AuditTrail;
@@ -61,6 +64,8 @@ export interface HubDeps {
   homeDir?: string;
   /** TTL do cache de descoberta em ms (padrão 30s). */
   discoveryTtlMs?: number;
+  /** Prazo sem sinal de vida das raízes adotadas, em ms (padrão 3 min). */
+  adoptedLeaseMs?: number;
 }
 
 export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}): Hub {
@@ -98,11 +103,25 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
   // subida também entram na trilha.
   audit.start();
   const operatorToken = ensureOperatorToken(config.home).token;
-  const server = new HubServer(config, sessions, registry, bus, reaper, discovery, importer, {
-    token: operatorToken,
-    audit,
-    policy: new PolicyService(config, store),
-  });
+  const leases = new AdoptedRootLeases(
+    sessions,
+    deps.adoptedLeaseMs !== undefined ? { leaseMs: deps.adoptedLeaseMs } : {},
+  );
+  const server = new HubServer(
+    config,
+    sessions,
+    registry,
+    bus,
+    reaper,
+    discovery,
+    importer,
+    {
+      token: operatorToken,
+      audit,
+      policy: new PolicyService(config, store),
+    },
+    leases,
+  );
 
   const hub: Hub = {
     config,
@@ -112,6 +131,7 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
     sessions,
     reaper,
     eventRetention,
+    leases,
     server,
     audit,
     operatorToken,
@@ -154,11 +174,13 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
       // compactação de eventos: ela também filtra por `ended_at`.
       reaper.start();
       eventRetention.start();
+      leases.start();
 
       return endereco;
     },
 
     async shutdown() {
+      leases.stop();
       eventRetention.stop();
       reaper.stop();
       await sessions.shutdown();

@@ -95,6 +95,7 @@ import {
   ESPERA_DO_GATE_MS,
   resumoDaChamada,
 } from './pretool-gate.js';
+import { TetoDeSaida, limitarPagina } from './event-limits.js';
 import { runValidation } from './validation.js';
 import { CicloDeVida, esperarAbortavel, type PedidoDeParada } from './session-lifecycle.js';
 import type { WorktreeManager } from './worktree.js';
@@ -154,6 +155,8 @@ export class SessionManager {
   readonly #seq: SequenceCounter;
   readonly #ledgers = new Map<string, BudgetLedger>();
   readonly #runs = new Map<string, LiveRun>();
+  /** Teto de saída por sessão (item 2.5). */
+  readonly #tetoDeSaida = new TetoDeSaida();
   /**
    * Reservas de concorrência: sessão → agente, entre o instante em que
    * `#reserveSlot` aceitou a vaga e o instante em que a run de verdade nasce
@@ -621,6 +624,13 @@ export class SessionManager {
       // seguidos), sem a transação a sessão ficaria `killed` mas as tasks
       // continuariam não-terminais — e como o laço externo só revisita
       // sessões `running`/`waiting_approval`, elas nunca seriam revisitadas.
+      //
+      // O evento `session.ended` e o fechamento da tentativa entram na MESMA
+      // transação: antes a sessão virava `killed` sem nenhum evento (a
+      // timeline acabava no meio, sem explicação, e quem escutava não sabia
+      // de nada) e a tentativa ficava com `endedAt: null` para sempre
+      // (vistoria 2026-09-25, item 2.8).
+      const motivo = 'o daemon reiniciou e a execução desta sessão não sobreviveu';
       this.store.transaction(() => {
         this.store.sessions.update(sessao.id, {
           state: 'killed',
@@ -629,11 +639,27 @@ export class SessionManager {
         });
 
         // A task fica em `failed` para o pipeline não achar que ainda há trabalho.
+        let taskId: string | null = null;
         for (const task of this.store.tasks.list({ sessionId: sessao.id })) {
           if (!isTerminalTaskState(task.state)) {
-            this.store.tasks.update(task.id, { state: 'failed' });
+            taskId = task.id;
+            const ultima = task.attempts[task.attempts.length - 1];
+            this.store.tasks.update(task.id, {
+              state: 'failed',
+              ...(ultima && ultima.endedAt === null
+                ? { attempts: closeLastAttempt(task.attempts, 'transient', motivo) }
+                : {}),
+            });
           }
         }
+
+        this.#emit({
+          sessionId: sessao.id,
+          taskId,
+          agentId: sessao.agentId,
+          type: 'session.ended',
+          payload: { state: 'killed', reason: motivo, reconciled: true },
+        });
       });
 
       encerradas += 1;
@@ -1496,16 +1522,35 @@ export class SessionManager {
     // numa única operação síncrona, antes de qualquer `await` desta função.
     this.#reserveSlot(sessionId, resolvedTarget);
 
+    // Run antiga marcada como SUBSTITUÍDA antes do cancel: o `#pump` dela
+    // encerra em silêncio quando vê em `#runs` um handle diferente do seu. Antes
+    // o `#runs.delete` vinha logo após o cancel, o pump antigo não achava run
+    // nenhuma e seguia para `#settle` — emitindo "tarefa encerrada sem
+    // sucesso" e marcando a task `failed` no meio do handoff (vistoria
+    // 2026-09-25, 13-orquestracao). O marcador herda tudo do handle real
+    // (protótipo), então cancel/shutdown continuam alcançando o processo
+    // enquanto o novo agente não sobe.
+    const live = this.#runs.get(sessionId);
+    const marcador = live ? (Object.create(live.handle) as RunHandle) : null;
+    if (live && marcador) this.#runs.set(sessionId, { ...live, handle: marcador });
+
     try {
       // Interrompe a execução atual se houver
-      const live = this.#runs.get(sessionId);
       if (live) {
         await this.registry.get(session.agentId).cancel(live.handle);
-        this.#runs.delete(sessionId);
       }
 
       const task = this.#latestTask(sessionId);
       const fromAgentId = session.agentId;
+
+      // A tentativa do agente antigo fecha aqui (sem desfecho de falha: ele não
+      // falhou, foi substituído) e o novo agente ganha a sua — sem isto o
+      // histórico de tentativas não registrava a troca e o retry/fallback
+      // posterior contava tentativas do agente errado.
+      const attempts = closeLastAttempt(task.attempts, 'canceled', `handoff para ${resolvedTarget}`);
+      const taskAtualizada = this.store.tasks.update(task.id, {
+        attempts: [...attempts, novaTentativa(attempts.length + 1, resolvedTarget)],
+      });
 
       this.#emit({
         sessionId,
@@ -1531,9 +1576,14 @@ export class SessionManager {
         message: `Você está assumindo esta sessão que estava sob responsabilidade de ${fromAgentId}. Motivo da transferência: ${reason ?? 'continuidade de trabalho'}. Continue a tarefa de onde parou.`,
       });
 
-      await this.#launch(updatedSession, task, prompt, null);
+      await this.#launch(updatedSession, taskAtualizada, prompt, null);
       return updatedSession;
     } finally {
+      // Se o novo agente não chegou a subir, o marcador não pode ficar em
+      // `#runs` ocupando vaga para sempre (a run antiga já foi cancelada).
+      if (marcador && this.#runs.get(sessionId)?.handle === marcador) {
+        this.#runs.delete(sessionId);
+      }
       this.#releaseSlot(sessionId);
     }
   }
@@ -1628,14 +1678,17 @@ export class SessionManager {
    * Encerra uma sessão adotada sem matar os filhos: o agente externo saiu, mas
    * o trabalho que ele delegou continua valendo.
    */
-  async detach(sessionId: string): Promise<void> {
+  async detach(sessionId: string, reason = 'agente externo desconectou'): Promise<void> {
     const session = this.#session(sessionId);
+    // Idempotente: o MCP pode desconectar depois de a raiz já ter expirado por
+    // falta de sinal de vida (ver `adopted-leases.ts`) — não há o que fechar.
+    if (isTerminalSessionState(session.state)) return;
     this.#emit({
       sessionId,
       taskId: null,
       agentId: session.agentId,
       type: 'session.ended',
-      payload: { reason: 'agente externo desconectou', external: true },
+      payload: { reason, external: true },
     });
     await this.#finish(sessionId, 'completed');
   }
@@ -1719,7 +1772,10 @@ export class SessionManager {
     limit?: number,
     page: { beforeSeq?: number; newest?: boolean } = {},
   ): EventEnvelope[] {
-    return this.store.events.list({ sessionId, sinceSeq, limit, ...page });
+    // Página limitada em bytes (item 2.5): uma sessão com eventos gigantes
+    // (inclusive os gravados antes dos tetos existirem) chegou a gerar uma
+    // resposta de 125 MB.
+    return limitarPagina(this.store.events.list({ sessionId, sinceSeq, limit, ...page }));
   }
 
   graph(rootId: string): GraphNode[] {
@@ -2848,15 +2904,28 @@ export class SessionManager {
   }
 
   #persistMapped(session: Session, task: Task, mapped: MappedEvent): void {
+    // Tetos por evento e por sessão (item 2.5, ver `event-limits.ts`): o que o
+    // agente imprime não pode inchar o banco, o barramento e o SSE sem limite.
+    const { evento: limitado, aviso } = this.#tetoDeSaida.admitir(session.id, mapped);
+    if (aviso) {
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'log',
+        payload: { stream: 'daemon', level: 'warn', text: aviso },
+      });
+    }
+    if (!limitado) return;
     const event = makeEvent(
       {
         sessionId: session.id,
         taskId: task.id,
         agentId: session.agentId,
         type: mapped.type,
-        payload: mapped.payload,
+        payload: limitado.payload,
         cost: mapped.cost ?? null,
-        raw: mapped.raw,
+        raw: limitado.raw as MappedEvent['raw'],
       },
       this.#nextSeq(session.id),
     );
@@ -3280,19 +3349,30 @@ export class SessionManager {
    * reservas em voo (`#reserved`) — sem as duas, uma reserva não impediria
    * uma segunda checagem concorrente de passar antes de a run nascer.
    */
-  #assertConcurrency(agentId: string): void {
-    const total = this.#runs.size + this.#reserved.size;
-    if (total >= this.config.policy.maxConcurrency) {
+  #assertConcurrency(agentId: string, sessionId: string): void {
+    // Uma sessão ocupa UMA vaga, mesmo com run viva E reserva ao mesmo tempo:
+    // é o `handoff`, que reserva a vaga do agente novo enquanto a run antiga da
+    // MESMA sessão ainda está em `#runs`. Somar os dois mapas contava a sessão
+    // duas vezes — com o Hub cheio, todo handoff era recusado (vistoria
+    // 2026-09-25, item 2.7). Por isso a conta é "as OUTRAS sessões ocupando
+    // vaga", e na contagem por agente cada sessão vale para o agente que vai
+    // rodar nela (a reserva), não para o da run que está saindo.
+    const outras = new Set([...this.#runs.keys(), ...this.#reserved.keys()]);
+    outras.delete(sessionId);
+
+    if (outras.size >= this.config.policy.maxConcurrency) {
       throw new HubError(
         'CONCURRENCY_EXCEEDED',
         `Limite de ${this.config.policy.maxConcurrency} sessões simultâneas atingido`,
-        { active: total, limit: this.config.policy.maxConcurrency },
+        { active: outras.size, limit: this.config.policy.maxConcurrency },
       );
     }
 
-    const perAgent =
-      [...this.#runs.values()].filter((r) => r.ctx.agentId === agentId).length +
-      [...this.#reserved.values()].filter((a) => a === agentId).length;
+    let perAgent = 0;
+    for (const id of outras) {
+      const agente = this.#reserved.get(id) ?? this.#runs.get(id)?.ctx.agentId;
+      if (agente === agentId) perAgent += 1;
+    }
     if (perAgent >= this.config.policy.maxConcurrencyPerAgent) {
       throw new HubError(
         'CONCURRENCY_EXCEEDED',
@@ -3310,7 +3390,7 @@ export class SessionManager {
    * envolvendo tudo até (e inclusive) o `await this.#launch(...)`.
    */
   #reserveSlot(sessionId: string, agentId: string): void {
-    this.#assertConcurrency(agentId);
+    this.#assertConcurrency(agentId, sessionId);
     this.#reserved.set(sessionId, agentId);
   }
 

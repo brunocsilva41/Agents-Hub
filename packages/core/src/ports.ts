@@ -92,9 +92,10 @@ export interface EventRepository {
   /**
    * Compacta (zera) `raw_json` de eventos cuja sessão terminou antes de
    * `cutoffIso` — nunca deleta a linha, nunca toca `payload_json` (ADR 06.3:
-   * eventos para sempre). Devolve quantas linhas foram afetadas.
+   * eventos para sempre). Devolve quantas linhas foram afetadas. Com `limit`,
+   * afeta no máximo N linhas por chamada — quem chama repete em lotes.
    */
-  compactRawBefore(cutoffIso: string): number;
+  compactRawBefore(cutoffIso: string, limit?: number): number;
 }
 
 export interface ApprovalRepository {

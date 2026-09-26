@@ -223,4 +223,19 @@ CREATE INDEX idx_audit_session ON audit_log(session_id, ts);
 CREATE INDEX idx_audit_project ON audit_log(project_id, ts);
 `,
   },
+  {
+    version: 8,
+    name: 'indices parciais para compactacao e somas de custo',
+    sql: `
+-- Vistoria 2026-09-25 (09-store-core, MÉDIOs de compactação e agregados):
+-- a passada de compactação de \`raw_json\` sem nada a fazer lia TODOS os
+-- eventos das sessões encerradas (775 ms com 100k eventos, a cada hora), e o
+-- grafo/custo por sessão fazia \`json_extract\` em todo evento da árvore.
+-- Índices parciais: só entram as linhas que interessam a cada consulta, então
+-- o custo passa a ser proporcional ao que falta compactar / aos eventos com
+-- custo, não ao tamanho da tabela.
+CREATE INDEX idx_events_raw   ON events(session_id) WHERE raw_json IS NOT NULL;
+CREATE INDEX idx_events_custo ON events(session_id) WHERE cost_json IS NOT NULL;
+`,
+  },
 ];

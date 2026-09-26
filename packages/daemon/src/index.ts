@@ -27,6 +27,12 @@ export { HubServer } from './server.js';
 export { serveStatic } from './static.js';
 export { WorktreeReaper, type SweepResult } from './reaper.js';
 export {
+  AdoptedRootLeases,
+  ADOPTED_HEARTBEAT_MS,
+  ADOPTED_LEASE_MS,
+  isAdoptedRoot,
+} from './adopted-leases.js';
+export {
   loadProjectOverrides,
   ignoredExecFieldsWarning,
   loadProjectContext,
