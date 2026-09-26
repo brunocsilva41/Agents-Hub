@@ -18,12 +18,14 @@
     "daemon": "node --experimental-sqlite packages/daemon/dist/main.js",
     "hub": "node packages/cli/dist/main.js",
     "test": "node scripts/run-tests.mjs",
+    "test:e2e": "npm run build:packages && npm run build --workspace @agents-hub/web && playwright test -c packages/web/playwright.config.ts",
     "build:packages": "tsc -b",
     "web:dev": "npm run dev --workspace @agents-hub/web",
     "verify": "npm run build && npm test",
     "demo": "node scripts/demo-e2e.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

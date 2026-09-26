@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionSummary } from '@agents-hub/client';
 import { Approvals } from './components/Approvals';
 import { Composer } from './components/Composer';
@@ -9,7 +9,11 @@ import { SettingsView } from './components/SettingsView';
 import { SidePanel } from './components/SidePanel';
 import { Timeline } from './components/Timeline';
 import { Toasts } from './components/Toasts';
-import { CommandPalette } from './components/CommandPalette';
+import { CommandPalette, rotuloAtalhoPaleta } from './components/CommandPalette';
+import { TopbarMenu, type OpcaoDeAba } from './components/TopbarMenu';
+import { focaveisEm, haDialogoAberto } from './useDialog';
+import { useMediaQuery } from './useMediaQuery';
+import { useTema } from './theme';
 import { AgentSwarmView } from './components/AgentSwarmView';
 import { DagCanvasView } from './components/DagCanvasView';
 import { TelemetryView } from './components/TelemetryView';
@@ -91,6 +95,75 @@ export function App() {
     setFlowsOpen(false);
   };
 
+  // Gavetas (colunas que viram painel deslizante em tela estreita).
+  //
+  // Antes as duas abriam juntas e se empilhavam uma sobre a outra, e fechadas
+  // continuavam na ordem de Tab (só um `transform` as tirava da tela). Agora
+  // abrir uma fecha a outra, a fechada fica `inert` e Esc/fundo fecham.
+  // Os valores têm de bater com os `@media` do CSS.
+  const painelEhGaveta = useMediaQuery('(max-width: 1200px)');
+  const fluxosEhGaveta = useMediaQuery('(max-width: 768px)');
+  const fluxosToggleRef = useRef<HTMLButtonElement>(null);
+  const painelToggleRef = useRef<HTMLButtonElement>(null);
+  const colunaFluxosRef = useRef<HTMLElement>(null);
+  const colunaPainelRef = useRef<HTMLElement>(null);
+  const fluxosGavetaAberta = fluxosEhGaveta && flowsOpen && activeTab === 'timeline';
+  const painelGavetaAberto = painelEhGaveta && panelOpen && activeTab === 'timeline';
+
+  const alternarFluxos = () => {
+    const abrir = !(flowsOpen && activeTab === 'timeline');
+    setActiveTab('timeline');
+    setFlowsOpen(abrir);
+    if (abrir) setPanelOpen(false);
+  };
+
+  const alternarPainel = () => {
+    const abrir = !(panelOpen && activeTab === 'timeline');
+    setActiveTab('timeline');
+    setPanelOpen(abrir);
+    if (abrir) setFlowsOpen(false);
+  };
+
+  const fecharGavetas = (devolverFoco: boolean) => {
+    const voltarPara = fluxosGavetaAberta ? fluxosToggleRef.current : painelToggleRef.current;
+    setFlowsOpen(false);
+    setPanelOpen(false);
+    if (devolverFoco) voltarPara?.focus();
+  };
+
+  // Gaveta que acabou de abrir recebe o foco: quem abriu pelo teclado continua
+  // no lugar certo em vez de ter de atravessar a timeline inteira.
+  useEffect(() => {
+    if (fluxosGavetaAberta && colunaFluxosRef.current) focaveisEm(colunaFluxosRef.current)[0]?.focus();
+  }, [fluxosGavetaAberta]);
+  useEffect(() => {
+    if (painelGavetaAberto && colunaPainelRef.current) focaveisEm(colunaPainelRef.current)[0]?.focus();
+  }, [painelGavetaAberto]);
+
+  const { tema, alternar: alternarTema } = useTema();
+  const atalhoPaleta = useMemo(() => rotuloAtalhoPaleta(), []);
+
+  // Atalhos globais. Ctrl/⌘+K alterna a paleta — o listener mora AQUI porque a
+  // paleta só existe depois de aberta (o que morava nela nunca abria nada).
+  // Não abre por cima de outro modal: roubaria o foco de um formulário.
+  const estadoAtalhos = useRef({ gavetaAberta: false, fecharGavetas });
+  estadoAtalhos.current = { gavetaAberta: fluxosGavetaAberta || painelGavetaAberto, fecharGavetas };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCmdOpen((aberta) => (aberta ? false : !haDialogoAberto()));
+        return;
+      }
+      if (e.key === 'Escape' && !haDialogoAberto() && estadoAtalhos.current.gavetaAberta) {
+        e.preventDefault();
+        estadoAtalhos.current.fecharGavetas(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Filtragem dos fluxos (por projeto, por status e por busca)
   const filteredFlows = useMemo(() => {
     return state.flows.filter((flow) => {
@@ -116,110 +189,154 @@ export function App() {
 
   const activeSessionsCount = state.sessions.filter((s) => isLiveState(s.state)).length;
 
+  const abas: Array<OpcaoDeAba<ActiveTab>> = [
+    { id: 'timeline', rotulo: 'Timeline', icone: '💬' },
+    { id: 'dag', rotulo: 'Grafo DAG', icone: '🕸' },
+    { id: 'swarm', rotulo: `Swarm (${state.agents.length})`, icone: '🤖' },
+    { id: 'telemetry', rotulo: 'Telemetria', icone: '📊' },
+    { id: 'settings', rotulo: 'Configurações', icone: '⚙️' },
+  ];
+
   return (
     <div className={`app${panelOpen ? ' panel-open' : ''}${flowsOpen ? ' flows-open' : ''}`}>
-      {/* 1. Header / Command Bar */}
+      {/* 1. Topbar.
+          Encolhe em degraus (ver "TOPBAR RESPONSIVA" no CSS): abaixo de 1200 px
+          as abas ficam só com ícone, abaixo de 1000 a busca vira ícone, abaixo
+          de 768 as ações também, e abaixo de 600 as abas e o tema vão para o
+          menu "Mais opções". Os rótulos escondidos continuam no nome acessível
+          (`.rotulo-compacto` recorta, não remove). */}
       <header className="topbar">
         <div className="topbar-left">
           <button
+            ref={fluxosToggleRef}
+            type="button"
             className="drawer-toggle flows-toggle"
-            aria-expanded={flowsOpen}
-            onClick={() => setFlowsOpen((v) => !v)}
+            aria-label="Fluxos"
+            aria-expanded={flowsOpen && fluxosEhGaveta}
+            aria-controls="coluna-fluxos"
+            onClick={alternarFluxos}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <line x1="3" y1="12" x2="21" y2="12"></line>
               <line x1="3" y1="6" x2="21" y2="6"></line>
               <line x1="3" y1="18" x2="21" y2="18"></line>
             </svg>
           </button>
 
-          <div className="brand" onClick={() => setActiveTab('timeline')}>
-            <div className="brand-logo-icon">⚡</div>
-            <div className="brand-text">
+          <button
+            type="button"
+            className="brand"
+            aria-label="Agents-Hub — ir para a Timeline"
+            onClick={() => setActiveTab('timeline')}
+          >
+            <span className="brand-logo-icon" aria-hidden="true">⚡</span>
+            <span className="brand-text" aria-hidden="true">
               <span className="brand-badge">AGENTS</span>
               <span className="brand-hub">HUB</span>
-            </div>
-            <span className="brand-version">v0.1</span>
-          </div>
+            </span>
+            <span className="brand-version" aria-hidden="true">v0.1</span>
+          </button>
 
-          {/* Navigation Tabs */}
-          <nav className="nav-tabs" role="tablist">
-            <button
-              className={`nav-tab ${activeTab === 'timeline' ? 'active' : ''}`}
-              onClick={() => setActiveTab('timeline')}
-            >
-              <span className="tab-icon">💬</span>
-              <span>Timeline</span>
-            </button>
-            <button
-              className={`nav-tab ${activeTab === 'dag' ? 'active' : ''}`}
-              onClick={() => setActiveTab('dag')}
-            >
-              <span className="tab-icon">🕸</span>
-              <span>Grafo DAG</span>
-            </button>
-            <button
-              className={`nav-tab ${activeTab === 'swarm' ? 'active' : ''}`}
-              onClick={() => setActiveTab('swarm')}
-            >
-              <span className="tab-icon">🤖</span>
-              <span>Swarm ({state.agents.length})</span>
-            </button>
-            <button
-              className={`nav-tab ${activeTab === 'telemetry' ? 'active' : ''}`}
-              onClick={() => setActiveTab('telemetry')}
-            >
-              <span className="tab-icon">📊</span>
-              <span>Telemetria</span>
-            </button>
-            <button
-              className={`nav-tab ${activeTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settings')}
-            >
-              <span className="tab-icon">⚙️</span>
-              <span>Configurações</span>
-            </button>
+          <nav className="nav-tabs" aria-label="Seções">
+            {abas.map((aba) => (
+              <button
+                key={aba.id}
+                type="button"
+                className={`nav-tab ${activeTab === aba.id ? 'active' : ''}`}
+                aria-current={activeTab === aba.id ? 'page' : undefined}
+                title={aba.rotulo}
+                onClick={() => setActiveTab(aba.id)}
+              >
+                <span className="tab-icon" aria-hidden="true">{aba.icone}</span>
+                <span className="tab-label rotulo-compacto">{aba.rotulo}</span>
+              </button>
+            ))}
           </nav>
         </div>
 
         <div className="topbar-center">
-          <button className="spotlight-btn" onClick={() => setCmdOpen(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <button
+            type="button"
+            className="spotlight-btn"
+            aria-label={`Buscar sessões, agentes e comandos (${atalhoPaleta})`}
+            aria-keyshortcuts="Control+K Meta+K"
+            title={`Buscar (${atalhoPaleta})`}
+            onClick={() => setCmdOpen(true)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
-            <span>Buscar sessões, agentes, comandos…</span>
-            <kbd className="kbd-shortcut">⌘K</kbd>
+            <span className="spotlight-text" aria-hidden="true">Buscar sessões, agentes, comandos…</span>
+            <kbd className="kbd-shortcut" aria-hidden="true">{atalhoPaleta}</kbd>
           </button>
         </div>
 
         <div className="topbar-right">
-          {/* Status Indicator */}
-          <div className={`pill status ${state.connected ? 'on' : 'off-air'}`}>
-            <span className={`radar-dot ${state.connected ? 'running' : 'failed'}`}>
+          <div
+            className={`pill status ${state.connected ? 'on' : 'off-air'}`}
+            role="status"
+            title={state.connected ? `${activeSessionsCount} sessões ao vivo` : 'Desconectado do Hub'}
+          >
+            <span className={`radar-dot ${state.connected ? 'running' : 'failed'}`} aria-hidden="true">
               <span className="radar-pulse" />
             </span>
-            <span className="status-text">{state.connected ? `${activeSessionsCount} Ao Vivo` : 'Desconectado'}</span>
+            {state.connected ? (
+              <span className="status-text">
+                {activeSessionsCount}
+                <span className="rotulo-compacto status-rotulo"> ao vivo</span>
+              </span>
+            ) : (
+              <span className="status-text">
+                <span className="rotulo-compacto status-rotulo">Desconectado</span>
+              </span>
+            )}
           </div>
 
           <button
-            className="drawer-toggle panel-toggle"
-            aria-expanded={panelOpen}
-            onClick={() => setPanelOpen((v) => !v)}
+            type="button"
+            className="theme-toggle"
+            aria-label={tema === 'light' ? 'Usar tema escuro' : 'Usar tema claro'}
+            title={tema === 'light' ? 'Usar tema escuro' : 'Usar tema claro'}
+            onClick={alternarTema}
           >
-            Painel
+            <span aria-hidden="true">{tema === 'light' ? '☾' : '☀'}</span>
           </button>
 
           <button
+            ref={painelToggleRef}
+            type="button"
+            className="drawer-toggle panel-toggle"
+            aria-expanded={panelOpen && painelEhGaveta}
+            aria-controls="coluna-painel"
+            onClick={alternarPainel}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+              <line x1="15" y1="4" x2="15" y2="20"></line>
+            </svg>
+            <span className="rotulo-compacto rotulo-acao">Painel</span>
+          </button>
+
+          <button
+            type="button"
             className="primary btn-hero-new"
             onClick={() => setModal({ delegateFrom: null })}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
-            <span>Nova Sessão</span>
+            <span className="rotulo-compacto rotulo-acao">Nova Sessão</span>
           </button>
+
+          <TopbarMenu
+            abas={abas}
+            ativa={activeTab}
+            onEscolher={setActiveTab}
+            tema={tema}
+            onAlternarTema={alternarTema}
+          />
         </div>
       </header>
 
@@ -276,8 +393,18 @@ export function App() {
       ) : (
         /* Timeline 3-Column Layout */
         <div className="columns">
+          {(fluxosGavetaAberta || painelGavetaAberto) && (
+            <div className="drawer-backdrop" aria-hidden="true" onClick={() => fecharGavetas(false)} />
+          )}
+
           {/* Coluna Esquerda: Fluxos */}
-          <aside className="col col-left" aria-label="Navegação de fluxos">
+          <aside
+            ref={colunaFluxosRef}
+            id="coluna-fluxos"
+            className="col col-left"
+            aria-label="Navegação de fluxos"
+            inert={fluxosEhGaveta && !fluxosGavetaAberta}
+          >
             {/* Seletor de Projetos */}
             <div className="sidebar-project-selector">
               <div className="project-select-header">
@@ -293,6 +420,7 @@ export function App() {
               </div>
               <select
                 className="project-dropdown"
+                aria-label="Filtrar por projeto"
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
               >
@@ -325,6 +453,7 @@ export function App() {
                 <button
                   className="btn-icon-subtle"
                   title="Nova Sessão"
+                  aria-label="Nova Sessão"
                   onClick={() => setModal({ delegateFrom: null })}
                 >
                   +
@@ -336,6 +465,7 @@ export function App() {
               <input
                 type="text"
                 className="sidebar-search-input"
+                aria-label="Filtrar fluxos ou agentes"
                 placeholder="Filtrar fluxos ou agentes…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -444,7 +574,13 @@ export function App() {
           </main>
 
           {/* Coluna Direita: Controles e Custo */}
-          <aside className="col col-right" aria-label="Controles e telemetria">
+          <aside
+            ref={colunaPainelRef}
+            id="coluna-painel"
+            className="col col-right"
+            aria-label="Controles e telemetria"
+            inert={painelEhGaveta && !painelGavetaAberto}
+          >
             <SidePanel
               session={selected}
               budget={budget}
@@ -494,7 +630,6 @@ export function App() {
 
       {cmdOpen && (
         <CommandPalette
-          isOpen={cmdOpen}
           onClose={() => setCmdOpen(false)}
           sessions={state.sessions}
           agents={state.agents}
