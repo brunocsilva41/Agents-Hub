@@ -240,11 +240,12 @@ export class HubClient {
     toolName: string;
     toolInput: Record<string, unknown>;
   }): Promise<{
-    permission: 'allow' | 'deny' | 'escalate';
+    permission: 'allow' | 'deny' | 'ask';
     decision: string;
     risk: string;
     reason: string;
     explanation: string;
+    approvalId?: string | null;
     sessionId: string | null;
     agentId: string | null;
   }> {

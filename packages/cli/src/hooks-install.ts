@@ -7,6 +7,7 @@ import {
   gravarComBackup,
   lerJsonDeConfig,
   lerJsonParaExibir,
+  TIMEOUT_DO_HOOK_SEC,
   type JsonDeConfig,
 } from '@agents-hub/daemon';
 
@@ -100,9 +101,13 @@ export function mergeHooks(
     (entrada) => !entrada.hooks?.some((h) => h.command?.includes('main.js" hook')),
   );
 
+  // Timeout MAIOR que a espera do daemon por aprovação humana. Era 10 s contra
+  // 60 s: o Claude desistia do hook e rodava a ferramenta antes de qualquer
+  // pessoa decidir. Reinstalar (`hub hooks install claude --write`) regrava a
+  // entrada com o valor novo — ver os três relógios em `pretool-gate.ts`.
   const nossa: EntradaDeHook = {
     matcher: MATCHER_DE_RISCO,
-    hooks: [{ type: 'command', command: comando, timeout: 10 }],
+    hooks: [{ type: 'command', command: comando, timeout: TIMEOUT_DO_HOOK_SEC }],
   };
 
   return {
@@ -117,6 +122,34 @@ export function hookInstalado(config: Record<string, unknown>): boolean {
     ? (hooks['PreToolUse'] as EntradaDeHook[])
     : [];
   return preToolUse.some((e) => e.hooks?.some((h) => h.command?.includes('main.js" hook')));
+}
+
+/**
+ * Hook do Hub instalado com timeout antigo (menor que o atual, ou ausente).
+ *
+ * Instalações anteriores gravaram `timeout: 10`, e com isso a ação que pedia
+ * aprovação humana RODAVA depois de 10 s sem resposta. Reinstalar corrige;
+ * isto é o que avisa que é preciso. Devolve `null` quando está tudo certo ou
+ * quando o hook nem está instalado.
+ */
+export function avisoDeTimeoutDoHook(config: Record<string, unknown>): string | null {
+  const hooks = (config['hooks'] ?? {}) as Record<string, unknown>;
+  const preToolUse = Array.isArray(hooks['PreToolUse'])
+    ? (hooks['PreToolUse'] as EntradaDeHook[])
+    : [];
+  const nossos = preToolUse.flatMap((e) =>
+    (e.hooks ?? []).filter((h) => h.command?.includes('main.js" hook')),
+  );
+  if (nossos.length === 0) return null;
+
+  const velho = nossos.find(
+    (h) => typeof h.timeout !== 'number' || h.timeout < TIMEOUT_DO_HOOK_SEC,
+  );
+  if (!velho) return null;
+  return (
+    `hook do gate instalado com timeout ${velho.timeout ?? 'ausente'}${typeof velho.timeout === 'number' ? ' s' : ''} ` +
+    `(precisa de ${TIMEOUT_DO_HOOK_SEC} s): ação que pede aprovação roda sem ela quando o agente desiste do hook`
+  );
 }
 
 /**

@@ -144,26 +144,65 @@ export function combineVerdicts(
 /**
  * Como o veredito do Hub vira permissão do agente.
  *
- * O vocabulário do hook é `allow | deny | escalate` — `escalate` devolve a
- * decisão a quem está no teclado.
+ * O vocabulário do hook do Claude Code é `allow | deny | ask | defer` — medido
+ * no schema embutido no binário (2.1.283). `ask` devolve a decisão a quem está
+ * no teclado. A versão anterior devolvia `escalate`, que NÃO existe nesse
+ * vocabulário: era um valor inválido que só não quebrava nada porque o gate
+ * bloqueante nunca devolve `approve` (ele espera a decisão humana e responde
+ * `allow` ou `deny`).
  *
- * `approve` do Hub vira `escalate`, nunca `deny`. Transformar "precisa de
+ * `approve` do Hub vira `ask`, nunca `deny`. Transformar "precisa de
  * aprovação" em "negado" faria o agente concluir que a ação é impossível e
  * procurar outro caminho para o mesmo efeito — exatamente o comportamento que
  * um gate de segurança não pode induzir.
  */
-export type HookPermission = 'allow' | 'deny' | 'escalate';
+export type HookPermission = 'allow' | 'deny' | 'ask';
 
 export function toHookPermission(decision: Decision): HookPermission {
   switch (decision) {
     case 'allow':
       return 'allow';
     case 'approve':
-      return 'escalate';
+      return 'ask';
     case 'deny':
       return 'deny';
   }
 }
+
+// --------------------------------------------------------------- tempos
+//
+// Três relógios decidem se o gate protege ou falha aberto, e a ordem entre
+// eles é o contrato inteiro:
+//
+//   espera do daemon  <  teto HTTP do hook  <  timeout do hook no agente
+//        55 s                  100 s                   120 s
+//
+// Medido com o `claude` real (vistoria de 2026-09-25): quando o hook estoura o
+// timeout que o agente deu a ele, a ferramenta RODA. Com o hook instalado a
+// 10 s e o daemon esperando 60 s, toda ação que pedia aprovação humana rodava
+// sem ela depois de 10 s — o caminho mais forte do gate era o único que
+// nunca protegia. Com a ordem acima, quem desiste primeiro é sempre o daemon,
+// e a desistência dele é `deny`; o hook ainda tem folga para aplicar o modo
+// de falha se o daemon sumir; e o agente só desistiria de um hook que já
+// morreu por outro motivo.
+//
+// Nem o Claude Code (schema `timeout: positive()`, sem teto; padrão de 600 s)
+// nem o Codex (`timeoutSec`, sem teto no binário 0.155.0) limitam o valor, então
+// 120 s é escolha nossa: longo o bastante para uma pessoa ler e decidir,
+// curto o bastante para um agente parado não parecer travado para sempre.
+
+/** Quanto o daemon espera por uma decisão humana antes de NEGAR a chamada. */
+export const ESPERA_DO_GATE_MS = 55_000;
+
+/**
+ * Quanto o processo do hook espera o daemon responder antes de aplicar o modo
+ * de falha. Maior que a espera do daemon (a resposta normal sempre chega
+ * antes) e menor que o timeout do hook (o hook ainda consegue falar).
+ */
+export const TETO_HTTP_DO_HOOK_MS = 100_000;
+
+/** Timeout gravado na config do agente (`timeout` do Claude, `timeoutSec` do Codex). */
+export const TIMEOUT_DO_HOOK_SEC = 120;
 
 /**
  * Saída do hook no dialeto do **Codex**, que não é o do Claude Code.

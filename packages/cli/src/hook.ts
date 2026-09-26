@@ -1,4 +1,5 @@
 import { HubClient } from '@agents-hub/client';
+import { actionsOfToolCall, TETO_HTTP_DO_HOOK_MS } from '@agents-hub/daemon';
 
 /**
  * Ponte entre o hook `PreToolUse` do agente e a política do Hub.
@@ -37,8 +38,8 @@ import { HubClient } from '@agents-hub/client';
  * silencioso no dia em que os payloads convergirem.
  *
  * O Codex também NÃO recebe `AGENTS_HUB_SESSION_ID` — a sonda confirmou que só
- * chegam variáveis `CODEX_*`. Para ele a correlação sai do `cwd`, que no Hub é
- * o worktree da sessão.
+ * chegam variáveis `CODEX_*`. Por isso o Hub põe o id no próprio comando do
+ * hook (`--session ses_...`), que ele monta a cada invocação.
  */
 
 export type DialetoDeHook = 'claude' | 'codex';
@@ -51,7 +52,7 @@ export interface HookInput {
 }
 
 interface GateResponse {
-  permission: 'allow' | 'deny' | 'escalate';
+  permission: 'allow' | 'deny' | 'ask' | 'escalate';
   explanation: string;
   reason: string;
   risk: string;
@@ -59,47 +60,130 @@ interface GateResponse {
 }
 
 /**
- * FALHA ABERTA de propósito.
+ * O que fazer quando o daemon NÃO responde (fora do ar, erro, resposta
+ * inválida, demora além do teto). Ver `GateConfig` no daemon.
+ */
+export type ModoDeFalha = 'open' | 'closed';
+
+export interface OpcoesDoHook {
+  /**
+   * Id da sessão do Hub, quando o hook sabe qual é: `AGENTS_HUB_SESSION_ID`
+   * no Claude, `--session` no Codex. É o que prova que a chamada vem de uma
+   * sessão do Hub.
+   */
+  sessionId?: string | undefined;
+  /** `gate.failMode` da config global; ausente = padrão por contexto. */
+  failMode?: ModoDeFalha | undefined;
+  /** Quanto esperar o daemon. Padrão: `TETO_HTTP_DO_HOOK_MS`. */
+  tetoMs?: number | undefined;
+}
+
+/**
+ * Modo de falha efetivo.
+ *
+ * Padrão: FECHADO para sessão do Hub, ABERTO fora dela.
  *
  * O hook pode estar instalado globalmente e disparar em toda sessão do agente,
- * inclusive quando o Hub não está envolvido. Bloquear porque o daemon está
+ * inclusive quando o Hub não está envolvido. Bloquear ali porque o daemon está
  * desligado transformaria o Hub numa dependência do seu editor — e a primeira
- * reação de qualquer pessoa seria desinstalar o hook, que é o pior desfecho
- * possível para um controle de segurança.
+ * reação de qualquer pessoa seria desinstalar o hook, o pior desfecho possível
+ * para um controle de segurança.
  *
- * A garantia que fica de pé é a que importa: quando o daemon RESPONDE e diz
- * "negado", a ferramenta não roda.
+ * Numa sessão que o Hub spawnou, o raciocínio inverte: a sessão prometeu
+ * passar pela política (o modo `supervised` existe por isso), o daemon é quem
+ * a está rodando, e o silêncio dele — caiu, travou, respondeu lixo — não pode
+ * virar permissão para `git push --force`. Antes, qualquer exceção virava
+ * `allow`, inclusive um 400 por entrada malformada.
  */
+export function modoDeFalhaEfetivo(
+  configurado: ModoDeFalha | undefined,
+  sessaoDoHub: boolean,
+): ModoDeFalha {
+  return configurado ?? (sessaoDoHub ? 'closed' : 'open');
+}
+
+/**
+ * A chamada tem risco a barrar quando o gate falha fechado?
+ *
+ * Mesmo critério do daemon (`actionsOfToolCall`): shell, escrita e rede têm;
+ * leitura e ferramenta desconhecida não. Negar leitura no modo fechado só
+ * cegaria o agente sem proteger nada.
+ */
+export function chamadaDeRisco(toolName: string, toolInput: unknown, cwd?: string): boolean {
+  // Entrada que não é objeto é anômala (o agente sempre manda objeto): sem
+  // como classificar, o lado seguro é tratá-la como risco.
+  if (typeof toolInput !== 'object' || toolInput === null || Array.isArray(toolInput)) return true;
+  const acoes = actionsOfToolCall(
+    { toolName, toolInput: toolInput as Record<string, unknown>, cwd },
+    cwd ?? process.cwd(),
+  );
+  return acoes.some((a) => a.kind !== 'file.read');
+}
+
+const ID_DE_SESSAO = /^ses_[a-z0-9]+$/i;
+
 export async function decideToolCall(
   entrada: HookInput,
   baseUrl: string,
   dialeto: DialetoDeHook = 'claude',
+  opcoes: OpcoesDoHook = {},
 ): Promise<{ saida: string; codigo: number }> {
   const toolName = entrada.tool_name;
   if (typeof toolName !== 'string' || toolName.length === 0) {
     return { saida: permitir('chamada sem nome de ferramenta', dialeto), codigo: 0 };
   }
 
+  // Só conta como sessão do Hub se o id tiver o formato esperado: a validação
+  // da borda recusa qualquer outra coisa, e aí a chamada inteira falharia.
+  const sessionId =
+    opcoes.sessionId && ID_DE_SESSAO.test(opcoes.sessionId) ? opcoes.sessionId : undefined;
+  // Vai como veio: um `tool_input` torto é recusado pela borda do daemon, e
+  // essa recusa cai no modo de falha — não vira `{}` "sem ação de risco".
+  const toolInput = entrada.tool_input ?? {};
+
   const client = new HubClient(baseUrl);
-  const sessionId = process.env['AGENTS_HUB_SESSION_ID'];
+  const teto = opcoes.tetoMs ?? TETO_HTTP_DO_HOOK_MS;
+  let timer: NodeJS.Timeout | undefined;
 
   try {
-    const veredito = await client.gateToolCall({
-      // Só manda o id do Hub se ele tiver o formato esperado: a validação da
-      // borda recusa qualquer outra coisa, e aí a chamada inteira falharia.
-      ...(sessionId && /^ses_[a-z0-9]+$/i.test(sessionId) ? { sessionId } : {}),
-      ...(entrada.session_id ? { nativeSessionId: entrada.session_id } : {}),
-      ...(entrada.cwd ? { cwd: entrada.cwd } : {}),
-      toolName,
-      toolInput: entrada.tool_input ?? {},
+    // Teto próprio: o daemon responde em até `ESPERA_DO_GATE_MS`; se passar
+    // muito disso, algo travou, e o hook precisa decidir ANTES de o agente
+    // desistir dele — desistência do agente é ferramenta rodando.
+    const estouro = new Promise<never>((_, rejeitar) => {
+      timer = setTimeout(() => rejeitar(new Error('daemon não respondeu a tempo')), teto);
     });
+    const veredito = await Promise.race([
+      client.gateToolCall({
+        ...(sessionId ? { sessionId } : {}),
+        ...(entrada.session_id ? { nativeSessionId: entrada.session_id } : {}),
+        ...(entrada.cwd ? { cwd: entrada.cwd } : {}),
+        toolName,
+        toolInput,
+      }),
+      estouro,
+    ]);
 
     return { saida: responder(veredito, dialeto), codigo: 0 };
-  } catch {
+  } catch (err) {
+    const modo = modoDeFalhaEfetivo(opcoes.failMode, sessionId !== undefined);
+    if (modo === 'closed' && chamadaDeRisco(toolName, toolInput, entrada.cwd)) {
+      return {
+        saida: negar(
+          `Agents-Hub não deu um veredito (${(err as Error).message}) e o gate desta sessão falha ` +
+            'FECHADO: ações de shell, escrita e rede ficam negadas até o daemon voltar. ' +
+            'Não tente contornar — diga ao usuário que o Agents-Hub está indisponível ' +
+            '(`hub daemon` para subir de novo).',
+          dialeto,
+        ),
+        codigo: 0,
+      };
+    }
     return {
       saida: permitir('Agents-Hub indisponível — sem política a aplicar', dialeto),
       codigo: 0,
     };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -107,20 +191,28 @@ function responder(veredito: GateResponse, dialeto: DialetoDeHook): string {
   if (dialeto === 'codex') {
     // Silêncio é o "sim" do Codex.
     if (veredito.permission === 'allow') return '';
-    return JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: veredito.explanation,
-      },
-    });
+    return negar(veredito.explanation, dialeto);
   }
 
+  // `escalate` é o nome antigo de `ask` (daemon de versão anterior): o
+  // Claude Code não conhece `escalate`, então traduzimos em vez de repassar.
+  const decisao = veredito.permission === 'escalate' ? 'ask' : veredito.permission;
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      permissionDecision: veredito.permission,
+      permissionDecision: decisao,
       permissionDecisionReason: veredito.explanation,
+    },
+  });
+}
+
+function negar(motivo: string, _dialeto: DialetoDeHook): string {
+  // Mesmo formato nos dois dialetos: o Codex exige motivo não vazio no `deny`.
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: motivo,
     },
   });
 }

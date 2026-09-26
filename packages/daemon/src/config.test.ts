@@ -35,6 +35,23 @@ describe('loadConfig — validação de config.json', () => {
     return raiz;
   }
 
+  test('gate.failMode: ausente por padrão, aceita open/closed e recusa outro valor', () => {
+    // Ausente = padrão por contexto no hook (fechado em sessão do Hub).
+    assert.equal(loadConfig({ home: homeComConfig({}) }).gate?.failMode, undefined);
+    assert.equal(
+      loadConfig({ home: homeComConfig({ gate: { failMode: 'closed' } }) }).gate?.failMode,
+      'closed',
+    );
+    assert.equal(
+      loadConfig({ home: homeComConfig({ gate: { failMode: 'open' } }) }).gate?.failMode,
+      'open',
+    );
+    assert.throws(
+      () => loadConfig({ home: homeComConfig({ gate: { failMode: 'talvez' } }) }),
+      (err: unknown) => isHubError(err) && err.code === 'HUB_CONFIG_INVALID',
+    );
+  });
+
   test('validation.review parcial preserva command e commandTimeoutSeconds do padrão', () => {
     const home = homeComConfig({
       policy: {

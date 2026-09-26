@@ -152,6 +152,63 @@ escolha explícita do usuário nesta máquina), não há prevenção nenhuma, e 
 recusa abrir uma sessão `--mode supervised` do Codex sem essa garantia, em vez
 de fingir que ela existe.
 
+### Quando o gate falha: aberto ou fechado
+
+O gate do **Claude Code** também depende de instalação: sem
+`hub hooks install claude --write` (que grava o hook em `~/.claude/settings.json`)
+não há gate nenhum, só vigilância. E o gate só aplica política a chamadas que ele
+consegue ligar a uma sessão do Hub: pelo id da sessão (`AGENTS_HUB_SESSION_ID`,
+que o Hub injeta no Claude; `--session`, que o Hub põe no comando do hook do
+Codex), pelo id nativo, ou pelo diretório de uma sessão **viva** que o Hub
+spawnou. Fora disso — o Claude que você abre na mão, inclusive no diretório de
+um projeto registrado — a resposta é `allow` "fora de uma sessão do Hub".
+
+**Tempo.** Três relógios, nesta ordem (`packages/daemon/src/pretool-gate.ts`):
+
+| Relógio | Valor | O que acontece quando estoura |
+|---|---|---|
+| Espera do daemon por decisão humana | 55 s | o daemon responde `deny` "ninguém respondeu — não por proibição"; a sessão **continua** |
+| Teto HTTP do processo do hook | 100 s | o hook aplica o modo de falha (abaixo) |
+| Timeout do hook na config do agente | 120 s | o agente desiste do hook e **roda a ferramenta** |
+
+A última linha é o motivo da ordem: foi medido com o `claude` real que hook
+estourado é erro não bloqueante — a ferramenta roda. Instalações antigas gravaram
+`timeout: 10` (Claude) e `timeoutSec = 20` (Codex) contra 60 s de espera do
+daemon, e com isso **toda ação que pedia aprovação rodava sem ela depois de
+10/20 s**. Reinstale com `hub hooks install claude --write`; `hub hooks` e
+`hub doctor` acusam instalação com timeout antigo. O Codex recebe o timeout novo
+a cada sessão, sem reinstalar.
+
+Negar uma chamada (por humano ou por tempo) nega **só aquela chamada**: o agente
+recebe o motivo real e a sessão segue. Enquanto houver aprovação pendente,
+`send` e `handoff` na sessão são recusados (`ILLEGAL_STATE` citando o `apv_...`).
+
+**Daemon indisponível** (fora do ar, erro, resposta inválida, mais de 100 s):
+o hook não tem política para consultar e precisa escolher um lado.
+
+| Configuração (`~/.agents-hub/config.json`) | Sessão do Hub | Fora do Hub |
+|---|---|---|
+| `gate.failMode` ausente (**padrão**) | **fechado**: nega shell, escrita e rede; leitura passa | aberto: libera |
+| `"gate": { "failMode": "closed" }` | fechado | fechado |
+| `"gate": { "failMode": "open" }` | aberto | aberto |
+
+Modelo de ameaça por trás do padrão:
+
+- **Numa sessão do Hub**, o daemon é quem a está rodando e a sessão prometeu
+  passar pela política. Se o daemon cai, trava ou responde lixo, liberar
+  transformaria o silêncio em permissão — e derrubar o daemon (ou só fazê-lo
+  demorar) viraria o jeito de passar um `git push --force` por um gate
+  `supervised`. Por isso é fechado.
+- **Fora do Hub**, o hook está instalado globalmente e dispara em qualquer uso
+  do agente. Fechar ali faria o Hub desligado bloquear o seu editor, e a reação
+  natural seria desinstalar o hook — perdendo o gate também nas sessões do Hub.
+  Por isso é aberto. `closed` existe para quem prefere o contrário.
+- O que o modo de falha **não** cobre: um agente que apaga ou reescreve o
+  próprio hook (`~/.claude/settings.json`) ou roda fora do agente gateado;
+  processo local que fala direto com a API do daemon; e o Codex sem o bypass de
+  confiança, que ignora o hook em silêncio (ver acima). O `failMode` é lido
+  pelo hook da config **global**; config de projeto não o altera.
+
 ### O classificador de comando é análise estática, não sandbox
 
 O classificador lê o texto do comando; ele não vê o conteúdo de um script em

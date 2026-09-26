@@ -116,10 +116,12 @@ describe('decisão combinada', () => {
 });
 
 describe('tradução para a permissão do hook', () => {
-  test('"precisa de aprovação" vira ESCALAR, nunca NEGAR', () => {
+  test('"precisa de aprovação" vira PERGUNTAR (ask), nunca NEGAR', () => {
+    // `ask` é o valor que o Claude Code aceita (allow|deny|ask|defer, medido no
+    // binário 2.1.283); `escalate`, o valor antigo, não existe no vocabulário.
     assert.equal(
       toHookPermission('approve'),
-      'escalate',
+      'ask',
       'virar deny faria o agente concluir que a ação é impossível e tentar contorná-la',
     );
   });
@@ -160,7 +162,7 @@ describe('o gate concorda com a vigilância reativa', () => {
     assert.ok(acao);
     const v = engine.decide(acao, { workdir, mode: 'semi' });
     assert.equal(v.risk, 'irreversible');
-    assert.equal(toHookPermission(v.decision), 'escalate');
+    assert.equal(toHookPermission(v.decision), 'ask');
   });
 
   test('trabalho normal no worktree passa sem atrito', () => {

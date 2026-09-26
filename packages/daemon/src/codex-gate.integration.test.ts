@@ -175,6 +175,15 @@ describe('gate pré-execução do Codex — fim a fim', () => {
     assert.match(hooksArg, /^hooks=\{PreToolUse=/);
     // O comando embutido no TOML é o próprio bridge do hook, no dialeto certo.
     assert.match(hooksArg, /hook --dialect codex/);
+    // O Codex não repassa AGENTS_HUB_SESSION_ID ao hook: o id vai no comando,
+    // ou o hook não sabe que é sessão do Hub (e não falha fechado).
+    assert.ok(
+      hooksArg.includes(`--session ${session.id}`),
+      `esperava --session ${session.id} no comando do hook: ${hooksArg}`,
+    );
+    // Timeout do hook maior que a espera do daemon (55 s): com 20 s, o Codex
+    // desistia e rodava a ação que esperava aprovação humana.
+    assert.match(hooksArg, /timeoutSec=120\b/);
     assert.equal(
       argv.includes('--dangerously-bypass-hook-trust'),
       false,
