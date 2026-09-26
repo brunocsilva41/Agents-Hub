@@ -18,6 +18,8 @@ import type {
   ProjectSummary,
   SessionSummary,
   TaskSummary,
+  WorkflowRunSummary,
+  WorkflowValidationSummary,
 } from './types.js';
 import { idSegment } from './ids.js';
 import type {
@@ -440,6 +442,41 @@ export class HubClient {
 
   async budget(rootId: string): Promise<{ budget: BudgetSummary }> {
     return this.#get(`/budget/${idSegment(rootId, 'ses')}`);
+  }
+
+  /**
+   * Redefine o teto do fluxo (só na raiz). Exige token. Campos ausentes ficam
+   * como estão; abaixo do já gasto + reservado é recusado.
+   */
+  async setBudget(
+    rootId: string,
+    limits: { usd?: number; tokens?: number; seconds?: number },
+  ): Promise<{ budget: BudgetSummary }> {
+    return this.#send('PUT', `/budget/${idSegment(rootId, 'ses')}`, { limits });
+  }
+
+  // --------------------------------------------------------------- workflows
+  /** Valida o YAML de um workflow (sintaxe, dependências, ciclos). */
+  validateWorkflow(yaml: string): Promise<WorkflowValidationSummary> {
+    return this.#post('/workflows/validate', { yaml });
+  }
+
+  /** Dispara no daemon: o encadeamento não depende de quem chamou continuar ouvindo. */
+  async startWorkflow(body: {
+    yaml: string;
+    projectId: string;
+    budgetUsd?: number;
+  }): Promise<{ run: WorkflowRunSummary }> {
+    idSegment(body.projectId, 'prj');
+    return this.#post('/workflows/runs', body);
+  }
+
+  workflowRuns(): Promise<{ runs: WorkflowRunSummary[] }> {
+    return this.#get('/workflows/runs');
+  }
+
+  async workflowRun(id: string): Promise<{ run: WorkflowRunSummary }> {
+    return this.#get(`/workflows/runs/${idSegment(id, 'wfr')}`);
   }
 
   /** URL do SSE — o navegador usa `EventSource`, o Node usa `stream()`. */

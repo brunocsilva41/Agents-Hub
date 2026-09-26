@@ -1769,6 +1769,16 @@ export class SessionManager {
    */
   async detach(sessionId: string, reason = 'agente externo desconectou'): Promise<void> {
     const session = this.#session(sessionId);
+    // Desanexar é só para quem foi ADOTADO. Numa sessão comum, isto a marcava
+    // `completed` sem matar o processo do agente — um "encerrar" que mente o
+    // estado e deixa a run órfã. Para essas existe `cancel`.
+    if (!sessaoAdotada(session)) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${sessionId} não foi adotada de um agente externo; desanexar não se aplica — use cancelar.`,
+        { sessionId },
+      );
+    }
     // Idempotente: o MCP pode desconectar depois de a raiz já ter expirado por
     // falta de sinal de vida (ver `adopted-leases.ts`) — não há o que fechar.
     if (isTerminalSessionState(session.state)) return;
@@ -1880,6 +1890,67 @@ export class SessionManager {
     // (inclusive os gravados antes dos tetos existirem) chegou a gerar uma
     // resposta de 125 MB.
     return limitarPagina(this.store.events.list({ sessionId, sinceSeq, limit, ...page }));
+  }
+
+  /**
+   * Redefine o teto do fluxo (edição pelo operador, `PUT /budget/:rootId`).
+   *
+   * Só na RAIZ: o ledger é chaveado por ela, e aceitar o id de uma sub-sessão
+   * criaria um ledger órfão que ninguém consulta. Campos ausentes ficam como
+   * estão. O teto novo não pode ficar abaixo do que já foi gasto mais o que
+   * está reservado para delegações em curso — isso não "para" o fluxo, só o
+   * deixa num estado que o ledger chama de esgotado sem ninguém ter gasto
+   * nada a mais; para parar existe `cancel`.
+   */
+  setBudgetLimits(
+    rootId: string,
+    limits: Partial<BudgetLimits>,
+  ): { before: BudgetLimits; budget: BudgetSnapshot & { projection?: BudgetProjection } } {
+    const session = this.#session(rootId);
+    if (session.rootId !== session.id) {
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `A sessão ${rootId} não é raiz de fluxo; o orçamento pertence à raiz ${session.rootId}.`,
+        { sessionId: rootId, rootId: session.rootId },
+      );
+    }
+
+    const ledger = this.#ledger(rootId);
+    const atual = ledger.snapshot();
+    const alvo: BudgetLimits = { ...atual.limits };
+    const abaixo: string[] = [];
+    for (const campo of ['usd', 'tokens', 'seconds'] as const) {
+      const novo = limits[campo];
+      if (novo === undefined) continue;
+      const piso = atual.consumed[campo] + atual.reserved[campo];
+      if (novo < piso) abaixo.push(`${campo} (mínimo ${Number(piso.toFixed(4))})`);
+      alvo[campo] = novo;
+    }
+    if (abaixo.length > 0) {
+      throw new HubError(
+        'INVALID_QUERY',
+        `o teto novo fica abaixo do já gasto + reservado em: ${abaixo.join(', ')}`,
+        { rootId, abaixo },
+      );
+    }
+
+    ledger.setLimits(alvo);
+    this.#persistLedger(ledger);
+    // Teto mudou: cruzar 80% de novo é uma passagem nova.
+    this.#warned.delete(rootId);
+
+    const snapshot = ledger.snapshot();
+    this.#emit({
+      sessionId: rootId,
+      taskId: null,
+      agentId: session.agentId,
+      type: 'budget.updated',
+      payload: {
+        text: `orçamento redefinido pelo operador: US$ ${snapshot.limits.usd.toFixed(2)}`,
+        snapshot,
+      },
+    });
+    return { before: atual.limits, budget: this.budget(rootId) };
   }
 
   graph(rootId: string): GraphNode[] {
@@ -3826,7 +3897,7 @@ ${task.brief.objective.slice(0, 500)}`,
  * Sessão adotada (`adoptExternal`): nó de controle de um agente que roda FORA
  * do Hub, sem run própria. Reconhecida pelo `path` que a adoção grava.
  */
-function sessaoAdotada(session: Session): boolean {
+export function sessaoAdotada(session: Session): boolean {
   return (
     session.parentId === null &&
     session.path.length === 1 &&

@@ -64,6 +64,11 @@ export interface SessionSummary {
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
+  /**
+   * Sessão adotada de um agente externo (`POST /sessions/adopt`). Só ela
+   * aceita `detach`. Ausente em daemons anteriores a este campo.
+   */
+  adopted?: boolean;
 }
 
 export interface TaskSummary {
@@ -182,4 +187,56 @@ export interface ProjectContextDto {
   prompts?: Record<string, string>;
   /** Variáveis de ambiente por agente — é como "modelo local" chega ao CLI. */
   env?: Record<string, Record<string, string>>;
+}
+
+/** Resultado de `POST /workflows/validate`. */
+export type WorkflowValidationSummary =
+  | {
+      valid: true;
+      errors: [];
+      workflow: {
+        name: string;
+        description: string | null;
+        steps: Array<{ id: string; agent: string; dependsOn: string[] }>;
+      };
+      /** Lotes paralelos, em ordem topológica. */
+      executionOrder: string[][];
+    }
+  | { valid: false; errors: string[]; workflow: null; executionOrder: [] };
+
+export type WorkflowRunStepStateSummary =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
+  | 'timeout';
+
+/** Execução de workflow conduzida pelo daemon (`/workflows/runs`). */
+export interface WorkflowRunSummary {
+  id: string;
+  name: string;
+  description: string | null;
+  projectId: string;
+  state: 'running' | 'completed' | 'failed' | 'interrupted';
+  budgetUsd: number | null;
+  batches: string[][];
+  currentBatch: number | null;
+  steps: Array<{
+    stepId: string;
+    agent: string;
+    dependsOn: string[];
+    state: WorkflowRunStepStateSummary;
+    sessionId: string | null;
+    taskId: string | null;
+    summary: string | null;
+    detail: string | null;
+    usd: number;
+    capUsd: number | null;
+  }>;
+  totalUsd: number;
+  startedAt: string;
+  endedAt: string | null;
+  error: string | null;
 }
