@@ -19,10 +19,11 @@ import { useTema } from './theme';
 import { AgentSwarmView } from './components/AgentSwarmView';
 import { DagCanvasView } from './components/DagCanvasView';
 import { TelemetryView } from './components/TelemetryView';
+import { OperationView } from './components/OperationView';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
 import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES, timelineStatus } from './useHubState';
 
-type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'settings';
+type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'operation' | 'settings';
 
 export function App() {
   const state = useHubState();
@@ -204,6 +205,7 @@ export function App() {
     { id: 'dag', rotulo: 'Grafo DAG', icone: '🕸' },
     { id: 'swarm', rotulo: `Swarm (${state.agents.length})`, icone: '🤖' },
     { id: 'telemetry', rotulo: 'Telemetria', icone: '📊' },
+    { id: 'operation', rotulo: 'Operação', icone: '🛠' },
     { id: 'settings', rotulo: 'Configurações', icone: '⚙️' },
   ];
 
@@ -409,6 +411,21 @@ export function App() {
               setActiveTab('timeline');
             }}
             onNewSession={() => setModal({ delegateFrom: null })}
+          />
+        </main>
+      ) : activeTab === 'operation' ? (
+        <main className="tab-view-container">
+          <OperationView
+            sessions={state.sessions}
+            agents={state.agents}
+            projects={state.projects}
+            selectedSessionId={selectedId}
+            onSelectSession={setSelectedId}
+            onOpenSession={(id) => {
+              selectSession(id);
+              setActiveTab('timeline');
+            }}
+            onChanged={() => void state.refresh()}
           />
         </main>
       ) : activeTab === 'telemetry' ? (

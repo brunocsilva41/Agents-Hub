@@ -16,7 +16,7 @@
  * Mora aqui, e não no core, porque a Web UI empacota o cliente e o core puxa
  * `node:crypto` em runtime.
  */
-export type HubIdPrefix = 'ses' | 'tsk' | 'apv' | 'prj' | 'pfd';
+export type HubIdPrefix = 'ses' | 'tsk' | 'apv' | 'prj' | 'pfd' | 'wfr';
 
 const PADROES: Record<HubIdPrefix, RegExp> = {
   ses: /^ses_[a-z0-9]{1,60}$/i,
@@ -24,6 +24,8 @@ const PADROES: Record<HubIdPrefix, RegExp> = {
   apv: /^apv_[a-z0-9]{1,60}$/i,
   prj: /^prj_[a-z0-9]{1,60}$/i,
   pfd: /^pfd_(?:prj_)?[a-z0-9]{1,56}$/i,
+  /** Execução de workflow disparada pela API (registro em memória do daemon). */
+  wfr: /^wfr_[a-z0-9]{1,60}$/i,
 };
 
 const NOMES: Record<HubIdPrefix, string> = {
@@ -32,6 +34,7 @@ const NOMES: Record<HubIdPrefix, string> = {
   apv: 'aprovação',
   prj: 'projeto',
   pfd: 'pasta',
+  wfr: 'execução de workflow',
 };
 
 /** O padrão em si, para quem precisa declará-lo num schema (zod do MCP). */

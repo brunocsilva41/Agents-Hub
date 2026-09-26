@@ -17,6 +17,7 @@ export type AuditKind =
   | 'project.import'
   | 'project.folders'
   | 'maintenance.sweep'
+  | 'budget.updated'
   | 'daemon.shutdown';
 
 export interface AuditEntry {
@@ -63,5 +64,6 @@ export const AUDIT_KINDS: readonly AuditKind[] = [
   'project.import',
   'project.folders',
   'maintenance.sweep',
+  'budget.updated',
   'daemon.shutdown',
 ];

@@ -266,6 +266,16 @@ export class BudgetLedger {
     this.#limits = addUsage(this.#limits, delta);
     return this.snapshot();
   }
+
+  /**
+   * Redefine o teto por inteiro (edição do operador). Consumo, reservas e
+   * estimativas em aberto ficam como estão — só o limite muda. Quem chama
+   * decide se aceita um teto abaixo do já comprometido.
+   */
+  setLimits(limits: BudgetLimits): BudgetSnapshot {
+    this.#limits = sanitizeUsage(limits);
+    return this.snapshot();
+  }
 }
 
 function safeRatio(used: number, limit: number): number {

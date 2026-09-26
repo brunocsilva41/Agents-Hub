@@ -35,7 +35,7 @@ import {
   parseSseSince,
 } from './http-schemas.js';
 import type { WorktreeReaper } from './reaper.js';
-import type { SessionManager } from './session-manager.js';
+import { sessaoAdotada, type SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
 import { resumoDaFerramenta, type AuditTrail } from './audit.js';
 import {
@@ -46,6 +46,8 @@ import {
   shouldIssueOperatorCookie,
 } from './operator-auth.js';
 import { registerOperatorRoutes } from './operator-routes.js';
+import { registerOperationRoutes } from './operation-routes.js';
+import { WorkflowRunner } from './workflow-runs.js';
 import type { PolicyService } from './policy-service.js';
 import { startSseChannel } from './sse.js';
 import type { DiscoveryService, ImportService } from './absorption.js';
@@ -130,6 +132,8 @@ export class HubServer {
   #server: Server | null = null;
   /** Preenchido pelo `createHub`: como derrubar o Hub inteiro, não só o HTTP. */
   onShutdown: (() => Promise<void>) | null = null;
+  /** Workflows disparados pela API (painel) — ver `workflow-runs.ts`. */
+  readonly workflows: WorkflowRunner;
 
   constructor(
     private readonly config: HubConfig,
@@ -141,6 +145,7 @@ export class HubServer {
     private readonly importer: ImportService,
     private readonly operator: OperatorDeps,
   ) {
+    this.workflows = new WorkflowRunner(sessions);
     this.#registerRoutes();
   }
 
@@ -161,6 +166,7 @@ export class HubServer {
   }
 
   async close(): Promise<void> {
+    this.workflows.close();
     const server = this.#server;
     if (!server) return;
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -580,10 +586,13 @@ export class HubServer {
     this.#route('GET', '/sessions', (req, res) => {
       const url = new URL(req.url ?? '/', 'http://local');
       sendJson(res, 200, {
-        sessions: this.sessions.listSessions({
-          projectId: url.searchParams.get('projectId') ?? undefined,
-          rootId: url.searchParams.get('rootId') ?? undefined,
-        }),
+        sessions: this.sessions
+          .listSessions({
+            projectId: url.searchParams.get('projectId') ?? undefined,
+            rootId: url.searchParams.get('rootId') ?? undefined,
+          })
+          // `adopted`: o painel só oferece "desanexar" a quem foi adotado.
+          .map((s) => ({ ...s, adopted: sessaoAdotada(s) })),
       });
     });
 
@@ -689,8 +698,9 @@ export class HubServer {
 
     this.#route('GET', '/sessions/:id', (_req, res, params) => {
       const id = param(params['id'], SessionIdSchema, 'id');
+      const session = this.sessions.getSession(id);
       sendJson(res, 200, {
-        session: this.sessions.getSession(id),
+        session: { ...session, adopted: sessaoAdotada(session) },
         live: this.sessions.isLive(id),
       });
     });
@@ -898,6 +908,13 @@ export class HubServer {
     registerOperatorRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
       policy: this.operator.policy,
       audit: this.operator.audit,
+    });
+
+    // Orçamento editável e workflows pelo painel (item 6.12) — ver `operation-routes.ts`.
+    registerOperationRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
+      sessions: this.sessions,
+      audit: this.operator.audit,
+      workflows: this.workflows,
     });
 
     // ------------------------------------------------------------- grafo e custo

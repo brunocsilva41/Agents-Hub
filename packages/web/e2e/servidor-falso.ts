@@ -15,6 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rotearOperacao } from './dados-operacao';
 
 const DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 
@@ -61,7 +62,7 @@ function sessao(
   agentId: string,
   state: string,
   title: string,
-  extra: { rootId?: string; parentId?: string | null; depth?: number; projectId?: string; min?: number } = {},
+  extra: { rootId?: string; parentId?: string | null; depth?: number; projectId?: string; min?: number; adopted?: boolean } = {},
 ) {
   return {
     id,
@@ -79,6 +80,7 @@ function sessao(
     createdAt: ha((extra.min ?? 10) + 5),
     updatedAt: ha(extra.min ?? 10),
     endedAt: state === 'completed' ? ha(extra.min ?? 10) : null,
+    adopted: extra.adopted ?? false,
   };
 }
 
@@ -101,6 +103,7 @@ export const SESSOES = [
     projectId: 'prj_beta',
   }),
   sessao('ses_raiz3', 'opencode', 'paused', 'Investigar lentidão no build', { min: 20 }),
+  sessao('ses_ext1', 'claude', 'running', 'Claude Code (externo)', { min: 25, adopted: true }),
 ];
 
 const APROVACOES = [
@@ -190,6 +193,9 @@ async function estatico(res: ServerResponse, caminho: string): Promise<void> {
 async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const p = url.pathname;
+
+  // Aba Operação (item 6.12): rotas com resposta própria, inclusive as escritas.
+  if (await rotearOperacao(req, res, p)) return;
 
   if (req.method === 'POST') {
     // Nenhuma ação é exercida pelo teste; responder algo plausível evita
