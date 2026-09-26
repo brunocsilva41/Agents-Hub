@@ -37,6 +37,16 @@ import {
 import type { WorktreeReaper } from './reaper.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
+import { resumoDaFerramenta, type AuditTrail } from './audit.js';
+import {
+  authenticateOperator,
+  markOperator,
+  operatorCookieHeader,
+  operatorOf,
+  shouldIssueOperatorCookie,
+} from './operator-auth.js';
+import { registerOperatorRoutes } from './operator-routes.js';
+import type { PolicyService } from './policy-service.js';
 import { startSseChannel } from './sse.js';
 import type { DiscoveryService, ImportService } from './absorption.js';
 
@@ -90,6 +100,21 @@ interface Route {
   pattern: RegExp;
   keys: string[];
   handler: Handler;
+  /** Exige o token de operador (item 1.6) — ver `operator-auth.ts`. */
+  operator: boolean;
+}
+
+/** O que o servidor precisa para as rotas de operador (itens 1.6 e 1.10). */
+export interface OperatorDeps {
+  /** Token de `<home>/operator-token`. */
+  token: string;
+  audit: AuditTrail;
+  policy: PolicyService;
+}
+
+/** Quem fez, para `by`/auditoria. Só existe em rota `operator: true`. */
+function quem(req: IncomingMessage): string {
+  return operatorOf(req)?.by ?? 'desconhecido';
 }
 
 /**
@@ -114,6 +139,7 @@ export class HubServer {
     private readonly reaper: WorktreeReaper,
     private readonly discovery: DiscoveryService,
     private readonly importer: ImportService,
+    private readonly operator: OperatorDeps,
   ) {
     this.#registerRoutes();
   }
@@ -141,7 +167,7 @@ export class HubServer {
     this.#server = null;
   }
 
-  #route(method: string, path: string, handler: Handler): void {
+  #route(method: string, path: string, handler: Handler, opts: { operator?: boolean } = {}): void {
     const keys: string[] = [];
     const pattern = new RegExp(
       `^${path.replace(/:(\w+)/g, (_m, key: string) => {
@@ -149,7 +175,7 @@ export class HubServer {
         return '([^/]+)';
       })}$`,
     );
-    this.#routes.push({ method, pattern, keys, handler });
+    this.#routes.push({ method, pattern, keys, handler, operator: opts.operator === true });
   }
 
   async #dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -175,6 +201,26 @@ export class HubServer {
       const match = route.pattern.exec(url.pathname);
       if (!match) continue;
 
+      // Rotas que mudam política/segurança exigem o token de operador (item
+      // 1.6). Checado ANTES de ler corpo ou parâmetro: sem token, nada da
+      // requisição chega ao domínio.
+      if (route.operator) {
+        const identidade = authenticateOperator(req, this.operator.token);
+        if (!identidade) {
+          res.setHeader('WWW-Authenticate', 'Bearer realm="agents-hub"');
+          sendJson(res, 401, {
+            error: {
+              code: 'UNAUTHORIZED',
+              message:
+                'esta rota exige o token de operador (Authorization: Bearer ou X-Hub-Token, ' +
+                'lido de <AGENTS_HUB_HOME>/operator-token; no painel, recarregue a página)',
+            },
+          });
+          return;
+        }
+        markOperator(req, identidade);
+      }
+
       try {
         // Dentro do `try`: `decodeURIComponent('%E0')` lança URIError, e fora
         // daqui isso virava rejeição não tratada — o processo do daemon caía
@@ -191,8 +237,15 @@ export class HubServer {
       return;
     }
 
-    // Nenhuma rota de API bateu: pode ser a Web UI.
-    if (req.method === 'GET' && serveStatic(this.config.webRoot, url.pathname, res)) return;
+    // Nenhuma rota de API bateu: pode ser a Web UI. Carregar o documento no
+    // navegador entrega o token de operador por cookie HttpOnly (item 1.6).
+    if (req.method === 'GET') {
+      if (shouldIssueOperatorCookie(req)) {
+        res.setHeader('Set-Cookie', operatorCookieHeader(this.operator.token));
+      }
+      if (serveStatic(this.config.webRoot, url.pathname, res)) return;
+      if (!res.headersSent) res.removeHeader('Set-Cookie');
+    }
 
     sendJson(res, 404, { error: { code: 'NOT_FOUND', message: `Rota ${url.pathname} não existe` } });
   }
@@ -375,15 +428,24 @@ export class HubServer {
     // Confiança no projeto: libera `validation.command`/revisão do
     // `.agents-hub/config.yaml` do repositório (que viram processo). Mora no
     // banco do Hub, fora do repo — ver `ProjectRegistry.setTrusted`.
-    this.#route('POST', '/projects/:id/trust', async (req, res, params) => {
-      const body = await readBody(req, ProjectTrustSchema);
-      sendJson(res, 200, {
-        project: this.sessions.setProjectTrusted(
-          param(params['id'], ProjectIdSchema, 'id'),
-          body.trusted,
-        ),
-      });
-    });
+    this.#route(
+      'POST',
+      '/projects/:id/trust',
+      async (req, res, params) => {
+        const body = await readBody(req, ProjectTrustSchema);
+        const projectId = param(params['id'], ProjectIdSchema, 'id');
+        const project = this.sessions.setProjectTrusted(projectId, body.trusted);
+        this.operator.audit.record({
+          actor: quem(req),
+          kind: 'project.trust',
+          projectId,
+          action: `POST /projects/${projectId}/trust`,
+          decision: body.trusted ? 'trusted' : 'untrusted',
+        });
+        sendJson(res, 200, { project });
+      },
+      { operator: true },
+    );
 
     // Pastas do projeto. Um projeto agrupa N pastas; a sessão roda em UMA
     // delas, e é isso que mantém o confinamento de acesso significando algo.
@@ -393,24 +455,48 @@ export class HubServer {
       });
     });
 
-    this.#route('POST', '/projects/:id/folders', async (req, res, params) => {
-      const body = await readBody(req, AddFolderSchema);
-      sendJson(res, 201, {
-        folder: this.sessions.addProjectFolder(
-          param(params['id'], ProjectIdSchema, 'id'),
+    // Pastas mudam ONDE o agente pode agir (confinamento): token de operador.
+    this.#route(
+      'POST',
+      '/projects/:id/folders',
+      async (req, res, params) => {
+        const body = await readBody(req, AddFolderSchema);
+        const projectId = param(params['id'], ProjectIdSchema, 'id');
+        const folder = this.sessions.addProjectFolder(
+          projectId,
           validarDiretorioDeProjeto(body.path),
           body.label,
-        ),
-      });
-    });
+        );
+        this.operator.audit.record({
+          actor: quem(req),
+          kind: 'project.folders',
+          projectId,
+          action: `adicionou pasta ${folder.path}`,
+          decision: 'added',
+        });
+        sendJson(res, 201, { folder });
+      },
+      { operator: true },
+    );
 
-    this.#route('DELETE', '/projects/:id/folders/:folderId', (_req, res, params) => {
-      this.sessions.removeProjectFolder(
-        param(params['id'], ProjectIdSchema, 'id'),
-        param(params['folderId'], FolderIdSchema, 'folderId'),
-      );
-      sendJson(res, 200, { ok: true });
-    });
+    this.#route(
+      'DELETE',
+      '/projects/:id/folders/:folderId',
+      (req, res, params) => {
+        const projectId = param(params['id'], ProjectIdSchema, 'id');
+        const folderId = param(params['folderId'], FolderIdSchema, 'folderId');
+        this.sessions.removeProjectFolder(projectId, folderId);
+        this.operator.audit.record({
+          actor: quem(req),
+          kind: 'project.folders',
+          projectId,
+          action: `removeu pasta ${folderId}`,
+          decision: 'removed',
+        });
+        sendJson(res, 200, { ok: true });
+      },
+      { operator: true },
+    );
 
     // Memória e prompts do projeto. Vivem no daemon, e não no navegador,
     // porque precisam valer também para a sessão que um agente delega a outro.
@@ -420,33 +506,61 @@ export class HubServer {
       });
     });
 
-    this.#route('PUT', '/projects/:id/context', async (req, res, params) => {
-      const body = await readBody(req, ProjectContextSchema);
-      sendJson(res, 200, {
-        context: this.sessions.setProjectContext(
-          param(params['id'], ProjectIdSchema, 'id'),
-          body,
-        ),
-      });
-    });
+    // Contexto inclui `env` do agente (provedor/BASE_URL): token de operador.
+    this.#route(
+      'PUT',
+      '/projects/:id/context',
+      async (req, res, params) => {
+        const body = await readBody(req, ProjectContextSchema);
+        const projectId = param(params['id'], ProjectIdSchema, 'id');
+        const context = this.sessions.setProjectContext(projectId, body);
+        this.operator.audit.record({
+          actor: quem(req),
+          kind: 'project.context',
+          projectId,
+          action: `PUT /projects/${projectId}/context`,
+          decision: 'updated',
+          detail: { envAgents: Object.keys(body.env ?? {}) },
+        });
+        sendJson(res, 200, { context });
+      },
+      { operator: true },
+    );
 
     // Absorção: traz para o projeto o que o agente já tem (instruções, defaults
     // de modelo, ferramentas MCP). `dryRun` é verdadeiro por padrão.
-    this.#route('POST', '/projects/:id/import', async (req, res, params) => {
-      const projectId = param(params['id'], ProjectIdSchema, 'id');
-      const body = await readBody(req, ImportSchema);
-      const project = this.sessions.getProject(projectId);
-      const result = await this.importer.run(
-        {
-          path: project.path,
-          getContext: () => this.sessions.getProjectContext(projectId),
-          setContext: (ctx) => void this.sessions.setProjectContext(projectId, ctx),
-        },
+    // Import lê config dos CLIs e, com `dryRun: false`, grava no projeto:
+    // token de operador inclusive na prévia (ela expõe o que os CLIs têm).
+    this.#route(
+      'POST',
+      '/projects/:id/import',
+      async (req, res, params) => {
+        const projectId = param(params['id'], ProjectIdSchema, 'id');
+        const body = await readBody(req, ImportSchema);
+        const project = this.sessions.getProject(projectId);
         // `?? true`: ausência de dryRun NUNCA pode significar "escreva".
-        { ...body, dryRun: body.dryRun ?? true },
-      );
-      sendJson(res, 200, result);
-    });
+        const dryRun = body.dryRun ?? true;
+        const result = await this.importer.run(
+          {
+            path: project.path,
+            getContext: () => this.sessions.getProjectContext(projectId),
+            setContext: (ctx) => void this.sessions.setProjectContext(projectId, ctx),
+          },
+          { ...body, dryRun },
+        );
+        if (!dryRun) {
+          this.operator.audit.record({
+            actor: quem(req),
+            kind: 'project.import',
+            projectId,
+            action: `importou de ${body.agentId}: ${body.kinds.join(', ')}`,
+            decision: 'applied',
+          });
+        }
+        sendJson(res, 200, result);
+      },
+      { operator: true },
+    );
 
     // ------------------------------------------------------------- sessões
     this.#route('GET', '/sessions', (req, res) => {
@@ -655,16 +769,25 @@ export class HubServer {
       });
     });
 
-    this.#route('POST', '/approvals/:id', async (req, res, params) => {
-      const body = await readBody(req, ResolveApprovalSchema);
-      sendJson(res, 200, {
-        approval: await this.sessions.resolveApproval(
-          param(params['id'], ApprovalIdSchema, 'id'),
-          body.decision,
-          body.by ?? 'você',
-        ),
-      });
-    });
+    // Decidir aprovação é o ato de operador por excelência (item 1.6): exige
+    // o token, e `by` sai da origem autenticada (`cli:<usuário>`, `web`). O
+    // `by` do corpo continua aceito pelo schema (clientes antigos), mas é
+    // IGNORADO — texto livre tornava a auditoria falsificável.
+    this.#route(
+      'POST',
+      '/approvals/:id',
+      async (req, res, params) => {
+        const body = await readBody(req, ResolveApprovalSchema);
+        sendJson(res, 200, {
+          approval: await this.sessions.resolveApproval(
+            param(params['id'], ApprovalIdSchema, 'id'),
+            body.decision,
+            quem(req),
+          ),
+        });
+      },
+      { operator: true },
+    );
 
     // ------------------------------------------------- gate pré-execução
     /**
@@ -681,6 +804,22 @@ export class HubServer {
       // Promise serializada como `{}` e o hook leria "sem permissão declarada"
       // — o gate falharia ABERTO, exatamente no caso que ele existe para pegar.
       const verdict = await this.sessions.gateToolCall(body);
+      // Trilha de auditoria (item 1.10): toda decisão do gate sobre uma sessão
+      // do Hub. Chamada fora de sessão do Hub não tem política aplicada.
+      if (verdict.session) {
+        this.operator.audit.record({
+          actor: 'gate',
+          kind: 'gate.decision',
+          sessionId: verdict.session.id,
+          projectId: verdict.session.projectId,
+          approvalId: verdict.approvalId ?? null,
+          action: resumoDaFerramenta(body.toolName, body.toolInput ?? {}),
+          decision: verdict.decision,
+          risk: verdict.risk,
+          reason: verdict.reason,
+          detail: { tool: body.toolName, agentId: verdict.session.agentId },
+        });
+      }
 
       sendJson(res, 200, {
         permission: toHookPermission(verdict.decision),
@@ -701,14 +840,39 @@ export class HubServer {
      * pedir, precisa poder morrer sem você caçar o PID. Aceita só de localhost
      * — a mesma restrição de todas as outras rotas.
      */
-    this.#route('POST', '/shutdown', (_req, res) => {
-      sendJson(res, 200, { ok: true, message: 'encerrando' });
-      // Responde ANTES de derrubar: quem pediu precisa saber que foi aceito.
-      setTimeout(() => void this.onShutdown?.(), 100);
-    });
+    this.#route(
+      'POST',
+      '/shutdown',
+      (req, res) => {
+        this.operator.audit.record({ actor: quem(req), kind: 'daemon.shutdown', action: 'POST /shutdown' });
+        sendJson(res, 200, { ok: true, message: 'encerrando' });
+        // Responde ANTES de derrubar: quem pediu precisa saber que foi aceito.
+        setTimeout(() => void this.onShutdown?.(), 100);
+      },
+      { operator: true },
+    );
 
-    this.#route('POST', '/maintenance/sweep', async (_req, res) => {
-      sendJson(res, 200, { sweep: await this.reaper.sweep() });
+    // Apaga worktrees (checkout do trabalho do agente): token de operador.
+    this.#route(
+      'POST',
+      '/maintenance/sweep',
+      async (req, res) => {
+        const sweep = await this.reaper.sweep();
+        this.operator.audit.record({
+          actor: quem(req),
+          kind: 'maintenance.sweep',
+          action: 'POST /maintenance/sweep',
+          detail: { removed: sweep.removed },
+        });
+        sendJson(res, 200, { sweep });
+      },
+      { operator: true },
+    );
+
+    // Editor de política e auditoria (item 1.10) — ver `operator-routes.ts`.
+    registerOperatorRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
+      policy: this.operator.policy,
+      audit: this.operator.audit,
     });
 
     // ------------------------------------------------------------- grafo e custo

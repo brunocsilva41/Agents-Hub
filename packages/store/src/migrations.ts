@@ -177,4 +177,34 @@ CREATE INDEX idx_sessions_ended ON sessions(ended_at);
 ALTER TABLE projects ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 6,
+    name: 'trilha de auditoria',
+    sql: `
+-- Trilha de auditoria (item 1.10 do GOAL): decisões do gate, aprovações e
+-- mudanças de política/confiança — quem, quando, ação, decisão, motivo.
+--
+-- \`approvals\` guarda só o que pediu humano, e com \`resolved_by\` vindo do
+-- corpo da requisição (falsificável até o item 1.6). \`events\` é timeline, e
+-- nem toda decisão do gate vira evento. Tabela própria, só-acréscimo, sem FK:
+-- a auditoria precisa sobreviver a qualquer limpeza das outras tabelas.
+CREATE TABLE audit_log (
+  id          TEXT PRIMARY KEY,
+  ts          TEXT NOT NULL,
+  actor       TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  session_id  TEXT,
+  project_id  TEXT,
+  approval_id TEXT,
+  action      TEXT NOT NULL,
+  decision    TEXT,
+  risk        TEXT,
+  reason      TEXT,
+  detail_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX idx_audit_ts      ON audit_log(ts);
+CREATE INDEX idx_audit_session ON audit_log(session_id, ts);
+CREATE INDEX idx_audit_project ON audit_log(project_id, ts);
+`,
+  },
 ];

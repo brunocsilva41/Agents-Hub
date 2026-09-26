@@ -42,6 +42,8 @@ const SECRET_BASENAMES = new Set([
   'credentials',
   'credentials.json',
   '.credentials.json',
+  // Token de operador do próprio Hub (item 1.6): quem o lê aprova as próprias ações.
+  'operator-token',
 ]);
 
 /** Sufixos de `.env.<x>` que são modelo, não segredo. */

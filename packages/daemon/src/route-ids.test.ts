@@ -29,6 +29,9 @@ function cru(
   porta: number,
   method: string,
   caminho: string,
+  // Token de operador (item 1.6): rotas protegidas checam o token ANTES do
+  // id; sem ele, o 401 esconderia a validação de formato que este teste mede.
+  token?: string,
 ): Promise<{ status: number; body: { error?: { code?: string } } }> {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -37,7 +40,10 @@ function cru(
         port: porta,
         method,
         path: caminho,
-        headers: { Host: `127.0.0.1:${porta}` },
+        headers: {
+          Host: `127.0.0.1:${porta}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       },
       (res) => {
         let texto = '';
@@ -91,7 +97,7 @@ describe('daemon: id malformado em parâmetro de rota é 400, não 404', () => {
 
   for (const [method, caminho] of casos) {
     test(`${method} ${caminho} → 400 INVALID_ID`, async () => {
-      const { status, body } = await cru(porta, method, caminho);
+      const { status, body } = await cru(porta, method, caminho, hub.operatorToken);
       assert.equal(status, 400, JSON.stringify(body));
       assert.equal(body.error?.code, 'INVALID_ID');
     });
@@ -111,7 +117,12 @@ describe('daemon: id malformado em parâmetro de rota é 400, não 404', () => {
   });
 
   test('pasta no formato histórico da migração (pfd_prj_...) passa a validação', async () => {
-    const { body } = await cru(porta, 'DELETE', '/projects/prj_abc/folders/pfd_prj_abc');
+    const { body } = await cru(
+      porta,
+      'DELETE',
+      '/projects/prj_abc/folders/pfd_prj_abc',
+      hub.operatorToken,
+    );
     assert.notEqual(body.error?.code, 'INVALID_ID');
   });
 });

@@ -14,7 +14,7 @@
  * Pré-requisito: `npm run build` (usa packages/daemon/dist e packages/web/dist).
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -94,10 +94,14 @@ function manifesto(id, script, sleepMs) {
   ].join('\n');
 }
 
-async function http(base, method, rota, corpo) {
+async function http(base, method, rota, corpo, token) {
   const res = await fetch(base + rota, {
     method,
-    headers: corpo === undefined ? {} : { 'content-type': 'application/json' },
+    headers: {
+      ...(corpo === undefined ? {} : { 'content-type': 'application/json' }),
+      // Rotas de operador (ex.: /shutdown) exigem o token do item 1.6.
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
     body: corpo === undefined ? undefined : JSON.stringify(corpo),
   });
   const texto = await res.text();
@@ -295,7 +299,15 @@ async function limpar(ctx) {
   const d = ctx.daemon;
   if (d && d.exitCode === null) {
     try {
-      if (ctx.base) await http(ctx.base, 'POST', '/shutdown', {}).catch(() => {});
+      if (ctx.base) {
+        let token;
+        try {
+          token = readFileSync(path.join(ctx.tmp, 'home', 'operator-token'), 'utf8').trim();
+        } catch {
+          /* sem token: o kill abaixo resolve */
+        }
+        await http(ctx.base, 'POST', '/shutdown', {}, token).catch(() => {});
+      }
     } catch {
       /* cai para o kill abaixo */
     }

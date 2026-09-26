@@ -27,7 +27,26 @@ export class InMemoryEventBus implements EventBus {
     this.#rootOf.delete(sessionId);
   }
 
+  /**
+   * Observadores internos do daemon (hoje: a trilha de auditoria). Separados
+   * de `#subs` de propósito: não contam em `subscriberCount`, que é o teto de
+   * conexões SSE e o número que `/health` mostra.
+   */
+  readonly #taps = new Set<(event: EventEnvelope) => void>();
+
+  tap(handler: (event: EventEnvelope) => void): () => void {
+    this.#taps.add(handler);
+    return () => this.#taps.delete(handler);
+  }
+
   publish(event: EventEnvelope): void {
+    for (const tap of this.#taps) {
+      try {
+        tap(event);
+      } catch {
+        // Auditoria quebrada não pode travar o agente que produziu o evento.
+      }
+    }
     const rootId = this.#rootOf.get(event.sessionId);
     for (const sub of this.#subs) {
       if (sub.sessionId && sub.sessionId !== event.sessionId) continue;

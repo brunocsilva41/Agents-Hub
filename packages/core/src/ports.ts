@@ -12,6 +12,7 @@ import type {
 } from './domain.js';
 import type { EventEnvelope, EventType } from './events.js';
 import type { GraphNode } from './graph.js';
+import type { AuditEntry, AuditFilter } from './audit.js';
 
 /**
  * Portas do domínio. O core define as interfaces; `store` e `daemon` fornecem
@@ -93,6 +94,13 @@ export interface BudgetRepository {
   ensure(rootId: string, limits: BudgetLimits): BudgetRecord;
 }
 
+/** Trilha de auditoria: só acrescenta, nunca edita nem apaga (item 1.10). */
+export interface AuditRepository {
+  append(entry: AuditEntry): AuditEntry;
+  /** Mais recentes primeiro. */
+  list(filter?: AuditFilter): AuditEntry[];
+}
+
 export interface UnitOfWork {
   projects: ProjectRepository;
   sessions: SessionRepository;
@@ -101,6 +109,7 @@ export interface UnitOfWork {
   approvals: ApprovalRepository;
   artifacts: ArtifactRepository;
   budgets: BudgetRepository;
+  audit: AuditRepository;
   transaction<T>(fn: () => T): T;
   close(): void;
 }

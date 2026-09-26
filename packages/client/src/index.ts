@@ -19,9 +19,32 @@ import type {
   TaskSummary,
 } from './types.js';
 import { idSegment } from './ids.js';
+import type {
+  AuditEntrySummary,
+  AuditQuery,
+  PolicyDoc,
+  PolicySummary,
+  ProjectPolicySummary,
+} from './policy-types.js';
 
 export * from './types.js';
 export * from './ids.js';
+export * from './policy-types.js';
+
+/**
+ * Como o cliente se autentica nas rotas de operador (item 1.6).
+ *
+ * - CLI/scripts Node: `token` lido de `<AGENTS_HUB_HOME>/operator-token` (use
+ *   `readOperatorToken` de `@agents-hub/client/operator-token`). Pode ser uma
+ *   função: o daemon pode nascer DEPOIS de o cliente ser criado (autostart).
+ * - Navegador servido pelo daemon: sem `token` — o cookie HttpOnly vai sozinho
+ *   em toda requisição de mesma origem.
+ * - MCP server e hook do agente: sem token, de propósito. Nada que roda como
+ *   filho de agente pode aprovar, afrouxar política ou derrubar o daemon.
+ */
+export interface HubClientOptions {
+  token?: string | null | (() => string | null | undefined);
+}
 
 export interface BriefInput {
   agent: string;
@@ -71,9 +94,17 @@ export interface TaskStatus {
  */
 export class HubClient {
   readonly base: string;
+  readonly #token: HubClientOptions['token'];
 
-  constructor(base: string) {
+  constructor(base: string, options: HubClientOptions = {}) {
     this.base = base.replace(/\/$/, '');
+    this.#token = options.token;
+  }
+
+  /** Cabeçalho de autenticação, quando há token. */
+  #auth(): Record<string, string> {
+    const t = typeof this.#token === 'function' ? this.#token() : this.#token;
+    return t ? { Authorization: `Bearer ${t}` } : {};
   }
 
   // ------------------------------------------------------------------ estado
@@ -219,12 +250,61 @@ export class HubClient {
     return this.#get(`/approvals/${idSegment(id, 'apv')}`);
   }
 
+  /**
+   * Exige token de operador. Quem decidiu (`by`) é derivado pelo daemon da
+   * origem autenticada (`cli:<usuário>` ou `web`) — não há como declarar.
+   */
   async resolveApproval(
     id: string,
     decision: 'approved' | 'denied',
-    by?: string,
   ): Promise<{ approval: ApprovalSummary }> {
-    return this.#post(`/approvals/${idSegment(id, 'apv')}`, { decision, by });
+    return this.#post(`/approvals/${idSegment(id, 'apv')}`, { decision });
+  }
+
+  // ------------------------------------------------ política e auditoria
+  /**
+   * Camadas de política e o resultado efetivo. Com `projectId`, inclui a
+   * camada do projeto, o que o clamp anulou e os campos de execução ignorados.
+   */
+  async policy(projectId?: string): Promise<{ policy: PolicySummary }> {
+    return this.#get(
+      `/policy${projectId === undefined ? '' : `?projectId=${idSegment(projectId, 'prj')}`}`,
+    );
+  }
+
+  /**
+   * Substitui a camada GLOBAL (`config.json`). Exige token. `loosened` lista
+   * os campos em que a nova política é mais permissiva que a anterior.
+   */
+  setGlobalPolicy(layer: PolicyDoc): Promise<{
+    policy: PolicySummary;
+    loosened: string[];
+    backup: string | null;
+  }> {
+    return this.#send('PUT', '/policy', { policy: layer });
+  }
+
+  /**
+   * Substitui a camada do PROJETO (`.agents-hub/config.yaml`). Exige token.
+   * O projeto só aperta: `clamped` lista o que não vale por afrouxar a global.
+   */
+  async setProjectPolicy(
+    projectId: string,
+    layer: PolicyDoc,
+  ): Promise<{ project: ProjectPolicySummary; clamped: string[]; ignoredExecFields: string[] }> {
+    return this.#send('PUT', `/projects/${idSegment(projectId, 'prj')}/policy`, { policy: layer });
+  }
+
+  /** Trilha de auditoria, mais recente primeiro. */
+  async audit(query: AuditQuery = {}): Promise<{ entries: AuditEntrySummary[] }> {
+    const { sessionId, projectId, ...resto } = query;
+    return this.#get(
+      `/audit${queryOf({
+        ...resto,
+        sessionId: sessionId === undefined ? undefined : idSegment(sessionId, 'ses'),
+        projectId: projectId === undefined ? undefined : idSegment(projectId, 'prj'),
+      })}`,
+    );
   }
 
   // ------------------------------------------------- gate pré-execução
@@ -362,14 +442,14 @@ export class HubClient {
   }
 
   async #get<T>(path: string): Promise<T> {
-    return this.#handle(await fetch(`${this.base}${path}`));
+    return this.#handle(await fetch(`${this.base}${path}`, { headers: this.#auth() }));
   }
 
   async #post<T>(path: string, body: unknown): Promise<T> {
     return this.#handle(
       await fetch(`${this.base}${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.#auth() },
         body: JSON.stringify(body),
       }),
     );
@@ -380,7 +460,7 @@ export class HubClient {
     return this.#handle(
       await fetch(`${this.base}${path}`, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.#auth() },
         // Corpo ausente é diferente de corpo vazio: a guarda de borda só exige
         // `application/json` quando HÁ corpo.
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

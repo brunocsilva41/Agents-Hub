@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { defineConfig, type ProxyOptions } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -14,6 +17,8 @@ const API_ROUTES = [
   '/budget',
   '/events',
   '/context',
+  '/policy',
+  '/audit',
 ];
 
 // Ficam FORA de propósito, mesmo existindo no daemon: `/shutdown`,
@@ -23,6 +28,30 @@ const API_ROUTES = [
 // fica de fora: é a superfície de automação externa, não a da interface.
 
 const target = process.env['AGENTS_HUB_URL'] ?? 'http://127.0.0.1:4747';
+
+/**
+ * Token de operador (item 1.6) para o painel em `vite dev`.
+ *
+ * Servida pelo daemon, a UI recebe o token por cookie HttpOnly ao carregar
+ * `/`. Em desenvolvimento o documento vem do Vite (outra porta, outro host de
+ * cookie), então esse cookie não existe — quem autentica é o PROXY: ele lê o
+ * mesmo arquivo que a CLI (`<AGENTS_HUB_HOME>/operator-token`) a cada
+ * requisição (o daemon pode ter nascido depois do Vite) e injeta o header,
+ * declarando-se `web` para a auditoria. O script da página nunca vê o token.
+ *
+ * Consequência: enquanto `vite dev` estiver no ar, qualquer página que
+ * consiga falar com o servidor do Vite age como operador — mesma confiança
+ * que o proxy já tinha. É ferramenta de desenvolvimento; não deixe no ar à toa.
+ */
+function lerTokenDeOperador(): string | null {
+  const home = process.env['AGENTS_HUB_HOME'] ?? path.join(os.homedir(), '.agents-hub');
+  try {
+    const t = readFileSync(path.join(home, 'operator-token'), 'utf8').trim();
+    return /^[0-9a-f]{64}$/.test(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
 
 export default defineConfig({
   plugins: [react()],
@@ -59,6 +88,11 @@ export default defineConfig({
           configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq) => {
               proxyReq.setHeader('origin', target);
+              const token = lerTokenDeOperador();
+              if (token) {
+                proxyReq.setHeader('authorization', `Bearer ${token}`);
+                proxyReq.setHeader('x-hub-client', 'web');
+              }
             });
           },
         },
