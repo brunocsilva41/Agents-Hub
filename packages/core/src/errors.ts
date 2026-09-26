@@ -19,6 +19,10 @@ export type HubErrorCode =
   | 'INVALID_QUERY'
   /** Id em parâmetro de rota fora do formato `<prefixo>_<alfanumérico>`. */
   | 'INVALID_ID'
+  | 'INVALID_JSON'
+  | 'INVALID_PATH'
+  | 'MALFORMED_URL'
+  | 'PAYLOAD_TOO_LARGE'
   | 'POLICY_DENIED'
   | 'APPROVAL_REQUIRED'
   | 'BUDGET_EXCEEDED'

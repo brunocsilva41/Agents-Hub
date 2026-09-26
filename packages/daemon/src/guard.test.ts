@@ -139,6 +139,40 @@ describe('guarda de borda — o que precisa ser barrado', () => {
     assert.equal(v.ok, false);
   });
 
+  // Iframe `sandbox`/`data:` manda `Origin: null`; com `Content-Length: 0` o
+  // POST dispensava content-type e derrubava o daemon via `/shutdown`.
+  test('Origin: null é recusado mesmo em POST sem corpo', () => {
+    const v = guardRequest(
+      req('POST', { host: '127.0.0.1:4747', origin: 'null', 'content-length': '0' }),
+      ESPERADO,
+    );
+    assert.equal(v.ok, false);
+    assert.equal(v.status, 403);
+  });
+
+  test('Origin sem porta é a porta padrão do esquema, não "qualquer uma"', () => {
+    const v = guardRequest(
+      req('POST', { host: '127.0.0.1:4747', origin: 'http://localhost', 'content-length': '0' }),
+      ESPERADO,
+    );
+    assert.equal(v.ok, false);
+  });
+
+  test('Sec-Fetch-Site de outro site barra método que muda estado, com ou sem corpo', () => {
+    for (const site of ['cross-site', 'same-site']) {
+      const v = guardRequest(
+        req('DELETE', { host: '127.0.0.1:4747', 'sec-fetch-site': site }),
+        ESPERADO,
+      );
+      assert.equal(v.ok, false, site);
+    }
+    // Leitura não muda estado: segue passando.
+    assert.equal(
+      guardRequest(req('GET', { host: '127.0.0.1:4747', 'sec-fetch-site': 'cross-site' }), ESPERADO).ok,
+      true,
+    );
+  });
+
   test('cabeçalho duplicado não driba a checagem', () => {
     const v = guardRequest(
       {

@@ -100,7 +100,7 @@ describe('daemon: id malformado em parâmetro de rota é 400, não 404', () => {
   test('segmento mal codificado (%E0) é 400 e o daemon continua de pé', async () => {
     const { status, body } = await cru(porta, 'GET', '/sessions/%E0');
     assert.equal(status, 400, JSON.stringify(body));
-    assert.equal(body.error?.code, 'INVALID_ID');
+    assert.equal(body.error?.code, 'MALFORMED_URL');
     const saude = await cru(porta, 'GET', '/health');
     assert.equal(saude.status, 200);
   });
