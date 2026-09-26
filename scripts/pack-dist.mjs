@@ -10,7 +10,7 @@
  * `node_modules`. Um tarball precisa carregar tudo junto. O layout gerado é:
  *
  *   agents-hub/
- *     package.json            bin: hub, agents-hub-mcp; license: UNLICENSED
+ *     package.json            bin: hub, agents-hub-mcp; license: MIT
  *     bin/hub.js              -> node_modules/@agents-hub/cli/dist/bin.js
  *     bin/agents-hub-mcp.js   -> node_modules/@agents-hub/mcp/dist/main.js
  *     manifests/              os manifestos dos agentes
@@ -157,6 +157,7 @@ ${inst.stderr}`);
   cpSync(path.join(RAIZ_DO_REPO, 'manifests'), path.join(staging, 'manifests'), { recursive: true });
   cpSync(path.join(RAIZ_DO_REPO, 'packages', 'web', 'dist'), path.join(staging, 'web'), { recursive: true });
   cpSync(path.join(RAIZ_DO_REPO, 'README.md'), path.join(staging, 'README.md'));
+  cpSync(path.join(RAIZ_DO_REPO, 'LICENSE'), path.join(staging, 'LICENSE'));
 
   mkdirSync(path.join(staging, 'bin'), { recursive: true });
   writeFileSync(
@@ -172,14 +173,14 @@ ${inst.stderr}`);
     name: 'agents-hub',
     version: versao,
     description: raiz.description,
-    // TODO(licença): decisão do dono do projeto. Até lá, sem licença de uso
-    // concedida — e `private` impede um `npm publish` acidental.
-    license: 'UNLICENSED',
+    // MIT (LICENSE na raiz). `private` continua: publicar no registry é
+    // decisão explícita do dono do projeto, não efeito colateral de `npm publish`.
+    license: 'MIT',
     private: true,
     type: 'module',
     engines: raiz.engines,
     bin: { hub: 'bin/hub.js', 'agents-hub-mcp': 'bin/agents-hub-mcp.js' },
-    files: ['bin', 'manifests', 'web', 'README.md'],
+    files: ['bin', 'manifests', 'web', 'README.md', 'LICENSE'],
     dependencies: { ...internas, ...externas },
     bundleDependencies: [...Object.keys(internas), ...Object.keys(externas)],
   };

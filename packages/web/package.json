@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Painel do Agents-Hub: grafo ao vivo, timeline unificada, custo e controles.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

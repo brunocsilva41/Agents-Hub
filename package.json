@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Plano de controle onde qualquer agente de IA pode orquestrar e ser orquestrado.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=22.5.0"
   },

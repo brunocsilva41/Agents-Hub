@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "CLI do Agents-Hub.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "exports": {
     ".": "./dist/index.js",
     "./bin": "./dist/bin.js"

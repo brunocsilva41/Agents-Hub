@@ -260,4 +260,4 @@ Como contribuir, e o que precisa ser verdade para um item do roadmap receber `[x
 
 ## Licença
 
-**TODO: a licença ainda não foi escolhida** (decisão do dono do projeto). Até lá, todos os `package.json` declaram `"license": "UNLICENSED"` e nenhuma licença de uso é concedida a terceiros.
+[MIT](LICENSE).

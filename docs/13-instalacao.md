@@ -29,7 +29,7 @@ precisa de registry.
 
 ```
 agents-hub/
-  package.json           bin: hub, agents-hub-mcp · license: UNLICENSED · private
+  package.json           bin: hub, agents-hub-mcp · license: MIT · private
   bin/hub.js             -> node_modules/@agents-hub/cli/dist/bin.js
   bin/agents-hub-mcp.js  -> node_modules/@agents-hub/mcp/dist/main.js
   manifests/             manifestos dos agentes
@@ -43,8 +43,8 @@ internos no bundle, o `npm pack` marca as dependências deles como "do bundle"
 sem incluí-las, e o `npm i -g` cria pastas vazias no lugar (visto no primeiro
 teste: `ERR_MODULE_NOT_FOUND` de `zod` no `hub help`).
 
-`private: true` fica no pacote gerado de propósito: sem licença decidida, um
-`npm publish` acidental publicaria código sem licença de uso. `npm pack` e
+`private: true` fica no pacote gerado de propósito: publicar no registry é
+decisão explícita do dono do projeto, não efeito colateral de um `npm publish`. `npm pack` e
 `npm i -g <tgz>` funcionam normalmente com `private`.
 
 ### Onde o Hub se acha depois de instalado

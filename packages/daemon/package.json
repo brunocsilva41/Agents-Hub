@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Daemon do Agents-Hub: orquestrador, gerenciador de sessões e API HTTP+SSE.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "exports": {
     ".": "./dist/index.js",
     "./config": "./dist/config.js",

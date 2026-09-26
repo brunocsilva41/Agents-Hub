@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Contrato de adapter, registry dirigido por manifesto e mappers de evento por agente.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "exports": {
     ".": "./dist/index.js",
     "./discovery-util": "./dist/discovery/util.js"

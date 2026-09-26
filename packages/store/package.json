@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Persistência do Agents-Hub: SQLite (node:sqlite) + repositórios.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "exports": {
     ".": "./dist/index.js"
   },
