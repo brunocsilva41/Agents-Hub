@@ -126,6 +126,11 @@ function quem(req: IncomingMessage): string {
  * server e a API REST de automação externa (`/api/tasks/*`, ver `api-tasks.ts`)
  * são tradutores para cá, não caminhos paralelos.
  */
+/** Estados em que a task não muda mais — o stream dela pode fechar. */
+const TASK_TERMINAIS = new Set(['completed', 'failed', 'canceled', 'rejected']);
+/** Intervalo com que o stream de uma task confere se ela terminou. */
+const TASK_SSE_VIGIA_MS = 500;
+
 export class HubServer {
   readonly #routes: Route[] = [];
   #server: Server | null = null;
@@ -407,25 +412,54 @@ export class HubServer {
       });
       res.write(`: conectado ao stream de eventos da task ${taskId}\n\n`);
 
-      // Stream de UMA sessão só (a task não muda de sessão em execução): o
-      // mesmo `id:` + keep-alive + backpressure que `/events` já tinha,
-      // extraído para não divergir de novo entre as duas rotas.
+      // A task MUDA de sessão num fallback (o substituto é uma sessão nova,
+      // irmã no grafo). Assinar só a sessão do momento da conexão deixava o
+      // cliente vendo "passando a tarefa para beta" e depois silêncio para
+      // sempre: nada do substituto, nem o fim da task, e o stream nunca
+      // fechava. Por isso: assina a RAIZ e filtra pelas sessões por onde a
+      // task passou, e fecha quando ela chega a estado terminal. Sem `id:` —
+      // o `seq` é por sessão e se repetiria entre a original e o substituto.
       let unsubscribe: () => void = () => {};
+      let vigia: ReturnType<typeof setInterval> | undefined;
       const channel = startSseChannel(req, res, {
-        withId: true,
+        withId: false,
         queueCap: SSE_QUEUE_CAP,
-        onClose: () => unsubscribe(),
+        onClose: () => {
+          unsubscribe();
+          if (vigia) clearInterval(vigia);
+        },
       });
 
-      const past = this.sessions.listEvents(task.sessionId, undefined, SSE_REPLAY_LIMIT);
+      const sessoes = new Set(this.sessions.sessoesDaTask(taskId));
+      const past = sessoes.size <= 1
+        ? this.sessions.listEvents(task.sessionId, undefined, SSE_REPLAY_LIMIT)
+        : [...sessoes]
+            .flatMap((id) => this.sessions.listEvents(id, undefined, SSE_REPLAY_LIMIT))
+            .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+            .slice(-SSE_REPLAY_LIMIT);
       for (const event of past) channel.send(event);
       if (past.length === SSE_REPLAY_LIMIT) {
         channel.send(truncatedReplayNotice(task.sessionId, past.length), { withId: false });
       }
 
-      unsubscribe = this.bus.subscribe({ sessionId: task.sessionId }, (event: EventEnvelope) =>
-        channel.send(event),
-      );
+      const rootId = this.sessions.getSession(task.sessionId).rootId;
+      unsubscribe = this.bus.subscribe({ rootId }, (event: EventEnvelope) => {
+        const atual = this.sessions.getTask(taskId).sessionId;
+        sessoes.add(atual);
+        if (sessoes.has(event.sessionId)) channel.send(event);
+      });
+
+      const encerrarSeTerminal = (): void => {
+        if (channel.closed) return;
+        if (!TASK_TERMINAIS.has(this.sessions.getTask(taskId).state)) return;
+        channel.close();
+        if (!res.writableEnded) res.end();
+      };
+      encerrarSeTerminal();
+      if (!channel.closed) {
+        vigia = setInterval(encerrarSeTerminal, TASK_SSE_VIGIA_MS);
+        vigia.unref?.();
+      }
     });
 
     // ------------------------------------------------------------- projetos
@@ -605,6 +639,7 @@ export class HubServer {
         brief: body.brief,
         requesterSessionId: body.requesterSessionId ?? null,
         title: body.title,
+        ...(body.baseSessionIds ? { baseSessionIds: body.baseSessionIds } : {}),
       });
       sendJson(res, 201, result);
     });

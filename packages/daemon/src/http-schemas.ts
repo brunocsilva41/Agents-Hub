@@ -85,6 +85,9 @@ export const StartSessionSchema = z
     brief: z.record(z.unknown()),
     requesterSessionId: SessionIdSchema.nullable().optional(),
     title: z.string().max(500).optional(),
+    // Sessões de cujo trabalho (branch `hub/<id>`) o worktree desta parte —
+    // o passo seguinte de um workflow recebe o CÓDIGO do anterior.
+    baseSessionIds: z.array(SessionIdSchema).max(50).optional(),
   })
   .strict();
 

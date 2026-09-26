@@ -101,6 +101,8 @@ import { CicloDeVida, esperarAbortavel, type PedidoDeParada } from './session-li
 import type { WorktreeManager } from './worktree.js';
 import { ProjectRegistry, type RepoConfigStatus } from './project-registry.js';
 import { policyFor as resolvePolicyFor, projectPolicyFor } from './effective-policy.js';
+import { resolverBases } from './session-bases.js';
+import { branchExiste, commitarTrabalho, juntarBranches } from './worktree-commit.js';
 
 /** Quebra de linha literal para montar prompt sem brigar com escapes. */
 const NEWLINE_PROMPT = String.fromCharCode(10);
@@ -119,6 +121,12 @@ export interface StartSessionInput {
   /** Sessão que pediu. `null` = você, pela CLI/UI (sessão-raiz). */
   requesterSessionId?: string | null;
   title?: string;
+  /**
+   * Sessões de cujo trabalho o worktree desta deve partir (passo seguinte de
+   * um workflow). O worktree nasce do branch `hub/<id>` da primeira e junta as
+   * demais por merge; conflito recusa a sessão com erro explícito.
+   */
+  baseSessionIds?: string[];
 }
 
 export interface StartSessionResult {
@@ -171,7 +179,7 @@ export class SessionManager {
    * `#runs` em `#assertConcurrency`, a checagem-e-reserva vira uma única
    * operação síncrona, sem brecha para outra tentativa entrar no meio.
    */
-  readonly #reserved = new Map<string, string>();
+  readonly #reserved = new Map<string, { agentId: string; projectId: string | null }>();
   /** Sessões cujo `seq` já foi reconciliado com o banco nesta instância. */
   readonly #seeded = new Set<string>();
   /** Modelo declarado por sessão, para precificar os eventos que não o repetem. */
@@ -185,6 +193,13 @@ export class SessionManager {
    * então a próxima passagem pelos 80% é nova) e no fim do fluxo raiz.
    */
   readonly #warned = new Set<string>();
+
+  /**
+   * Desfecho da run que parou por estouro de orçamento, por task, guardado
+   * até a aprovação: se o turno já tinha concluído, aprovar finaliza a tarefa
+   * com ele (validação, `completed`) em vez de relançar o agente.
+   */
+  readonly #desfechoRetido = new Map<string, { outcome: RunOutcome; elapsedSeconds: number }>();
 
   /**
    * Pumps em andamento. Cada um escreve no banco até drenar, então o
@@ -358,7 +373,11 @@ export class SessionManager {
     // considerava fechado.
     if (parent) this.#exigirNaoTerminal(parent, 'delegar a partir dela');
 
-    const agentId = this.registry.resolveTarget(brief.agent, this.config.policy.fallback);
+    // Política do PROJETO (global com os ajustes dele, só apertando): antes
+    // `fallback`, `maxDepth`, `defaultBudget` e concorrência vinham da global
+    // e os overrides declarados no `.agents-hub/config.yaml` eram ignorados.
+    const politicaDoProjeto = this.#projectPolicy(project.id);
+    const agentId = this.registry.resolveTarget(brief.agent, politicaDoProjeto.fallback);
     const manifest = this.registry.get(agentId).manifest;
     const sessionId = newId('ses');
 
@@ -370,7 +389,7 @@ export class SessionManager {
     // chegar a `#launch` (negado, retido para aprovação, ou erro no meio do
     // caminho) precisa liberá-la explicitamente. O `finally` abaixo garante
     // isso sem precisar espalhar a liberação por cada `return`/`throw`.
-    this.#reserveSlot(sessionId, agentId);
+    this.#reserveSlot(sessionId, agentId, project.id);
 
     // O que já foi feito e precisa ser desfeito se algo lançar no meio do
     // caminho (agente não instalado, gate do Codex recusado, projeto não-git,
@@ -386,7 +405,7 @@ export class SessionManager {
         ? checkDelegation({
             parentPath: parent.path,
             parentDepth: parent.depth,
-            maxDepth: this.config.policy.maxDepth,
+            maxDepth: politicaDoProjeto.maxDepth,
             target: { agentId, objective: brief.objective },
           })
         : { depth: 0, path: [pathKey(agentId, brief.objective)], key: '' };
@@ -404,9 +423,9 @@ export class SessionManager {
     const ledger = parent
       ? this.#ledger(rootId)
       : this.#ledger(rootId, {
-          usd: brief.budget.usd ?? this.config.policy.defaultBudget.usd,
-          tokens: brief.budget.tokens ?? this.config.policy.defaultBudget.tokens,
-          seconds: brief.budget.seconds ?? this.config.policy.defaultBudget.seconds,
+          usd: brief.budget.usd ?? politicaDoProjeto.defaultBudget.usd,
+          tokens: brief.budget.tokens ?? politicaDoProjeto.defaultBudget.tokens,
+          seconds: brief.budget.seconds ?? politicaDoProjeto.defaultBudget.seconds,
         });
 
     if (parent) {
@@ -421,13 +440,29 @@ export class SessionManager {
 
     // --- isolamento ---------------------------------------------------------
     const isolation: IsolationMode = brief.isolation ?? manifest.defaults.isolation;
+    const bases = await resolverBases(this.store, project, isolation, input.baseSessionIds ?? []);
     const worktree = await this.worktrees.create({
       projectPath: project.path,
       projectName: project.name,
       sessionId,
       isolation,
+      ...(bases.refs[0] !== undefined ? { baseRef: bases.refs[0] } : {}),
     });
     if (worktree.isolated) feito.worktree = { projectPath: project.path, path: worktree.path };
+    if (worktree.isolated && bases.refs.length > 1) {
+      try {
+        await juntarBranches(worktree.path, bases.refs.slice(1));
+      } catch (err) {
+        await this.worktrees
+          .release({ projectPath: project.path, worktreePath: worktree.path, force: true })
+          .catch(() => undefined);
+        throw new HubError(
+          'ILLEGAL_STATE',
+          `Não foi possível juntar o trabalho das sessões anteriores: ${(err as Error).message}`,
+          { baseSessionIds: input.baseSessionIds },
+        );
+      }
+    }
 
     const session: Session = {
       id: sessionId,
@@ -473,6 +508,28 @@ export class SessionManager {
 
     this.#avisarConfigDoProjetoQuebrada(session, taskId, project);
     this.#avisarDependenciasNaoLigadas(session, taskId, worktree.dependencyWarnings);
+    for (const aviso of bases.avisos) this.#avisar(session, taskId, aviso);
+    if (bases.refs.length > 0 && worktree.isolated) {
+      this.#avisar(
+        session,
+        taskId,
+        `worktree criado a partir do trabalho de ${bases.refs.join(' + ')}`,
+        'info',
+      );
+    }
+    // `--mode autonomous` pedido numa raiz cujo manifesto é `semi` vira `semi`
+    // (o modo nunca passa do padrão do agente). Reduzir é o lado seguro, mas
+    // em silêncio o usuário achava que o agente rodaria sem pausas.
+    if (brief.supervision !== undefined && mode !== brief.supervision) {
+      this.#avisar(
+        session,
+        taskId,
+        `modo "${brief.supervision}" pedido, mas a sessão roda em "${mode}" — ` +
+          (parent
+            ? `o filho nunca tem mais autonomia que o pai (${parent.mode})`
+            : `o padrão do agente ${agentId} é "${manifest.defaults.supervision}" e o modo nunca passa dele`),
+      );
+    }
 
     // Fotografa o que já estava pendente ANTES de o agente começar.
     //
@@ -1047,6 +1104,9 @@ export class SessionManager {
       return resolved;
     }
 
+    const retido = approval.taskId ? this.#desfechoRetido.get(approval.taskId) : undefined;
+    if (approval.taskId) this.#desfechoRetido.delete(approval.taskId);
+
     if (decision === 'denied') {
       if (approval.taskId) this.store.tasks.update(approval.taskId, { state: 'rejected' });
       await this.cancel(session.id, `negado por ${by}: ${approval.action}`);
@@ -1105,6 +1165,35 @@ export class SessionManager {
           snapshot,
         },
       });
+
+      // O turno já tinha CONCLUÍDO quando o teto estourou: não há de onde
+      // "continuar". Relançar aqui era um turno extra que ninguém pediu (e
+      // que estourava de novo). A tarefa só passa pelo que faltava — portão
+      // de validação e conclusão —; um próximo turno, só se o usuário mandar.
+      if (approval.detail['turnCompleted'] === true && task) {
+        this.store.transaction(() => {
+          this.store.tasks.update(task.id, { state: 'working' });
+          this.store.sessions.update(session.id, { state: 'running' });
+        });
+        // Run ainda drenando: o próprio pump fecha a tarefa ao ver o fim do
+        // processo (já com o desfecho corrigido para sucesso).
+        if (this.#runs.has(session.id)) return resolved;
+
+        const desfecho = retido ?? {
+          outcome: {
+            exitCode: 0,
+            signal: null,
+            reason: 'exit' as const,
+            error: null,
+            nativeSessionId: viva.nativeSessionId,
+            tail: '',
+          },
+          elapsedSeconds: 0,
+        };
+        const atual = this.store.sessions.get(session.id) ?? viva;
+        await this.#settle(atual, this.store.tasks.get(task.id) ?? task, desfecho.outcome, desfecho.elapsedSeconds);
+        return resolved;
+      }
     }
 
     if (isDelegation && task) {
@@ -1707,6 +1796,21 @@ export class SessionManager {
     return task;
   }
 
+  /**
+   * Sessões por onde a task passou: a original e cada substituto de fallback
+   * (a task é reatribuída à sessão nova). A atual vem por último.
+   */
+  sessoesDaTask(taskId: string): string[] {
+    const task = this.getTask(taskId);
+    const vistas = new Set<string>();
+    for (const e of this.store.events.list({ taskId, limit: 5000 })) vistas.add(e.sessionId);
+    vistas.delete(task.sessionId);
+    // O pai registra a delegação na timeline DELE com o id da task do filho —
+    // isso não faz dele uma sessão por onde a task passou.
+    if (task.requesterSessionId) vistas.delete(task.requesterSessionId);
+    return [...vistas, task.sessionId];
+  }
+
   listTasks(sessionId: string): Task[] {
     return this.store.tasks.list({ sessionId });
   }
@@ -2099,6 +2203,20 @@ export class SessionManager {
     // O custo final do turno substitui as estimativas parciais em vez de
     // somar a elas (ver `TurnCostTracker`).
     const custos = new TurnCostTracker(baseDoAcumulado(this.store, session));
+    // Um estouro por run: depois dele o que ainda chega do stream (a linha de
+    // custo final depois da estimativa parcial, por exemplo) não pode abrir
+    // outra aprovação de orçamento para a mesma parada.
+    let estourou = false;
+    let turnoConcluidoNoEstouro = false;
+    // Orçamento em SEGUNDOS: só era somado em `settle`, depois que a run
+    // acabava — um teto de 3 s com um agente de 9 s terminava `completed` com
+    // "300% do orçamento". O relógio aqui é o teto de tempo de parede desta
+    // run, com o que o fluxo ainda tem de saldo em segundos.
+    const tetoDeTempo = this.#armarTetoDeTempo(session, task, handle, ledger, () => {
+      if (estourou) return false;
+      estourou = true;
+      return true;
+    });
 
     try {
       for await (const bruto of handle.events) {
@@ -2127,34 +2245,16 @@ export class SessionManager {
           this.#persistLedger(ledger);
           this.#checkBudgetWarning(session, task.id, snapshot);
 
-          if (snapshot.exhausted) {
-            this.#emit({
-              sessionId: session.id,
-              taskId: task.id,
-              agentId: session.agentId,
-              type: 'budget.exceeded',
-              payload: { snapshot },
-            });
-
-            // Estouro é decisão humana por definição (ADR 03) — mas antes isto
-            // só marcava a sessão como "aguardando" SEM criar aprovação: ela
-            // não aparecia em `hub approvals` e não havia como destravar.
-            // Beco sem saída silencioso, encontrado rodando de verdade.
-            this.#requestApproval({
-              session,
-              taskId: task.id,
-              risk: 'budget',
-              action: `orçamento do fluxo esgotado (US$ ${snapshot.consumed.usd.toFixed(4)} de ${snapshot.limits.usd.toFixed(2)})`,
-              detail: {
-                kind: 'budget',
-                consumed: snapshot.consumed,
-                limits: snapshot.limits,
-                // Aprovar libera outra rodada do mesmo tamanho: é previsível e
-                // evita que um "ok" vire orçamento ilimitado.
-                increment: snapshot.limits,
-              },
-            });
-
+          if (snapshot.exhausted && !estourou) {
+            estourou = true;
+            // Estouro na linha de custo FINAL do turno = o turno já acabou; o
+            // agente não está no meio de nada. Aprovar depois disso não pode
+            // relançá-lo (era um turno extra, não pedido, que estourava de
+            // novo): só finaliza a tarefa. O processo é encerrado do mesmo
+            // jeito — nada mais pode rodar por cima do teto —, e o `canceled`
+            // que isso produz não é falha do agente (ver depois do `done`).
+            turnoConcluidoNoEstouro = passo.kind === 'final';
+            this.#abrirEstouroDeOrcamento(session, task, snapshot, turnoConcluidoNoEstouro);
             await this.registry.get(session.agentId).cancel(handle);
           }
         }
@@ -2171,7 +2271,15 @@ export class SessionManager {
 
     this.#fecharCustoDoTurno(session, task, custos, ledger);
 
-    const outcome = await handle.done;
+    const desfechoBruto = await handle.done;
+    clearTimeout(tetoDeTempo);
+    // O Hub encerrou o processo DEPOIS de o turno concluir (estouro na linha
+    // de custo final): o desfecho real do trabalho é sucesso, não `canceled`
+    // — senão aprovar o estouro mandaria o turno concluído para retry.
+    const outcome: RunOutcome =
+      turnoConcluidoNoEstouro && desfechoBruto.reason === 'canceled'
+        ? { ...desfechoBruto, reason: 'exit', exitCode: 0, signal: null, error: null }
+        : desfechoBruto;
     const live = this.#runs.get(session.id);
     // Se a run ativa na sessão já foi substituída (ex: por handoff),
     // encerramos silenciosamente sem interferir na nova execução.
@@ -2209,6 +2317,9 @@ export class SessionManager {
     // estado com "falhou", senão a aprovação apontaria para uma sessão morta.
     if (current && current.state === 'input_required') {
       const pendente = this.store.approvals.listPending({ sessionId: session.id })[0];
+      // Quem aprovar um estouro com o turno já concluído finaliza a tarefa
+      // com ESTE desfecho (ver `resolveApproval`), sem relançar o agente.
+      this.#desfechoRetido.set(task.id, { outcome, elapsedSeconds });
       this.#emit({
         sessionId: session.id,
         taskId: task.id,
@@ -2440,6 +2551,11 @@ export class SessionManager {
           .filter((a) => a.taskId === task.id)
           .map((a) => a.id);
 
+        // ANTES de a task virar `completed`: quem espera por ela (o passo
+        // seguinte de um workflow) cria o próprio worktree a partir deste
+        // commit assim que a vê concluída.
+        await this.#commitarWorktree(session, task);
+
         this.store.tasks.update(task.id, {
           state: 'completed',
           attempts,
@@ -2471,13 +2587,17 @@ export class SessionManager {
     }
 
     // --- falha: retry → fallback → desistir ---------------------------------
+    // `retries` e `fallback` da política EFETIVA da sessão (global + projeto,
+    // só apertando): antes vinham da global e `retries: {max: 0}` no
+    // `.agents-hub/config.yaml` do projeto ainda rodava o agente 3 vezes.
+    const efetiva = this.policyFor(session).policy;
     const step = nextStep(
       { attempts, currentAgentId: session.agentId },
       effectiveClass,
       {
-        maxRetries: this.config.policy.retries.max,
-        backoffMs: this.config.policy.retries.backoffMs,
-        fallbackChain: this.#fallbackChain(session.agentId),
+        maxRetries: efetiva.retries.max,
+        backoffMs: efetiva.retries.backoffMs,
+        fallbackChain: this.#fallbackChain(session.agentId, efetiva.fallback),
       },
     );
 
@@ -2543,7 +2663,7 @@ export class SessionManager {
     // (ex: dois filhos do mesmo fluxo falhando ao mesmo tempo) liam o mesmo
     // `#runs` antes de qualquer uma registrar a sua.
     try {
-      this.#reserveSlot(session.id, agentId);
+      this.#reserveSlot(session.id, agentId, session.projectId);
     } catch (err) {
       this.store.tasks.update(task.id, { state: 'failed' });
       this.#emit({
@@ -2622,7 +2742,7 @@ export class SessionManager {
     // conta a vaga na mesma checagem síncrona — mesma correção de `start()`.
     const sessionId = newId('ses');
     try {
-      this.#reserveSlot(sessionId, agentId);
+      this.#reserveSlot(sessionId, agentId, session.projectId);
     } catch (err) {
       this.store.tasks.update(task.id, { state: 'failed' });
       this.#emit({
@@ -2636,11 +2756,20 @@ export class SessionManager {
     }
 
     try {
+      // O substituto parte de onde o original PARTIU — o branch `hub/<id>`
+      // dele, que carrega a base do workflow (o código dos passos anteriores)
+      // e nunca o trabalho da tentativa falha, que não é commitado. Do HEAD do
+      // projeto ele perderia o código herdado de um passo anterior.
+      const baseDoOriginal =
+        session.isolation === 'worktree' && (await branchExiste(project.path, `hub/${session.id}`))
+          ? `hub/${session.id}`
+          : undefined;
       const worktree = await this.worktrees.create({
         projectPath: project.path,
         projectName: project.name,
         sessionId,
         isolation: session.isolation,
+        ...(baseDoOriginal !== undefined ? { baseRef: baseDoOriginal } : {}),
       });
 
       const replacement: Session = {
@@ -2695,10 +2824,41 @@ export class SessionManager {
   }
 
   /** Cadeia de fallback do agente, já filtrando quem não está instalado. */
-  #fallbackChain(agentId: string): string[] {
+  #fallbackChain(agentId: string, fallback: PolicyDocument['fallback'] = this.config.policy.fallback): string[] {
     return this.registry
-      .fallbackFor(agentId, this.config.policy.fallback)
+      .fallbackFor(agentId, fallback)
       .filter((id) => this.registry.cachedProbe(id)?.installed !== false);
+  }
+
+  /**
+   * Commita o trabalho da sessão no branch `hub/<id>` do worktree dela.
+   *
+   * Falhar aqui não reprova a tarefa — o trabalho está no disco e o diff já
+   * foi capturado —, mas precisa aparecer: sem o commit, quem parte deste
+   * branch (o passo seguinte do workflow) não recebe o código.
+   */
+  async #commitarWorktree(session: Session, task: Task): Promise<void> {
+    if (session.isolation !== 'worktree') return;
+    const project = this.store.projects.get(session.projectId);
+    if (!project || path.resolve(session.workdir) === path.resolve(project.path)) return;
+    try {
+      const sha = await commitarTrabalho(
+        session.workdir,
+        `hub: trabalho de ${session.agentId} na sessão ${session.id}
+
+${task.brief.objective.slice(0, 500)}`,
+      );
+      if (sha) {
+        this.#avisar(session, task.id, `trabalho commitado em hub/${session.id} (${sha.slice(0, 10)})`, 'info');
+      }
+    } catch (err) {
+      this.#avisar(
+        session,
+        task.id,
+        `não foi possível commitar o trabalho em hub/${session.id}: ${(err as Error).message} — ` +
+          'quem partir deste branch não recebe o código',
+      );
+    }
   }
 
   /** Fecha a sessão, avisa o pai e libera o que precisa ser liberado. */
@@ -2758,7 +2918,9 @@ export class SessionManager {
 
   #watch(session: Session, task: Task, mapped: MappedEvent): 'ok' | 'flagged' | 'paused' {
     const engine = this.policyFor(session);
-    const watch = watchForMode(this.config.policy.watch, session.mode);
+    // `watch` da política EFETIVA (global + projeto + pai): o projeto que pede
+    // `pauseOn: [escalate]` precisa de fato parar em `escalate`.
+    const watch = watchForMode(engine.policy.watch, session.mode);
     const veredito = avaliarVigilancia(
       mapped,
       session.workdir,
@@ -3007,6 +3169,17 @@ export class SessionManager {
    * reprovou sem motivo aparente", que a Fase 2 já corrigiu uma vez por outro
    * caminho.
    */
+  /** Uma linha de aviso na timeline da sessão. */
+  #avisar(session: Session, taskId: string | null, text: string, level: 'warn' | 'info' = 'warn'): void {
+    this.#emit({
+      sessionId: session.id,
+      taskId,
+      agentId: session.agentId,
+      type: 'log',
+      payload: { level, text },
+    });
+  }
+
   #avisarDependenciasNaoLigadas(session: Session, taskId: string, avisos: string[]): void {
     if (avisos.length === 0) return;
 
@@ -3129,7 +3302,7 @@ export class SessionManager {
     try {
       revisor = this.registry.resolveTarget(
         politica.agent ?? 'cap:code-review',
-        this.config.policy.fallback,
+        this.policyFor(session).policy.fallback,
       );
     } catch {
       return {
@@ -3143,7 +3316,10 @@ export class SessionManager {
     // O revisor não pode ser quem escreveu: revisar o próprio trabalho é
     // exatamente o viés que a revisão existe para evitar.
     if (revisor === session.agentId) {
-      const alternativa = this.#fallbackChain(session.agentId)[0];
+      const alternativa = this.#fallbackChain(
+        session.agentId,
+        this.policyFor(session).policy.fallback,
+      )[0];
       if (!alternativa) {
         return {
           passed: true,
@@ -3349,7 +3525,7 @@ export class SessionManager {
    * reservas em voo (`#reserved`) — sem as duas, uma reserva não impediria
    * uma segunda checagem concorrente de passar antes de a run nascer.
    */
-  #assertConcurrency(agentId: string, sessionId: string): void {
+  #assertConcurrency(agentId: string, sessionId: string, projectId?: string): void {
     // Uma sessão ocupa UMA vaga, mesmo com run viva E reserva ao mesmo tempo:
     // é o `handoff`, que reserva a vaga do agente novo enquanto a run antiga da
     // MESMA sessão ainda está em `#runs`. Somar os dois mapas contava a sessão
@@ -3370,7 +3546,7 @@ export class SessionManager {
 
     let perAgent = 0;
     for (const id of outras) {
-      const agente = this.#reserved.get(id) ?? this.#runs.get(id)?.ctx.agentId;
+      const agente = this.#reserved.get(id)?.agentId ?? this.#runs.get(id)?.ctx.agentId;
       if (agente === agentId) perAgent += 1;
     }
     if (perAgent >= this.config.policy.maxConcurrencyPerAgent) {
@@ -3378,6 +3554,54 @@ export class SessionManager {
         'CONCURRENCY_EXCEEDED',
         `Limite de ${this.config.policy.maxConcurrencyPerAgent} sessões simultâneas para "${agentId}" atingido`,
         { agentId, active: perAgent },
+      );
+    }
+
+    if (projectId !== undefined) this.#assertConcurrencyDoProjeto(agentId, projectId, sessionId);
+  }
+
+  /**
+   * Teto de concorrência declarado pelo PROJETO (`maxConcurrency` e
+   * `maxConcurrencyPerAgent` no `.agents-hub/config.yaml`, já com o clamp que
+   * só deixa apertar). Conta só as sessões daquele projeto: é um limite do
+   * repositório ("aqui, no máximo N agentes ao mesmo tempo"), não do Hub —
+   * o global continua valendo por cima, na checagem acima.
+   */
+  #assertConcurrencyDoProjeto(agentId: string, projectId: string, sessionId: string): void {
+    const politica = this.#projectPolicy(projectId);
+    const global = this.config.policy;
+    if (
+      politica.maxConcurrency >= global.maxConcurrency &&
+      politica.maxConcurrencyPerAgent >= global.maxConcurrencyPerAgent
+    ) {
+      return;
+    }
+
+    const ocupadas: string[] = [];
+    // Mesma regra do teto global: a sessão que pede a vaga (handoff) não
+    // conta contra si mesma.
+    for (const [id, run] of this.#runs) {
+      if (id === sessionId) continue;
+      if (this.store.sessions.get(run.sessionId)?.projectId === projectId) ocupadas.push(run.ctx.agentId);
+    }
+    for (const [id, reserva] of this.#reserved) {
+      if (id === sessionId) continue;
+      if (reserva.projectId === projectId) ocupadas.push(reserva.agentId);
+    }
+
+    if (ocupadas.length >= politica.maxConcurrency) {
+      throw new HubError(
+        'CONCURRENCY_EXCEEDED',
+        `Limite de ${politica.maxConcurrency} sessões simultâneas deste projeto atingido (config do projeto)`,
+        { projectId, active: ocupadas.length, limit: politica.maxConcurrency },
+      );
+    }
+    const doAgente = ocupadas.filter((a) => a === agentId).length;
+    if (doAgente >= politica.maxConcurrencyPerAgent) {
+      throw new HubError(
+        'CONCURRENCY_EXCEEDED',
+        `Limite de ${politica.maxConcurrencyPerAgent} sessões simultâneas para "${agentId}" neste projeto atingido (config do projeto)`,
+        { projectId, agentId, active: doAgente },
       );
     }
   }
@@ -3389,9 +3613,9 @@ export class SessionManager {
    * sessão registrada em `#runs`, tipicamente com `try { ... } finally { this.#releaseSlot(sessionId); }`
    * envolvendo tudo até (e inclusive) o `await this.#launch(...)`.
    */
-  #reserveSlot(sessionId: string, agentId: string): void {
-    this.#assertConcurrency(agentId, sessionId);
-    this.#reserved.set(sessionId, agentId);
+  #reserveSlot(sessionId: string, agentId: string, projectId?: string): void {
+    this.#assertConcurrency(agentId, sessionId, projectId);
+    this.#reserved.set(sessionId, { agentId, projectId: projectId ?? null });
   }
 
   /** Libera uma reserva de concorrência. Idempotente: chave ausente é no-op. */
@@ -3431,6 +3655,113 @@ export class SessionManager {
       type: 'budget.warning',
       payload: { snapshot },
     });
+  }
+
+  /**
+   * Para o fluxo por orçamento: evento `budget.exceeded` + UMA aprovação.
+   *
+   * Se já existe aprovação de orçamento pendente para a sessão, não abre
+   * outra — antes cada linha de custo depois do estouro (e cada `send`)
+   * empilhava aprovações obsoletas em `hub approvals`.
+   *
+   * O motivo diz QUAL dimensão estourou: a mensagem citava sempre dólares,
+   * inclusive quando o teto batido era de tokens ("US$ 0.0000 de 5.00").
+   */
+  #abrirEstouroDeOrcamento(
+    session: Session,
+    task: Task,
+    snapshot: BudgetSnapshot,
+    turnoConcluido: boolean,
+  ): void {
+    const jaPendente = this.store.approvals
+      .listPending({ sessionId: session.id })
+      .some((a) => a.detail['kind'] === 'budget');
+    if (jaPendente) return;
+
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'budget.exceeded',
+      payload: { snapshot },
+    });
+
+    const { consumed, limits, remaining } = snapshot;
+    const estouradas: string[] = [];
+    if (consumed.usd >= limits.usd || remaining.usd < 0) {
+      estouradas.push(`US$ ${consumed.usd.toFixed(4)} de ${limits.usd.toFixed(2)}`);
+    }
+    if (consumed.tokens >= limits.tokens || remaining.tokens < 0) {
+      estouradas.push(`${consumed.tokens} de ${limits.tokens} tokens`);
+    }
+    if (consumed.seconds >= limits.seconds || remaining.seconds < 0) {
+      estouradas.push(`${Math.round(consumed.seconds)}s de ${limits.seconds}s de tempo`);
+    }
+
+    // Estouro é decisão humana por definição (ADR 03).
+    this.#requestApproval({
+      session,
+      taskId: task.id,
+      risk: 'budget',
+      action: `orçamento do fluxo esgotado (${estouradas.join('; ') || `US$ ${consumed.usd.toFixed(4)} de ${limits.usd.toFixed(2)}`})`,
+      detail: {
+        kind: 'budget',
+        consumed,
+        limits,
+        // Aprovar libera outra rodada do mesmo tamanho: é previsível e
+        // evita que um "ok" vire orçamento ilimitado.
+        increment: limits,
+        // O turno já tinha acabado quando o teto estourou: aprovar só
+        // finaliza a tarefa, não relança o agente.
+        turnCompleted: turnoConcluido,
+      },
+    });
+  }
+
+  /**
+   * Teto de tempo de parede da run, pelo saldo em segundos do fluxo.
+   *
+   * Os segundos só entram no ledger em `settle` (fim da run), então sem este
+   * relógio o teto em segundos nunca parava nada. Estourado, segue o mesmo
+   * caminho do estouro em dólares/tokens: aprovação e processo encerrado —
+   * aprovar amplia o teto e retoma, porque aqui o Hub cortou o agente no meio.
+   */
+  #armarTetoDeTempo(
+    session: Session,
+    task: Task,
+    handle: RunHandle,
+    ledger: BudgetLedger,
+    reivindicar: () => boolean,
+  ): ReturnType<typeof setTimeout> | undefined {
+    const inicial = ledger.snapshot();
+    // Saldo de tempo do FLUXO (teto − consumido), sem descontar reservas: a
+    // fatia reservada de um filho é justamente o tempo que ele pode gastar.
+    const restanteMs = Math.max(0, inicial.limits.seconds - inicial.consumed.seconds) * 1000;
+    // Acima do máximo do `setTimeout` (~24,8 dias) o Node dispara na hora.
+    if (!Number.isFinite(restanteMs) || restanteMs > 2_000_000_000) return undefined;
+    const inicio = Date.now();
+
+    const timer = setTimeout(() => {
+      if (this.#runs.get(session.id)?.handle !== handle) return;
+      if (!reivindicar()) return;
+
+      const atual = ledger.snapshot();
+      const decorrido = (Date.now() - inicio) / 1000;
+      const consumed = { ...atual.consumed, seconds: Math.round(atual.consumed.seconds + decorrido) };
+      const snapshot: BudgetSnapshot = {
+        ...atual,
+        consumed,
+        remaining: { ...atual.remaining, seconds: atual.limits.seconds - consumed.seconds },
+        exhausted: true,
+      };
+      this.#abrirEstouroDeOrcamento(session, task, snapshot, false);
+      void this.registry
+        .get(session.agentId)
+        .cancel(handle)
+        .catch(() => undefined);
+    }, restanteMs);
+    timer.unref?.();
+    return timer;
   }
 
   #persistLedger(ledger: BudgetLedger): void {

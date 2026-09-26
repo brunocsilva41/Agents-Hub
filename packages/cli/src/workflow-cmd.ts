@@ -9,7 +9,7 @@ import {
   type WorkflowRunEvent,
   type WorkflowStepResult,
 } from '@agents-hub/core';
-import type { HubClient } from './client.js';
+import type { HubClient, TaskStatus } from './client.js';
 import { bold, cyan, dim, green, red, yellow } from './render.js';
 
 interface Args {
@@ -30,7 +30,21 @@ const TERMINAIS = new Set(['completed', 'failed', 'canceled', 'rejected']);
 const ESPERA_MAX_MS = 45 * 60 * 1000;
 const INTERVALO_MS = 2000;
 
-export async function workflowCommand(client: HubClient, args: Args): Promise<void> {
+/** Relógios do acompanhamento — injetáveis só para teste não esperar minutos. */
+export interface WorkflowCommandOptions {
+  intervaloMs?: number;
+  esperaMaxMs?: number;
+}
+
+export async function workflowCommand(
+  client: HubClient,
+  args: Args,
+  opcoes: WorkflowCommandOptions = {},
+): Promise<void> {
+  const relogio = {
+    intervaloMs: opcoes.intervaloMs ?? INTERVALO_MS,
+    esperaMaxMs: opcoes.esperaMaxMs ?? ESPERA_MAX_MS,
+  };
   const [subcommand, file] = args.positional;
 
   if (!subcommand || subcommand === 'help' || args.flags['help']) {
@@ -42,6 +56,9 @@ ${bold('Uso:')}
   hub workflow run <arquivo.yaml>            executa respeitando as dependências
       --project <caminho>                    diretório do projeto (padrão: atual)
       --budget-usd <n>                       teto em dólares do workflow inteiro
+
+  Passo em worktree parte do CÓDIGO dos passos de que depende (branch hub/<sessão>).
+  Passo que pede aprovação espera: aprove com \`hub approve <id>\` e o workflow segue.
 `);
     return;
   }
@@ -108,7 +125,8 @@ ${bold('Uso:')}
       workflow,
       val.executionOrder,
       {
-        start: async ({ step, upstream, capUsd }) => {
+        start: async ({ step, upstream, capUsd, baseSessionIds }) => {
+          const supervisao = step.supervision ?? 'semi';
           const res = await client.startSession({
             projectId: project.id,
             brief: {
@@ -124,14 +142,27 @@ ${bold('Uso:')}
                 ...(capUsd !== null ? { usd: arredondaCentavos(capUsd) } : {}),
               },
               isolation: step.isolation,
-              supervision: step.supervision ?? 'semi',
+              supervision: supervisao,
             },
             title: `[${workflow.name}] Step: ${step.id}`,
+            // O CÓDIGO dos passos anteriores, não só o resumo: o worktree
+            // deste passo nasce do branch `hub/<id>` deles.
+            ...(baseSessionIds.length > 0 ? { baseSessionIds } : {}),
           });
+          if (res.session.mode !== supervisao) {
+            console.log(
+              yellow(
+                `  ⚠ ${step.id}: modo "${supervisao}" pedido, mas a sessão roda em "${res.session.mode}" (limite do agente ${res.session.agentId})`,
+              ),
+            );
+          }
           return { sessionId: res.session.id, taskId: res.task.id };
         },
 
-        settle: ({ sessionId }) => aguardarPasso(client, sessionId),
+        settle: ({ step, taskId }) =>
+          aguardarPasso(client, taskId, relogio, (texto) =>
+            console.log(`  ${yellow('⏸')} ${cyan(step.id)} ${texto}`),
+          ),
 
         report: (ev) => imprimir(ev, val.executionOrder.length),
       },
@@ -153,49 +184,84 @@ ${bold('Uso:')}
  * É o `await` que a versão anterior não tinha: ela dava `await` em
  * `startSession`, que devolve assim que a sessão nasce. Sem isto, `dependsOn`
  * não significa nada em tempo de execução.
+ *
+ * Acompanha pela TASK (`GET /tasks/:id`), não pela sessão: num fallback a
+ * task é reatribuída à sessão do substituto, e `tasks(sessãoOriginal)` vinha
+ * vazio — o passo era dado como falho ("a sessão não tem tarefa") enquanto o
+ * substituto o concluía.
+ *
+ * Aprovação pendente não encerra o passo: o workflow avisa uma vez e segue
+ * esperando — aprovado, o passo retoma e o DAG continua; negado, a task vira
+ * `rejected` e o passo falha. Só vira `blocked` se o teto de espera estourar
+ * com a aprovação ainda em aberto.
  */
 async function aguardarPasso(
   client: HubClient,
-  sessionId: string,
+  taskId: string,
+  relogio: { intervaloMs: number; esperaMaxMs: number },
+  aoBloquear: (texto: string) => void,
 ): Promise<{
   state: 'completed' | 'failed' | 'blocked' | 'timeout';
   summary: string | null;
   detail: string | null;
   usd: number;
+  sessionId?: string;
 }> {
-  const limite = Date.now() + ESPERA_MAX_MS;
+  const limite = Date.now() + relogio.esperaMaxMs;
+  let avisado: string | null = null;
+  let ultimo: TaskStatus | null = null;
+  let falhasSeguidas = 0;
 
   while (Date.now() < limite) {
-    const { tasks } = await client.tasks(sessionId).catch(() => ({ tasks: [] }));
-    const task = tasks[0];
-
-    if (!task) {
-      return { state: 'failed', summary: null, detail: 'a sessão não tem tarefa', usd: 0 };
+    let status: TaskStatus;
+    try {
+      status = await client.task(taskId);
+      falhasSeguidas = 0;
+    } catch (err) {
+      // Tropeço de rede não é desfecho do passo; task que sumiu é.
+      falhasSeguidas += 1;
+      if (falhasSeguidas >= 5) {
+        return {
+          state: 'failed',
+          summary: null,
+          detail: `não foi possível acompanhar a tarefa ${taskId}: ${(err as Error).message}`,
+          usd: 0,
+        };
+      }
+      await esperar(relogio.intervaloMs);
+      continue;
     }
+    ultimo = status;
+    const { task, session, approval } = status;
+    const usd = status.budget.consumed.usd;
 
-    // Bloqueio por decisão humana não é espera: ninguém vai destravar enquanto
-    // o workflow segura o terminal. Sai e diz o que falta fazer.
     if (task.state === 'input_required') {
-      const { approvals } = await client.approvals(sessionId).catch(() => ({ approvals: [] }));
-      const pendente = approvals[0];
-      return {
-        state: 'blocked',
-        summary: null,
-        detail: pendente
-          ? `esperando aprovação: ${pendente.action} — resolva com \`hub approve ${pendente.id}\``
-          : 'esperando decisão humana (veja `hub approvals`)',
-        usd: await gastoDa(client, sessionId),
-      };
-    }
-
-    if (!TERMINAIS.has(task.state)) {
-      await new Promise((r) => setTimeout(r, INTERVALO_MS));
+      const chave = approval?.id ?? 'sem-aprovacao';
+      if (avisado !== chave) {
+        avisado = chave;
+        aoBloquear(
+          approval
+            ? `esperando aprovação: ${approval.action} — resolva com \`hub approve ${approval.id}\` (o workflow continua daqui)`
+            : 'esperando decisão humana (veja `hub approvals`)',
+        );
+      }
+      await esperar(relogio.intervaloMs);
       continue;
     }
 
-    const usd = await gastoDa(client, sessionId);
+    if (!TERMINAIS.has(task.state)) {
+      await esperar(relogio.intervaloMs);
+      continue;
+    }
+
     if (task.state === 'completed') {
-      return { state: 'completed', summary: task.result?.summary ?? null, detail: null, usd };
+      return {
+        state: 'completed',
+        summary: task.result?.summary ?? null,
+        detail: null,
+        usd,
+        sessionId: session.id,
+      };
     }
 
     const ultima = task.attempts[task.attempts.length - 1];
@@ -208,26 +274,35 @@ async function aguardarPasso(
         ultima?.error ??
         (reprovada ? `validação reprovou: ${reprovada.name}` : `tarefa terminou em ${task.state}`),
       usd,
+      sessionId: session.id,
     };
   }
 
+  const minutos = Math.round(relogio.esperaMaxMs / 60000);
+  if (ultimo?.task.state === 'input_required') {
+    const pendente = ultimo.approval;
+    return {
+      state: 'blocked',
+      summary: null,
+      detail: pendente
+        ? `esperando aprovação há mais de ${minutos} min: ${pendente.action} — resolva com \`hub approve ${pendente.id}\``
+        : 'esperando decisão humana (veja `hub approvals`)',
+      usd: ultimo.budget.consumed.usd,
+      sessionId: ultimo.session.id,
+    };
+  }
+  const onde = ultimo?.session.id ?? taskId;
   return {
     state: 'timeout',
     summary: null,
-    detail: `passou de ${Math.round(ESPERA_MAX_MS / 60000)} min — a sessão ${sessionId} continua viva no daemon`,
-    usd: await gastoDa(client, sessionId),
+    detail: `passou de ${minutos} min — a sessão ${onde} continua viva no daemon`,
+    usd: ultimo?.budget.consumed.usd ?? 0,
+    ...(ultimo ? { sessionId: ultimo.session.id } : {}),
   };
 }
 
-/**
- * Custo do passo pelo ledger da raiz, não pelo `usage` da tarefa: o passo pode
- * ter delegado, e o que os filhos gastaram é debitado da mesma raiz.
- */
-async function gastoDa(client: HubClient, sessionId: string): Promise<number> {
-  const { budget } = await client
-    .budget(sessionId)
-    .catch(() => ({ budget: { consumed: { usd: 0 } } }) as never);
-  return budget.consumed.usd;
+function esperar(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function imprimir(ev: WorkflowRunEvent, totalLotes: number): void {

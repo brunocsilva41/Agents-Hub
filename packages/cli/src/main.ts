@@ -24,7 +24,6 @@ import {
   formatTokens,
   green,
   red,
-  renderEvent,
   renderGraph,
   stateBadge,
   yellow,
@@ -38,6 +37,7 @@ import {
   writeConfig,
 } from './mcp-install.js';
 import { workflowCommand } from './workflow-cmd.js';
+import { streamUntilDone } from './follow-task.js';
 import { pauseCommand } from './pause-cmd.js';
 import { interruptCommand } from './interrupt-cmd.js';
 import { discoverCommand, importCommand } from './discover-cmd.js';
@@ -975,6 +975,15 @@ async function start(client: HubClient, args: Args): Promise<void> {
   const result = await client.startSession({ projectId, brief });
   console.log(`${green('sessão iniciada')} ${bold(result.session.id)} ${dim(`(${agent})`)}`);
   console.log(dim(`worktree: ${result.session.workdir}`));
+  // O modo nunca passa do padrão do agente: `--mode autonomous` num agente
+  // `semi` roda em `semi`. Reduzir é o lado seguro, mas não em silêncio.
+  if (brief.supervision !== undefined && result.session.mode !== brief.supervision) {
+    console.log(
+      yellow(
+        `⚠ modo "${brief.supervision}" pedido, mas a sessão roda em "${result.session.mode}" — o padrão do agente ${result.session.agentId} limita o modo`,
+      ),
+    );
+  }
 
   if (args.flags['detach'] === true) {
     console.log(dim(`acompanhe com: hub watch ${result.session.id}`));
@@ -982,7 +991,7 @@ async function start(client: HubClient, args: Args): Promise<void> {
   }
 
   console.log();
-  await streamUntilDone(client, { rootId: result.session.rootId });
+  await streamUntilDone(client, { rootId: result.session.rootId }, { taskId: result.task.id });
 }
 
 async function listSessions(client: HubClient): Promise<void> {
@@ -1010,102 +1019,6 @@ async function watch(client: HubClient, args: Args): Promise<void> {
   }
   const sessionId = required(args.positional[0], 'sessionId');
   await streamUntilDone(client, { sessionId });
-}
-
-/**
- * Acompanha o stream e devolve o terminal quando o fluxo termina.
- *
- * "Terminou" aqui é o fim da sessão-raiz — não o fim do primeiro agente:
- * num fluxo com delegação, o pai fecha depois dos filhos.
- */
-async function streamUntilDone(
-  client: HubClient,
-  filter: { sessionId?: string; rootId?: string },
-): Promise<void> {
-  const rootId = filter.rootId;
-  const showAgent = rootId !== undefined;
-
-  const alvo = filter.sessionId ?? rootId;
-
-  for await (const event of client.stream(filter)) {
-    console.log(renderEvent(event, { showAgent }));
-
-    const doAlvo = alvo === undefined || event.sessionId === alvo;
-    const fimDeTurno =
-      doAlvo && (event.type === 'turn.completed' || event.type === 'error' || event.type === 'session.ended');
-
-    if (!fimDeTurno) continue;
-
-    // O turno acabar NÃO quer dizer que a tarefa acabou: ainda faltam o portão
-    // de validação e, se ele reprovar, retry ou troca de agente. Devolver o
-    // terminal aqui mostraria "concluído" para algo que pode falhar em seguida.
-    if (alvo !== undefined && (await aguardarTaskTerminal(client, alvo))) return;
-  }
-}
-
-/**
- * Espera a tarefa da sessão chegar a um estado terminal, relatando o portão de
- * validação. Devolve `false` quando a tarefa continua viva (retry ou fallback),
- * para o chamador seguir acompanhando o stream.
- */
-async function aguardarTaskTerminal(client: HubClient, sessionId: string): Promise<boolean> {
-  const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
-  let avisou = false;
-
-  for (let i = 0; i < 600; i += 1) {
-    const { tasks } = await client.tasks(sessionId).catch(() => ({ tasks: [] }));
-    const task = tasks[0];
-    if (!task) return true;
-
-    // Bloqueio por decisão humana NÃO é espera: ninguém vai destravar enquanto
-    // o terminal está preso. Antes, a CLI ficava dez minutos calada aqui.
-    if (task.state === 'input_required') {
-      const { approvals } = await client.approvals(sessionId).catch(() => ({ approvals: [] }));
-      const pendente = approvals[0];
-
-      console.log(`${NEWLINE}${yellow('⏸ bloqueado, esperando você')}`);
-      if (pendente) {
-        console.log(`   ${pendente.action} ${dim(`[${pendente.risk}]`)}`);
-        console.log(
-          `${NEWLINE}   ${bold(`hub approve ${pendente.id}`)}   ${dim('ou')}   ${bold(`hub deny ${pendente.id}`)}`,
-        );
-      } else {
-        console.log(dim('   nenhuma aprovação registrada — veja `hub approvals`'));
-      }
-      return true;
-    }
-
-    if (!terminais.has(task.state)) {
-      if (!avisou) {
-        console.log(dim('… aguardando o portão de validação'));
-        avisou = true;
-      }
-      await new Promise((r) => setTimeout(r, 1000));
-      continue;
-    }
-
-    const validacao = task.result?.validation;
-    if (validacao) {
-      for (const check of validacao.checks) {
-        console.log(
-          `${check.passed ? green('✓') : red('✗')} validação: ${check.name}${
-            check.detail ? dim(` — ${check.detail}`) : ''
-          }`,
-        );
-      }
-    }
-
-    const { session } = await client.session(sessionId);
-    const { budget } = await client.budget(session.rootId);
-    console.log(
-      `\n${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${formatTokens(
-        budget.consumed.tokens,
-      )} tokens ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
-    );
-    return true;
-  }
-
-  return true;
 }
 
 async function send(client: HubClient, args: Args): Promise<void> {

@@ -347,4 +347,124 @@ describe('execução do workflow', () => {
     assert.match(res.steps[0]!.detail!, /esgotou tentativas de concorrência/);
     assert.doesNotMatch(res.steps[0]!.detail!, /não foi possível iniciar/);
   });
+  test('CONCURRENCY_EXCEEDED vindo do client HTTP (outra classe, mesmo code) também é retentado', async () => {
+    // Pela CLI o erro chega como `HubApiError` do `@agents-hub/client`, não
+    // como `HubError`: `instanceof` nunca casava e o retry não disparava.
+    class HubApiErrorFalso extends Error {
+      constructor(
+        readonly status: number,
+        readonly code: string,
+        message: string,
+      ) {
+        super(message);
+      }
+    }
+    const wf = parseWorkflow({
+      name: 'Concorrência via HTTP',
+      steps: [{ id: 'p', agent: 'codex', objective: 'Passo que disputa vaga via HTTP' }],
+    });
+    const { deps } = fabrica();
+    const original = deps.start;
+    let chamadas = 0;
+    deps.start = async (input) => {
+      chamadas += 1;
+      if (chamadas === 1) {
+        throw new HubApiErrorFalso(409, 'CONCURRENCY_EXCEEDED', 'Limite de 2 sessões simultâneas');
+      }
+      return original(input);
+    };
+    deps.sleep = async () => {};
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps);
+
+    assert.equal(chamadas, 2);
+    assert.equal(res.steps[0]!.state, 'completed');
+  });
+
+  test('passo que sofreu fallback: o dependente herda a sessão do SUBSTITUTO (resumo e código)', async () => {
+    const { deps, recebido } = fabrica();
+    const bases = new Map<string, string[]>();
+    const originalStart = deps.start;
+    deps.start = async (input) => {
+      bases.set(input.step.id, input.baseSessionIds);
+      return originalStart(input);
+    };
+    const originalSettle = deps.settle;
+    deps.settle = async (input) => {
+      const r = await originalSettle(input);
+      // O daemon trocou de agente: a tarefa terminou em outra sessão.
+      return input.step.id === 'plan' ? { ...r, sessionId: 'ses_substituto' } : r;
+    };
+
+    const res = await runWorkflow(linear, validateWorkflow(linear).executionOrder, deps);
+
+    assert.equal(res.steps[0]!.sessionId, 'ses_substituto');
+    assert.deepEqual(bases.get('plan'), []);
+    assert.deepEqual(bases.get('refactor'), ['ses_substituto']);
+    assert.equal(recebido.get('refactor')![0]!.sessionRef, 'session:ses_substituto');
+  });
+
+  test('passo em isolation none não recebe base de código (já trabalha no projeto)', async () => {
+    const wf = parseWorkflow({
+      name: 'Sem isolamento',
+      steps: [
+        { id: 'a', agent: 'claude', objective: 'Primeiro passo' },
+        { id: 'b', agent: 'codex', objective: 'Segundo passo', dependsOn: ['a'], isolation: 'none' },
+      ],
+    });
+    const { deps } = fabrica();
+    const bases = new Map<string, string[]>();
+    const originalStart = deps.start;
+    deps.start = async (input) => {
+      bases.set(input.step.id, input.baseSessionIds);
+      return originalStart(input);
+    };
+    await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps);
+    assert.deepEqual(bases.get('b'), []);
+  });
+
+  test('pedido maior que o saldo não deixa o irmão do lote sem nada: todos encolhem na proporção', async () => {
+    const wf = parseWorkflow({
+      name: 'Pedido guloso',
+      steps: [
+        { id: 'guloso', agent: 'claude', objective: 'Pede mais que o teto', budget: { usd: 100 } },
+        { id: 'irmao', agent: 'codex', objective: 'Não pediu nada' },
+      ],
+    });
+    const { deps, tetos } = fabrica();
+
+    const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps, { budgetUsd: 10 });
+
+    assert.equal(res.steps[1]!.state, 'completed', 'o irmão não pode ser pulado sem nada ter sido gasto');
+    const g = tetos.get('guloso')!;
+    const i = tetos.get('irmao')!;
+    assert.ok(i > 0);
+    assert.ok(g > i);
+    assert.ok(Math.abs(g + i - 10) < 1e-9, `soma dos tetos deveria ser 10, foi ${g + i}`);
+  });
+
+  test('pedidos que cabem no saldo: cada um recebe o seu e a sobra vai para quem não pediu', async () => {
+    const wf = parseWorkflow({
+      name: 'Pedido que cabe',
+      steps: [
+        { id: 'a', agent: 'claude', objective: 'Pede 2', budget: { usd: 2 } },
+        { id: 'b', agent: 'codex', objective: 'Não pediu' },
+      ],
+    });
+    const { deps, tetos } = fabrica();
+    await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps, { budgetUsd: 10 });
+    assert.equal(tetos.get('a'), 2);
+    assert.equal(tetos.get('b'), 8);
+  });
+});
+
+describe('limites do workflow', () => {
+  test('recusa workflow com mais de 200 passos', () => {
+    const steps = Array.from({ length: 201 }, (_, i) => ({
+      id: `s${i}`,
+      agent: 'claude',
+      objective: `passo ${i}`,
+    }));
+    assert.throws(() => parseWorkflow({ name: 'Enorme', steps }), /Workflow inválido/);
+  });
 });

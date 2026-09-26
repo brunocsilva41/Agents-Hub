@@ -118,12 +118,20 @@ process.stdin.on('end', () => {
   const invocacao = Number(fs.readFileSync(contadorFile, 'utf8')) + 1;
   fs.writeFileSync(contadorFile, String(invocacao), 'utf8');
 
-  // 1ª invocação: estoura o orçamento de US$ 1,00 de propósito.
-  // 2ª invocação (depois da aprovação dobrar o teto para US$ 2,00): soma
-  // mais US$ 0,20 ao já consumido (US$ 1,50), cruzando 80% de novo (US$ 1,70
-  // de US$ 2,00) sem esgotar.
-  const custo = invocacao === 1 ? 1.5 : 0.2;
-  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: custo, usage: { input_tokens: 10, output_tokens: 5 } }) + '\\n');
+  // 1ª invocação: estoura o teto de 1M tokens NO MEIO do turno (estimativa
+  // da linha "assistant", com o processo ainda vivo): o Hub corta o agente, e
+  // aprovar o aumento RETOMA o trabalho. Estouro na linha de custo final (turno
+  // já concluído) não relança mais nada ao aprovar — ver
+  // orquestracao.integration.test.ts.
+  // 2ª invocação (depois da aprovação dobrar o teto para 2M tokens): soma
+  // mais 150k ao já consumido (1,5M), cruzando 80% de novo (1,65M de 2M) sem
+  // esgotar.
+  if (invocacao === 1) {
+    process.stdout.write(JSON.stringify({ type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'trabalhando' }], usage: { input_tokens: 1500000, output_tokens: 0 } } }) + '\\n');
+    setTimeout(() => process.exit(0), 10000);
+    return;
+  }
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', total_cost_usd: 0.2, usage: { input_tokens: 150000, output_tokens: 0 } }) + '\\n');
   process.exit(0);
 });
 `,

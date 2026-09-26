@@ -176,7 +176,16 @@ export class HubClient {
     return this.#get(`/sessions/${idSegment(id, 'ses')}`);
   }
 
-  startSession(body: { projectId: string; brief: BriefInput; title?: string }): Promise<{
+  /**
+   * `baseSessionIds`: o worktree da sessão nova parte do trabalho dessas
+   * sessões (branch `hub/<id>`), em vez do HEAD do projeto.
+   */
+  startSession(body: {
+    projectId: string;
+    brief: BriefInput;
+    title?: string;
+    baseSessionIds?: string[];
+  }): Promise<{
     session: SessionSummary;
     task: TaskSummary;
     budget: BudgetSummary;
