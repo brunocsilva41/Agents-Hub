@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { DEFAULT_POLICY, PolicyEngine, type GuardedAction, type WatchPolicy } from '@agents-hub/core';
+import {
+  DEFAULT_POLICY,
+  PolicyEngine,
+  agentOwnDirs,
+  watchForMode,
+  type GuardedAction,
+  type WatchPolicy,
+} from '@agents-hub/core';
 import { avaliarVigilancia, describeAction, guardedActionsOf } from './guarded-actions.js';
 import type { MappedEvent } from './types.js';
 
@@ -119,6 +126,34 @@ test('avaliarVigilancia: comando comum dentro do workdir não pausa nem alerta',
   );
   assert.equal(veredito.outcome, 'ok');
   assert.deepEqual(veredito.flagged, []);
+});
+
+test('avaliarVigilancia: plano do Claude em ~/.claude/plans não pausa o supervised (vistoria 11)', () => {
+  // Reproduz o achado: em supervised o Claude entra em plan mode e grava o
+  // plano fora do worktree; isso abria aprovação "escalate" inútil no
+  // primeiro turno de qualquer pedido.
+  const home = path.resolve('/home/u');
+  const plano = path.join(home, '.claude', 'plans', 'tarefa-atomic-tulip.md');
+  const watch = watchForMode(watchPadrao, 'supervised');
+  const evento = mapped('file.changed', { path: plano });
+
+  const semDirs = avaliarVigilancia(evento, '/repo', 'supervised', engine, watch);
+  assert.equal(semDirs.outcome, 'paused', 'sem agentDirs a escrita fora do workdir continua pausando');
+
+  const comDirs = avaliarVigilancia(evento, '/repo', 'supervised', engine, watch, agentOwnDirs('claude', home));
+  assert.equal(comDirs.outcome, 'ok');
+});
+
+test('avaliarVigilancia: comando composto pausa pelo pior segmento', () => {
+  const veredito = avaliarVigilancia(
+    mapped('command.executed', { command: 'git status && git push origin main' }),
+    '/repo',
+    'semi',
+    engine,
+    watchPadrao,
+  );
+  assert.equal(veredito.outcome, 'paused');
+  assert.equal(veredito.pausedBy?.risk, 'irreversible');
 });
 
 test('avaliarVigilancia: watch customizado com flagOn pega risco que não pausa', () => {

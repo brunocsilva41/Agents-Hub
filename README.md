@@ -152,7 +152,8 @@ O Hub **nunca** toca nas suas credenciais: cada adapter roda com o login que o p
 - Orçamento é do fluxo inteiro, consumido pelos descendentes: o que um gasta, falta para os outros
 - Política de um filho = interseção com a do pai: **delegar nunca aumenta privilégio**
 - Profundidade máxima e detecção de ciclo semântico impedem que delegação vire loop caro
-- `git push`, `rm -rf`, publish e caminhos sensíveis (`.ssh`, `.env`) param a sessão e abrem uma aprovação
+- `git push`, `rm -rf`, publish e segredos (ler ou escrever `.ssh`, `.env`, chaves, credenciais de CLI) param a sessão e abrem uma aprovação
+- Comando composto não engana a política: `git status && git push` vale como `git push` (cada segmento é classificado, vence o pior)
 
 Detalhes e níveis de risco em [docs/decisoes/03-seguranca-limites.md](docs/decisoes/03-seguranca-limites.md).
 
@@ -181,7 +182,20 @@ ligado nesta máquina, em vez de rodar sem a prevenção que o modo promete;
 `semi`/`autonomous` rodam sem o bypass, mas com aviso explícito na timeline.
 Detalhes do modelo de ameaça em [SECURITY.md](SECURITY.md).
 
-Por padrão só o irreversível (`git push`, `rm -rf`, publish, `.ssh`) interrompe; sair da allow list vira alerta na timeline. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero.
+**Tabela de risco padrão** (`--mode`; `semi` é o padrão da maioria dos agentes):
+
+| Risco | Exemplos | supervised | semi | autonomous |
+|---|---|---|---|---|
+| `read` | `ls`, `cat`, `rg`, `git status/diff/log`, ler arquivo comum, plano do Claude em `~/.claude/plans` | passa | passa | passa |
+| `write` | editar/criar no worktree, `mkdir`, `touch`, `cp`, `mv`, `echo x > src/a.ts`, `rm arquivo` | aprovação | passa | passa |
+| `exec` | `npm test/install`, `make`, `cargo build`, `git fetch/commit`, `npx vitest`, `node script.js` | aprovação | passa | passa |
+| `escalate` | comando fora da allow list, `curl` para domínio não liberado, escrita fora do worktree, `node -e` com `fs`/`child_process`, comando que não tokeniza | aprovação | aprovação no gate · alerta na vigilância | passa |
+| `irreversible` | `git push`, `rm -rf`, `git reset --hard`, `git stash drop`, `find -delete`, publish, ler/escrever segredo, escrever `.git/hooks`/`.github/workflows` | aprovação | aprovação | aprovação |
+| deny list | `sudo`, `shutdown`, `mkfs`, `reg delete` | negado | negado | negado |
+
+"Aprovação" é prévia nos agentes com gate (Claude, Codex); nos demais, a vigilância pausa depois do fato só a partir de `escalate` em `supervised` e de `irreversible` nos outros modos.
+
+Por padrão só o irreversível interrompe o trabalho comum: o que um agente roda o dia todo (`mkdir`, `make`, `cargo build`, `git fetch`, `npm install`) é `write`/`exec` e passa em `semi`. Um controle que congela a sessão a cada comando legítimo é desligado na primeira hora, e controle desligado protege zero. A exceção deliberada é `escalate` **nos agentes com gate** (Claude, Codex): lá ele pede aprovação em `semi`, porque o gate *previne* e `escalate` passou a significar só o que realmente sai do combinado (rede não liberada, escrita fora do worktree, binário desconhecido). Nos demais, que só têm vigilância, `escalate` em `semi` vira alerta na timeline — pausar depois do fato não desfaz nada.
 
 ```bash
 hub approvals        # o que espera sua decisão

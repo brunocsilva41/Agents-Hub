@@ -5,6 +5,8 @@ export * from './events.js';
 export * from './brief.js';
 export * from './conversation.js';
 export * from './policy.js';
+export { classifyCommand, type CommandVerdict } from './command-classifier.js';
+export { agentOwnDirs, matchSensitivePath, type SensitiveMatch } from './sensitive-paths.js';
 export * from './folders.js';
 export * from './agent-env.js';
 export * from './budget.js';

@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import {
   BudgetLedger,
@@ -27,6 +28,7 @@ import {
   type ContextoDoProjeto,
   resolveEventCost,
   watchForMode,
+  agentOwnDirs,
   type Approval,
   type Artifact,
   type Brief,
@@ -741,7 +743,11 @@ export class SessionManager {
     );
 
     const vereditos = actions.map((action) => {
-      const v = engine.decide(action, { workdir: session.workdir, mode: session.mode });
+      const v = engine.decide(action, {
+        workdir: session.workdir,
+        mode: session.mode,
+        agentDirs: this.#agentDirs(session),
+      });
       return { decision: v.decision, risk: v.risk, reason: v.reason };
     });
 
@@ -2065,10 +2071,25 @@ export class SessionManager {
    * (`packages/adapters/src/guarded-actions.ts`) — aqui só os efeitos
    * (emitir alerta, abrir aprovação), que dependem de `store`/`bus`.
    */
+  /**
+   * Diretórios de trabalho do próprio agente (plano do Claude em
+   * `~/.claude/plans`): escrita ali não pede aprovação — ver `agentOwnDirs`.
+   */
+  #agentDirs(session: Session): string[] {
+    return agentOwnDirs(session.agentId, os.homedir(), process.env);
+  }
+
   #watch(session: Session, task: Task, mapped: MappedEvent): 'ok' | 'flagged' | 'paused' {
     const engine = this.policyFor(session);
     const watch = watchForMode(this.config.policy.watch, session.mode);
-    const veredito = avaliarVigilancia(mapped, session.workdir, session.mode, engine, watch);
+    const veredito = avaliarVigilancia(
+      mapped,
+      session.workdir,
+      session.mode,
+      engine,
+      watch,
+      this.#agentDirs(session),
+    );
 
     for (const f of veredito.flagged) {
       this.#emit({

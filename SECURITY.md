@@ -31,7 +31,8 @@ não fechar relato sem explicação.
 | Escalação por delegação | Política efetiva = interseção com a do pai. Filho **nunca** supera o pai | `packages/core/src/policy.ts` |
 | Delegação em loop | Profundidade máxima + ciclo semântico por `(agente, hash do objetivo)` | `packages/core/src/graph.ts` |
 | Gasto descontrolado | Orçamento é da sessão-raiz, consumido pelos descendentes | `packages/core/src/budget.ts` |
-| Ação irreversível | `git push`, `rm -rf`, publish, `.ssh`, `.env` param a sessão e abrem aprovação | `packages/core/src/policy.ts` |
+| Ação irreversível | `git push`, `rm -rf`, publish, ler ou escrever segredo (`.ssh`, `.env`, chaves, credenciais de CLI) e escrever em `.git/hooks`/`.github/workflows` param a sessão e abrem aprovação; a deny list (`sudo`...) é negada sem aprovação | `packages/core/src/policy.ts` |
+| Comando composto para driblar a allow list | Comando tokenizado (`&&`, `;`, `\|`, `$(...)`, crase, redirecionamento, `bash -c`, `cmd /c`, `powershell -Command`...); vale o pior segmento; o que não dá para tokenizar não é liberado | `packages/core/src/command-classifier.ts` |
 | Config de projeto hostil | `<repo>/.agents-hub/config.yaml` só pode **apertar** a política global, nunca afrouxar (regra campo a campo em `mergePolicyLayer`); `validation.command`/revisão do repo só valem com `hub project trust` (confiança no banco do Hub, padrão desligado) | `packages/daemon/src/project-config.ts` |
 
 **Credenciais:** o Hub nunca lê, persiste nem repassa segredo. Cada adapter roda
@@ -116,6 +117,17 @@ garante: hook não confiável é **ignorado em silêncio** pelo binário — sem
 escolha explícita do usuário nesta máquina), não há prevenção nenhuma, e o Hub
 recusa abrir uma sessão `--mode supervised` do Codex sem essa garantia, em vez
 de fingir que ela existe.
+
+### O classificador de comando é análise estática, não sandbox
+
+O classificador lê o texto do comando; ele não vê o conteúdo de um script em
+arquivo (`bash deploy.sh`, `node build.js`, `npm run x`), e código inline
+(`node -e`, `python -c`) é avaliado por heurística (uso de API de processo,
+arquivo e rede sobe o risco; menção a segredo vira `irreversible`). O que ele
+garante é que composição não esconde nada: cada segmento de `a && b`, `a | b`,
+`$(...)`, crase e `bash -c`/`cmd /c`/`powershell -Command` é classificado, e
+entrada que não tokeniza com segurança (aspas sem fechar, crase de escape do
+PowerShell) vira `escalate`, nunca `allow`.
 
 ### O worktree não é sandbox
 
