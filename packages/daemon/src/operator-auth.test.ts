@@ -28,6 +28,20 @@ interface Resposta {
 
 let porta = 0;
 
+/**
+ * O token certo com o ÚLTIMO caractere trocado — "quase certo" de propósito.
+ *
+ * Era `token.slice(0, 63) + '0'`: quando o token sorteado já terminava em
+ * `0` (1 em 16 subidas), o "errado" ERA o certo, o daemon autenticava e o
+ * laço das rotas protegidas falhava inteiro (inclusive `POST /shutdown`
+ * respondendo 200 e derrubando o processo de teste). Parecia falha de
+ * segurança intermitente; era o teste mandando a credencial válida.
+ */
+function quaseOToken(token: string): string {
+  const ultimo = token.slice(-1);
+  return `${token.slice(0, -1)}${ultimo === '0' ? '1' : '0'}`;
+}
+
 function http(
   method: string,
   caminho: string,
@@ -194,7 +208,7 @@ defaults:
 
       const erradoHeader = await http(method, caminho(), {
         json,
-        headers: { 'x-hub-token': `${hub.operatorToken.slice(0, 63)}0` },
+        headers: { 'x-hub-token': quaseOToken(hub.operatorToken) },
       });
       assert.equal(erradoHeader.status, 401, erradoHeader.body);
 

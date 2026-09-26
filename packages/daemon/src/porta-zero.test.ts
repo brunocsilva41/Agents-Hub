@@ -11,8 +11,10 @@ import { createHub, type Hub } from './hub.js';
  * Item 7.3 do GOAL (testes frágeis): os testes escolhiam porta com
  * `portaLivre()` — abrir a porta 0, ler o número, FECHAR e só então o daemon
  * tentar ligar a mesma porta. Entre o `close` e o `listen` qualquer processo
- * da máquina podia pegá-la; foi assim que `operator-auth.test` recebeu 200/400
- * numa rota protegida sem token: a requisição caiu no servidor de OUTRO teste.
+ * da máquina podia pegá-la (o daemon falhava no `listen`, ou o teste falava
+ * com o servidor de OUTRO teste). Obs.: os 200/400 intermitentes de
+ * `operator-auth.test` nas rotas protegidas NÃO eram isto — eram o próprio
+ * teste mandando o token certo como "errado" (ver `operator-routes-table.test`).
  *
  * A correção é o daemon aceitar `port: 0` de verdade: o SO escolhe e liga a
  * porta num passo só, e `listen()` devolve a porta real e a grava na config —
