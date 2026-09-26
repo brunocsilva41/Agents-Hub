@@ -58,8 +58,8 @@ Como a contagem foi feita:
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R01-01 | ALTO | Gate bloqueia quase todo comando fora da allow list; README diz o contrário | 1.7 | [x] |
-| R01-02 | ALTO | Hook instalado desiste em 10 s e daemon espera 60 s: gate pode falhar aberto | 1.3 | [ ] |
-| R01-03 | ALTO | Fluxo bloqueante do gate sem teste e com 3 defeitos (timeout mata, msg errada, approve) | 1.5 | [ ] |
+| R01-02 | ALTO | Hook instalado desiste em 10 s e daemon espera 60 s: gate pode falhar aberto | 1.3 | [x] |
+| R01-03 | ALTO | Fluxo bloqueante do gate sem teste e com 3 defeitos (timeout mata, msg errada, approve) | 1.5 | [x] |
 | R01-04 | ALTO | Política por prefixo: cat/ls/node/python liberam tudo; .ssh/.env não param | 1.1 | [x] |
 | R01-05 | MED | Autostart do daemon sem `--experimental-sqlite` (Node 22.5–22.12) | 5.1 | [ ] |
 | R01-06 | MED | Doc 07 "fonte de verdade" defasado em pontos centrais | 8.1 | [ ] |
@@ -75,10 +75,10 @@ Como a contagem foi feita:
 |---|---|---|---|---|
 | R02-01 | ALTO | Política de comandos por prefixo: `git status && git push` vira exec/allow | 1.1 | [x] |
 | R02-02 | ALTO | Proteção de .ssh/.env/credenciais só na escrita; leitura e `cat` passam | 1.2 | [x] |
-| R02-03 | ALTO | Gate falha aberto por desenho e SECURITY.md não diz | 1.4 | [ ] |
+| R02-03 | ALTO | Gate falha aberto por desenho e SECURITY.md não diz | 1.4 | [x] |
 | R02-04 | ALTO | Config de projeto "só aperta" é falsa: orçamento, timeouts, retries, validation.command | 0.7 | [x] |
 | R02-05 | MED | `/discovery` não mascara `args` nem query strings fora da lista | 1.8 | [x] |
-| R02-06 | MED | SECURITY.md omite vetores reais (BASE_URL, prompts/memory, env de projeto) | 1.9 | [ ] |
+| R02-06 | MED | SECURITY.md omite vetores reais (BASE_URL, prompts/memory, env de projeto) | 1.9 | [x] |
 | R02-07 | MED | Retenção documentada ("para sempre", bruto preservado) não bate com o código | 8.1 | [ ] |
 | R02-08 | MED | ADRs 01/03/06 divergem do código (fallback, 9 agentes, TUI, nomes) | 8.1 | [ ] |
 | R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [ ] |
@@ -93,32 +93,32 @@ Como a contagem foi feita:
 
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
-| R03-01 | ALTO | Timeline mostra os 500 PRIMEIROS eventos e perde histórico se SSE chega antes | 6.3 | [ ] |
-| R03-02 | ALTO | Ctrl/⌘+K nunca abre a paleta; `<kbd>N</kbd>` sem handler; sem setas/Enter | 6.2 | [ ] |
-| R03-03 | ALTO | Configurações: falha ao carregar projeto mantém config do anterior e permite gravá-la | 6.6 | [ ] |
-| R03-04 | ALTO | Topbar sem regra responsiva: abaixo de ~1100 px ações inalcançáveis | 6.1 | [ ] |
-| R03-05 | MED | Pausar torna a sessão impossível de encerrar/interromper/transferir | 6.4 | [ ] |
-| R03-06 | MED | "ver a sessão" (Aprovações) não troca para a aba Timeline | 6.9 | [ ] |
-| R03-07 | MED | Toasts de sucesso enganosos (interromper sem turno, delegação retida) | 6.9 | [ ] |
-| R03-08 | MED | Mensagem enviada pelo usuário nunca aparece na timeline | 6.3 | [ ] |
-| R03-09 | MED | Auto-scroll da timeline para depois de 400 eventos | 6.3 | [ ] |
-| R03-10 | MED | Falha ao buscar eventos nunca é repetida (mensagem promete retry) | 6.3 | [ ] |
-| R03-11 | MED | "Nova Sessão" pré-seleciona o 1º projeto; perde dados; agente não instalado | 6.9 | [ ] |
+| R03-01 | ALTO | Timeline mostra os 500 PRIMEIROS eventos e perde histórico se SSE chega antes | 6.3 | [x] |
+| R03-02 | ALTO | Ctrl/⌘+K nunca abre a paleta; `<kbd>N</kbd>` sem handler; sem setas/Enter | 6.2 | [x] |
+| R03-03 | ALTO | Configurações: falha ao carregar projeto mantém config do anterior e permite gravá-la | 6.6 | [x] |
+| R03-04 | ALTO | Topbar sem regra responsiva: abaixo de ~1100 px ações inalcançáveis | 6.1 | [x] |
+| R03-05 | MED | Pausar torna a sessão impossível de encerrar/interromper/transferir | 6.4 | [x] |
+| R03-06 | MED | "ver a sessão" (Aprovações) não troca para a aba Timeline | 6.9 | [x] |
+| R03-07 | MED | Toasts de sucesso enganosos (interromper sem turno, delegação retida) | 6.9 | [x] |
+| R03-08 | MED | Mensagem enviada pelo usuário nunca aparece na timeline | 6.3 | [x] |
+| R03-09 | MED | Auto-scroll da timeline para depois de 400 eventos | 6.3 | [x] |
+| R03-10 | MED | Falha ao buscar eventos nunca é repetida (mensagem promete retry) | 6.3 | [x] |
+| R03-11 | MED | "Nova Sessão" pré-seleciona o 1º projeto; perde dados; agente não instalado | 6.9 | [x] |
 | R03-12 | MED | ProjectModal: falha parcial não atualiza lista e "tentar de novo" repete trabalho | — | [ ] |
-| R03-13 | MED | Modais sem Esc, sem foco preso, sem nome; clique no fundo descarta formulário | 6.7 | [ ] |
-| R03-14 | MED | Gavetas podem abrir juntas e se sobrepor, focáveis fechadas, cobrem aprovações | 6.7 | [ ] |
-| R03-15 | MED | Overflow/quebra de layout em <900 px e <600 px (só 2 breakpoints) | 6.1 | [ ] |
+| R03-13 | MED | Modais sem Esc, sem foco preso, sem nome; clique no fundo descarta formulário | 6.7 | [x] |
+| R03-14 | MED | Gavetas podem abrir juntas e se sobrepor, focáveis fechadas, cobrem aprovações | 6.7 | [x] |
+| R03-15 | MED | Overflow/quebra de layout em <900 px e <600 px (só 2 breakpoints) | 6.1 | [x] |
 | R03-16 | MED | Estados vazios/erro ausentes ou enganosos | — | [ ] |
-| R03-17 | MED | Aba "Grafo DAG" sem arestas, sem teclado e ignora filtro de projeto | 6.9 | [ ] |
-| R03-18 | MED | Vite dev: `/discovery` fora do proxy; aba "Agentes detectados" quebra | 6.11 | [ ] |
-| R03-19 | MED | Configurações: edições somem sem aviso; "Modelos locais" com controles fantasma | 6.5 | [ ] |
+| R03-17 | MED | Aba "Grafo DAG" sem arestas, sem teclado e ignora filtro de projeto | 6.9 | [x] |
+| R03-18 | MED | Vite dev: `/discovery` fora do proxy; aba "Agentes detectados" quebra | 6.11 | [x] |
+| R03-19 | MED | Configurações: edições somem sem aviso; "Modelos locais" com controles fantasma | 6.5 | [x] |
 | R03-20 | MED | Cobertura do painel vs. sistema: faltam superfícies (seção F, 16 itens) | 6.12 | [ ] |
 | R03-21 | BAIXO | Abas com ARIA inválido e controles sem nome acessível | — | [ ] |
-| R03-22 | BAIXO | Contraste de `--text-faint` e ausência de `prefers-reduced-motion` | 6.8 | [ ] |
-| R03-23 | BAIXO | Fontes via Google Fonts (`@import`) em painel local | 6.8 | [ ] |
+| R03-22 | BAIXO | Contraste de `--text-faint` e ausência de `prefers-reduced-motion` | 6.8 | [x] |
+| R03-23 | BAIXO | Fontes via Google Fonts (`@import`) em painel local | 6.8 | [x] |
 | R03-24 | BAIXO | Fluxo selecionado na lista não pode ser recolhido | — | [ ] |
 | R03-25 | BAIXO | Botões com `margin-left:4px` global e `transform` no hover | — | [ ] |
-| R03-26 | BAIXO | Toasts: fila sem teto e sem "dispensar todos" | 6.9 | [ ] |
+| R03-26 | BAIXO | Toasts: fila sem teto e sem "dispensar todos" | 6.9 | [x] |
 | R03-27 | BAIXO | Telemetria rasa e inconsistente com o resto | — | [ ] |
 | R03-28 | BAIXO | Código morto/duplicado e atalho "/" global dispara com modal aberto | — | [ ] |
 
@@ -126,31 +126,31 @@ Como a contagem foi feita:
 
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
-| R04-01 | ALTO | Mobile 375 px: topbar estoura; abas, busca, "Nova Sessão" e "Painel" inalcançáveis | 6.1 | [ ] |
-| R04-02 | ALTO | Tablet 768–~1116 px: topbar estoura; busca sobrepõe o pill "Ao Vivo" | 6.1 | [ ] |
-| R04-03 | MED | Ctrl/⌘+K não abre a paleta; "N" e setas/Enter não funcionam | 6.2 | [ ] |
-| R04-04 | MED | Retomar pausada por mensagem deixa a UI "PAUSADA" para sempre | 6.4 | [ ] |
-| R04-05 | MED | Sessão pausada não tem "Retomar" nem "Encerrar" no painel | 6.4 | [ ] |
-| R04-06 | MED | Registrar projeto com caminho inexistente é aceito | 6.6 | [ ] |
-| R04-07 | MED | Nenhum modal tem armadilha de foco nem fecha com Esc | 6.7 | [ ] |
-| R04-08 | MED | Variáveis `--agent-1..8` nunca definidas (telemetria invisível, avatares sem cor) | 6.8 | [ ] |
-| R04-09 | MED | Fan-out: cada evento refaz 4 GETs duas vezes + `/graph` por fluxo | 6.10 | [ ] |
-| R04-10 | BAIXO | Config salva sem `policy:` gera aviso falso de "configuração inválida" | 6.6 | [ ] |
-| R04-11 | BAIXO | "Interromper" em agente one-shot marca a sessão como FALHOU | 6.4 | [ ] |
-| R04-12 | BAIXO | "Encerrar" destrutivo, de um clique, sem confirmação | 6.4 | [ ] |
-| R04-13 | BAIXO | Toasts de erro nunca somem e se empilham cobrindo painel e "Enviar" | 6.9 | [ ] |
-| R04-14 | BAIXO | Modal "Nova Sessão": rodapé sem sticky e selects truncados | 6.7 | [ ] |
-| R04-15 | BAIXO | Mobile: gaveta sob o compositor, dica sobreposta, cabeçalho cortado, sem backdrop | 6.7 | [ ] |
-| R04-16 | BAIXO | Rótulos em inglês cru, "Desconectado" errado, plural, sem tema claro | 6.2, 6.8 | [ ] |
+| R04-01 | ALTO | Mobile 375 px: topbar estoura; abas, busca, "Nova Sessão" e "Painel" inalcançáveis | 6.1 | [x] |
+| R04-02 | ALTO | Tablet 768–~1116 px: topbar estoura; busca sobrepõe o pill "Ao Vivo" | 6.1 | [x] |
+| R04-03 | MED | Ctrl/⌘+K não abre a paleta; "N" e setas/Enter não funcionam | 6.2 | [x] |
+| R04-04 | MED | Retomar pausada por mensagem deixa a UI "PAUSADA" para sempre | 6.4 | [x] |
+| R04-05 | MED | Sessão pausada não tem "Retomar" nem "Encerrar" no painel | 6.4 | [x] |
+| R04-06 | MED | Registrar projeto com caminho inexistente é aceito | 6.6 | [x] |
+| R04-07 | MED | Nenhum modal tem armadilha de foco nem fecha com Esc | 6.7 | [x] |
+| R04-08 | MED | Variáveis `--agent-1..8` nunca definidas (telemetria invisível, avatares sem cor) | 6.8 | [x] |
+| R04-09 | MED | Fan-out: cada evento refaz 4 GETs duas vezes + `/graph` por fluxo | 6.10 | [x] |
+| R04-10 | BAIXO | Config salva sem `policy:` gera aviso falso de "configuração inválida" | 6.6 | [x] |
+| R04-11 | BAIXO | "Interromper" em agente one-shot marca a sessão como FALHOU | 6.4 | [x] |
+| R04-12 | BAIXO | "Encerrar" destrutivo, de um clique, sem confirmação | 6.4 | [x] |
+| R04-13 | BAIXO | Toasts de erro nunca somem e se empilham cobrindo painel e "Enviar" | 6.9 | [x] |
+| R04-14 | BAIXO | Modal "Nova Sessão": rodapé sem sticky e selects truncados | 6.7 | [x] |
+| R04-15 | BAIXO | Mobile: gaveta sob o compositor, dica sobreposta, cabeçalho cortado, sem backdrop | 6.7 | [x] |
+| R04-16 | BAIXO | Rótulos em inglês cru, "Desconectado" errado, plural, sem tema claro | 6.2, 6.8 | [x] |
 
 ## R05 — 05-permissoes-seguranca.md
 
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R05-01 | ALTO | `validation.command` do config.yaml do repo executa com shell, fora do gate | 0.7 | [x] |
-| R05-02 | ALTO | Env do config.yaml do repo redireciona tráfego/credenciais (`*_BASE_URL`) | 1.9 | [ ] |
-| R05-03 | ALTO | Qualquer processo local, inclusive o agente, aprova as próprias aprovações | 1.6 | [ ] |
-| R05-04 | ALTO | Timeout do hook menor que a espera do gate: aprovação vira falha aberta | 1.3 | [ ] |
+| R05-02 | ALTO | Env do config.yaml do repo redireciona tráfego/credenciais (`*_BASE_URL`) | 1.9 | [x] |
+| R05-03 | ALTO | Qualquer processo local, inclusive o agente, aprova as próprias aprovações | 1.6 | [x] |
+| R05-04 | ALTO | Timeout do hook menor que a espera do gate: aprovação vira falha aberta | 1.3 | [x] |
 | R05-05 | ALTO | Política por prefixo: comando composto passa como allow list e vira exec livre | 1.1 | [x] |
 | R05-06 | MED | CSRF residual: `Origin: null` aceito e POST sem corpo dispensa content-type | 1.8 | [x] |
 | R05-07 | MED | `GET /discovery` e importação vazam segredos em `args` de MCP | 1.8 | [x] |
@@ -168,8 +168,8 @@ Como a contagem foi feita:
 | R06-03 | ALTO | Cancel durante validação/backoff: terminal ressuscita ou task presa em `working` | 2.1 | [ ] |
 | R06-04 | ALTO | `interrupt` e `pause` no Windows encerram a sessão como `failed` | 2.2 | [ ] |
 | R06-05 | ALTO | Falha ao subir agente deixa sessão `running`, worktree vazado e reserva presa | 2.3 | [ ] |
-| R06-06 | ALTO | Timeout do gate mata a sessão inteira e a explicação correta não chega | 1.5 | [ ] |
-| R06-07 | ALTO | `send` em sessão `waiting_approval` relança o agente por cima da aprovação | 2.4 | [ ] |
+| R06-06 | ALTO | Timeout do gate mata a sessão inteira e a explicação correta não chega | 1.5 | [x] |
+| R06-07 | ALTO | `send` em sessão `waiting_approval` relança o agente por cima da aprovação | 2.4 | [x] |
 | R06-08 | MED | Rajada de saída bloqueia o event loop; sem teto de eventos/bytes por sessão | 2.5 | [ ] |
 | R06-09 | MED | Reaper: worktrees sujos/meio-apagados nunca recolhidos; sweep sem trava | 2.6 | [ ] |
 | R06-10 | MED | Reconciliação no restart fecha sessões sem evento nem tentativa fechada | 2.8 | [ ] |
@@ -184,7 +184,7 @@ Como a contagem foi feita:
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R07-01 | ALTO | `hooks install claude --write` apaga settings.json que não parseia; `.bak` sobrescrito | 0.4 | [x] |
-| R07-02 | ALTO | Timeout do hook (10 s) menor que a espera do daemon (60 s): gate falha aberto | 1.3 | [ ] |
+| R07-02 | ALTO | Timeout do hook (10 s) menor que a espera do daemon (60 s): gate falha aberto | 1.3 | [x] |
 | R07-03 | MED | `hub start` (e project/import/workflow) em subpasta de projeto → PROJECT_FOLDER_CONFLICT | 5.3 | [ ] |
 | R07-04 | MED | Referência de projeto desconhecida vira "registrar diretório com esse nome" | 5.5 | [ ] |
 | R07-05 | MED | Sem normalização de caminho: 8.3/caixa viram 2 projetos ou erro enganoso | 5.5 | [ ] |
@@ -197,7 +197,7 @@ Como a contagem foi feita:
 | R07-12 | MED | `mcp install --write` sobrescreve o `.bak` a cada execução | 0.5 | [x] |
 | R07-13 | MED | `hooks install codex --write` congela toda a config padrão no config.json | 5.5 | [ ] |
 | R07-14 | MED | Ids sem `encodeURIComponent` no client; budget/graph de id errado dão zeros/crash | 0.6 | [x] |
-| R07-15 | BAIXO | Negação/timeout no gate: agente recebe "a política proíbe esta ação" | 1.5 | [ ] |
+| R07-15 | BAIXO | Negação/timeout no gate: agente recebe "a política proíbe esta ação" | 1.5 | [x] |
 | R07-16 | BAIXO | `hub interrupt`/`cancel`/`send` sempre dizem sucesso; no Windows interrupt mata | 2.2 | [ ] |
 | R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [ ] |
 | R07-18 | BAIXO | Horários exibidos em UTC sem rótulo | — | [ ] |
@@ -214,14 +214,14 @@ Como a contagem foi feita:
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R08-01 | ALTO | Path traversal no client: `hub_agent_cancel` com `../shutdown#` derruba o daemon | 0.6 | [x] |
-| R08-02 | ALTO | Timeout do hook (10 s/20 s) < espera do gate (60 s): ação roda sem aprovação | 1.3 | [ ] |
+| R08-02 | ALTO | Timeout do hook (10 s/20 s) < espera do gate (60 s): ação roda sem aprovação | 1.3 | [x] |
 | R08-03 | ALTO | `mcp install opencode --write` gera config que o OpenCode rejeita por inteiro | 0.5 | [x] |
 | R08-04 | ALTO | `mcp install codex --write` corrompe config.toml (chave duplicada) | 0.5 | [x] |
 | R08-05 | ALTO | `hooks install claude --write` apaga config quando settings.json não é JSON estrito | 0.4 | [x] |
 | R08-06 | MED | Sessão/tarefa fantasma quando a delegação falha ao iniciar | 2.3 | [ ] |
 | R08-07 | MED | `CallerIdentity` cacheia para sempre uma adoção que falhou | 2.8 | [ ] |
 | R08-08 | MED | `hub_agent_wait` ignora cancelamento/timeout do cliente e consulta para sempre | 2.8 | [ ] |
-| R08-09 | MED | Explicação de "negado por falta de resposta" descartada; `escalate` inválido no hook | 1.5 | [ ] |
+| R08-09 | MED | Explicação de "negado por falta de resposta" descartada; `escalate` inválido no hook | 1.5 | [x] |
 | R08-10 | MED | Gate aplica política do Hub ao Claude "normal" do usuário por casamento de `cwd` | — | [ ] |
 | R08-11 | MED | Sem limite de tamanho em `hub_agent_call`; failover em cascata sem aviso | — | [ ] |
 | R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [ ] |
@@ -236,8 +236,8 @@ Como a contagem foi feita:
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R09-01 | ALTO | Policy: comando composto passa como `exec` se começar por item da allow list | 1.1 | [x] |
-| R09-02 | ALTO | BudgetLedger conta a fatia do filho duas vezes e dispara `exhausted` falso | 3.2 | [ ] |
-| R09-03 | ALTO | Replay/`hub_context_fetch` usa os PRIMEIROS N eventos, não os últimos | 3.3 | [ ] |
+| R09-02 | ALTO | BudgetLedger conta a fatia do filho duas vezes e dispara `exhausted` falso | 3.2 | [x] |
+| R09-03 | ALTO | Replay/`hub_context_fetch` usa os PRIMEIROS N eventos, não os últimos | 3.3 | [x] |
 | R09-04 | MED | Padrões de "irreversível" e allow list com lacunas e falsos positivos | 1.1 | [x] |
 | R09-05 | MED | "Deny list" não nega: vira `irreversible` e a decisão padrão é `approve` | 1.2 | [x] |
 | R09-06 | MED | Não há backup/restauração do banco; copiar só o `.db` perde dados (WAL) | 5.6 | [ ] |
@@ -245,10 +245,10 @@ Como a contagem foi feita:
 | R09-08 | MED | Consultas agregadas por sessão/árvore escalam mal e bloqueiam o processo | — | [ ] |
 | R09-09 | MED | `mergePolicyLayer(clampToBase)` não trava budget/retries/timeouts/fallback | 0.7 | [x] |
 | R09-10 | MED | Política de arquivos: leitura nunca protegida; lista de escrita sensível incompleta | 1.2 | [x] |
-| R09-11 | MED | BudgetLedger aceita NaN/negativos e vaza reserva em `reserve` duplicado | 3.2 | [ ] |
+| R09-11 | MED | BudgetLedger aceita NaN/negativos e vaza reserva em `reserve` duplicado | 3.2 | [x] |
 | R09-12 | BAIXO | Schemas de política aceitam valores sem sentido; risk parcial cai em fail-open | — | [ ] |
 | R09-13 | BAIXO | Brief: validações frouxas (trim, tamanho, Infinity, `..` em artifacts) | — | [ ] |
-| R09-14 | BAIXO | Pricing: variantes casam por prefixo com confiança `model`; itens não modelados | 3.4 | [ ] |
+| R09-14 | BAIXO | Pricing: variantes casam por prefixo com confiança `model`; itens não modelados | 3.4 | [x] |
 | R09-15 | BAIXO | `combineCostEstimates`: rótulo de confiança incoerente | — | [ ] |
 | R09-16 | BAIXO | `transaction()` não protege contra fn assíncrona nem usa SAVEPOINT | — | [ ] |
 | R09-17 | BAIXO | Integridade e desempenho: lacunas de schema (FK, is_primary, path, índices) | — | [ ] |
@@ -262,18 +262,18 @@ Como a contagem foi feita:
 | R10-01 | CRIT | Antigravity (`agy`) nunca recebe o prompt: agente 100% quebrado | 0.2 | [x] |
 | R10-02 | CRIT | Injeção de comando via prompt nos agentes `.cmd` com prompt em argv | 0.3 | [x] |
 | R10-03 | ALTO | Prompt por argv em `.cmd` truncado em quebra de linha, ~8 KB e sem Unicode | 0.3 | [x] |
-| R10-04 | ALTO | `resolveBin` corrompe caminhos com acento (saída do `where` lida como UTF-8) | 4.1 | [ ] |
-| R10-05 | ALTO | Custo contado 2–3x (Claude, OpenClaude, Antigravity) | 3.1 | [ ] |
-| R10-06 | ALTO | OpenCode: modo do Hub não restringe nada; agente padrão com `allow *` | 4.2 | [ ] |
-| R10-07 | MED | `ctx.model` ignorado por 8 dos 9 agentes; providerID fixo no OpenCode | 4.3 | [ ] |
-| R10-08 | MED | Kimi 2.0.0: mapper do formato antigo; supervised pode travar; existe `--plan` | 4.4 | [ ] |
-| R10-09 | MED | `resolveBin` cacheia `null` para sempre | 4.1 | [ ] |
-| R10-10 | MED | Mapper `generic-json` (mimo, cursor) não extrai texto, sessão nem custo | 4.4 | [ ] |
-| R10-11 | MED | Discovery do Antigravity lê o caminho errado | 4.4 | [ ] |
+| R10-04 | ALTO | `resolveBin` corrompe caminhos com acento (saída do `where` lida como UTF-8) | 4.1 | [x] |
+| R10-05 | ALTO | Custo contado 2–3x (Claude, OpenClaude, Antigravity) | 3.1 | [x] |
+| R10-06 | ALTO | OpenCode: modo do Hub não restringe nada; agente padrão com `allow *` | 4.2 | [x] |
+| R10-07 | MED | `ctx.model` ignorado por 8 dos 9 agentes; providerID fixo no OpenCode | 4.3 | [x] |
+| R10-08 | MED | Kimi 2.0.0: mapper do formato antigo; supervised pode travar; existe `--plan` | 4.4 | [x] |
+| R10-09 | MED | `resolveBin` cacheia `null` para sempre | 4.1 | [x] |
+| R10-10 | MED | Mapper `generic-json` (mimo, cursor) não extrai texto, sessão nem custo | 4.4 | [x] |
+| R10-11 | MED | Discovery do Antigravity lê o caminho errado | 4.4 | [x] |
 | R10-12 | MED | `raw` do evento não é truncado: 5 MB persistidos por tool_result | 2.5 | [ ] |
-| R10-13 | MED | Cursor: manifesto 100% não verificado e binário ausente | 4.5 | [ ] |
+| R10-13 | MED | Cursor: manifesto 100% não verificado e binário ausente | 4.5 | [x] |
 | R10-14 | BAIXO | OpenCode: `probe()` não devolve versão e afirma `authenticated:true` | — | [ ] |
-| R10-15 | BAIXO | Manifesto do Copilot cita duas versões que não batem com a instalada | 4.5 | [ ] |
+| R10-15 | BAIXO | Manifesto do Copilot cita duas versões que não batem com a instalada | 4.5 | [x] |
 | R10-16 | BAIXO | Codex falha em diretório não-git (falta `--skip-git-repo-check`) | — | [ ] |
 | R10-17 | BAIXO | Ruído `DEP0190` do Node; settings.json do Claude com conteúdo extra | 0.3 | [x] |
 
@@ -282,14 +282,14 @@ Como a contagem foi feita:
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R11-01 | ALTO | Antigravity totalmente quebrado com agy 1.2.6 (`-p` engole `--output-format`) | 0.2 | [x] |
-| R11-02 | ALTO | Copilot: prompt multilinha truncado, saída não mapeada, custo/tokens zerados | 0.3, 3.1 | [ ] |
-| R11-03 | ALTO | Turno trivial de Claude estoura teto de US$ 0,10; dupla contagem de custo | 3.1 | [ ] |
+| R11-02 | ALTO | Copilot: prompt multilinha truncado, saída não mapeada, custo/tokens zerados | 0.3, 3.1 | [x] |
+| R11-03 | ALTO | Turno trivial de Claude estoura teto de US$ 0,10; dupla contagem de custo | 3.1 | [x] |
 | R11-04 | MED | Sessão órfã `running` após recusa CODEX_GATE_NOT_GUARANTEED | 2.3 | [ ] |
 | R11-05 | MED | Codex supervised recusado; `send` em sessão concluída recusado (resume não validado) | — | [ ] |
 | R11-06 | MED | Supervised do Claude dispara aprovação por gravar plano em ~/.claude/plans | 1.7 | [x] |
 | R11-07 | MED | `send` em sessão bloqueada e `approve` disparam turnos extras e aprovações duplicadas | 2.4, 2.10 | [ ] |
-| R11-08 | BAIXO | Saída do CLI/stream: eventos crus, linhas vazias e brief ecoado | 4.2 | [ ] |
-| R11-09 | BAIXO | Manifestos apontam versões verificadas diferentes das instaladas | 4.5 | [ ] |
+| R11-08 | BAIXO | Saída do CLI/stream: eventos crus, linhas vazias e brief ecoado | 4.2 | [x] |
+| R11-09 | BAIXO | Manifestos apontam versões verificadas diferentes das instaladas | 4.5 | [x] |
 
 ## R12 — 12-testes-ci.md
 
