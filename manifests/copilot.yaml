@@ -12,7 +12,7 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  # Verificado contra o binário 1.0.70: `-p` recebe o TEXTO do prompt como
+  # Verificado contra o binário 1.0.70 (flags reconferidas no --help 1.0.88): `-p` recebe o TEXTO do prompt como
   # valor, não caminho de arquivo, e `--output-format json` emite JSONL — um
   # objeto por linha.
   #
@@ -33,7 +33,7 @@ invoke:
   env: {}
 
   # Verificado contra `copilot --help` e `copilot help permissions` (binário
-  # 1.1.17 nesta máquina): o único modo nativo de "só analisar, não agir" é
+  # 1.0.88 nesta máquina em 2026-09-26): o único modo nativo de "só analisar, não agir" é
   # `--mode plan` (choices: interactive, plan, autopilot) — o agente entra em
   # modo de plano e não invoca ferramentas de escrita/execução, então não
   # precisa de `--allow-all-tools` para não travar em modo não-interativo.
@@ -53,6 +53,19 @@ invoke:
     supervised: ["--mode", "plan"]
     semi: ["--allow-all-tools"]
     autonomous: ["--allow-all-tools"]
+
+# Verificado contra `copilot --help` (1.0.88): `--model <model>` — "use 'auto'
+# to let Copilot pick automatically". Sem modelo, o Copilot segue no auto.
+model:
+  supported: true
+  args: ["--model", "{{model}}"]
+  format: "id do modelo do Copilot (ex.: gpt-5.4) ou `auto`"
+
+verified:
+  status: verified
+  version: "1.0.88"
+  date: "2026-09-26"
+  notes: "flags conferidas no `copilot --help` 1.0.88 (so --help/--version, sem chamada de modelo)"
 
 session:
   # `--resume=<id>` existe e foi confirmado no help; o id vem no evento `result`,
@@ -79,7 +92,7 @@ defaults:
 
 caveats:
   - "O help diz que `--allow-all-tools` é necessário para modo não-interativo. Sem ele, tarefas que precisem de ferramenta podem parar esperando confirmação e estourar o heartbeat — prefira `--allow-tool=<ferramenta>` em extraArgs a liberar tudo."
-  - "modeArgs verificado contra `copilot --help`/`copilot help permissions` (1.1.17): supervised usa `--mode plan` (analisa, não age — restrição real). semi e autonomous são IDÊNTICOS (`--allow-all-tools`): o Copilot não tem um modo intermediário nativo, e sem essa flag o CLI trava em modo não-interativo (é o que o próprio --help documenta). A diferença entre semi e autonomous, neste agente, fica inteiramente por conta da vigilância reativa e do portão de aprovação do Hub — não do Copilot."
+  - "modeArgs verificado contra `copilot --help` e `copilot help permissions` (1.0.88): supervised usa `--mode plan` (analisa, não age — restrição real). semi e autonomous são IDÊNTICOS (`--allow-all-tools`): o Copilot não tem um modo intermediário nativo, e sem essa flag o CLI trava em modo não-interativo (é o que o próprio --help documenta). A diferença entre semi e autonomous, neste agente, fica inteiramente por conta da vigilância reativa e do portão de aprovação do Hub — não do Copilot."
   - "Fatura em créditos, não em dólares, e não reporta uso de entrada: o custo do Hub sai estimado e por baixo."
-  - "O modelo é escolhido automaticamente (`session.auto_mode_resolved`); a estimativa de custo usa o que ele escolheu, que muda entre execuções."
+  - "Sem modelo definido no Hub, o Copilot escolhe sozinho (`auto`, evento `session.auto_mode_resolved`) e a estimativa de custo usa o que ele escolheu, que muda entre execuções. Com modelo definido, o Hub passa `--model`."
   - "O id da sessão só aparece no evento final `result`, então o resume nativo só vale a partir do segundo turno."

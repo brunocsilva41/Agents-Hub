@@ -185,6 +185,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
     // no Windows, um prompt multilinha atravessando o cmd.exe quebra o comando.
     // `{{promptFile}}` grava o Brief em arquivo e passa só o caminho.
     const wantsPromptFile = argsTemplate.some((a) => a.includes('{{promptFile}}'));
+    // Valida o modelo ANTES de gravar o prompt em disco: se lançar depois, o
+    // arquivo ficaria órfão no tmpdir.
+    modeloDaRun(this.manifest, ctx);
     const promptFile = wantsPromptFile ? await writePromptFile(ctx.sessionId, prompt) : '';
 
     const { args } = montarInvocacao(this.manifest, ctx, argsTemplate, prompt, nativeSessionId, promptFile);
@@ -538,7 +541,9 @@ export interface InvocacaoMontada {
  */
 export function montarInvocacao(
   manifest: AgentManifest,
-  ctx: Pick<RunContext, 'mode' | 'workdir' | 'model' | 'extraArgs'>,
+  ctx: Pick<RunContext, 'mode' | 'workdir' | 'model' | 'extraArgs'> & {
+    env?: Record<string, string>;
+  },
   argsTemplate: readonly string[],
   prompt: string,
   nativeSessionId: string | null,
@@ -548,18 +553,24 @@ export function montarInvocacao(
   const wantsPromptFile = argsTemplate.some((a) => a.includes('{{promptFile}}'));
   const noArgv = !usesStdin && !wantsPromptFile;
 
+  const model = modeloDaRun(manifest, ctx);
+
   const vars: Record<string, string> = {
     prompt: noArgv ? prompt : '',
     promptFile,
     nativeSessionId: nativeSessionId ?? '',
     workdir: ctx.workdir,
-    model: ctx.model ?? '',
+    model,
   };
 
   // A política nativa do agente vem do modo da sessão: é o que impede o
   // sandbox do próprio CLI de contradizer o isolamento que o Hub já montou.
+  // O modelo entra como PAR de argumentos (`--model x`) e só quando existe:
+  // `{{model}}` vazio sumiria, mas a flag ficaria sozinha e engoliria o
+  // argumento seguinte.
   const args = [
     ...argsTemplate,
+    ...(model ? manifest.model.args : []),
     ...manifest.invoke.modeArgs[ctx.mode],
     ...manifest.invoke.extraArgs,
     ...(ctx.extraArgs ?? []),
@@ -578,6 +589,37 @@ export function montarInvocacao(
         : 'nenhuma';
   return { args, entrega };
 }
+
+/**
+ * Modelo desta run: `ctx.model` (escolha explícita da sessão/roteamento) ou,
+ * na falta dele, `MODEL` do env do projeto para o agente — é o que o campo
+ * "Modelo" das Configurações grava e que, até aqui, nenhum adapter lia
+ * (vistoria 2026-09-25, relatório 03).
+ *
+ * O valor vira argumento de linha de comando, então é validado: começar com
+ * `-` faria o CLI lê-lo como outra flag (ex.: um "modelo"
+ * `--dangerously-skip-permissions`), e caractere de controle não é nome de
+ * modelo de ninguém. Agente sem suporte (`model.supported: false`) ignora o
+ * modelo — não há flag para onde mandá-lo.
+ */
+export function modeloDaRun(
+  manifest: AgentManifest,
+  ctx: Pick<RunContext, 'model'> & { env?: Record<string, string> },
+): string {
+  const bruto = (ctx.model || ctx.env?.['MODEL'] || '').trim();
+  if (!bruto || !manifest.model.supported) return '';
+  if (bruto.startsWith('-') || CONTROLE.test(bruto) || bruto.length > 200) {
+    throw new HubError(
+      'ADAPTER_FAILURE',
+      `Modelo inválido para "${manifest.id}": não pode começar com "-", ter caractere de controle nem passar de 200 caracteres`,
+      { agentId: manifest.id },
+    );
+  }
+  return bruto;
+}
+
+// eslint-disable-next-line no-control-regex
+const CONTROLE = /[\u0000-\u001f\u007f]/;
 
 function applyTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => vars[key] ?? '');

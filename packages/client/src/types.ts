@@ -8,6 +8,18 @@ export interface AgentSummary {
   streamFormat: string;
   caveats: string[];
   loginHint: string;
+  /**
+   * Se o CLI aceita modelo por invocação. `supported: false` = não oferecer o
+   * controle de modelo para este agente (o valor não chegaria a ele).
+   */
+  model: { supported: boolean; format: string };
+  /** Contra qual versão do binário o manifesto foi conferido. */
+  verified: {
+    status: 'verified' | 'partial' | 'unverified';
+    version: string | null;
+    date: string;
+    notes: string;
+  };
   probe: ProbeSummary | null;
 }
 

@@ -1,6 +1,49 @@
 import { z } from 'zod';
 import type { EventCost, EventEnvelope, EventType, SessionMode } from '@agents-hub/core';
 
+const ModelSpecSchema = z
+  .object({
+    /** O CLI aceita modelo por invocação (flag/env conferidos no `--help`). */
+    supported: z.boolean().default(false),
+    /** Args acrescentados quando há modelo; devem conter `{{model}}`. */
+    args: z.array(z.string()).default([]),
+    /** Formato esperado do valor, para a UI (ex.: `provider/model`). */
+    format: z.string().default(''),
+  })
+  .default({})
+  .superRefine((m, ctx) => {
+    const usa = m.args.some((a) => a.includes('{{model}}'));
+    if (m.supported && !usa) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'model.supported: true exige `{{model}}` em model.args',
+      });
+    }
+    if (!m.supported && m.args.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'model.args só vale com model.supported: true',
+      });
+    }
+  });
+
+const VerifiedSchema = z
+  .object({
+    /**
+     * `verified`: flags conferidas contra o binário real nesta versão;
+     * `partial`: parte conferida, parte deduzida (ver caveats);
+     * `unverified`: nada conferido (binário ausente, flags de documentação).
+     */
+    status: z.enum(['verified', 'partial', 'unverified']).default('unverified'),
+    /** Versão do `--version` contra a qual o manifesto foi conferido. */
+    version: z.string().nullable().default(null),
+    /** Data (AAAA-MM-DD) da conferência. */
+    date: z.string().default(''),
+    /** Como foi conferido (só `--help`/`--version`, execução real etc.). */
+    notes: z.string().default(''),
+  })
+  .default({});
+
 /**
  * O manifesto é a peça que torna "adicionar agente" um arquivo YAML em vez de
  * um pull request. Todos os oito agentes do MVP são descritos por ele; só
@@ -31,7 +74,10 @@ export const AgentManifestSchema = z.object({
     .default({}),
 
   invoke: z.object({
-    /** Args de uma execução nova. Suporta `{{prompt}}`, `{{workdir}}`, `{{model}}`. */
+    /**
+     * Args de uma execução nova. Suporta `{{prompt}}`, `{{workdir}}`. O
+     * modelo NÃO vai aqui: vai em `model.args`, que só entra quando há modelo.
+     */
     oneShot: z.array(z.string()).min(1),
     /** Args para continuar uma sessão nativa. Suporta `{{nativeSessionId}}`. */
     resume: z.array(z.string()).optional(),
@@ -64,6 +110,29 @@ export const AgentManifestSchema = z.object({
       })
       .default({}),
   }),
+
+  /**
+   * Como o modelo escolhido pelo Hub (`ctx.model`, ou `MODEL` no env do
+   * projeto para o agente) chega ao CLI.
+   *
+   * Antes não existia: o `{{model}}` era aceito no template mas nenhum
+   * manifesto o usava, e o campo "Modelo" do painel não tinha efeito em 8 de
+   * 9 agentes (vistoria 2026-09-25, relatórios 03 e 10). Os `args` são
+   * acrescentados SÓ quando há modelo — uma flag `--model` sozinha, sem
+   * valor, engoliria o argumento seguinte.
+   *
+   * `supported: false` é a declaração honesta de "este CLI não aceita modelo
+   * por invocação (ou não foi verificado)": o `/agents` expõe isso para o
+   * painel e a CLI não oferecerem um controle sem efeito.
+   */
+  model: ModelSpecSchema,
+
+  /**
+   * Contra qual versão do binário real este manifesto foi conferido. O
+   * `status` é o que o painel mostra; `version` é comparável com o probe
+   * (`--version`) para acusar drift.
+   */
+  verified: VerifiedSchema,
 
   session: z
     .object({

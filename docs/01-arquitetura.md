@@ -125,7 +125,25 @@ auth:
   mode: inherit               # o Hub não toca em segredo
 cost:
   from: "$.usage"
+model:                        # como o modelo do Hub chega ao CLI
+  supported: true             # false = o CLI não aceita (ou não foi conferido)
+  args: ["-m", "{{model}}"]   # só entra quando há modelo
+  format: "id do modelo"
+verified:                     # contra qual binário o manifesto foi conferido
+  status: verified            # verified | partial | unverified
+  version: "0.155.0"
+  date: "2026-09-26"
 ```
+
+**Modelo por agente.** O modelo de uma run é `ctx.model` ou, na falta dele, a
+variável `MODEL` do env do projeto para aquele agente (o campo "Modelo" das
+Configurações). Ele só chega ao CLI se o manifesto declarar `model.supported:
+true` com a flag real conferida no `--help`; os `model.args` entram inteiros
+ou não entram (uma `--model` sem valor engoliria o argumento seguinte), e um
+valor que comece com `-` ou tenha caractere de controle é recusado. O
+`GET /agents` expõe `model: { supported, format }` e `verified` por agente:
+painel e CLI **não devem oferecer** o controle de modelo onde `supported` é
+`false`. Contrato fixado em `packages/adapters/src/manifest-model.test.ts`.
 
 ## 6. Como "qualquer um chama qualquer um"
 

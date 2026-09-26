@@ -43,6 +43,19 @@ invoke:
     semi: []
     autonomous: ["--yolo"]
 
+# Verificado contra `mimo run --help` (0.1.14): `-m, --model` — "model to use in
+# the format of provider/model".
+model:
+  supported: true
+  args: ["-m", "{{model}}"]
+  format: "provider/model"
+
+verified:
+  status: verified
+  version: "0.1.14"
+  date: "2026-09-26"
+  notes: "flags conferidas no `mimo run --help` 0.1.14 (so --help/--version, sem chamada de modelo)"
+
 session:
   strategy: native
 

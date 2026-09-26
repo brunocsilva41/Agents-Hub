@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -40,59 +40,154 @@ export interface LookupDeps {
   existsSync: (path: string) => boolean;
   /** Lê o conteúdo de um shim `.cmd`. Opcional: sem ele, usa o disco real. */
   readFileSync?: (path: string) => string;
+  /**
+   * "É um arquivo" (não diretório) — usado na varredura do PATH no Windows.
+   * Opcional: sem ele, cai em `existsSync` (o que os testes com disco falso
+   * injetam).
+   */
+  isFile?: (path: string) => boolean;
+  /** Ambiente de onde saem `PATH`/`PATHEXT`. Opcional: `process.env`. */
+  env?: NodeJS.ProcessEnv;
+  /** Relógio do cache negativo. Opcional: `Date.now`. */
+  now?: () => number;
 }
 
 export const defaultLookupDeps: LookupDeps = {
   execFileAsync: realExecFileAsync as LookupDeps['execFileAsync'],
   existsSync,
+  isFile: (p) => {
+    try {
+      return statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  },
 };
 
-const cache = new Map<string, ResolvedBin | null>();
+/**
+ * Por quanto tempo um "não achei" vale. Curto de propósito: antes o `null`
+ * ficava no cache para sempre, e um agente instalado (ou um PATH corrigido)
+ * depois do boot do daemon nunca era encontrado — o registry re-sondava a
+ * cada 5 min, mas `resolveBin` devolvia o `null` guardado (vistoria
+ * 2026-09-25, relatório 10). `clearBinCache()` no probe forçado
+ * (`hub doctor`, "Sondar de novo") zera na hora.
+ */
+export const BIN_CACHE_NEGATIVO_MS = 30_000;
+
+interface EntradaCache {
+  resolved: ResolvedBin | null;
+  em: number;
+}
+
+const cache = new Map<string, EntradaCache>();
 
 export async function resolveBin(
   bin: string,
   deps: LookupDeps = defaultLookupDeps,
 ): Promise<ResolvedBin | null> {
+  const agora = (deps.now ?? Date.now)();
   const cached = cache.get(bin);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    if (cached.resolved === null) {
+      if (agora - cached.em < BIN_CACHE_NEGATIVO_MS) return null;
+    } else if (deps.existsSync(cached.resolved.path)) {
+      // Positivo vale enquanto o arquivo existir: desinstalar o agente não
+      // deixa o Hub spawnando um caminho morto (ENOENT) até reiniciar.
+      return cached.resolved;
+    }
+  }
 
   const resolved = await lookup(bin, deps);
-  cache.set(bin, resolved);
+  cache.set(bin, { resolved, em: agora });
   return resolved;
 }
 
-export function clearBinCache(): void {
-  cache.clear();
+/** Esquece a resolução de `bin` (ou de todos, sem argumento). */
+export function clearBinCache(bin?: string): void {
+  if (bin === undefined) cache.clear();
+  else cache.delete(bin);
 }
 
 async function lookup(bin: string, deps: LookupDeps): Promise<ResolvedBin | null> {
   const isWindows = process.platform === 'win32';
-  const finder = isWindows ? 'where' : 'which';
 
-  try {
-    const { stdout } = await deps.execFileAsync(finder, [bin], { windowsHide: true });
-    const candidates = stdout
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+  if (isWindows) {
+    // `where` foi abandonado no Windows: ele imprime na code page OEM (cp850
+    // num Windows pt-BR) e a saída era decodificada como UTF-8 — qualquer
+    // caminho com acento (`C:\Users\João\...`) virava `Jo�o`, o probe
+    // "achava" o agente e o spawn falhava com ENOENT (vistoria 2026-09-25,
+    // relatório 10). Varrer PATH × PATHEXT aqui mesmo não depende de
+    // encoding nenhum: os nomes vêm do Node em UTF-16.
+    const candidates = candidatosNoPath(bin, deps);
     if (candidates.length === 0) return lookupFallback(bin, isWindows, deps);
 
-    if (!isWindows) {
-      return { path: candidates[0] as string, needsShell: false };
-    }
-
-    // `where codex` costuma devolver DUAS entradas: o script sh sem extensão
-    // (instalado pelo npm para o Git Bash) e o shim .cmd. A primeira linha é a
-    // sem extensão — e o Windows não sabe executá-la, dando ENOENT.
+    // A mesma varredura acha, na pasta do npm, o script sh sem extensão
+    // (instalado para o Git Bash) E o shim .cmd. O primeiro o Windows não
+    // sabe executar (ENOENT) — por isso a preferência .exe > .cmd/.bat.
     const best =
       candidates.find((c) => /\.exe$/i.test(c)) ??
       candidates.find((c) => /\.(cmd|bat)$/i.test(c)) ??
-      candidates[0] as string;
+      (candidates[0] as string);
 
     return comShimDesembrulhado(best, deps);
-  } catch {
-    return lookupFallback(bin, isWindows, deps);
   }
+
+  try {
+    const { stdout } = await deps.execFileAsync('which', [bin], { windowsHide: true });
+    const primeiro = stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0);
+    return primeiro ? { path: primeiro, needsShell: false } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Lê uma variável de ambiente sem diferenciar maiúsculas (regra do Windows). */
+function envWin(env: NodeJS.ProcessEnv, nome: string): string | undefined {
+  if (env[nome] !== undefined) return env[nome];
+  const chave = Object.keys(env).find((k) => k.toUpperCase() === nome.toUpperCase());
+  return chave === undefined ? undefined : env[chave];
+}
+
+/**
+ * Todos os arquivos que o Windows consideraria para `bin`, na ordem do PATH e,
+ * dentro de cada diretório, do PATHEXT — o mesmo que `where` listaria,
+ * inclusive o nome exato sem extensão.
+ *
+ * Diferença deliberada do `where`/`cmd`: o diretório CORRENTE não entra. O
+ * daemon roda agentes dentro de worktrees com conteúdo de terceiros; um
+ * `claude.cmd` plantado na raiz do repositório não pode ganhar do binário real.
+ */
+export function candidatosNoPath(bin: string, deps: LookupDeps = defaultLookupDeps): string[] {
+  const env = deps.env ?? process.env;
+  const ehArquivo = deps.isFile ?? deps.existsSync;
+  const exts = (envWin(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((e) => e.trim())
+    .filter((e) => e.startsWith('.'));
+  const nomes = [bin, ...exts.map((e) => bin + e.toLowerCase())];
+
+  const diretorios = path.isAbsolute(bin)
+    ? ['']
+    : (envWin(env, 'PATH') ?? '')
+        .split(';')
+        .map((d) => d.trim().replace(/^"(.*)"$/, '$1'))
+        .filter((d) => d.length > 0);
+
+  const vistos = new Set<string>();
+  const achados: string[] = [];
+  for (const dir of diretorios) {
+    for (const nome of nomes) {
+      const candidato = dir ? path.win32.join(dir, nome) : nome;
+      const chave = candidato.toLowerCase();
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      if (ehArquivo(candidato)) achados.push(candidato);
+    }
+  }
+  return achados;
 }
 
 function lookupFallback(

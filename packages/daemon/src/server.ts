@@ -226,6 +226,10 @@ export class HubServer {
           streamFormat: manifest.stream.format,
           caveats: manifest.caveats,
           loginHint: manifest.auth.loginHint,
+          // Painel/CLI só oferecem "Modelo" para quem declara suporte: nos
+          // demais o valor não chegaria ao CLI (vistoria 2026-09-25).
+          model: { supported: manifest.model.supported, format: manifest.model.format },
+          verified: manifest.verified,
           probe: byId.get(manifest.id) ?? null,
         })),
       });
