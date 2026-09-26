@@ -28,6 +28,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Menor privilégio: nenhum job aqui escreve no repositório, abre PR, comenta
+# ou publica pacote. Sem este bloco o `GITHUB_TOKEN` herda o padrão da
+# organização — que pode ser escrita — e um passo comprometido (uma action de
+# terceiro, um script de `postinstall` de dependência) ganharia push em `main`.
+permissions:
+  contents: read
+
 # Um push novo no mesmo branch cancela a execução anterior: o que interessa é
 # o veredito sobre o topo, não sobre um commit que já foi substituído.
 concurrency:
@@ -118,8 +125,42 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      # O mesmo `verify` que se roda localmente. Teste que depende de
+      # Windows (junction, shim `.cmd`, `cmd.exe`) já se marca `skip` por
+      # plataforma, com o motivo, no próprio arquivo de teste.
+      - run: npm run verify
+
+  # ------------------------------------------------ informativo: cobertura
+  # Medir antes de exigir (item 7.2 do GOAL): o número por pacote aparece no
+  # resumo do job e o `lcov.info` fica como artefato. Nenhuma meta é imposta
+  # ainda — quando houver, este job perde o `continue-on-error`.
+  cobertura:
+    name: cobertura (informativo)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
       - run: npm run build
-      - run: npm test
+      - name: Suíte com cobertura
+        shell: bash
+        run: |
+          npm run coverage | tee cobertura.txt
+          {
+            echo '```'
+            sed -n '/^Cobertura por pacote/,/^lcov:/p' cobertura.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lcov
+          path: coverage/lcov.info
+          if-no-files-found: ignore
 
   # --------------------------------------------------- informativo, de novo
   # Dependência transitiva com CVE conhecido é dívida que se acumula em

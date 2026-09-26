@@ -44,6 +44,11 @@ function exigir(ok, descricao, detalhe) {
 
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Porta "provavelmente livre" para o daemon filho. Tem corrida (fecha antes de
+ * o daemon ligar) — `subirDaemon` a compensa com nova tentativa e checagem de
+ * identidade. Nos testes em processo use `createHub({ port: 0 })`, que não tem.
+ */
 function portaLivre() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -137,6 +142,76 @@ function achatar(nos) {
   return nos.flatMap((n) => [n, ...achatar(n.children ?? [])]);
 }
 
+/**
+ * O daemon em `base` é o que subimos? Só ele conhece o token de operador
+ * gravado na nossa home temporária: com esse token, uma rota de operador passa
+ * da autenticação (a aprovação não existe, então não é 2xx — mas não é 401).
+ */
+async function ehNosso(base, home) {
+  let token;
+  try {
+    token = readFileSync(path.join(home, 'operator-token'), 'utf8').trim();
+  } catch {
+    return false;
+  }
+  try {
+    const r = await http(base, 'POST', '/approvals/apv_demoinexistente', { decision: 'approved' }, token);
+    return r.status !== 401 && r.status !== 403;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Uma tentativa de subir o daemon isolado. Devolve a base quando `/health`
+ * responde, ou `null` se o processo morreu antes (porta tomada) — quem chama
+ * tenta de novo com outra porta.
+ */
+async function subirDaemon(ctx, home) {
+  const porta = await portaLivre();
+  const base = `http://127.0.0.1:${porta}`;
+  const saida = [];
+  const filho = spawn(process.execPath, ['--experimental-sqlite', daemonMain], {
+    cwd: raizDoRepo,
+    env: {
+      ...process.env,
+      AGENTS_HUB_HOME: home,
+      AGENTS_HUB_PORT: String(porta),
+      AGENTS_HUB_NO_AUTOSTART: '1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  filho.stdout.on('data', (d) => saida.push(String(d)));
+  filho.stderr.on('data', (d) => saida.push(String(d)));
+  const morreu = new Promise((resolve) => filho.once('exit', (code) => resolve(code)));
+  ctx.daemon = filho;
+  ctx.saida = saida;
+  ctx.morreu = morreu;
+  ctx.base = base;
+
+  const limite = Date.now() + 20_000;
+  while (Date.now() < limite && filho.exitCode === null) {
+    try {
+      const r = await http(base, 'GET', '/health');
+      if (r.status === 200 && r.json?.ok === true) {
+        if (await ehNosso(base, home)) return base;
+        break; // outro servidor nesta porta: esta tentativa não serve
+      }
+    } catch {
+      /* ainda subindo */
+    }
+    await dormir(150);
+  }
+  if (filho.exitCode === null) {
+    filho.kill('SIGKILL');
+    await Promise.race([morreu, dormir(3000)]);
+  }
+  ctx.daemon = null;
+  ctx.base = null;
+  return null;
+}
+
 async function main(ctx) {
   console.log('Demo E2E do Agents-Hub (agentes falsos, custo zero)\n');
 
@@ -157,46 +232,24 @@ async function main(ctx) {
   writeFileSync(path.join(manifestos, 'filho.yaml'), manifesto('filho', script, 5000), 'utf8');
   writeFileSync(path.join(manifestos, 'neto.yaml'), manifesto('neto', script, 300), 'utf8');
 
-  const porta = await portaLivre();
-  const base = `http://127.0.0.1:${porta}`;
-  ctx.base = base;
-
-  const saida = [];
-  const filho = spawn(process.execPath, ['--experimental-sqlite', daemonMain], {
-    cwd: raizDoRepo,
-    env: {
-      ...process.env,
-      AGENTS_HUB_HOME: home,
-      AGENTS_HUB_PORT: String(porta),
-      AGENTS_HUB_NO_AUTOSTART: '1',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  ctx.daemon = filho;
-  filho.stdout.on('data', (d) => saida.push(String(d)));
-  filho.stderr.on('data', (d) => saida.push(String(d)));
-  ctx.saida = saida;
-  const morreu = new Promise((resolve) => filho.once('exit', (code) => resolve(code)));
-  ctx.morreu = morreu;
-
   // --- 1. daemon no ar ------------------------------------------------------
-  let saude = null;
-  const limite = Date.now() + 20_000;
-  while (Date.now() < limite) {
-    try {
-      const r = await http(base, 'GET', '/health');
-      if (r.status === 200) {
-        saude = r.json;
-        break;
-      }
-    } catch {
-      /* ainda subindo */
-    }
-    await dormir(150);
+  //
+  // O daemon é OUTRO processo, e `AGENTS_HUB_PORT` não aceita 0: a porta é
+  // reservada aqui e solta antes do spawn — janela em que outro processo da
+  // máquina pode pegá-la. Por isso: (a) se o daemon morrer na subida (porta
+  // tomada), tenta outra porta; (b) "respondeu /health" não basta — quem
+  // respondeu precisa aceitar o token de operador gravado na NOSSA home
+  // temporária, senão a demo estaria falando com o servidor de outra pessoa.
+  let base = null;
+  for (let tentativa = 1; tentativa <= 5 && base === null; tentativa += 1) {
+    base = await subirDaemon(ctx, home);
   }
-  exigir(saude?.ok === true, `daemon isolado no ar em ${base}`, `home ${home}`);
-  exigir(path.resolve(saude.home) === path.resolve(home), '/health reporta a home temporária (não toca ~/.agents-hub)');
+  exigir(base !== null, 'daemon isolado no ar', `home ${home}
+${(ctx.saida ?? []).join('')}`);
+  passo(true, `daemon isolado no ar em ${base}`, `home ${home}`);
+  // `subirDaemon` só devolve a base depois de `ehNosso`: o registro abaixo é
+  // a evidência explícita de que não é o daemon do usuário.
+  exigir(await ehNosso(base, home), 'o daemon na porta aceita o token da home temporária (não toca ~/.agents-hub)');
 
   // --- 2. painel web --------------------------------------------------------
   if (existsSync(webIndex)) {
