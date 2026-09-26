@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -20,18 +19,6 @@ import { operatorTokenPath } from './operator-auth.js';
  * ignorado (vem da origem autenticada); a Web UI recebe o token por cookie
  * HttpOnly ao carregar `/`; e o ambiente do agente NÃO contém o token.
  */
-
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const a = srv.address();
-      const porta = typeof a === 'object' && a ? a.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 interface Resposta {
   status: number;
@@ -127,14 +114,13 @@ defaults:
       'utf8',
     );
 
-    porta = await portaLivre();
     hub = createHub({
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
-      port: porta,
+      port: 0,
       policy: { ...DEFAULT_POLICY, watch: { pauseOn: [], flagOn: [] } },
     });
-    await hub.start();
+    porta = (await hub.start()).port;
     projectId = hub.sessions.registerProject(projetoDir, 'projeto').id;
   });
 
@@ -310,14 +296,21 @@ defaults:
         supervision: 'semi',
       },
     });
+    // Espera o arquivo existir E estar completo (JSON válido): um respiro fixo
+    // depois do `existsSync` podia ler a escrita pela metade num runner lento.
     const limite = Date.now() + 20_000;
-    while (!existsSync(envDump)) {
+    let bruto = '';
+    let env: Record<string, string> | null = null;
+    while (env === null) {
       if (Date.now() > limite) throw new Error('o agente de teste não gravou o ambiente');
-      await new Promise((r) => setTimeout(r, 50));
+      try {
+        bruto = existsSync(envDump) ? readFileSync(envDump, 'utf8') : '';
+        env = bruto ? (JSON.parse(bruto) as Record<string, string>) : null;
+      } catch {
+        env = null;
+      }
+      if (env === null) await new Promise((r) => setTimeout(r, 50));
     }
-    await new Promise((r) => setTimeout(r, 100));
-    const bruto = readFileSync(envDump, 'utf8');
-    const env = JSON.parse(bruto) as Record<string, string>;
 
     // Prova de que é o ambiente montado pelo Hub para ESTA sessão.
     assert.equal(env['AGENTS_HUB_SESSION_ID'], started.session.id);

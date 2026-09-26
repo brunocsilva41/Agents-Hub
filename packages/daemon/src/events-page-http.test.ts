@@ -1,24 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { newId, nowIso, type EventEnvelope, type Session } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
-/** Porta livre reservada antes do Hub: a guarda de borda compara o `Host` com ela. */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 /**
  * `GET /sessions/:id/events` pelo fim (`tail=1`) e para trás (`before=`).
@@ -41,7 +28,7 @@ describe('HTTP: página de eventos pelo fim', () => {
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
       webRoot: path.join(raiz, 'sem-web'),
-      port: await portaLivre(),
+      port: 0,
     });
     const { host, port } = await hub.start();
     baseUrl = `http://${host}:${port}`;

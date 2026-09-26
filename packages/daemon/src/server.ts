@@ -155,6 +155,13 @@ export class HubServer {
       server.on('error', reject);
       server.listen(this.config.port, this.config.host, () => {
         this.#server = server;
+        // `port: 0` pede ao SO uma porta livre, ligada atomicamente. A porta
+        // REAL volta para a config porque a guarda valida Host/Origin contra
+        // ela (e `baseUrl` a usa): ficar com 0 recusaria toda requisição.
+        // Testes dependem disto — "abrir 0, ler, fechar e reabrir" é corrida
+        // com qualquer outro processo da máquina.
+        const endereco = server.address();
+        if (endereco !== null && typeof endereco === 'object') this.config.port = endereco.port;
         resolve({ host: this.config.host, port: this.config.port });
       });
     });

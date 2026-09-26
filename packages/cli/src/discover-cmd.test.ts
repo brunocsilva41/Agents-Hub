@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -140,17 +139,6 @@ describe('hub discover / import — contra o daemon', () => {
   let home: string;
   const SEGREDO = 'SEGREDO-CLI-0123456789abcdef';
 
-  function portaLivre(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const srv = createServer();
-      srv.once('error', reject);
-      srv.listen(0, '127.0.0.1', () => {
-        const a = srv.address();
-        const p = typeof a === 'object' && a ? a.port : 0;
-        srv.close(() => resolve(p));
-      });
-    });
-  }
 
   before(async () => {
     raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-cli-abs-'));
@@ -169,7 +157,7 @@ describe('hub discover / import — contra o daemon', () => {
       );
     }
     hub = createHub(
-      { home: path.join(raiz, 'hh'), manifestsDir: manifestos, port: await portaLivre() },
+      { home: path.join(raiz, 'hh'), manifestsDir: manifestos, port: 0 },
       {
         homeDir: home,
         discoverAgent: async (id) =>

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -30,17 +29,6 @@ process.stdout.write('agente de teste no ar\\n');
 setTimeout(() => process.exit(0), ms);
 `;
 
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 function manifesto(id: string, script: string, dormirMs: number): string {
   const esc = script.replace(/\\/g, '\\\\');
@@ -171,14 +159,13 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     writeFileSync(path.join(manifestos, 'dorminhoco.yaml'), manifesto('dorminhoco', script, 30_000), 'utf8');
     writeFileSync(path.join(manifestos, 'rapido.yaml'), manifesto('rapido', script, 800), 'utf8');
 
-    const porta = await portaLivre();
     hub = createHub({
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
-      port: porta,
+      port: 0,
       policy: { ...DEFAULT_POLICY, watch: { pauseOn: [], flagOn: [] } },
     });
-    await hub.start();
+    const porta = (await hub.start()).port;
     base = `http://127.0.0.1:${porta}`;
     projetoId = hub.sessions.registerProject(projetoPath, 'Gate bloqueante').id;
   });

@@ -1,29 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { makeEvent, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
-/**
- * `port: 0` deixaria o SO escolher a porta, mas a guarda de borda (`guard.ts`)
- * compara o `Host` da requisição contra `config.port` — que continuaria `0`
- * depois do `listen`, pois só o retorno de `server.listen()` sabe a porta
- * real. Por isso reservamos uma porta livre ANTES de montar o Hub.
- */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 /**
  * Endurecimento do SSE (Fase 5), exercitado contra o daemon HTTP de verdade —
@@ -87,7 +69,7 @@ defaults:
     hub = createHub({
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
-      port: await portaLivre(),
+      port: 0,
       maxSseConnections: 1,
     });
     const { host, port } = await hub.start();

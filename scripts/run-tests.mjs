@@ -19,35 +19,11 @@
  * Node 22, que é o mínimo declarado em `engines`. No 24 ela é aceita e ignorada.
  */
 import { spawn } from 'node:child_process';
-import { readdirSync, existsSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { descobrirTestes, raizDoRepo } from './test-files.mjs';
 
-const raizDoRepo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const pacotes = path.join(raizDoRepo, 'packages');
-
-/** Todos os `*.test.js` sob o `dist/` de cada pacote, em qualquer profundidade. */
-function encontrarTestes(dir) {
-  const achados = [];
-  for (const entrada of readdirSync(dir, { withFileTypes: true })) {
-    const completo = path.join(dir, entrada.name);
-    if (entrada.isDirectory()) achados.push(...encontrarTestes(completo));
-    else if (entrada.name.endsWith('.test.js')) achados.push(completo);
-  }
-  return achados;
-}
-
-// `dist-test` é o do painel web: o `dist/` dele é a build do Vite (apagada a
-// cada `vite build`), então a lógica pura e os testes compilam à parte
-// (`packages/web/tsconfig.test.json`).
-const arquivos = [];
-for (const pacote of readdirSync(pacotes, { withFileTypes: true })) {
-  if (!pacote.isDirectory()) continue;
-  for (const saida of ['dist', 'dist-test']) {
-    const dir = path.join(pacotes, pacote.name, saida);
-    if (existsSync(dir)) arquivos.push(...encontrarTestes(dir));
-  }
-}
+// Descoberta (inclusive o `dist-test` do painel web) em `test-files.mjs`,
+// compartilhada com `coverage.mjs`.
+const arquivos = descobrirTestes();
 
 // Suíte vazia é o modo de falha que este script existe para impedir: quase
 // sempre significa "esqueci de compilar", e sair 0 aqui devolveria verde a um

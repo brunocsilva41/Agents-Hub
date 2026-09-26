@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -12,17 +11,6 @@ import { createHub, type Hub } from './hub.js';
  * conferido (`verified`) — é o dado que o painel e a CLI usam para NÃO
  * oferecer "Modelo" onde o valor não chegaria ao agente.
  */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 const COM_MODELO = `id: com-modelo
 name: Com modelo
@@ -57,9 +45,8 @@ describe('GET /agents expõe suporte a modelo e verificação do manifesto', () 
     mkdirSync(manifestos, { recursive: true });
     writeFileSync(path.join(manifestos, 'a.yaml'), COM_MODELO);
     writeFileSync(path.join(manifestos, 'b.yaml'), SEM_MODELO);
-    porta = await portaLivre();
-    hub = createHub({ home: path.join(raiz, 'home'), manifestsDir: manifestos, port: porta });
-    await hub.start();
+    hub = createHub({ home: path.join(raiz, 'home'), manifestsDir: manifestos, port: 0 });
+    porta = (await hub.start()).port;
   });
 
   after(async () => {
