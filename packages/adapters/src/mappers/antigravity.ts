@@ -59,13 +59,19 @@ export function antigravityMapper(line: unknown): MappedEvent[] {
           });
         }
 
+        // Uso por etapa é ESTIMATIVA: o `result` do fim traz o total do turno
+        // e o substitui. Somar os dois contava o turno em dobro (vistoria
+        // 2026-09-25, relatório 10). Atualizações da mesma etapa se substituem.
         if (usage && events.length > 0) {
           const last = events[events.length - 1];
           if (last) {
+            const etapa = numberOf(step['step_index']);
             last.cost = {
               inputTokens: numberOf(usage['input_tokens']),
               outputTokens: numberOf(usage['output_tokens']),
               cachedTokens: numberOf(usage['cache_read_tokens']),
+              provisional: true,
+              ...(etapa !== undefined ? { partId: `step:${etapa}` } : {}),
             };
           }
         }
@@ -128,13 +134,21 @@ export function antigravityMapper(line: unknown): MappedEvent[] {
           durationSeconds: numberOf(res['duration_seconds']),
           numTurns: numberOf(res['num_turns']),
         },
-        cost: {
-          inputTokens: numberOf(usage?.['input_tokens']),
-          outputTokens: numberOf(usage?.['output_tokens']),
-          cachedTokens: numberOf(usage?.['cache_read_tokens']),
-        },
         raw: line,
       };
+      // Total do turno: substitui as estimativas por etapa. Sem nenhum número
+      // de entrada/saída o `result` não vira custo — um final "vazio" apagaria
+      // a estimativa e o turno sairia de graça; assim o Hub fecha a conta com
+      // a estimativa acumulada.
+      const inputTokens = numberOf(usage?.['input_tokens']);
+      const outputTokens = numberOf(usage?.['output_tokens']);
+      if (inputTokens !== undefined || outputTokens !== undefined) {
+        mapped.cost = {
+          inputTokens,
+          outputTokens,
+          cachedTokens: numberOf(usage?.['cache_read_tokens']),
+        };
+      }
       if (resConvId) mapped.nativeSessionId = resConvId;
       return [mapped];
     }

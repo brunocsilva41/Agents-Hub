@@ -10,6 +10,7 @@ export { agentOwnDirs, matchSensitivePath, type SensitiveMatch } from './sensiti
 export * from './folders.js';
 export * from './agent-env.js';
 export * from './budget.js';
+export * from './turn-cost.js';
 export * from './pricing.js';
 export * from './graph.js';
 export * from './resilience.js';

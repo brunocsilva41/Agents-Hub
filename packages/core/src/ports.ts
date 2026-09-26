@@ -62,10 +62,20 @@ export interface EventRepository {
     taskId?: string;
     sinceSeq?: number;
     types?: EventType[];
+    /** Máximo de eventos (1..5000; padrão 500). */
     limit?: number;
+    /**
+     * `true` devolve os ÚLTIMOS `limit` eventos (ainda em ordem crescente de
+     * `seq`). Sem isto, o corte pega o começo — que é o que o replay e o
+     * `hub_context_fetch` entregavam por engano em sessões longas.
+     */
+    tail?: boolean;
   }): EventEnvelope[];
   lastSeq(sessionId: string): number;
-  /** Custo acumulado de uma sessão, somando o `cost` dos eventos. */
+  /**
+   * Custo acumulado de uma sessão, somando o `cost` dos eventos — exceto as
+   * estimativas parciais (`cost.provisional`), que o custo final substitui.
+   */
   costOf(sessionId: string): BudgetUsage;
   /**
    * Compacta (zera) `raw_json` de eventos cuja sessão terminou antes de

@@ -33,8 +33,34 @@ export type EventType =
 export interface EventCost {
   inputTokens?: number;
   outputTokens?: number;
+  /** Tokens LIDOS do cache. */
   cachedTokens?: number;
+  /** Tokens ESCRITOS no cache (Anthropic cobra 1,25x a entrada por eles). */
+  cacheWriteTokens?: number;
   usd?: number;
+  /**
+   * Estimativa parcial do turno em andamento — NÃO é somada em lugar nenhum
+   * (store, grafo, orçamento). O custo final do turno (o `result` do Claude,
+   * por exemplo) substitui todas as parciais; se o turno morrer sem ele, o
+   * Hub fecha a conta com a última estimativa num evento próprio.
+   *
+   * Existe porque o Claude repete o `usage` completo da mesma mensagem em cada
+   * linha do stream e ainda manda o total no `result`: somar tudo contava o
+   * turno duas ou três vezes.
+   */
+  provisional?: boolean;
+  /**
+   * Identidade da parcial (ex.: `message.id` do Claude). Parciais com o mesmo
+   * `partId` se substituem; com ids diferentes, somam dentro do turno.
+   */
+  partId?: string;
+  /**
+   * `usd` é o ACUMULADO da sessão nativa, não o incremento deste evento (os
+   * créditos do Copilot vêm assim). Sempre acompanha `provisional: true`.
+   */
+  cumulative?: boolean;
+  /** Créditos informados pelo agente (Copilot: AI Credits), quando houver. */
+  credits?: number;
 }
 
 export interface EventEnvelope {

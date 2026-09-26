@@ -595,7 +595,9 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'brief e devolve os eventos ao redor dela. A delegação passa ponteiros em vez de ' +
         'texto: busque só o que você realmente precisar ver.',
       inputSchema: {
-        ref: z.string().describe('ex.: "session:ses_abc#event:42" ou "session:ses_abc"'),
+        ref: z
+          .string()
+          .describe('ex.: "session:ses_abc#event:42" ou "session:ses_abc" (os 200 eventos mais recentes)'),
       },
       annotations: { readOnlyHint: true },
     },

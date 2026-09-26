@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test, describe } from 'node:test';
 import {
   AGENT_FALLBACK_MODEL,
+  COPILOT_USD_PER_AI_CREDIT,
   MODEL_PRICES,
   combineCostEstimates,
   estimateTokenCost,
@@ -105,7 +106,7 @@ describe('fallback por agente', () => {
     assert.equal(estimate.confidence, 'agent-default', 'a UI precisa saber que foi chute');
     assert.equal(estimate.agentId, 'codex');
     assert.equal(estimate.model, AGENT_FALLBACK_MODEL['codex']);
-    assert.equal(estimate.usd, 1.75);
+    assert.equal(estimate.usd, findModelPrice(AGENT_FALLBACK_MODEL['codex'])?.inputPerMTok);
   });
 
   test('agente sem modelo padrão apurado continua unknown', () => {
@@ -183,7 +184,9 @@ describe('agregação de custo do fluxo', () => {
 
     assert.equal(total.usd, 1, 'o gasto real é pelo menos isso');
     assert.equal(total.basis, 'estimated');
-    assert.equal(total.confidence, 'agent-default');
+    // `partial`, não `agent-default`: nenhum modelo-padrão de agente entrou
+    // na conta (vistoria 2026-09-25, relatório 09).
+    assert.equal(total.confidence, 'partial');
   });
 
   test('tudo desconhecido continua desconhecido', () => {
@@ -205,7 +208,8 @@ describe('integridade da tabela', () => {
       assert.match(price.source, /^https:\/\//, `${price.id} sem fonte`);
       assert.match(price.collectedAt, /^\d{4}-\d{2}-\d{2}$/, `${price.id} sem data`);
       assert.ok(price.outputPerMTok >= price.inputPerMTok, `${price.id}: saída barata demais`);
-      assert.ok(price.cacheReadPerMTok < price.inputPerMTok, `${price.id}: cache caro demais`);
+      // `<=`: os `-pro` da OpenAI não publicam desconto de cache (cobra como entrada).
+      assert.ok(price.cacheReadPerMTok <= price.inputPerMTok, `${price.id}: cache caro demais`);
     }
   });
 
@@ -213,5 +217,70 @@ describe('integridade da tabela', () => {
     for (const [agentId, modelId] of Object.entries(AGENT_FALLBACK_MODEL)) {
       assert.ok(findModelPrice(modelId), `${agentId} aponta para ${modelId}, que não existe`);
     }
+  });
+});
+
+/**
+ * Fase 3.4 (vistoria 2026-09-25, relatório 09 + conferência nas páginas
+ * oficiais em 2026-09-26): modelos atuais caíam no preço do irmão errado pelo
+ * casamento por prefixo, variantes saíam como "modelo exato", e escrita de
+ * cache era ignorada.
+ */
+describe('revisão de preços 2026-09-26', () => {
+  const MTOK = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+
+  test('Opus 5.5 (padrão do Claude Code) não herda o preço do Opus 5', () => {
+    const e = estimateTokenCost(MTOK, { model: 'claude-opus-5-5' });
+    assert.equal(e.model, 'claude-opus-5-5');
+    assert.equal(e.usd, 24, '4 entrada + 20 saída');
+    assert.equal(findModelPrice('claude-opus-5-5[1m]')?.id, 'claude-opus-5-5', 'sufixo [1m] do Claude Code');
+    assert.equal(AGENT_FALLBACK_MODEL['claude'], 'claude-opus-5-5');
+  });
+
+  test('irmãos com preço próprio não caem no alias mais curto', () => {
+    assert.equal(findModelPrice('gpt-5.5-pro')?.id, 'gpt-5-5-pro');
+    assert.equal(findModelPrice('gemini-3.8-flash')?.id, 'gemini-3-8-flash');
+    assert.equal(findModelPrice('gemini-3-flash-preview')?.id, 'gemini-3-flash');
+    assert.equal(findModelPrice('claude-fable-5-1')?.cacheReadPerMTok, 0.25);
+    assert.equal(findModelPrice('kimi-k2.7-code-highspeed')?.id, 'kimi-k2-7-code-highspeed');
+    assert.equal(findModelPrice('gpt-6-sol')?.inputPerMTok, 2);
+  });
+
+  test('Kimi K2.6: leitura de cache publicada é 0,16', () => {
+    assert.equal(findModelPrice('kimi-k2-6')?.cacheReadPerMTok, 0.16);
+  });
+
+  test('fontes de agregador saíram das linhas verificadas', () => {
+    for (const price of MODEL_PRICES) {
+      if (price.note?.startsWith('NÃO VERIFICADO')) continue;
+      assert.doesNotMatch(price.source, /pricepertoken|benchlm/, `${price.id} ainda cita agregador`);
+    }
+  });
+
+  test('variante fora da tabela sai como família, sufixo de data continua modelo', () => {
+    assert.equal(estimateTokenCost(MTOK, { model: 'gpt-5.3-codex-spark' }).confidence, 'family');
+    assert.equal(estimateTokenCost(MTOK, { model: 'claude-opus-5-fast' }).confidence, 'family');
+    assert.equal(estimateTokenCost(MTOK, { model: 'claude-opus-4-5-20251101' }).confidence, 'model');
+    assert.equal(estimateTokenCost(MTOK, { model: 'gemini-3.1-pro-preview' }).confidence, 'model');
+  });
+
+  test('escrita de cache é cobrada (Anthropic: 1,25x a entrada)', () => {
+    const e = estimateTokenCost(
+      { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 1_000_000 },
+      { model: 'claude-opus-5' },
+    );
+    assert.equal(e.usd, 6.25);
+  });
+
+  test('subset: cache maior que a entrada não é cobrado cheio', () => {
+    const e = estimateTokenCost(
+      { inputTokens: 100, cachedTokens: 1_000_000 },
+      { model: 'gpt-5-3-codex' },
+    );
+    assert.ok(e.usd < 0.001, `US$ ${e.usd} por 100 tokens de entrada`);
+  });
+
+  test('crédito do Copilot vale US$ 0,01', () => {
+    assert.equal(COPILOT_USD_PER_AI_CREDIT, 0.01);
   });
 });
