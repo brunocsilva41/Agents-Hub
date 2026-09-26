@@ -19,3 +19,7 @@ packages/web/dist/
 # `git add -A` distraído publicaria tudo isso. Nunca versionar.
 session-export-*/
 session-export-*.zip
+# Exports de conversa em texto (`/export` do Claude Code grava
+# `AAAA-MM-DD-HHMMSS-*.txt` na raiz) e notas soltas de sessão: mesmo motivo.
+/*.txt
+.claude/worktrees/
