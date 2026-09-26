@@ -80,7 +80,16 @@ export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } 
     }
 
     case 'error':
-      return `${time} ${who}${red('✗')} ${textOf(p['message'] ?? p['error'] ?? p['text'])}`;
+      // O daemon também emite `{reason, exitCode, error: null}` (cancelamento,
+      // processo que saiu): sem o fallback a linha ficava só "✗ ".
+      return `${time} ${who}${red('✗')} ${textOf(
+        p['message'] ??
+          p['error'] ??
+          p['text'] ??
+          [p['reason'], p['exitCode'] != null ? `código ${String(p['exitCode'])}` : null]
+            .filter((x) => x !== undefined && x !== null && x !== '')
+            .join(' · '),
+      )}`;
 
     case 'session.ended':
       return `${time} ${who}${dim(`▪ sessão encerrada (${String(p['reason'] ?? '')})`)}`;
