@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { nowIso, newId, HubError } from '@agents-hub/core';
 import { AsyncQueue } from './async-queue.js';
-import { quoteForShell, resolveBin } from './bin-resolver.js';
+import { montarSpawn, resolveBin, type ResolvedBin } from './bin-resolver.js';
 import { resolveMapper } from './mappers/index.js';
 import { killProcessTree } from './process-tree.js';
 import type {
@@ -187,26 +187,24 @@ export class ProcessAgentAdapter implements AgentAdapter {
     const wantsPromptFile = argsTemplate.some((a) => a.includes('{{promptFile}}'));
     const promptFile = wantsPromptFile ? await writePromptFile(ctx.sessionId, prompt) : '';
 
-    const vars: Record<string, string> = {
-      prompt: usesStdin || wantsPromptFile ? '' : prompt,
-      promptFile,
-      nativeSessionId: nativeSessionId ?? '',
-      workdir: ctx.workdir,
-      model: ctx.model ?? '',
-    };
+    const { args } = montarInvocacao(this.manifest, ctx, argsTemplate, prompt, nativeSessionId, promptFile);
 
-    // A política nativa do agente vem do modo da sessão: é o que impede o
-    // sandbox do próprio CLI de contradizer o isolamento que o Hub já montou.
-    const args = [
-      ...argsTemplate,
-      ...this.manifest.invoke.modeArgs[ctx.mode],
-      ...this.manifest.invoke.extraArgs,
-      ...(ctx.extraArgs ?? []),
-    ]
-      .map((arg) => applyTemplate(arg, vars))
-      // Um placeholder vazio (ex.: `{{model}}` sem modelo definido) some do
-      // comando em vez de virar um argumento em branco que quebra o parser.
-      .filter((arg) => arg.length > 0);
+    // Monta o spawn sem `shell: true`: shim npm vira `node script`/`.exe` real,
+    // e só um `.cmd` desconhecido passa pelo `cmd.exe`, com escape próprio.
+    // Se nem assim der para entregar o prompt íntegro (multilinha ou longo
+    // demais para o `cmd`), falha AQUI, explicando, em vez de rodar o agente
+    // com metade do Brief.
+    let comando: ReturnType<typeof montarSpawn>;
+    try {
+      comando = montarSpawn(resolved, args);
+    } catch (err) {
+      if (promptFile) await unlink(promptFile).catch(() => {});
+      throw new HubError(
+        'ADAPTER_FAILURE',
+        `Não dá para invocar "${this.manifest.id}" com segurança: ${(err as Error).message}`,
+        { agentId: this.manifest.id, bin: resolved.path },
+      );
+    }
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -217,17 +215,14 @@ export class ProcessAgentAdapter implements AgentAdapter {
       AGENTS_HUB_AGENT_ID: ctx.agentId,
     };
 
-    const child = spawn(
-      resolved.needsShell ? quoteForShell(resolved.path) : resolved.path,
-      resolved.needsShell ? args.map(quoteForShell) : args,
-      {
-        cwd: ctx.workdir,
-        env,
-        shell: resolved.needsShell,
-        windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      },
-    ) as ChildProcessWithoutNullStreams;
+    const child = spawn(comando.file, comando.args, {
+      cwd: ctx.workdir,
+      env,
+      shell: false,
+      windowsVerbatimArguments: comando.windowsVerbatimArguments,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }) as ChildProcessWithoutNullStreams;
 
     /**
      * Mantém o heartbeat vivo enquanto `child.stdout` está pausado por
@@ -524,6 +519,66 @@ async function writePromptFile(sessionId: string, prompt: string): Promise<strin
   return file;
 }
 
+/** Como o prompt chega ao CLI numa invocação montada por `montarInvocacao`. */
+export type EntregaDoPrompt = 'argv' | 'stdin' | 'promptFile' | 'nenhuma';
+
+export interface InvocacaoMontada {
+  /** Argumentos já com placeholders aplicados (sem o binário). */
+  args: string[];
+  entrega: EntregaDoPrompt;
+}
+
+/**
+ * Argv efetivo de uma run, sem spawnar nada — puro, para o adapter e para os
+ * testes de contrato dos manifestos (achado CRÍTICO do Antigravity: o
+ * manifesto não tinha `{{prompt}}` nem `stdinPrompt`, e o prompt não chegava
+ * ao CLI por caminho nenhum; só um teste que monta o argv pega isso).
+ *
+ * `promptFile` é o caminho já gravado, quando o template usa `{{promptFile}}`.
+ */
+export function montarInvocacao(
+  manifest: AgentManifest,
+  ctx: Pick<RunContext, 'mode' | 'workdir' | 'model' | 'extraArgs'>,
+  argsTemplate: readonly string[],
+  prompt: string,
+  nativeSessionId: string | null,
+  promptFile = '',
+): InvocacaoMontada {
+  const usesStdin = manifest.invoke.stdinPrompt;
+  const wantsPromptFile = argsTemplate.some((a) => a.includes('{{promptFile}}'));
+  const noArgv = !usesStdin && !wantsPromptFile;
+
+  const vars: Record<string, string> = {
+    prompt: noArgv ? prompt : '',
+    promptFile,
+    nativeSessionId: nativeSessionId ?? '',
+    workdir: ctx.workdir,
+    model: ctx.model ?? '',
+  };
+
+  // A política nativa do agente vem do modo da sessão: é o que impede o
+  // sandbox do próprio CLI de contradizer o isolamento que o Hub já montou.
+  const args = [
+    ...argsTemplate,
+    ...manifest.invoke.modeArgs[ctx.mode],
+    ...manifest.invoke.extraArgs,
+    ...(ctx.extraArgs ?? []),
+  ]
+    .map((arg) => applyTemplate(arg, vars))
+    // Um placeholder vazio (ex.: `{{model}}` sem modelo definido) some do
+    // comando em vez de virar um argumento em branco que quebra o parser.
+    .filter((arg) => arg.length > 0);
+
+  const entrega: EntregaDoPrompt = usesStdin
+    ? 'stdin'
+    : wantsPromptFile
+      ? 'promptFile'
+      : argsTemplate.some((a) => a.includes('{{prompt}}'))
+        ? 'argv'
+        : 'nenhuma';
+  return { args, entrega };
+}
+
 function applyTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => vars[key] ?? '');
 }
@@ -547,24 +602,22 @@ function killTree(child: ChildProcessWithoutNullStreams): Promise<void> {
 }
 
 async function runToCompletion(
-  bin: { path: string; needsShell: boolean },
+  bin: ResolvedBin,
   args: string[],
   extraEnv: Record<string, string>,
   timeoutMs: number,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      bin.needsShell ? quoteForShell(bin.path) : bin.path,
-      bin.needsShell ? args.map(quoteForShell) : args,
-      {
-        env: { ...process.env, ...extraEnv },
-        shell: bin.needsShell,
-        windowsHide: true,
-        // stdin fechado é essencial: vários CLIs de agente, ao verem um stdin
-        // aberto, ficam esperando entrada em vez de imprimir a versão e sair.
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
+    const comando = montarSpawn(bin, args);
+    const child = spawn(comando.file, comando.args, {
+      env: { ...process.env, ...extraEnv },
+      shell: false,
+      windowsVerbatimArguments: comando.windowsVerbatimArguments,
+      windowsHide: true,
+      // stdin fechado é essencial: vários CLIs de agente, ao verem um stdin
+      // aberto, ficam esperando entrada em vez de imprimir a versão e sair.
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
     let out = '';
     const timer = setTimeout(() => {

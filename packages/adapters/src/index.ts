@@ -1,6 +1,15 @@
 export * from './types.js';
 export { AsyncQueue } from './async-queue.js';
-export { resolveBin, clearBinCache, quoteForShell, type ResolvedBin } from './bin-resolver.js';
+export {
+  resolveBin,
+  clearBinCache,
+  quoteForShell,
+  montarSpawn,
+  escaparArgParaCmd,
+  resolverShimNpm,
+  type ResolvedBin,
+  type SpawnMontado,
+} from './bin-resolver.js';
 export {
   killProcessTree,
   imagemDoProcesso,
@@ -9,7 +18,12 @@ export {
   pidPareceReciclado,
   TOLERANCIA_RELOGIO_MS,
 } from './process-tree.js';
-export { ProcessAgentAdapter } from './process-adapter.js';
+export {
+  ProcessAgentAdapter,
+  montarInvocacao,
+  type EntregaDoPrompt,
+  type InvocacaoMontada,
+} from './process-adapter.js';
 export {
   guardedActionsOf,
   describeAction,

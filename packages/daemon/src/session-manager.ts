@@ -51,6 +51,7 @@ import {
   killProcessTree,
   imagemDoProcesso,
   imagemPareceEsperada,
+  resolveBin,
   horarioDeCriacaoDoProcesso,
   pidPareceReciclado,
   describeAction,
@@ -611,7 +612,10 @@ export class SessionManager {
         ? this.registry.get(sessao.agentId).manifest.bin
         : null;
 
-      if (bin === null || !imagemPareceEsperada(imagem, bin)) {
+      // Shim npm desembrulhado (ver `resolverShimNpm`): o PID guardado é do
+      // `node.exe`/`.exe` real que o adapter spawnou, não de um `cmd.exe`.
+      const resolvido = bin === null ? null : await resolveBin(bin).catch(() => null);
+      if (bin === null || !imagemPareceEsperada(imagem, bin, resolvido?.file)) {
         // Ou o agente nem está mais registrado (não dá para saber o que
         // esperar), ou o PID já foi reciclado para outro binário. Nos dois
         // casos, não mexer é mais seguro do que adivinhar.

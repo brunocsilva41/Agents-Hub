@@ -116,11 +116,28 @@ export async function imagemDoProcesso(pid: number): Promise<string | null> {
  * qualquer script Node do usuário — sem nenhuma relação com o Hub — elegível
  * para ser morto por qualquer agente. O wrapper aceito é só o shell que
  * `needsShell: true` de fato usa para invocar o shim.
+ *
+ * `executavelSpawnado` (opcional) é o arquivo que o adapter de fato spawna
+ * quando desembrulha o shim npm (`ResolvedBin.file`: o `node.exe` que roda o
+ * script, ou o `.exe` real): aí o PID guardado é desse executável, não do
+ * `cmd.exe`. Aceitá-lo aqui é específico ao agente (vem do resolve do PRÓPRIO
+ * `bin`), não um "node genérico" — e a checagem de horário de criação do PID
+ * em `#matarOrfao` continua valendo por cima.
  */
-export function imagemPareceEsperada(imagem: string, bin: string): boolean {
+export function imagemPareceEsperada(
+  imagem: string,
+  bin: string,
+  executavelSpawnado?: string,
+): boolean {
   const nome = imagem.toLowerCase().replace(/\.exe$/, '');
   const alvo = bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   if (nome === alvo) return true;
+  if (executavelSpawnado) {
+    const spawnado = (executavelSpawnado.split(/[\\/]/).pop() ?? '')
+      .toLowerCase()
+      .replace(/\.exe$/, '');
+    if (nome === spawnado) return true;
+  }
   return ['cmd', 'sh', 'bash'].includes(nome);
 }
 

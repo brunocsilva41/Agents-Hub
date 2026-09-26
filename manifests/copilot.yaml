@@ -15,6 +15,13 @@ invoke:
   # Verificado contra o binário 1.0.70: `-p` recebe o TEXTO do prompt como
   # valor, não caminho de arquivo, e `--output-format json` emite JSONL — um
   # objeto por linha.
+  #
+  # O prompt vai em argv porque o `--help` (1.0.88) só documenta stdin
+  # combinado com `--fleet`. Isso é seguro porque o Hub desembrulha o shim
+  # `copilot.cmd` do npm e spawna `node npm-loader.js` direto, sem `cmd.exe`
+  # (`resolverShimNpm` em bin-resolver.ts): antes, o prompt passava pelo
+  # `cmd.exe` — injeção de comando, Brief multilinha cortado na 1ª linha,
+  # teto de 8 KB e CJK/emoji virando `?`.
   oneShot: ["-p", "{{prompt}}", "--output-format", "json", "--no-color"]
   resume: ["-p", "{{prompt}}", "--resume", "{{nativeSessionId}}", "--output-format", "json", "--no-color"]
   stdinPrompt: false

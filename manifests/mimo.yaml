@@ -13,12 +13,17 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  # Verificado contra o binário. ATENÇÃO: `-p` aqui é `--password`, NÃO prompt —
-  # o texto vai como posicional de `run`. A versão anterior deste manifesto
-  # mandava o prompt pela flag errada.
-  oneShot: ["run", "{{prompt}}", "--format", "json"]
-  resume: ["run", "{{prompt}}", "--session", "{{nativeSessionId}}", "--format", "json"]
-  stdinPrompt: false
+  # Verificado contra o binário. ATENÇÃO: `-p` aqui é `--password`, NÃO prompt.
+  # O prompt vai por STDIN: o handler de `run` (0.1.14, conferido no bundle do
+  # `mimo.exe`) faz `if (!process.stdin.isTTY) message += " " + stdin` e só
+  # reclama "You must provide a message" se os dois estiverem vazios. Por argv
+  # (posicional) o prompt atravessava o shim `mimo.cmd` e o `cmd.exe`: injeção
+  # de comando, truncamento na 1ª quebra de linha e Unicode virando `?`
+  # (vistoria 2026-09-25) — e o próprio `run` ainda re-junta os posicionais
+  # com aspas à mão, alterando o texto.
+  oneShot: ["run", "--format", "json"]
+  resume: ["run", "--session", "{{nativeSessionId}}", "--format", "json"]
+  stdinPrompt: true
   interactive: false
   extraArgs: []
   env: {}

@@ -152,6 +152,18 @@ test('imagemPareceEsperada: NÃO aceita node como wrapper genérico', () => {
   assert.equal(imagemPareceEsperada('node.exe', 'claude'), false);
 });
 
+test('imagemPareceEsperada: aceita o executável que o shim npm desembrulhado de fato spawnou', () => {
+  // Shim npm desembrulhado (resolverShimNpm): o PID guardado é do node.exe
+  // que roda o script do PRÓPRIO agente, ou do .exe real — não de um cmd.exe.
+  assert.equal(imagemPareceEsperada('node.exe', 'copilot', 'C:\\Program Files\\nodejs\\node.exe'), true);
+  assert.equal(
+    imagemPareceEsperada('opencode.exe', 'opencode', 'C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe'),
+    true,
+  );
+  // Sem o executável resolvido, node continua recusado.
+  assert.equal(imagemPareceEsperada('node.exe', 'copilot'), false);
+});
+
 test('imagemPareceEsperada: imagem sem relação com o bin é recusada', () => {
   assert.equal(imagemPareceEsperada('chrome.exe', 'claude'), false);
 });
