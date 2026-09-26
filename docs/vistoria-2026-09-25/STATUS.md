@@ -16,7 +16,7 @@
 - Daemon do usuário (porta 4747) tinha 2 aprovações pendentes de sessões antigas (`git push origin main`) — não tocadas.
 
 ## Fase 0 — Perda de dados e execução indevida
-- [~] 0.1 Reaper apaga node_modules real via junction (CRÍTICO, relatório 06)
+- [x] 0.1 Reaper apaga node_modules real via junction (CRÍTICO, relatório 06) — merge 7e7a7a7; worktree-links.test.ts (6 testes; mutação: 0/6 sem a correção)
 - [~] 0.2 `agy` nunca recebe prompt (CRÍTICO, relatórios 10/11)
 - [~] 0.3 Injeção de comando em agentes `.cmd` com prompt em argv (relatório 10)
 - [~] 0.4 `hooks install claude --write` destrói settings.json não-canônico (relatórios 07/08)
