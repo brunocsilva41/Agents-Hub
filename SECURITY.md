@@ -32,7 +32,7 @@ não fechar relato sem explicação.
 | Delegação em loop | Profundidade máxima + ciclo semântico por `(agente, hash do objetivo)` | `packages/core/src/graph.ts` |
 | Gasto descontrolado | Orçamento é da sessão-raiz, consumido pelos descendentes | `packages/core/src/budget.ts` |
 | Ação irreversível | `git push`, `rm -rf`, publish, `.ssh`, `.env` param a sessão e abrem aprovação | `packages/core/src/policy.ts` |
-| Config de projeto hostil | `<repo>/.agents-hub/config.yaml` só pode **apertar** a política global, nunca afrouxar | `packages/daemon/src/project-config.ts` |
+| Config de projeto hostil | `<repo>/.agents-hub/config.yaml` só pode **apertar** a política global, nunca afrouxar (regra campo a campo em `mergePolicyLayer`); `validation.command`/revisão do repo só valem com `hub project trust` (confiança no banco do Hub, padrão desligado) | `packages/daemon/src/project-config.ts` |
 
 **Credenciais:** o Hub nunca lê, persiste nem repassa segredo. Cada adapter roda
 com o login que o próprio CLI já tem (`~/.claude`, `~/.codex`, ...). Não existe

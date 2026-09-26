@@ -85,6 +85,15 @@ export interface Project {
   path: string;
   defaultBranch: string;
   createdAt: string;
+  /**
+   * O usuário marcou este projeto como confiável NESTA máquina.
+   *
+   * Mora no registro do Hub (banco em `~/.agents-hub`), nunca no repositório:
+   * é o que libera os campos de `.agents-hub/config.yaml` que viram processo
+   * (`validation.command`, revisão — ver `EXEC_POLICY_FIELDS`). Um repo
+   * clonado não pode se declarar confiável sozinho. Ausente = `false`.
+   */
+  trusted?: boolean;
 }
 
 /**

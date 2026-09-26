@@ -11,11 +11,20 @@ import {
 } from './project-config.js';
 
 describe('config por projeto', () => {
-  test('o projeto define o comando de validação, que é o caso de uso principal', () => {
+  test('o projeto CONFIÁVEL define o comando de validação, que é o caso de uso principal', () => {
+    const merged = mergeProjectPolicy(
+      DEFAULT_POLICY,
+      { validation: { command: 'npm test' } },
+      { trusted: true },
+    );
+    assert.equal(merged.validation.command, 'npm test');
+  });
+
+  test('projeto NÃO confiável não define comando de validação (vira processo)', () => {
     const merged = mergeProjectPolicy(DEFAULT_POLICY, {
       validation: { command: 'npm test' },
     });
-    assert.equal(merged.validation.command, 'npm test');
+    assert.equal(merged.validation.command, null);
   });
 
   test('o projeto pode APERTAR a profundidade máxima', () => {
@@ -76,9 +85,12 @@ describe('config por projeto', () => {
       },
     };
 
-    const merged = mergeProjectPolicy(global, {
-      validation: { review: { enabled: true } },
-    });
+    // Revisão liga uma sessão de agente — campo de execução, exige confiança.
+    const merged = mergeProjectPolicy(
+      global,
+      { validation: { review: { enabled: true } } },
+      { trusted: true },
+    );
 
     assert.equal(merged.validation.review.enabled, true);
     assert.equal(

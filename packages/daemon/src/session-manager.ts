@@ -75,6 +75,7 @@ import {
 import {
   contextForAgent,
   envForAgent,
+  ignoredExecFieldsWarning,
   loadProjectContext,
   loadProjectOverrides,
   saveProjectContext,
@@ -207,6 +208,11 @@ export class SessionManager {
 
   listProjects(): Project[] {
     return this.#projects.list();
+  }
+
+  /** Marca/desmarca o projeto como confiável — ver `ProjectRegistry.setTrusted`. */
+  setProjectTrusted(projectId: string, trusted: boolean): Project {
+    return this.#projects.setTrusted(projectId, trusted);
   }
 
   /**
@@ -410,7 +416,7 @@ export class SessionManager {
     });
     this.bus.registerSession(sessionId, rootId);
 
-    this.#avisarConfigDoProjetoQuebrada(session, taskId, project.path);
+    this.#avisarConfigDoProjetoQuebrada(session, taskId, project);
     this.#avisarDependenciasNaoLigadas(session, taskId, worktree.dependencyWarnings);
 
     // Fotografa o que já estava pendente ANTES de o agente começar.
@@ -1981,7 +1987,7 @@ export class SessionManager {
       });
 
       this.bus.registerSession(sessionId, replacement.rootId);
-      this.#avisarConfigDoProjetoQuebrada(replacement, task.id, project.path);
+      this.#avisarConfigDoProjetoQuebrada(replacement, task.id, project);
       this.#avisarDependenciasNaoLigadas(replacement, task.id, worktree.dependencyWarnings);
 
       // O histórico de falhas vai junto: sem ele o substituto recomeça cego e
@@ -2183,10 +2189,30 @@ export class SessionManager {
    * `console.error` no log do daemon — mas isso não aparece pra quem só olha o
    * painel da sessão, exatamente onde a política "deveria" estar mais apertada
    * e não está. Chamado uma vez no nascimento da sessão, não a cada gate.
+   *
+   * Também avisa quando o YAML declara campos que viram processo
+   * (`validation.command`, revisão) e eles foram IGNORADOS por o projeto não
+   * ser confiável — sem isto, quem configurou `npm test` no repo veria o
+   * portão de validação simplesmente não rodar, sem saber por quê.
    */
-  #avisarConfigDoProjetoQuebrada(session: Session, taskId: string, projectPath: string): void {
-    const overrides = loadProjectOverrides(projectPath);
-    const contexto = loadProjectContext(projectPath);
+  #avisarConfigDoProjetoQuebrada(session: Session, taskId: string, project: Project): void {
+    const overrides = loadProjectOverrides(project.path, { trusted: project.trusted === true });
+    const contexto = loadProjectContext(project.path);
+
+    if (overrides.ignoredExecFields.length > 0) {
+      this.#emit({
+        sessionId: session.id,
+        taskId,
+        agentId: session.agentId,
+        type: 'log',
+        payload: {
+          level: 'warn',
+          text: ignoredExecFieldsWarning(project.path, overrides.ignoredExecFields),
+          ignoredExecFields: overrides.ignoredExecFields,
+        },
+      });
+    }
+
     const erro = overrides.error ?? contexto.error;
     if (!erro) return;
 

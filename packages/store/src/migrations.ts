@@ -166,4 +166,15 @@ ALTER TABLE sessions ADD COLUMN pid INTEGER;
 CREATE INDEX idx_sessions_ended ON sessions(ended_at);
 `,
   },
+  {
+    version: 5,
+    name: 'confianca por projeto',
+    sql: `
+-- Confiança do usuário no projeto (vistoria 2026-09-25, item 0.7 do GOAL).
+-- \`.agents-hub/config.yaml\` é versionado no repositório: sem isto, clonar um
+-- repo com \`validation.command\` executava o comando na máquina de quem
+-- clonou. A confiança mora AQUI, fora do repo, e nasce desligada.
+ALTER TABLE projects ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0;
+`,
+  },
 ];

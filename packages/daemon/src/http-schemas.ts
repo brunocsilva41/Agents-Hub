@@ -38,6 +38,13 @@ export const CreateProjectSchema = z
   })
   .strict();
 
+/** Corpo de `POST /projects/:id/trust` — confiança explícita do usuário. */
+export const ProjectTrustSchema = z
+  .object({
+    trusted: z.boolean(),
+  })
+  .strict();
+
 export const AddFolderSchema = z
   .object({
     path: z.string().min(1).max(4096),

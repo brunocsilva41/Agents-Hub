@@ -86,6 +86,11 @@ export class HubClient {
     return this.#post('/projects', { path, name });
   }
 
+  /** Marca/desmarca o projeto como confiável (libera `validation.command` do repo). */
+  setProjectTrusted(projectId: string, trusted: boolean): Promise<{ project: ProjectSummary }> {
+    return this.#post(`/projects/${encodeURIComponent(projectId)}/trust`, { trusted });
+  }
+
   // ----------------------------------------------------------------- sessões
   sessions(filter: { projectId?: string; rootId?: string } = {}): Promise<{
     sessions: SessionSummary[];

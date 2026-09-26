@@ -22,7 +22,13 @@ export interface EffectivePolicyDeps {
 export function projectPolicyFor(deps: EffectivePolicyDeps, projectId: string): PolicyDocument {
   const project = deps.store.projects.get(projectId);
   if (!project) return deps.globalPolicy;
-  return mergeProjectPolicy(deps.globalPolicy, loadProjectOverrides(project.path).overrides);
+  // Confiança vem do registro (banco do Hub), nunca do próprio repositório.
+  const trusted = project.trusted === true;
+  return mergeProjectPolicy(
+    deps.globalPolicy,
+    loadProjectOverrides(project.path, { trusted }).overrides,
+    { trusted },
+  );
 }
 
 /**

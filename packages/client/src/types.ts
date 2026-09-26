@@ -26,6 +26,8 @@ export interface ProjectSummary {
   path: string;
   defaultBranch: string;
   createdAt: string;
+  /** Confiado pelo usuário: `validation.command`/revisão do config.yaml do repo valem. */
+  trusted?: boolean;
 }
 
 export interface SessionSummary {

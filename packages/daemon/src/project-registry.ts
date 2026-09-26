@@ -78,6 +78,27 @@ export class ProjectRegistry {
     return project;
   }
 
+  /**
+   * Marca (ou desmarca) o projeto como confiável NESTA máquina.
+   *
+   * É o único caminho para `validation.command` e a revisão declarados no
+   * `.agents-hub/config.yaml` do repositório passarem a valer: esses campos
+   * viram processo, e o arquivo é versionado — sem confiança explícita,
+   * clonar um repo malicioso bastaria para executar código. A marca mora no
+   * banco do Hub, fora do repo, então o repositório não consegue se
+   * autodeclarar confiável.
+   */
+  setTrusted(projectId: string, trusted: boolean): Project {
+    this.get(projectId);
+    const atualizado = this.store.projects.setTrusted(projectId, trusted);
+    if (!atualizado) {
+      throw new HubError('PROJECT_NOT_FOUND', `Projeto ${projectId} não encontrado`, {
+        projectId,
+      });
+    }
+    return atualizado;
+  }
+
   /** Memória e prompts do projeto, como estão no arquivo. */
   getContext(projectId: string): ProjectContext {
     return loadProjectContext(this.get(projectId).path).ctx;
