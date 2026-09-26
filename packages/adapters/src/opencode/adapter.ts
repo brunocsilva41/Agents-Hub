@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { HubError, newId, nowIso } from '@agents-hub/core';
 import { AsyncQueue } from '../async-queue.js';
-import { quoteForShell, resolveBin } from '../bin-resolver.js';
+import { montarSpawn, resolveBin } from '../bin-resolver.js';
 import { killProcessTree } from '../process-tree.js';
 import type {
   AgentAdapter,
@@ -540,12 +540,16 @@ export class OpenCodeAdapter implements AgentAdapter {
     // o servidor — ver `#warnEnvMismatch` sobre o que acontece quando outra
     // sessão pede um ambiente diferente depois.
     const spawnEnv = { ...process.env, ...env };
+    // `montarSpawn` desembrulha o shim npm (`opencode.cmd` → o `opencode.exe`
+    // real) e só cai no `cmd.exe`, com escape próprio, para `.cmd` desconhecido.
+    const comando = montarSpawn(resolved, args);
     const child = spawn(
-      resolved.needsShell ? quoteForShell(resolved.path) : resolved.path,
-      resolved.needsShell ? args.map(quoteForShell) : args,
+      comando.file,
+      comando.args,
       {
         env: spawnEnv,
-        shell: resolved.needsShell,
+        shell: false,
+        windowsVerbatimArguments: comando.windowsVerbatimArguments,
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
         detached: false,

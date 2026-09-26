@@ -12,8 +12,16 @@ detect:
   versionRegex: "(\\d+\\.\\d+\\.\\d+)"
 
 invoke:
-  oneShot: ["-p", "--output-format", "stream-json"]
-  resume: ["--conversation", "{{nativeSessionId}}", "-p", "--output-format", "stream-json"]
+  # Verificado contra `agy --help` (1.2.10): `-p`/`--print` recebe o TEXTO do
+  # prompt como valor. Antes o template era `-p --output-format stream-json`
+  # sem `{{prompt}}`: o agy tomava "--output-format" como prompt e saía com
+  # código 2 ("-p took "--output-format" as its prompt") — o prompt real
+  # nunca chegava. A forma anexada `-p=<prompt>` é a que o próprio erro do agy
+  # recomenda, e não deixa um prompt que comece com `-` ser lido como flag.
+  # O `agy.exe` é binário nativo (sem shim `.cmd`), então o prompt vai em
+  # argv sem passar por shell nenhum.
+  oneShot: ["--output-format", "stream-json", "-p={{prompt}}"]
+  resume: ["--conversation", "{{nativeSessionId}}", "--output-format", "stream-json", "-p={{prompt}}"]
   stdinPrompt: false
   interactive: false
   extraArgs: []
@@ -52,7 +60,7 @@ defaults:
   supervision: supervised
 
 caveats:
-  - "VERIFICADO: validado contra o binario real `agy.exe` (v1.1.22)."
+  - "VERIFICADO: validado contra o binario real `agy.exe` (v1.1.22); montagem do argv (`--output-format stream-json -p=<prompt>`) revista contra `agy --help` da v1.2.10 — na 1.2.x o `-p` sem valor anexado engolia a flag seguinte e nenhuma sessao rodava."
   - "Utiliza `--output-format stream-json` com parser de eventos dedicado."
   - "Suporta retomada nativa de sessao via `--conversation <conversation_id>`."
   - "modeArgs verificado contra `agy --help`: `--mode plan` (supervised) vs `--mode accept-edits` (semi/autonomous). O binario tambem tem `--sandbox` (restringe acesso de terminal) nao usado aqui — nao testado em combinacao com `--mode` nesta verificacao, e por isso fica de fora para nao arriscar quebrar a invocacao com uma combinacao nunca exercitada."

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -7,13 +7,22 @@ import { promisify } from 'node:util';
 const realExecFileAsync = promisify(execFile);
 
 export interface ResolvedBin {
+  /** Caminho achado no PATH — é o que se mostra ao usuário (probe, doctor). */
   path: string;
   /**
-   * `.cmd` e `.bat` no Windows exigem `shell: true` no spawn desde as correções
-   * de segurança do Node 18.20/20.12 — e quase todo CLI de agente instalado via
-   * npm no Windows é um shim `.cmd`.
+   * `true` só para um `.cmd`/`.bat` que NÃO deu para desembrulhar (ver
+   * `resolverShimNpm`): esse precisa passar pelo `cmd.exe`, com o escape
+   * próprio do `cmd` de `montarSpawn`. Shim do npm reconhecido vira
+   * `node.exe script` ou o `.exe` real, sem shell nenhum.
    */
   needsShell: boolean;
+  /**
+   * Executável de fato spawnado, quando difere de `path` (shim npm
+   * desembrulhado: `node.exe` ou o `.exe` que o shim chamaria).
+   */
+  file?: string;
+  /** Argumentos que vão antes dos do manifesto (o script JS do shim). */
+  prefixArgs?: string[];
 }
 
 /**
@@ -29,6 +38,8 @@ export interface LookupDeps {
     options: { windowsHide: boolean },
   ) => Promise<{ stdout: string; stderr: string }>;
   existsSync: (path: string) => boolean;
+  /** Lê o conteúdo de um shim `.cmd`. Opcional: sem ele, usa o disco real. */
+  readFileSync?: (path: string) => string;
 }
 
 export const defaultLookupDeps: LookupDeps = {
@@ -78,7 +89,7 @@ async function lookup(bin: string, deps: LookupDeps): Promise<ResolvedBin | null
       candidates.find((c) => /\.(cmd|bat)$/i.test(c)) ??
       candidates[0] as string;
 
-    return { path: best, needsShell: /\.(cmd|bat)$/i.test(best) };
+    return comShimDesembrulhado(best, deps);
   } catch {
     return lookupFallback(bin, isWindows, deps);
   }
@@ -99,7 +110,7 @@ function lookupFallback(
   ];
   for (const fb of fallbacks) {
     if (deps.existsSync(fb)) {
-      return { path: fb, needsShell: /\.(cmd|bat)$/i.test(fb) };
+      return comShimDesembrulhado(fb, deps);
     }
   }
   return null;
@@ -146,4 +157,188 @@ export function quoteForShell(value: string): string {
   }
   result += '\\'.repeat(backslashes * 2) + '"';
   return result;
+}
+
+/**
+ * Transforma o candidato escolhido em `ResolvedBin`, desembrulhando o shim
+ * `.cmd` do npm quando ele é reconhecível.
+ *
+ * Por que desembrulhar (vistoria 2026-09-25, achados CRÍTICO/ALTO de
+ * `10-adapters-manifestos.md`): um `.cmd` só roda via `cmd.exe`, e o `cmd.exe`
+ * reinterpreta a linha de comando INTEIRA — `&`, `|`, `>` e `%VAR%` dentro do
+ * prompt viravam comando executado com o usuário do daemon (injeção medida:
+ * `a&echo>PWNED.txt` criava o arquivo), quebra de linha truncava o Brief na
+ * primeira linha, 8191 caracteres era o teto duro e CJK/emoji viravam `?`.
+ * Nada disso existe quando o Hub chama direto o que o shim chamaria
+ * (`node.exe script.js ...` ou o `.exe` real): o argv vai por `CreateProcessW`,
+ * em UTF-16, sem shell nenhum, até ~32 K caracteres.
+ */
+function comShimDesembrulhado(candidato: string, deps: LookupDeps): ResolvedBin {
+  if (!/\.(cmd|bat)$/i.test(candidato)) return { path: candidato, needsShell: false };
+  const alvo = resolverShimNpm(candidato, deps);
+  if (alvo) return { path: candidato, needsShell: false, ...alvo };
+  return { path: candidato, needsShell: true };
+}
+
+/**
+ * Lê um shim `.cmd` gerado pelo npm (`cmd-shim`) e devolve o que ele de fato
+ * executaria, ou `null` se o arquivo não tiver a forma conhecida — aí o
+ * chamador cai no caminho com `cmd.exe` (e no escape de `escaparArgParaCmd`).
+ *
+ * Formas reconhecidas (todas medidas nesta máquina, em `%APPDATA%\npm`):
+ * - `"%_prog%"  "%dp0%\node_modules\pacote\bin\x.js" %*`, com `_prog` sendo
+ *   `%dp0%\node.exe` ou `node` (copilot, codex, mimo, openclaude);
+ * - `"%dp0%\node_modules\pacote\bin\x.exe"   %*` (opencode);
+ * - o formato antigo do cmd-shim, com `"%~dp0\..."` no lugar de `%dp0%`.
+ *
+ * Interpretador que não seja `node` (shebang `sh`, `python`...) não é
+ * desembrulhado: não há como garantir a mesma semântica, e o fallback com
+ * `cmd.exe` escapado continua seguro.
+ */
+export function resolverShimNpm(
+  cmdPath: string,
+  deps: LookupDeps = defaultLookupDeps,
+): { file: string; prefixArgs: string[] } | null {
+  const ler = deps.readFileSync ?? ((p: string) => readFileSync(p, 'utf8'));
+  let conteudo: string;
+  try {
+    conteudo = ler(cmdPath);
+  } catch {
+    return null;
+  }
+
+  const linha = conteudo.split(/\r?\n/).find((l) => l.includes('%*'));
+  if (!linha) return null;
+
+  // Todos os caminhos relativos ao diretório do shim que aparecem na linha que
+  // repassa `%*`; o alvo é o último antes do `%*` (o primeiro pode ser o
+  // `node.exe` local).
+  const antesDoRepasse = linha.slice(0, linha.indexOf('%*'));
+  const relativos = [...antesDoRepasse.matchAll(/"%~?dp0%?\\?([^"%]+)"/gi)].map(
+    (m) => m[1] as string,
+  );
+  const relativo = relativos.at(-1);
+  if (!relativo) return null;
+
+  const dir = path.dirname(cmdPath);
+  const alvo = path.join(dir, relativo);
+  if (!deps.existsSync(alvo)) return null;
+
+  if (/\.(exe|com)$/i.test(alvo)) {
+    if (/(^|[\\/])node\.exe$/i.test(alvo)) return null;
+    return { file: alvo, prefixArgs: [] };
+  }
+
+  // Script: só desembrulha se o interpretador do shim for o node.
+  const usaProg = /%_prog%/i.test(antesDoRepasse);
+  const progs = [...conteudo.matchAll(/SET\s+"_prog=([^"]+)"/gi)].map((m) => m[1] as string);
+  const interpretadorEhNode = usaProg
+    ? progs.length > 0 && progs.every((p) => /(^|[\\/%])node(\.exe)?$/i.test(p))
+    : /(^|[\s"\\/])node(\.exe)?"?\s/i.test(antesDoRepasse);
+  if (!interpretadorEhNode) return null;
+
+  // Mesma preferência do shim: o `node.exe` ao lado dele, senão "o node".
+  // Para "o node" usamos o do próprio daemon em vez de procurar no PATH: é
+  // um executável garantidamente existente e da versão que o Hub suporta.
+  const nodeLocal = path.join(dir, 'node.exe');
+  const node = deps.existsSync(nodeLocal) ? nodeLocal : process.execPath;
+  return { file: node, prefixArgs: [alvo] };
+}
+
+/** Teto da linha de comando do `cmd.exe` (`/c` inclusive). */
+export const CMD_MAX_LINHA = 8191;
+
+/**
+ * Caracteres especiais para o parser do `cmd.exe` (mesmo conjunto que o
+ * `cross-spawn` usa). Escapar TODOS com `^` — inclusive `"` — faz o `cmd`
+ * nunca entrar em "modo aspas": não sobra nenhum `&`, `|`, `<`, `>` ou `%`
+ * interpretável, esteja onde estiver.
+ */
+const META_CMD = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * Escapa UM argumento para atravessar `cmd.exe /d /s /c "..."` e, em seguida,
+ * o `%*` de um `.bat`/`.cmd` que o repassa a outro programa.
+ *
+ * 1. Primeiro as aspas da regra do `CommandLineToArgvW` (a que o programa
+ *    final usa para reconstruir o argv), igual a `quoteForShell`, mas sempre
+ *    entre aspas.
+ * 2. Depois `^` antes de cada metacaractere do `cmd` — DUAS vezes: a
+ *    primeira camada é consumida pelo `cmd /c`, a segunda pelo reparse da
+ *    linha do `.bat` após expandir `%*`. Com uma camada só, qualquer `"` no
+ *    valor alternava o "modo aspas" do segundo parse e o `&` seguinte virava
+ *    separador de comando (a injeção da vistoria).
+ *
+ * Quebra de linha e NUL não têm representação possível numa linha do
+ * `cmd.exe` (o `cmd` corta o comando ali, em silêncio): recusamos em vez de
+ * entregar metade do prompt.
+ */
+export function escaparArgParaCmd(valor: string): string {
+  if (/[\r\n\0]/.test(valor)) {
+    throw new Error(
+      'argumento com quebra de linha ou NUL não atravessa o cmd.exe sem ser truncado; ' +
+        'use stdinPrompt/{{promptFile}} no manifesto ou um executável que não seja .cmd/.bat',
+    );
+  }
+  let citado = '"';
+  let barras = 0;
+  for (const ch of valor) {
+    if (ch === '\\') {
+      barras += 1;
+      continue;
+    }
+    if (ch === '"') citado += '\\'.repeat(barras * 2 + 1) + '"';
+    else citado += '\\'.repeat(barras) + ch;
+    barras = 0;
+  }
+  citado += '\\'.repeat(barras * 2) + '"';
+  return citado.replace(META_CMD, '^$1').replace(META_CMD, '^$1');
+}
+
+export interface SpawnMontado {
+  file: string;
+  args: string[];
+  /** Sempre `false`: nenhum texto do usuário passa por `shell: true`. */
+  shell: false;
+  /** `true` só no caminho `cmd.exe`, onde a linha já vai escapada à mão. */
+  windowsVerbatimArguments: boolean;
+}
+
+/**
+ * Monta `file`/`args` do `spawn` para um binário resolvido — ponto único para
+ * todo lugar que spawna agente (run, probe, `opencode serve`).
+ *
+ * - Binário comum ou shim npm desembrulhado: `spawn(file, [...prefixArgs, ...args])`
+ *   sem shell. O argv chega íntegro (aspas, `%`, `&`, multilinha, Unicode).
+ * - `.cmd`/`.bat` não reconhecido: `cmd.exe /d /s /c "<linha>"` com
+ *   `windowsVerbatimArguments` — o mesmo que o Node faria com `shell: true`,
+ *   mas com cada argumento escapado por `escaparArgParaCmd` em vez de só
+ *   ganhar aspas. Recusa (lança) linha acima de `CMD_MAX_LINHA` em vez de
+ *   deixar o `cmd` falhar com "linha de comando muito longa".
+ */
+export function montarSpawn(resolved: ResolvedBin, args: readonly string[]): SpawnMontado {
+  const todos = [...(resolved.prefixArgs ?? []), ...args];
+  if (!resolved.needsShell) {
+    return {
+      file: resolved.file ?? resolved.path,
+      args: todos,
+      shell: false,
+      windowsVerbatimArguments: false,
+    };
+  }
+
+  const comando = (resolved.file ?? resolved.path).replace(META_CMD, '^$1');
+  const linha = [comando, ...todos.map(escaparArgParaCmd)].join(' ');
+  if (linha.length + 16 > CMD_MAX_LINHA) {
+    throw new Error(
+      `linha de comando com ${linha.length} caracteres excede o limite do cmd.exe (${CMD_MAX_LINHA}); ` +
+        'use stdinPrompt/{{promptFile}} no manifesto',
+    );
+  }
+  return {
+    file: process.env['ComSpec'] ?? 'cmd.exe',
+    args: ['/d', '/s', '/c', `"${linha}"`],
+    shell: false,
+    windowsVerbatimArguments: true,
+  };
 }
