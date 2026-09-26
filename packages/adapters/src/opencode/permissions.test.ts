@@ -205,12 +205,17 @@ describe('OpenCode: modo do Hub → agente com permissão real', () => {
     ];
     const handle = await adapter.start(ctx('semi'), 'leia o .env');
     const eventos = await drenar(handle.events);
-    // A recusa é disparada sem await no loop do stream; dá um respiro.
-    await new Promise((r) => setTimeout(r, 100));
+    // A recusa é disparada sem await no loop do stream: espera ela chegar ao
+    // servidor falso (com prazo), em vez de um respiro fixo que num runner
+    // lento chega antes da requisição.
+    const acharRecusa = () =>
+      servidor.requests.find(
+        (r) => r.method === 'POST' && r.url === '/api/session/ses_falsa/permission/per_1/reply',
+      );
+    const limite = Date.now() + 5_000;
+    while (!acharRecusa() && Date.now() < limite) await new Promise((r) => setTimeout(r, 10));
 
-    const recusa = servidor.requests.find(
-      (r) => r.method === 'POST' && r.url === '/api/session/ses_falsa/permission/per_1/reply',
-    );
+    const recusa = acharRecusa();
     assert.equal((recusa?.body as Record<string, unknown> | undefined)?.['reply'], 'reject');
     assert.ok(!eventos.some((e) => e.type === 'approval.requested'));
     assert.ok(eventos.some((e) => e.type === 'log' && /recusado pelo Hub/.test(String(e.payload['text']))));

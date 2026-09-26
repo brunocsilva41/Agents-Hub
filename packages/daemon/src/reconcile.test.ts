@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +24,20 @@ async function aguardarMorte(pid: number, timeoutMs = 10_000): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`pid ${pid} continua vivo depois de ${timeoutMs}ms`);
+}
+
+/**
+ * O processo filho já existe para o SO (evento `spawn`) e responde a sinal 0.
+ * Substitui um `setTimeout(200)` fixo: em runner lento, 200 ms podia não bastar
+ * e, em máquina rápida, era espera à toa.
+ */
+async function aguardarNascimento(filho: ChildProcess, timeoutMs = 10_000): Promise<void> {
+  await once(filho, 'spawn');
+  const limite = Date.now() + timeoutMs;
+  while (!pidVivo(filho.pid!)) {
+    if (Date.now() > limite) throw new Error(`pid ${filho.pid} não apareceu em ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /**
@@ -213,7 +228,7 @@ describe('reconciliação na subida do daemon', () => {
       assert.ok(filho.pid);
       // Só prossegue quando o SO já reconhece o processo — evita corrida com
       // `tasklist` rodando antes do PID existir de verdade.
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await aguardarNascimento(filho);
 
       const { session } = semear('running', false, filho.pid!, 'node-fake');
 
@@ -240,7 +255,7 @@ describe('reconciliação na subida do daemon', () => {
         stdio: 'ignore',
       });
       assert.ok(filho.pid);
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await aguardarNascimento(filho);
 
       try {
         const { session } = semear('running', false, filho.pid!, 'wrong-bin');
@@ -277,7 +292,7 @@ describe('reconciliação na subida do daemon', () => {
           stdio: 'ignore',
         });
         assert.ok(filho.pid);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await aguardarNascimento(filho);
 
         try {
           const { session } = semear('running', false, filho.pid!, 'node-fake', umaHoraAtras);

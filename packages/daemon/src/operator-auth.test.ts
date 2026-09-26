@@ -296,14 +296,21 @@ defaults:
         supervision: 'semi',
       },
     });
+    // Espera o arquivo existir E estar completo (JSON válido): um respiro fixo
+    // depois do `existsSync` podia ler a escrita pela metade num runner lento.
     const limite = Date.now() + 20_000;
-    while (!existsSync(envDump)) {
+    let bruto = '';
+    let env: Record<string, string> | null = null;
+    while (env === null) {
       if (Date.now() > limite) throw new Error('o agente de teste não gravou o ambiente');
-      await new Promise((r) => setTimeout(r, 50));
+      try {
+        bruto = existsSync(envDump) ? readFileSync(envDump, 'utf8') : '';
+        env = bruto ? (JSON.parse(bruto) as Record<string, string>) : null;
+      } catch {
+        env = null;
+      }
+      if (env === null) await new Promise((r) => setTimeout(r, 50));
     }
-    await new Promise((r) => setTimeout(r, 100));
-    const bruto = readFileSync(envDump, 'utf8');
-    const env = JSON.parse(bruto) as Record<string, string>;
 
     // Prova de que é o ambiente montado pelo Hub para ESTA sessão.
     assert.equal(env['AGENTS_HUB_SESSION_ID'], started.session.id);
