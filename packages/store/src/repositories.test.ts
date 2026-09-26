@@ -407,10 +407,10 @@ describe('compactação em lotes e índices parciais', () => {
     assert.match(compactacao, /idx_events_raw/, compactacao);
 
     const custo = plano(
-      `SELECT SUM(json_extract(cost_json, '$.usd')) FROM events WHERE session_id = ? AND cost_json IS NOT NULL`,
+      `SELECT SUM(cost_usd) FROM events WHERE session_id = ? AND cost_tokens IS NOT NULL`,
       id,
     );
-    assert.match(custo, /idx_events_custo/, custo);
+    assert.match(custo, /idx_events_custo_soma/, custo);
 
     // E o resultado das somas não muda com o filtro.
     assert.equal(store.events.costOf(id).usd, 2.5);

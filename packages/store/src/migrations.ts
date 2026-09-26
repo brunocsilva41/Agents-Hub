@@ -238,4 +238,82 @@ CREATE INDEX idx_events_raw   ON events(session_id) WHERE raw_json IS NOT NULL;
 CREATE INDEX idx_events_custo ON events(session_id) WHERE cost_json IS NOT NULL;
 `,
   },
+  {
+    version: 9,
+    name: 'custo em colunas geradas e indices compostos de eventos',
+    sql: `
+-- Vistoria 2026-09-25 (R09-08): o índice parcial da migração 8 só cortava as
+-- linhas SEM custo; cada soma ainda lia a linha inteira e rodava
+-- \`json_extract\` três vezes por evento com custo (grafo da raiz com 100k
+-- eventos: ~70 ms no thread principal, crescendo linear com a árvore).
+--
+-- Colunas GERADAS (VIRTUAL, então nenhum dado é reescrito e não há segunda
+-- fonte de verdade: o valor sai sempre de \`cost_json\`). A regra de "custo que
+-- conta" é a mesma de antes — estimativa parcial (\`provisional\`) fica de fora,
+-- porque o custo final do turno já a substitui. \`cost_tokens\` é NULL para o
+-- que não conta, e é por ele que as somas filtram.
+ALTER TABLE events ADD COLUMN cost_tokens INTEGER GENERATED ALWAYS AS (
+  CASE WHEN cost_json IS NOT NULL
+        AND COALESCE(json_extract(cost_json, '$.provisional'), 0) = 0
+  THEN COALESCE(json_extract(cost_json, '$.inputTokens'), 0) +
+       COALESCE(json_extract(cost_json, '$.outputTokens'), 0)
+  END) VIRTUAL;
+ALTER TABLE events ADD COLUMN cost_usd REAL GENERATED ALWAYS AS (
+  CASE WHEN cost_json IS NOT NULL
+        AND COALESCE(json_extract(cost_json, '$.provisional'), 0) = 0
+  THEN json_extract(cost_json, '$.usd')
+  END) VIRTUAL;
+-- O índice guarda os valores calculados na escrita: a soma por sessão lê só o
+-- índice, sem abrir o JSON de cada evento a cada consulta.
+CREATE INDEX idx_events_custo_soma ON events(session_id, cost_usd, cost_tokens)
+  WHERE cost_tokens IS NOT NULL;
+DROP INDEX idx_events_custo;
+
+-- \`list({types})\` e \`list({taskId})\` ordenam por (session_id, seq): com os
+-- índices de uma coluna só o SQLite montava uma B-TREE temporária com TODOS
+-- os eventos do tipo (570 ms para 5000 de 100k). Compostos, a ordem sai
+-- pronta do índice. Os antigos são prefixo dos novos e saem.
+CREATE INDEX idx_events_type_sessao ON events(type, session_id, seq);
+DROP INDEX idx_events_type;
+CREATE INDEX idx_events_task_sessao ON events(task_id, session_id, seq);
+DROP INDEX idx_events_task;
+`,
+  },
+  {
+    version: 10,
+    name: 'integridade de eventos e pastas',
+    sql: `
+-- Vistoria 2026-09-25 (R09-17): lacunas de integridade que só a convenção do
+-- chamador evitava.
+
+-- Uma pasta principal por projeto. A guarda existia só no daemon
+-- (\`project-registry.ts\`); um caminho que escrevesse direto no store criava
+-- duas "principais" e a sessão sem pasta escolhida caía numa delas ao acaso.
+-- Antes do índice único, normaliza bancos que já tenham a duplicidade SEM
+-- apagar nada: fica principal a pasta mais antiga, as outras viram comuns.
+UPDATE project_folders SET is_primary = 0
+ WHERE is_primary = 1
+   AND rowid <> (SELECT p2.rowid FROM project_folders p2
+                  WHERE p2.project_id = project_folders.project_id AND p2.is_primary = 1
+                  ORDER BY p2.created_at, p2.rowid LIMIT 1);
+CREATE UNIQUE INDEX idx_project_folders_primaria ON project_folders(project_id)
+  WHERE is_primary = 1;
+
+-- \`events.task_id\` nasceu sem FK e o SQLite não acrescenta FK a tabela
+-- existente sem reconstruí-la (cópia de TODOS os eventos). O gatilho dá a
+-- mesma garantia para o que entra daqui em diante; linhas antigas órfãs, se
+-- houver, ficam como estão (nada de dado apagado na migração).
+CREATE TRIGGER trg_events_task_existe
+BEFORE INSERT ON events
+WHEN NEW.task_id IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM tasks WHERE id = NEW.task_id)
+BEGIN
+  SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: events.task_id sem task');
+END;
+
+-- Consultas por janela de tempo (auditoria da timeline, retenção futura) não
+-- tinham índice em \`ts\`.
+CREATE INDEX idx_events_ts ON events(ts);
+`,
+  },
 ];
