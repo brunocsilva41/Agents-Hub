@@ -12,7 +12,11 @@ import type { TaskAttempt } from './domain.js';
 export type OutcomeClass = 'success' | 'transient' | 'permanent' | 'canceled';
 
 export interface RunOutcomeLike {
-  reason: 'exit' | 'timeout' | 'heartbeat' | 'canceled' | 'error';
+  /**
+   * `interrupted`: alguém pediu para parar o TURNO, não a sessão (interrupt/
+   * pause). Não é falha nem motivo de retry.
+   */
+  reason: 'exit' | 'timeout' | 'heartbeat' | 'canceled' | 'interrupted' | 'error';
   exitCode: number | null;
   error: string | null;
 }
@@ -42,7 +46,9 @@ const TRANSIENT_PATTERNS: RegExp[] = [
 ];
 
 export function classifyOutcome(outcome: RunOutcomeLike): OutcomeClass {
-  if (outcome.reason === 'canceled') return 'canceled';
+  // Interrupção é pedido de alguém, como o cancelamento: insistir seria
+  // desobedecer. Sem esta linha, `exitCode: null` caía em "sucesso".
+  if (outcome.reason === 'canceled' || outcome.reason === 'interrupted') return 'canceled';
 
   // Run travada: nenhum evento por tempo demais, ou estouro do teto de duração.
   // Quase sempre é infraestrutura, não a tarefa — vale tentar de novo.

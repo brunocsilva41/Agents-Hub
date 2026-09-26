@@ -73,6 +73,11 @@ export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } 
       return `${time} ${who}${red('✗ orçamento esgotado')}`;
 
     case 'turn.completed': {
+      // Turno parado a pedido (interrupt/pause) não é "concluído": a sessão
+      // segue viva esperando a próxima instrução.
+      if (p['interrupted'] === true) {
+        return `${time} ${who}${yellow('⏹ turno interrompido')} ${dim(textOf(p['message']))}`;
+      }
       const cost = event.cost?.usd;
       return `${time} ${who}${green('✓ turno concluído')}${
         cost ? dim(` — US$ ${cost.toFixed(4)}`) : ''

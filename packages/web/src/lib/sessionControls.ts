@@ -53,12 +53,18 @@ export function deriveControls(input: {
     };
   }
 
-  const turnoVivo = state === 'running' || state === 'waiting_approval';
+  const turnoVivo = state === 'running';
   const ocupado = busy ? off('aguardando a ação anterior') : null;
+  // O daemon recusa parar o turno com aprovação pendente (a pendência ficaria
+  // aberta numa sessão ociosa): o botão diz o porquê em vez de dar erro.
+  const semTurno =
+    state === 'waiting_approval'
+      ? off('resolva a aprovação pendente primeiro')
+      : off(state === 'paused' ? 'já está pausada' : 'nenhum turno em andamento');
 
   return {
-    interrupt: ocupado ?? (turnoVivo ? on : off('nenhum turno em andamento')),
-    pause: ocupado ?? (turnoVivo ? on : off(state === 'paused' ? 'já está pausada' : 'nenhum turno em andamento')),
+    interrupt: ocupado ?? (turnoVivo ? on : state === 'paused' ? off('nenhum turno em andamento') : semTurno),
+    pause: ocupado ?? (turnoVivo ? on : semTurno),
     handoff: ocupado ?? (hasHandoffTarget ? on : off('nenhum outro agente instalado')),
     cancel: ocupado ?? on,
     resumeHint: state === 'paused' ? 'Pausada — envie uma mensagem para retomar.' : null,
@@ -76,7 +82,9 @@ export interface ActionFeedback {
  * não é erro, mas também não é "turno interrompido". Mostrar sucesso ali era
  * ensinar a confiar num botão que não fez nada.
  */
-export function interruptFeedback(result: { interrupted?: boolean } | null | undefined): ActionFeedback {
+export function interruptFeedback(
+  result: { interrupted?: boolean; state?: string } | null | undefined,
+): ActionFeedback {
   if (result && result.interrupted === false) {
     return {
       kind: 'warn',
@@ -84,7 +92,12 @@ export function interruptFeedback(result: { interrupted?: boolean } | null | und
       detail: 'A sessão não tinha turno em andamento.',
     };
   }
-  return { kind: 'ok', title: 'Pedido de interrupção enviado.', detail: 'O estado abaixo é o que o Hub informar.' };
+  // O turno parou e a sessão segue viva (ociosa): retomar é mandar mensagem.
+  return {
+    kind: 'ok',
+    title: 'Turno interrompido.',
+    detail: 'A sessão continua viva e ociosa — envie uma mensagem para retomar.',
+  };
 }
 
 /**

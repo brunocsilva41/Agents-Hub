@@ -5,6 +5,12 @@ import type { ValidationOutcome, ValidationPolicy } from '@agents-hub/core';
 export interface ValidationContext {
   workdir: string;
   acceptanceCriteria: string[];
+  /**
+   * Aborta o comando (matando a árvore) quando a sessão é cancelada ou o
+   * daemon desliga no meio da validação. Sem isto o `npm test` seguia vivo
+   * depois do cancelamento — e ficava órfão quando o daemon saía.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -30,6 +36,7 @@ export async function runValidation(
     policy.command,
     ctx.workdir,
     policy.commandTimeoutSeconds * 1000,
+    ctx.signal,
   );
 
   return { passed: check.passed, checks: [check] };
@@ -41,8 +48,18 @@ interface CheckResult {
   detail?: string;
 }
 
-function runCommandCheck(command: string, cwd: string, timeoutMs: number): Promise<CheckResult> {
+function runCommandCheck(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<CheckResult> {
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve({ name: command, passed: false, detail: 'validação abortada antes de começar' });
+      return;
+    }
+
     // `shell: true` é necessário aqui: o comando vem da configuração do usuário
     // como uma linha só ("npm test -- --run"), não como argv separado.
     const child = spawn(command, {
@@ -71,8 +88,23 @@ function runCommandCheck(command: string, cwd: string, timeoutMs: number): Promi
     // código de saída X" em vez de "excedeu o timeout" — perdendo o motivo
     // real e, pior, resolvendo ANTES de a árvore estar de fato morta.
     let estourouTimeout = false;
+    let abortada = false;
+
+    const aoAbortar = (): void => {
+      if (estourouTimeout || abortada) return;
+      abortada = true;
+      clearTimeout(timer);
+      // Mesma espera do timeout: resolver só com a árvore morta, senão quem
+      // cancelou (ou o daemon que está saindo) segue com o comando vivo.
+      void killProcessTree(child.pid ?? -1, () => child.kill()).then(() => {
+        resolve({ name: command, passed: false, detail: 'validação abortada (sessão encerrada)' });
+      });
+    };
+    signal?.addEventListener('abort', aoAbortar, { once: true });
 
     const timer = setTimeout(() => {
+      if (abortada) return;
+      signal?.removeEventListener('abort', aoAbortar);
       estourouTimeout = true;
       // `shell: true` roda o comando através de `cmd.exe`/`sh`: `child.kill()`
       // sozinho mata só esse shell no Windows, deixando `npm`/`node` filho
@@ -89,7 +121,8 @@ function runCommandCheck(command: string, cwd: string, timeoutMs: number): Promi
     }, timeoutMs);
 
     child.on('error', (err) => {
-      if (estourouTimeout) return;
+      if (estourouTimeout || abortada) return;
+      signal?.removeEventListener('abort', aoAbortar);
       clearTimeout(timer);
       resolve({
         name: command,
@@ -99,7 +132,8 @@ function runCommandCheck(command: string, cwd: string, timeoutMs: number): Promi
     });
 
     child.on('close', (code) => {
-      if (estourouTimeout) return;
+      if (estourouTimeout || abortada) return;
+      signal?.removeEventListener('abort', aoAbortar);
       clearTimeout(timer);
       resolve({
         name: command,

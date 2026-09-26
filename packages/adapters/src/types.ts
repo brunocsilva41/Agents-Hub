@@ -256,7 +256,8 @@ export interface RunHandle {
 export interface RunOutcome {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
-  reason: 'exit' | 'timeout' | 'heartbeat' | 'canceled' | 'error';
+  /** `interrupted`: o turno parou a pedido (interrupt/pause), a sessão segue. */
+  reason: 'exit' | 'timeout' | 'heartbeat' | 'canceled' | 'interrupted' | 'error';
   error: string | null;
   nativeSessionId: string | null;
   /** stdout/stderr acumulados quando o formato não é estruturado. */

@@ -1,5 +1,5 @@
 import type { HubClient } from './client.js';
-import { green } from './render.js';
+import { dim, green, yellow } from './render.js';
 
 interface Args {
   command: string;
@@ -17,8 +17,14 @@ interface Args {
  */
 export async function pauseCommand(client: HubClient, args: Args): Promise<void> {
   const sessionId = required(args.positional[0], 'sessionId');
-  await client.pause(sessionId);
-  console.log(green('sessão pausada'));
+  const r = await client.pause(sessionId);
+  // O daemon diz o estado resultante: "pausada" só quando é verdade.
+  if (r.state !== undefined && r.state !== 'paused') {
+    console.log(yellow(`a sessão não ficou pausada (estado: ${r.state})`));
+    return;
+  }
+  console.log(green('sessão pausada — o turno em andamento foi parado'));
+  console.log(dim(`   retome com: hub send ${sessionId} "<próxima instrução>"`));
 }
 
 function required(value: string | undefined, name: string): string {

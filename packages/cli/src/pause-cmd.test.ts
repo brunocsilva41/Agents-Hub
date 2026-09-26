@@ -8,6 +8,7 @@ import { newId, nowIso, type Session } from '@agents-hub/core';
 import { createHub, type Hub } from '@agents-hub/daemon';
 import { HubClient } from './client.js';
 import { pauseCommand } from './pause-cmd.js';
+import { interruptCommand } from './interrupt-cmd.js';
 
 interface Args {
   command: string;
@@ -144,5 +145,32 @@ describe('hub pause (CLI)', () => {
     const args: Args = { command: 'pause', positional: [id], flags: {} };
     await assert.rejects(() => pauseCommand(client, args), /já terminou/i);
     assert.equal(hub.store.sessions.get(id)?.state, 'completed');
+  });
+
+  // `hub interrupt` imprimia "turno interrompido" sem olhar a resposta: sem
+  // turno em andamento (ou numa sessão já concluída) também dizia sucesso.
+  test('interrupt sem turno em andamento NÃO diz "turno interrompido"', async () => {
+    const session = semearRodando();
+    const args: Args = { command: 'interrupt', positional: [session.id], flags: {} };
+    const linhas: string[] = [];
+    const originalLog = console.log;
+    console.log = (msg?: unknown) => {
+      linhas.push(String(msg));
+    };
+    try {
+      await interruptCommand(client, args);
+    } finally {
+      console.log = originalLog;
+    }
+    assert.ok(linhas.some((l) => l.includes('nenhum turno em andamento')), linhas.join(' | '));
+    assert.ok(!linhas.some((l) => l.includes('turno interrompido')), linhas.join(' | '));
+    assert.equal(hub.store.sessions.get(session.id)?.state, 'running');
+  });
+
+  test('interrupt de sessão já terminada é recusado pelo daemon', async () => {
+    const session = semearRodando();
+    hub.store.sessions.update(session.id, { state: 'completed', endedAt: nowIso() });
+    const args: Args = { command: 'interrupt', positional: [session.id], flags: {} };
+    await assert.rejects(() => interruptCommand(client, args), /já terminou/i);
   });
 });

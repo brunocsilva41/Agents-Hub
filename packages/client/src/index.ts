@@ -207,12 +207,17 @@ export class HubClient {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/send`, { text });
   }
 
-  /** `interrupted: false`: a sessão existe, mas não havia turno em andamento. */
-  async interrupt(sessionId: string): Promise<{ ok: boolean; interrupted?: boolean }> {
+  /**
+   * `interrupted: false`: a sessão existe, mas não havia turno em andamento.
+   * `state`: estado depois da interrupção (`idle` quando parou um turno).
+   */
+  async interrupt(
+    sessionId: string,
+  ): Promise<{ ok: boolean; interrupted?: boolean; state?: string }> {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/interrupt`, {});
   }
 
-  async pause(sessionId: string): Promise<{ ok: boolean }> {
+  async pause(sessionId: string): Promise<{ ok: boolean; state?: string }> {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/pause`, {});
   }
 

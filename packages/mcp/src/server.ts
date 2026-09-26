@@ -429,7 +429,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         };
         return ok(
           interrupted
-            ? `turno da sessão ${session_id} interrompido`
+            ? `turno da sessão ${session_id} interrompido — a sessão continua viva (ociosa); retome com hub_session_send`
             : `sessão ${session_id} não tinha turno em andamento — nada para interromper`,
         );
       } catch (err) {
@@ -455,7 +455,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     async ({ session_id }): Promise<ToolResult> => {
       try {
         await client.pause(session_id);
-        return ok(`sessão ${session_id} pausada`);
+        return ok(`sessão ${session_id} pausada — retome com hub_session_send`);
       } catch (err) {
         return fail(describe(err));
       }

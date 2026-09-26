@@ -57,6 +57,30 @@ Três invariantes que sustentam tudo:
 
 `idle · running · waiting_approval · paused · completed · failed · killed`
 
+### Parar uma sessão: cancel, interrupt, pause
+
+| Ação | Processo do turno | Sessão | Task | Pai (delegação) |
+|---|---|---|---|---|
+| `cancel` | morto (árvore), inclusive validação/revisão/backoff em curso | `killed` | `canceled` | `delegation.completed` com `state: canceled` |
+| `interrupt` | encerrado (Windows: árvore morta; POSIX: SIGINT, árvore morta após 5 s) | `idle` | `input_required` | nada — a tarefa segue viva |
+| `pause` | idem `interrupt` | `paused` | `input_required` | nada |
+
+- O pedido é anotado **antes** de mexer no processo (`packages/daemon/src/session-lifecycle.ts`):
+  o fim do processo sozinho não distingue cancelamento de interrupção de falha, e sem a
+  anotação o pump tratava tudo como falha (`failed`, com retry).
+- Retomar `idle`/`paused` é mandar mensagem (`hub send`, `hub_session_send`): resume nativo quando
+  o manifesto declara `session.strategy: native` e o id nativo já apareceu, replay do histórico
+  quando não. A tentativa da task continua aberta — interromper não é falhar e não gasta retry.
+- Recusas explícitas (`ILLEGAL_STATE`, nunca "interrompido" seguido de morte): agente com
+  `session.strategy: none` (não há como retomar), sessão com aprovação pendente
+  (`waiting_approval`) e, para `pause`, sessão cujo processo já saiu e está em validação/revisão.
+- `pause` não desce para os filhos (ao contrário de `cancel`): cada sessão é pausada e retomada
+  por conta própria.
+- Falha ao subir o agente (binário ausente, spawn, gate do Codex recusado, projeto não-git) não
+  deixa nada para trás: sessão `failed` com o motivo, task `failed`, reserva do orçamento
+  devolvida ao fluxo e worktree liberado. Numa continuação (`send`), a sessão volta ao estado
+  anterior e segue retomável.
+
 ## 4. O EventEnvelope
 
 Todo adapter traduz a saída nativa do agente para este formato. É o coração da observabilidade.
