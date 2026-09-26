@@ -38,7 +38,7 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 - [ ] 1.6 Aprovação sem token (relatório 05)
 - [x] 1.7 Calibrar tabela de risco supervised vs README (relatório 01/11) — mesmo merge; ~/.claude/plans não pede aprovação; ls/cat/git status = read; mkdir/make/npm install passam em semi; README com tabela risco×modo
 - [x] 1.8 Guard: Origin null, JSON malformado→500, args MCP não mascarados, etc (relatório 02/05) — merge 639dd11; http-hardening.test.ts (10 vermelhos sem a correção) + guard.test; Origin null/sem porta/Sec-Fetch-Site; %→400; JSON→400; >5MB→413; args/url/headers mascarados; caminho de projeto validado; ADS/reservados→400; /health sem home
-- [ ] 1.9 Trust-on-first-use para BASE_URL/prompts/env do repo (relatório 02/05)
+- [x] 1.9 Trust-on-first-use para BASE_URL/prompts/env do repo (relatório 02/05) — merge 77f7e21; repo-trust.test.ts (7 testes, 6 vermelhos sem a correção); env/prompts/memória/validation do repo só com confiança + hash (TOFU, suspende se mudar); contexto do Hub no banco (migração 6). Pendente p/ 6.12: UI de confiança no painel
 - [ ] 1.10 Editor de política + trilha de auditoria no painel/CLI (relatório 05)
 
 ## Fase 2 — Ciclo de vida de sessão
@@ -54,7 +54,8 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 - [ ] 5.1 a 5.7 (relatórios 01/02/07/09/12/14)
 
 ## Fase 6 — Painel web
-- [ ] 6.1 a 6.12 (relatórios 03/04/13/10/14)
+- [x] 6.5 6.6 6.11 — merge fa7ee18; testes de lógica do web (packages/web/src/logic, runner dist-test), 10 vermelhos sem a correção; onboarding sem projeto; tabela de env por agente no core. Pendências: trocar de aba no topo descarta edição sem aviso (App.tsx); classes .settings-vazio/.settings-erro sem CSS
+- [ ] 6.1 6.2 6.3 6.4 6.7 6.8 6.9 6.10 6.12
 
 ## Fase 7 — Testes/CI
 - [ ] 7.1 a 7.4 (relatórios 01/04/12)
