@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { HubError, isHubError } from './errors.js';
+import { HubError } from './errors.js';
 import { BriefSchema, type Brief, type UpstreamResult } from './brief.js';
 import { sleep as defaultSleep } from './resilience.js';
+
+export const MAX_WORKFLOW_STEPS = 200;
 
 export const WorkflowStepSchema = z.object({
   id: z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'id do step deve ser alfanumérico'),
@@ -25,7 +27,12 @@ export const WorkflowSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   version: z.string().default('1.0'),
-  steps: z.array(WorkflowStepSchema).min(1, 'o workflow precisa ter pelo menos um step'),
+  // Teto de passos: sem ele, uma cadeia de milhares de passos era "válida" e
+  // cada um vira uma sessão de agente com custo próprio.
+  steps: z
+    .array(WorkflowStepSchema)
+    .min(1, 'o workflow precisa ter pelo menos um step')
+    .max(MAX_WORKFLOW_STEPS, `o workflow pode ter no máximo ${MAX_WORKFLOW_STEPS} steps`),
 });
 
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
@@ -189,14 +196,29 @@ export interface WorkflowRunDeps {
     upstream: UpstreamResult[];
     /** Teto em dólares desta execução, já descontado do orçamento global. */
     capUsd: number | null;
+    /**
+     * Sessões (a FINAL de cada dependência concluída — a do substituto, se
+     * houve fallback) de cujo trabalho o passo deve partir. O resumo em
+     * `upstream` diz o que foi feito; isto entrega o CÓDIGO: o worktree do
+     * passo nasce do branch `hub/<id>` delas, não do HEAD do projeto.
+     */
+    baseSessionIds: string[];
   }): Promise<{ sessionId: string; taskId: string }>;
 
-  /** Espera a tarefa chegar a estado terminal. É o `await` que faltava. */
+  /**
+   * Espera a tarefa chegar a estado terminal. É o `await` que faltava.
+   *
+   * A tarefa é acompanhada pelo `taskId`, não pela sessão: num fallback ela
+   * MUDA de sessão (o substituto é uma sessão nova), e seguir a sessão
+   * original dava "a sessão não tem tarefa" para um passo que o substituto
+   * concluiu. `sessionId` na resposta é onde ela terminou.
+   */
   settle(input: { step: WorkflowStep; sessionId: string; taskId: string }): Promise<{
     state: 'completed' | 'failed' | 'blocked' | 'timeout';
     summary: string | null;
     detail: string | null;
     usd: number;
+    sessionId?: string;
   }>;
 
   report?(event: WorkflowRunEvent): void;
@@ -295,21 +317,7 @@ export async function runWorkflow(
     //    soma dos tetos aqui nunca passa do que sobrou.
     const saldoInicial =
       options.budgetUsd === undefined ? null : Math.max(0, options.budgetUsd - gastoTotal);
-    let saldo = saldoInicial;
-    const tetos = new Map<string, number | null>();
-    let restantes = executaveis.length;
-
-    for (const step of executaveis) {
-      if (saldo === null) {
-        tetos.set(step.id, null);
-      } else {
-        const pedido = step.budget.usd ?? saldo / restantes;
-        const teto = Math.min(pedido, saldo);
-        tetos.set(step.id, teto);
-        saldo -= teto;
-      }
-      restantes -= 1;
-    }
+    const tetos = repartirSaldo(executaveis, saldoInicial);
 
     // 3. Despachar e ESPERAR. É a correção: o lote inteiro chega a estado
     //    terminal antes de o próximo começar.
@@ -348,9 +356,18 @@ export async function runWorkflow(
 
         while (ids === null) {
           try {
-            ids = await deps.start({ step, upstream, capUsd: teto });
+            ids = await deps.start({
+              step,
+              upstream,
+              capUsd: teto,
+              baseSessionIds: basesDe(step, results),
+            });
           } catch (err) {
-            const éConcorrencia = isHubError(err) && err.code === 'CONCURRENCY_EXCEEDED';
+            // Checagem ESTRUTURAL pelo código, não `instanceof HubError`: pela
+            // CLI o erro chega como `HubApiError` (do client HTTP), outra
+            // classe com o mesmo `code` — e o retry nunca disparava fora dos
+            // testes unitários, que lançavam `HubError` direto.
+            const éConcorrencia = codigoDoErro(err) === 'CONCURRENCY_EXCEEDED';
             if (!éConcorrencia || tentativa >= maxTentativasConcorrencia) {
               const detail = éConcorrencia
                 ? `esgotou tentativas de concorrência (${tentativa + 1}/${maxTentativasConcorrencia + 1}): ${(err as Error).message}`
@@ -404,7 +421,9 @@ export async function runWorkflow(
             stepId: step.id,
             agent: step.agent,
             state: desfecho.state,
-            sessionId: ids.sessionId,
+            // A sessão onde a tarefa TERMINOU: depois de um fallback é a do
+            // substituto — é dela o trabalho que o passo seguinte herda.
+            sessionId: desfecho.sessionId ?? ids.sessionId,
             taskId: ids.taskId,
             summary: desfecho.summary,
             detail: desfecho.detail,
@@ -434,6 +453,66 @@ export async function runWorkflow(
     steps,
     totalUsd: gastoTotal,
   };
+}
+
+/**
+ * Reparte o saldo do workflow entre os passos de um lote.
+ *
+ * Quem declarou `budget.usd` pede isso; quem não declarou pede uma fatia igual
+ * do saldo. Cabendo tudo, cada um recebe o que pediu e o que sobra vai para os
+ * sem pedido. NÃO cabendo, todos encolhem na mesma proporção — antes o
+ * primeiro passo com `usd: 100` num teto de 10 levava os 10 inteiros e o irmão
+ * do mesmo lote era pulado por "orçamento esgotado" sem nada ter sido gasto.
+ */
+function repartirSaldo(
+  executaveis: WorkflowStep[],
+  saldo: number | null,
+): Map<string, number | null> {
+  const tetos = new Map<string, number | null>();
+  if (saldo === null) {
+    for (const step of executaveis) tetos.set(step.id, null);
+    return tetos;
+  }
+  if (executaveis.length === 0) return tetos;
+
+  const semPedido = executaveis.filter((s) => s.budget.usd === undefined);
+  const somaPedidos = executaveis.reduce((acc, s) => acc + (s.budget.usd ?? 0), 0);
+
+  if (somaPedidos <= saldo) {
+    const fatia = semPedido.length > 0 ? (saldo - somaPedidos) / semPedido.length : 0;
+    for (const step of executaveis) tetos.set(step.id, step.budget.usd ?? fatia);
+    return tetos;
+  }
+
+  const pesoSemPedido = saldo / executaveis.length;
+  const pesos = executaveis.map((s) => s.budget.usd ?? pesoSemPedido);
+  const somaPesos = pesos.reduce((a, b) => a + b, 0);
+  executaveis.forEach((step, i) => {
+    tetos.set(step.id, somaPesos > 0 ? (pesos[i]! * saldo) / somaPesos : 0);
+  });
+  return tetos;
+}
+
+/** `code` de qualquer erro com esse campo — `HubError`, `HubApiError` ou objeto. */
+function codigoDoErro(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * De onde o CÓDIGO do passo parte: as sessões finais das dependências
+ * concluídas. Só faz sentido para passo isolado em worktree — em
+ * `isolation: none` o agente já trabalha no diretório do projeto.
+ */
+function basesDe(step: WorkflowStep, results: Map<string, WorkflowStepResult>): string[] {
+  if (step.isolation !== 'worktree') return [];
+  const bases: string[] = [];
+  for (const dep of step.dependsOn) {
+    const r = results.get(dep);
+    if (r && r.state === 'completed' && r.sessionId) bases.push(r.sessionId);
+  }
+  return bases;
 }
 
 /**
