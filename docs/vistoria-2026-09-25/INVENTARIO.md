@@ -81,13 +81,13 @@ Como a contagem foi feita:
 | R02-06 | MED | SECURITY.md omite vetores reais (BASE_URL, prompts/memory, env de projeto) | 1.9 | [x] |
 | R02-07 | MED | Retenção documentada ("para sempre", bruto preservado) não bate com o código | 8.1 | [ ] |
 | R02-08 | MED | ADRs 01/03/06 divergem do código (fallback, 9 agentes, TUI, nomes) | 8.1 | [ ] |
-| R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [ ] |
+| R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [~] CI permissions (ab3a0af); CONTRIBUTING → 8.1 |
 | R02-10 | MED | docs/09: MCP e CLI leem `process.env` cru, `NaN` volta | 5.4 | [x] |
 | R02-11 | BAIXO | JSON malformado devolve 500 INTERNAL com mensagem do parser | 1.8 | [x] |
 | R02-12 | BAIXO | POST sem corpo e sem Content-Type recusado com 415 | — | [ ] |
 | R02-13 | BAIXO | docs/10 e precos-modelos dizem que só o Claude reporta USD (OpenCode também) | 8.1 | [ ] |
 | R02-14 | BAIXO | Exemplo YAML promete paralelismo que não tem | — | [ ] |
-| R02-15 | BAIXO | Exports de sessão `.txt` soltos na raiz, fora do .gitignore | 8.3 | [ ] |
+| R02-15 | BAIXO | Exports de sessão `.txt` soltos na raiz, fora do .gitignore | 8.3 | [x] /*.txt no .gitignore (1a3ce75) |
 
 ## R03 — 03-web-estatico.md
 
@@ -113,7 +113,7 @@ Como a contagem foi feita:
 | R03-18 | MED | Vite dev: `/discovery` fora do proxy; aba "Agentes detectados" quebra | 6.11 | [x] |
 | R03-19 | MED | Configurações: edições somem sem aviso; "Modelos locais" com controles fantasma | 6.5 | [x] |
 | R03-20 | MED | Cobertura do painel vs. sistema: faltam superfícies (seção F, 16 itens) | 6.12 | [x] |
-| R03-21 | BAIXO | Abas com ARIA inválido e controles sem nome acessível | — | [ ] |
+| R03-21 | BAIXO | Abas com ARIA inválido e controles sem nome acessível | — | [x] ARIA/nomes (9979203) |
 | R03-22 | BAIXO | Contraste de `--text-faint` e ausência de `prefers-reduced-motion` | 6.8 | [x] |
 | R03-23 | BAIXO | Fontes via Google Fonts (`@import`) em painel local | 6.8 | [x] |
 | R03-24 | BAIXO | Fluxo selecionado na lista não pode ser recolhido | — | [ ] |
@@ -174,7 +174,7 @@ Como a contagem foi feita:
 | R06-09 | MED | Reaper: worktrees sujos/meio-apagados nunca recolhidos; sweep sem trava | 2.6 | [x] |
 | R06-10 | MED | Reconciliação no restart fecha sessões sem evento nem tentativa fechada | 2.8 | [x] |
 | R06-11 | MED | `handoff` conta a mesma sessão duas vezes no teto de concorrência | 2.7 | [x] |
-| R06-12 | BAIXO | Cancel em cascata ignora filhos `paused`/`idle` | — | [ ] |
+| R06-12 | BAIXO | Cancel em cascata ignora filhos `paused`/`idle` | — | [x] cascata alcança paused/idle (468ce58) |
 | R06-13 | BAIXO | Kill de árvore em POSIX mata só o filho direto | — | [ ] |
 | R06-14 | BAIXO | Artefato de diff só é capturado no caminho de sucesso | — | [ ] |
 | R06-15 | BAIXO | Escrita fora do worktree não é detectada (docs/04 diz `escalate`) | 8.1 | [ ] |
@@ -199,7 +199,7 @@ Como a contagem foi feita:
 | R07-14 | MED | Ids sem `encodeURIComponent` no client; budget/graph de id errado dão zeros/crash | 0.6 | [x] |
 | R07-15 | BAIXO | Negação/timeout no gate: agente recebe "a política proíbe esta ação" | 1.5 | [x] |
 | R07-16 | BAIXO | `hub interrupt`/`cancel`/`send` sempre dizem sucesso; no Windows interrupt mata | 2.2 | [x] |
-| R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [ ] |
+| R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [x] error com mensagem (6f231e2) |
 | R07-18 | BAIXO | Horários exibidos em UTC sem rótulo | — | [ ] |
 | R07-19 | BAIXO | Cada invocação carrega daemon/SQLite: ~0,6 s e ExperimentalWarning | 5.6 | [x] |
 | R07-20 | BAIXO | Help x implementação (sem `--help` por comando, `--version`, `--json`, `--`) | 5.6 | [x] |
@@ -222,7 +222,7 @@ Como a contagem foi feita:
 | R08-07 | MED | `CallerIdentity` cacheia para sempre uma adoção que falhou | 2.8 | [x] |
 | R08-08 | MED | `hub_agent_wait` ignora cancelamento/timeout do cliente e consulta para sempre | 2.8 | [x] |
 | R08-09 | MED | Explicação de "negado por falta de resposta" descartada; `escalate` inválido no hook | 1.5 | [x] |
-| R08-10 | MED | Gate aplica política do Hub ao Claude "normal" do usuário por casamento de `cwd` | — | [ ] |
+| R08-10 | MED | Gate aplica política do Hub ao Claude "normal" do usuário por casamento de `cwd` | — | [x] gate só p/ sessão viva do Hub (4fff125) |
 | R08-11 | MED | Sem limite de tamanho em `hub_agent_call`; failover em cascata sem aviso | — | [ ] |
 | R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [ ] |
 | R08-13 | MED | Raízes adotadas ficam `running` para sempre se o MCP é morto sem fechar stdin | 2.8 | [x] |
@@ -241,7 +241,7 @@ Como a contagem foi feita:
 | R09-04 | MED | Padrões de "irreversível" e allow list com lacunas e falsos positivos | 1.1 | [x] |
 | R09-05 | MED | "Deny list" não nega: vira `irreversible` e a decisão padrão é `approve` | 1.2 | [x] |
 | R09-06 | MED | Não há backup/restauração do banco; copiar só o `.db` perde dados (WAL) | 5.6 | [x] |
-| R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [ ] |
+| R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [x] lotes de 2000 + índice parcial (494f026) |
 | R09-08 | MED | Consultas agregadas por sessão/árvore escalam mal e bloqueiam o processo | — | [ ] |
 | R09-09 | MED | `mergePolicyLayer(clampToBase)` não trava budget/retries/timeouts/fallback | 0.7 | [x] |
 | R09-10 | MED | Política de arquivos: leitura nunca protegida; lista de escrita sensível incompleta | 1.2 | [x] |
@@ -249,10 +249,10 @@ Como a contagem foi feita:
 | R09-12 | BAIXO | Schemas de política aceitam valores sem sentido; risk parcial cai em fail-open | — | [ ] |
 | R09-13 | BAIXO | Brief: validações frouxas (trim, tamanho, Infinity, `..` em artifacts) | — | [ ] |
 | R09-14 | BAIXO | Pricing: variantes casam por prefixo com confiança `model`; itens não modelados | 3.4 | [x] |
-| R09-15 | BAIXO | `combineCostEstimates`: rótulo de confiança incoerente | — | [ ] |
+| R09-15 | BAIXO | `combineCostEstimates`: rótulo de confiança incoerente | — | [x] confiança partial (559db1f) |
 | R09-16 | BAIXO | `transaction()` não protege contra fn assíncrona nem usa SAVEPOINT | — | [ ] |
 | R09-17 | BAIXO | Integridade e desempenho: lacunas de schema (FK, is_primary, path, índices) | — | [ ] |
-| R09-18 | BAIXO | Workflow: teto de orçamento pessimista e sem limite de passos | — | [ ] |
+| R09-18 | BAIXO | Workflow: teto de orçamento pessimista e sem limite de passos | — | [x] fatias proporcionais + máx 200 passos (4a20fe0) |
 | R09-19 | BAIXO | Resiliência e CallGraph: retry de timeout, `pathKey` literal, ciclo de parent_id | — | [ ] |
 
 ## R10 — 10-adapters-manifestos.md
@@ -272,9 +272,9 @@ Como a contagem foi feita:
 | R10-11 | MED | Discovery do Antigravity lê o caminho errado | 4.4 | [x] |
 | R10-12 | MED | `raw` do evento não é truncado: 5 MB persistidos por tool_result | 2.5 | [x] |
 | R10-13 | MED | Cursor: manifesto 100% não verificado e binário ausente | 4.5 | [x] |
-| R10-14 | BAIXO | OpenCode: `probe()` não devolve versão e afirma `authenticated:true` | — | [ ] |
+| R10-14 | BAIXO | OpenCode: `probe()` não devolve versão e afirma `authenticated:true` | — | [x] probe com --version, auth null (3fdc4a4) |
 | R10-15 | BAIXO | Manifesto do Copilot cita duas versões que não batem com a instalada | 4.5 | [x] |
-| R10-16 | BAIXO | Codex falha em diretório não-git (falta `--skip-git-repo-check`) | — | [ ] |
+| R10-16 | BAIXO | Codex falha em diretório não-git (falta `--skip-git-repo-check`) | — | [x] --skip-git-repo-check (f88df96) |
 | R10-17 | BAIXO | Ruído `DEP0190` do Node; settings.json do Claude com conteúdo extra | 0.3 | [x] |
 
 ## R11 — 11-teste-real-clis.md
@@ -297,7 +297,7 @@ Como a contagem foi feita:
 |---|---|---|---|---|
 | R12-01 | MED | Sem LICENSE e sem campo `license` nos package.json | 7.3 | [x] |
 | R12-02 | MED | Módulos relevantes sem teste (reaper, project-registry, hooks-install, client, web) | 7.1 | [x] |
-| R12-03 | MED | Não há medição nem gate de cobertura | 7.2 | [ ] |
+| R12-03 | MED | Não há medição nem gate de cobertura | 7.2 | [x] npm run coverage + job CI (ab3a0af) |
 | R12-04 | MED | Sem lint nem formatador | 7.2 | [ ] |
 | R12-05 | MED | Job Linux informativo (continue-on-error); portão só exige Windows | 7.2 | [ ] |
 | R12-06 | BAIXO | `npm audit`: 1 vulnerabilidade moderada (qs), transitiva | 7.3 | [x] |
@@ -338,7 +338,7 @@ Como a contagem foi feita:
 | R14-03 | ALTO | `hub watch <id-inexistente>` trava para sempre, sem erro | 5.2 | [x] |
 | R14-04 | MED | `hub start` em subpasta de projeto registrado falha com PROJECT_FOLDER_CONFLICT | 5.3 | [x] |
 | R14-05 | MED | Repositório git sem commits: erro cru do git | 5.3 | [x] |
-| R14-06 | MED | Objetivo curto rejeitado (`min(8)`) e validação de agente vem depois | — | [ ] |
+| R14-06 | MED | Objetivo curto rejeitado (`min(8)`) e validação de agente vem depois | — | [x] agente validado antes; msg melhor (6f231e2) |
 | R14-07 | MED | `AGENTS_HUB_PORT` ignorada pelo cliente da CLI | 5.4 | [x] |
 | R14-08 | MED | `ExperimentalWarning: SQLite` em todo comando, até `hub help` | 5.6 | [x] |
 | R14-09 | MED | Sem onboarding (`hub init`); doctor, discover e painel não se conversam | 5.6 | [x] |
