@@ -391,6 +391,67 @@ export interface McpUpsertOutcome {
 }
 
 /**
+ * O que `upsertMcpServer` gravaria, sem gravar: o texto atual e o novo (ou
+ * `null` quando já está correto). É a prévia que o painel mostra como diff
+ * antes de o operador confirmar (item 6.12 do GOAL). Lança, sem gravar nada,
+ * nos mesmos casos em que a escrita recusaria.
+ */
+export interface McpUpsertPlan {
+  path: string;
+  existed: boolean;
+  /** Conteúdo atual do arquivo (vazio se não existe). */
+  raw: string;
+  /** Conteúdo que seria gravado; `null` = nada a mudar. */
+  next: string | null;
+  avisos: string[];
+}
+
+export function planUpsertMcpServer(
+  target: McpTarget,
+  configPath: string,
+  server: PortableMcpServer,
+): McpUpsertPlan {
+  const existed = existsSync(configPath);
+  const raw = existed ? readFileSync(configPath, 'utf8') : '';
+  const base = { path: configPath, existed, raw };
+
+  if (target.format === 'toml-codex') {
+    const antes = lerTomlDeConfig(configPath, raw);
+    const esperado = tomlEntry(server);
+    if (isDeepStrictEqual(servidoresToml(antes)[server.name], esperado)) {
+      return { ...base, next: null, avisos: [] };
+    }
+    const next = substituirServidorToml(raw, server.name, tomlSection(server));
+    const depois = tomlGeradoOuFalha(configPath, next);
+    // Prova de que só o nosso servidor mudou e de que ficou exatamente como pedido.
+    if (
+      !isDeepStrictEqual(servidoresToml(depois)[server.name], esperado) ||
+      !isDeepStrictEqual(semServidor(depois, server.name), semServidor(antes, server.name))
+    ) {
+      throw new Error(
+        `${configPath}: o servidor "${server.name}" está declarado de um jeito que não sei ` +
+          'substituir com segurança (ex.: tabela inline ou chaves pontuadas). Nada foi gravado; ' +
+          'edite à mão com o trecho de `hub mcp show codex`.',
+      );
+    }
+    return { ...base, next, avisos: [] };
+  }
+
+  const lido = lerJsonDeConfig(configPath);
+  const doc = lido.doc;
+  const key = JSON_KEY(target);
+  const bucket = jsonBucket(configPath, doc, key);
+  const entrada = jsonEntry(target, server);
+  if (isDeepStrictEqual(bucket[server.name], entrada)) {
+    return { ...base, next: null, avisos: lido.avisos };
+  }
+  bucket[server.name] = entrada;
+  doc[key] = bucket;
+  return { ...base, next: `${JSON.stringify(doc, null, 2)}
+`, avisos: lido.avisos };
+}
+
+/**
  * Cria ou SUBSTITUI um servidor (o do próprio Hub) no config de um agente.
  *
  * Diferente de `addMcpServers` (que nunca toca em nome existente), aqui a
@@ -404,47 +465,17 @@ export function upsertMcpServer(
   server: PortableMcpServer,
   agora: Date = new Date(),
 ): McpUpsertOutcome {
-  const existed = existsSync(configPath);
-  const raw = existed ? readFileSync(configPath, 'utf8') : '';
-
-  let next: string;
-  let avisos: string[] = [];
-  if (target.format === 'toml-codex') {
-    const antes = lerTomlDeConfig(configPath, raw);
-    const esperado = tomlEntry(server);
-    if (isDeepStrictEqual(servidoresToml(antes)[server.name], esperado)) {
-      return { path: configPath, action: 'unchanged', backup: null, avisos };
-    }
-    next = substituirServidorToml(raw, server.name, tomlSection(server));
-    const depois = tomlGeradoOuFalha(configPath, next);
-    // Prova de que só o nosso servidor mudou e de que ficou exatamente como pedido.
-    if (
-      !isDeepStrictEqual(servidoresToml(depois)[server.name], esperado) ||
-      !isDeepStrictEqual(semServidor(depois, server.name), semServidor(antes, server.name))
-    ) {
-      throw new Error(
-        `${configPath}: o servidor "${server.name}" está declarado de um jeito que não sei ` +
-          'substituir com segurança (ex.: tabela inline ou chaves pontuadas). Nada foi gravado; ' +
-          'edite à mão com o trecho de `hub mcp show codex`.',
-      );
-    }
-  } else {
-    const lido = lerJsonDeConfig(configPath);
-    avisos = lido.avisos;
-    const doc = lido.doc;
-    const key = JSON_KEY(target);
-    const bucket = jsonBucket(configPath, doc, key);
-    const entrada = jsonEntry(target, server);
-    if (isDeepStrictEqual(bucket[server.name], entrada)) {
-      return { path: configPath, action: 'unchanged', backup: null, avisos };
-    }
-    bucket[server.name] = entrada;
-    doc[key] = bucket;
-    next = `${JSON.stringify(doc, null, 2)}\n`;
+  const plano = planUpsertMcpServer(target, configPath, server);
+  if (plano.next === null) {
+    return { path: configPath, action: 'unchanged', backup: null, avisos: plano.avisos };
   }
-
-  const backup = gravarComBackup(configPath, next, agora);
-  return { path: configPath, action: existed ? 'merged' : 'created', backup, avisos };
+  const backup = gravarComBackup(configPath, plano.next, agora);
+  return {
+    path: configPath,
+    action: plano.existed ? 'merged' : 'created',
+    backup,
+    avisos: plano.avisos,
+  };
 }
 
 /**

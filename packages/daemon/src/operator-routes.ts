@@ -18,6 +18,7 @@ import type { PolicyService } from './policy-service.js';
  * | GET  /policy[?projectId=]    | não   | camadas + política efetiva (+ projeto)   |
  * | PUT  /policy                 | sim   | substitui a camada global                |
  * | PUT  /projects/:id/policy    | sim   | substitui a camada do projeto (clamp)    |
+ * | (as duas com `?dryRun=1`)    | sim   | só valida e prevê loosened/clamped       |
  * | GET  /audit                  | não   | trilha (sessionId, projectId, kind,      |
  * |                              |       | since, until, limit)                     |
  */
@@ -44,6 +45,12 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
     'Content-Length': Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+/** `?dryRun=1` (ou `true`): prévia, nada é gravado nem auditado. */
+function ehPrevia(req: IncomingMessage): boolean {
+  const v = new URL(req.url ?? '/', 'http://local').searchParams.get('dryRun');
+  return v === '1' || v === 'true';
 }
 
 function validar<T>(schema: z.ZodType<T>, valor: unknown, nome: string): T {
@@ -111,6 +118,10 @@ export function registerOperatorRoutes(
     '/policy',
     async (req, res) => {
       const layer = await lerCorpoDePolitica(req);
+      if (ehPrevia(req)) {
+        sendJson(res, 200, { dryRun: true, ...policy.previewGlobalLayer(layer) });
+        return;
+      }
       const result = policy.setGlobalLayer(layer);
       audit.record({
         actor: operatorOf(req)?.by ?? 'desconhecido',
@@ -135,6 +146,10 @@ export function registerOperatorRoutes(
     async (req, res, params) => {
       const projectId = validar(ProjectIdSchema, params['id'], 'id');
       const layer = await lerCorpoDePolitica(req);
+      if (ehPrevia(req)) {
+        sendJson(res, 200, { dryRun: true, ...policy.previewProjectLayer(projectId, layer) });
+        return;
+      }
       const project = policy.setProjectLayer(projectId, layer);
       audit.record({
         actor: operatorOf(req)?.by ?? 'desconhecido',

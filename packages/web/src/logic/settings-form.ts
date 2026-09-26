@@ -91,6 +91,10 @@ export interface CampoDeEnv {
   rotulo: string;
   /** Valor é credencial: campo mascarado, com aviso de versionamento. */
   secreto: boolean;
+  /** Formato esperado (vem do manifesto, para o campo de modelo). */
+  formato?: string;
+  /** O valor chega ao CLI como flag (`--model x`), não como variável lida por ele. */
+  viaFlag?: boolean;
 }
 
 const ROTULO: Record<PapelDeVariavel, string> = {
@@ -99,40 +103,58 @@ const ROTULO: Record<PapelDeVariavel, string> = {
   model: 'Modelo',
 };
 
+/** O que o painel precisa saber do agente para o campo de modelo. */
+export type ModeloDoAgente = Partial<Pick<AgentSummary, 'model'>>;
+
 /**
  * Os campos fixos de "Modelos locais" para um agente: só as variáveis que ele
  * de fato lê (tabela em `core/agent-env.ts`).
  *
  * Antes a tela oferecia `OPENAI_BASE_URL`/`OPENAI_API_KEY`/`MODEL` a TODOS os
  * agentes — inclusive ao Claude, que não lê `OPENAI_*`, e com um `MODEL` que
- * nenhum adapter consome. Controle fantasma: o usuário configurava e nada
+ * nenhum adapter consumia. Controle fantasma: o usuário configurava e nada
  * mudava (vistoria 2026-09-25, relatórios 03 e 10).
  *
- * O campo de modelo só aparece quando o agente lê uma variável de modelo.
- *
- * TODO(modelo por manifesto): outro trabalho está adicionando ao manifesto a
- * capacidade de escolher modelo por flag (`invoke.modelArgs`). Quando o
- * `/agents` expuser esse dado (hoje `AgentSummary` não tem campo nenhum para
- * isso), o modelo de agentes SEM variável de ambiente (codex, opencode…) pode
- * ganhar campo aqui — mas gravado numa chave própria do contexto do projeto,
- * não em `env`, e só depois de o daemon passar esse valor ao adapter. Até lá,
- * esconder é o correto: mostrar seria de novo um campo sem efeito.
+ * Modelo (item 4.3): o `/agents` diz por agente se o CLI aceita modelo por
+ * invocação (`model.supported`, flag conferida no `--help`). Quando aceita, o
+ * campo "Modelo" grava `MODEL` no env do projeto para o agente, que o adapter
+ * lê e transforma na flag do manifesto (`modeloDaRun`). Quando NÃO aceita, não
+ * há campo de modelo nenhum — nem o da variável própria do CLI: o controle só
+ * aparece onde o valor chega ao agente. Sem o resumo do agente (lista ainda
+ * carregando), cai na tabela de variáveis, como antes.
  */
-export function camposDeEnvDoAgente(agentId: string): CampoDeEnv[] {
-  return variaveisLidasPeloAgente(agentId).map((v) => ({
-    nome: v.nome,
-    papel: v.papel,
-    rotulo: ROTULO[v.papel],
-    secreto: v.papel === 'apiKey',
-  }));
+export function camposDeEnvDoAgente(agentId: string, agente?: ModeloDoAgente): CampoDeEnv[] {
+  // `model` ausente = daemon anterior ao item 4.3: comportamento antigo.
+  const conhece = agente?.model !== undefined;
+  const doAmbiente = variaveisLidasPeloAgente(agentId)
+    .filter((v) => !conhece || v.papel !== 'model')
+    .map((v) => ({
+      nome: v.nome,
+      papel: v.papel,
+      rotulo: ROTULO[v.papel],
+      secreto: v.papel === 'apiKey',
+    }));
+  if (agente?.model?.supported !== true) return doAmbiente;
+  return [
+    ...doAmbiente,
+    {
+      nome: 'MODEL',
+      papel: 'model',
+      rotulo: ROTULO.model,
+      secreto: false,
+      viaFlag: true,
+      ...(agente.model.format ? { formato: agente.model.format } : {}),
+    },
+  ];
 }
 
 /** Variáveis do agente que não são campos fixos — listadas à parte. */
 export function extrasDoAgente(
   envDoAgente: Record<string, string>,
   agentId: string,
+  agente?: ModeloDoAgente,
 ): Array<[string, string]> {
-  const fixos = new Set(camposDeEnvDoAgente(agentId).map((c) => c.nome));
+  const fixos = new Set(camposDeEnvDoAgente(agentId, agente).map((c) => c.nome));
   return Object.entries(envDoAgente).filter(([chave]) => !fixos.has(chave));
 }
 

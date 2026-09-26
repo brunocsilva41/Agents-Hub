@@ -27,8 +27,14 @@ import type {
   PolicySummary,
   ProjectPolicySummary,
 } from './policy-types.js';
+import type {
+  IntegrationEntrypoints,
+  IntegrationPlan,
+  IntegrationSummary,
+} from './integration-types.js';
 
 export * from './types.js';
+export * from './integration-types.js';
 export * from './ids.js';
 export * from './policy-types.js';
 
@@ -300,6 +306,28 @@ export class HubClient {
     return this.#send('PUT', `/projects/${idSegment(projectId, 'prj')}/policy`, { policy: layer });
   }
 
+  /**
+   * Prévia de `setGlobalPolicy`: valida (mesmo 422) e diz o que AFROUXARIA,
+   * sem gravar. Exige token (a rota é a mesma, com `?dryRun=1`).
+   */
+  previewGlobalPolicy(layer: PolicyDoc): Promise<{
+    dryRun: true;
+    loosened: string[];
+    effective: PolicyDoc;
+  }> {
+    return this.#send('PUT', '/policy?dryRun=1', { policy: layer });
+  }
+
+  /** Prévia de `setProjectPolicy`: o que o clamp anularia, sem gravar. */
+  async previewProjectPolicy(
+    projectId: string,
+    layer: PolicyDoc,
+  ): Promise<{ dryRun: true; clamped: string[]; ignoredExecFields: string[]; effective: PolicyDoc }> {
+    return this.#send('PUT', `/projects/${idSegment(projectId, 'prj')}/policy?dryRun=1`, {
+      policy: layer,
+    });
+  }
+
   /** Trilha de auditoria, mais recente primeiro. */
   async audit(query: AuditQuery = {}): Promise<{ entries: AuditEntrySummary[] }> {
     const { sessionId, projectId, ...resto } = query;
@@ -310,6 +338,46 @@ export class HubClient {
         projectId: projectId === undefined ? undefined : idSegment(projectId, 'prj'),
       })}`,
     );
+  }
+
+  // ------------------------------------------ integrações (hook e MCP)
+  /** Hook do gate e registro do MCP em cada agente (só leitura). */
+  async integrations(projectId?: string): Promise<{
+    entrypoints: IntegrationEntrypoints;
+    integrations: IntegrationSummary[];
+  }> {
+    return this.#get(
+      `/integrations${projectId === undefined ? '' : `?projectId=${idSegment(projectId, 'prj')}`}`,
+    );
+  }
+
+  /** Prévia (diff) de instalar o hook/MCP do Hub no agente. Exige token. */
+  async planIntegration(
+    agentId: string,
+    tipo: 'hook' | 'mcp',
+    projectId?: string,
+  ): Promise<{ dryRun: true; plan: IntegrationPlan }> {
+    return this.#post(`/integrations/${encodeURIComponent(agentId)}/${tipo}`, {
+      dryRun: true,
+      ...(projectId === undefined ? {} : { projectId: idSegment(projectId, 'prj') }),
+    });
+  }
+
+  /**
+   * Grava o que a prévia mostrou. `base` vem da prévia: se o arquivo mudou
+   * desde então, o daemon recusa (409 `CONFIG_CHANGED`) sem gravar.
+   */
+  async applyIntegration(
+    agentId: string,
+    tipo: 'hook' | 'mcp',
+    base: string,
+    projectId?: string,
+  ): Promise<{ dryRun: false; plan: IntegrationPlan; backup: string | null }> {
+    return this.#post(`/integrations/${encodeURIComponent(agentId)}/${tipo}`, {
+      dryRun: false,
+      base,
+      ...(projectId === undefined ? {} : { projectId: idSegment(projectId, 'prj') }),
+    });
   }
 
   // ------------------------------------------------- gate pré-execução

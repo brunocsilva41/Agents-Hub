@@ -4,6 +4,7 @@ import { parseDocument, YAMLMap, type Document } from 'yaml';
 import {
   clampedFields,
   DEFAULT_POLICY,
+  execFieldsDeclared,
   HubError,
   loosenedFields,
   mergePolicyLayer,
@@ -132,6 +133,35 @@ export class PolicyService {
     // Mesmo objeto de config que SessionManager e servidor leem a cada decisão.
     this.config.policy = depois;
     return { view: this.view(), loosened: loosenedFields(antes, depois), backup };
+  }
+
+  /**
+   * Prévia de `setGlobalLayer`, sem gravar nada: valida (mesmo 422) e diz o
+   * que a nova camada AFROUXARIA em relação ao que vale agora. É o que deixa o
+   * painel mostrar "isto afrouxa a política" ANTES de o operador confirmar —
+   * depois de gravado o aviso já chega tarde.
+   */
+  previewGlobalLayer(layer: unknown): { loosened: string[]; effective: PolicyDocument } {
+    const validada = parsePolicyLayer(layer);
+    const depois = mergePolicyLayer(DEFAULT_POLICY, validada);
+    return { loosened: loosenedFields(this.config.policy, depois), effective: depois };
+  }
+
+  /**
+   * Prévia de `setProjectLayer`, sem gravar: o que o clamp anularia e quais
+   * campos de execução seriam ignorados por o projeto não ser confiável.
+   */
+  previewProjectLayer(
+    projectId: string,
+    layer: unknown,
+  ): { clamped: string[]; ignoredExecFields: string[]; effective: PolicyDocument } {
+    const validada = parsePolicyLayer(layer);
+    const trusted = this.#project(projectId).trusted === true;
+    return {
+      clamped: clampedFields(this.config.policy, validada, trusted),
+      ignoredExecFields: trusted ? [] : execFieldsDeclared(validada),
+      effective: mergeProjectPolicy(this.config.policy, validada, { trusted }),
+    };
   }
 
   /**

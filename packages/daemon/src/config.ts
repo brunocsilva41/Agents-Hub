@@ -150,6 +150,11 @@ export function cliHookEntrypoint(): string {
   return path.join(repoRoot(), 'packages', 'cli', 'dist', 'main.js');
 }
 
+/** Executável do MCP server do Hub (o que `hub mcp install` registra nos CLIs). */
+export function mcpServerEntrypoint(): string {
+  return path.join(repoRoot(), 'packages', 'mcp', 'dist', 'main.js');
+}
+
 /**
  * Valida `config.json` ANTES do merge com os padrões.
  *

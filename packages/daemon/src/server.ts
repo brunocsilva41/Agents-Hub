@@ -4,7 +4,7 @@ import { HubError, isHubError, nowIso, type EventEnvelope } from '@agents-hub/co
 import type { ZodType } from 'zod';
 import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
-import type { HubConfig } from './config.js';
+import { baseUrl, cliHookEntrypoint, mcpServerEntrypoint, type HubConfig } from './config.js';
 import { guardRequest } from './guard.js';
 import { decodificarSegmento, ehErroDeUrl, readJsonBody } from './http-body.js';
 import { validarDiretorioDeProjeto } from './project-path.js';
@@ -46,6 +46,7 @@ import {
   shouldIssueOperatorCookie,
 } from './operator-auth.js';
 import { registerOperatorRoutes } from './operator-routes.js';
+import { registerIntegrationRoutes } from './integration-routes.js';
 import type { PolicyService } from './policy-service.js';
 import { startSseChannel } from './sse.js';
 import type { DiscoveryService, ImportService } from './absorption.js';
@@ -110,6 +111,8 @@ export interface OperatorDeps {
   token: string;
   audit: AuditTrail;
   policy: PolicyService;
+  /** Home do usuário onde moram as configs dos CLIs (injetável em teste). */
+  userHome: string;
 }
 
 /** Quem fez, para `by`/auditoria. Só existe em rota `operator: true`. */
@@ -900,6 +903,22 @@ export class HubServer {
       audit: this.operator.audit,
     });
 
+    // Hook do gate e MCP por agente: estado e instalação com prévia (6.12).
+    registerIntegrationRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
+      deps: () => ({
+        userHome: this.operator.userHome,
+        hubHome: this.config.home,
+        hubUrl: baseUrl(this.config),
+        codexBypassAtivo: this.config.codexGate.bypassHookTrust === true,
+        nodeBin: process.execPath,
+        cliMain: cliHookEntrypoint(),
+        mcpMain: mcpServerEntrypoint(),
+      }),
+      agentIds: () => this.registry.ids(),
+      projectPath: (projectId) => this.sessions.getProject(projectId).path,
+      audit: this.operator.audit,
+    });
+
     // ------------------------------------------------------------- grafo e custo
     this.#route('GET', '/graph/:rootId', (_req, res, params) => {
       sendJson(res, 200, {
@@ -1015,7 +1034,10 @@ export function statusFor(code: string): number {
     case 'DEPTH_EXCEEDED':
     case 'CYCLE_DETECTED':
     case 'CONCURRENCY_EXCEEDED':
+    case 'CONFIG_CHANGED':
       return 409;
+    case 'AGENT_CONFIG_INVALID':
+      return 422;
     case 'TIMEOUT':
       return 504;
     case 'INVALID_QUERY':
