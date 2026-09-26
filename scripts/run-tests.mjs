@@ -42,6 +42,10 @@ for (const pacote of readdirSync(pacotes, { withFileTypes: true })) {
   if (!pacote.isDirectory()) continue;
   const dist = path.join(pacotes, pacote.name, 'dist');
   if (existsSync(dist)) arquivos.push(...encontrarTestes(dist));
+  // O painel compila a lógica pura para `dist-test/` (ver
+  // packages/web/tsconfig.test.json): o `dist/` dele é a build do Vite.
+  const distTest = path.join(pacotes, pacote.name, 'dist-test');
+  if (existsSync(distTest)) arquivos.push(...encontrarTestes(distTest));
 }
 
 // Suíte vazia é o modo de falha que este script existe para impedir: quase

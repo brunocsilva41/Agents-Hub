@@ -172,7 +172,8 @@ export class HubClient {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/send`, { text });
   }
 
-  async interrupt(sessionId: string): Promise<{ ok: boolean }> {
+  /** `interrupted: false`: a sessão existe, mas não havia turno em andamento. */
+  async interrupt(sessionId: string): Promise<{ ok: boolean; interrupted?: boolean }> {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/interrupt`, {});
   }
 
@@ -266,9 +267,12 @@ export class HubClient {
   // ------------------------------------------------------------ observação
   async events(
     sessionId: string,
-    options: { since?: number; limit?: number } = {},
+    options: { since?: number; limit?: number; before?: number; tail?: boolean } = {},
   ): Promise<{ events: EventEnvelope[] }> {
-    return this.#get(`/sessions/${idSegment(sessionId, 'ses')}/events${queryOf(options)}`);
+    const { tail, ...rest } = options;
+    return this.#get(
+      `/sessions/${idSegment(sessionId, 'ses')}/events${queryOf({ ...rest, tail: tail ? 1 : undefined })}`,
+    );
   }
 
   context(ref: string): Promise<{ ref: string; events: EventEnvelope[] }> {

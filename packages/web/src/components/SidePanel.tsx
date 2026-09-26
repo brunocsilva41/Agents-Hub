@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { AgentSummary, BudgetSummary, SessionSummary } from '@agents-hub/client';
-import { useAction } from '../actions';
+import { pushToast, useAction } from '../actions';
 import { agentColor, hub, STATE_LABEL, formatDuration, formatTokens, formatUsd } from '../hub';
+import { deriveControls, interruptFeedback } from '../lib/sessionControls';
 
 interface Props {
   session: SessionSummary | null;
@@ -22,6 +23,13 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
   const [memoryExpanded, setMemoryExpanded] = useState(true);
   const [projectGuidelines, setProjectGuidelines] = useState<string | null>(null);
   const [projectContextFailed, setProjectContextFailed] = useState(false);
+  // Encerrar é destrutivo: o primeiro clique só pede confirmação.
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  useEffect(() => {
+    setConfirmCancel(false);
+    setHandoffOpen(false);
+  }, [session?.id]);
 
   /**
    * Memória do projeto, vinda do daemon.
@@ -63,7 +71,7 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
     };
   }, [session?.projectId]);
 
-  const act = (label: string, fn: () => Promise<unknown>, ok: string): void => {
+  const act = (label: string, fn: () => Promise<unknown>, ok?: string): void => {
     void action.run(label, fn, ok).then((done) => {
       if (done) onChanged();
     });
@@ -86,10 +94,16 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
       });
   };
 
-  const active = session?.state === 'running' || session?.state === 'waiting_approval';
   const installedAgents = agents.filter(
     (a) => a.probe?.installed === true && a.id !== session?.agentId,
   );
+  // Habilitação derivada SÓ do estado que o daemon informou (lib/sessionControls):
+  // pausada continua encerrável e transferível, como o daemon aceita.
+  const controls = deriveControls({
+    state: session?.state ?? 'completed',
+    busy: action.busy !== null,
+    hasHandoffTarget: installedAgents.length > 0,
+  });
 
   const pressure = budget ? Math.min(1, budget.pressure) : 0;
   const level = budget?.exhausted || pressure >= 0.9 ? 'danger' : pressure >= 0.6 ? 'warn' : 'ok';
@@ -235,11 +249,15 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
               <div className="controls-grid">
                 <button
                   className="btn-ctrl btn-interrupt"
-                  disabled={!active || action.busy !== null}
+                  disabled={!controls.interrupt.enabled}
                   onClick={() =>
-                    act('interrupt', () => hub.interrupt(session.id), 'Turno interrompido.')
+                    act('interrupt', async () => {
+                      // O daemon diz se havia turno; o aviso repete o que ele disse.
+                      const result = await hub.interrupt(session.id);
+                      pushToast(interruptFeedback(result));
+                    })
                   }
-                  title="Interrompe o turno atual sem matar o processo nem a sessão"
+                  title={controls.interrupt.reason ?? 'Pede ao Hub para interromper o turno atual'}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="6" y="4" width="4" height="16"></rect>
@@ -249,9 +267,14 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                 </button>
                 <button
                   className="btn-ctrl btn-pause"
-                  disabled={!active || action.busy !== null}
-                  onClick={() => act('pause', () => hub.pause(session.id), 'Sessão pausada.')}
-                  title="Pausa a sessão sem encerrá-la — retome depois enviando uma mensagem"
+                  disabled={!controls.pause.enabled}
+                  onClick={() =>
+                    act('pause', () => hub.pause(session.id), 'Pedido de pausa aceito pelo Hub.')
+                  }
+                  title={
+                    controls.pause.reason ??
+                    'Pausa a sessão sem encerrá-la — retome depois enviando uma mensagem'
+                  }
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
@@ -262,9 +285,9 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                 </button>
                 <button
                   className="btn-ctrl btn-handoff"
-                  disabled={!active || installedAgents.length === 0}
+                  disabled={!controls.handoff.enabled}
                   onClick={() => setHandoffOpen((open) => !open)}
-                  title="Transfere o controle da sessão para outro agente"
+                  title={controls.handoff.reason ?? 'Transfere o controle da sessão para outro agente'}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="17 1 21 5 17 9"></polyline>
@@ -276,11 +299,10 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                 </button>
                 <button
                   className="btn-ctrl btn-cancel danger"
-                  disabled={!active || action.busy !== null}
-                  onClick={() =>
-                    act('cancel', () => hub.cancel(session.id, 'via painel'), 'Sessão encerrada.')
-                  }
-                  title="Encerra a sessão imediatamente"
+                  disabled={!controls.cancel.enabled || confirmCancel}
+                  aria-expanded={confirmCancel}
+                  onClick={() => setConfirmCancel(true)}
+                  title={controls.cancel.reason ?? 'Encerra a sessão (pede confirmação)'}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
@@ -290,6 +312,33 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                   <span>{action.busy === 'cancel' ? '…' : 'Encerrar'}</span>
                 </button>
               </div>
+
+              {controls.resumeHint && (
+                <div className="notice session-resume-hint" role="status">
+                  {controls.resumeHint}
+                </div>
+              )}
+
+              {confirmCancel && controls.cancel.enabled && (
+                <div className="subform confirm-cancel" role="alertdialog" aria-label="Confirmar encerramento">
+                  <div className="subform-title">
+                    <span>Encerrar esta sessão? O processo do agente é finalizado e não há como retomar.</span>
+                  </div>
+                  <div className="subform-actions">
+                    <button
+                      className="danger"
+                      autoFocus
+                      onClick={() => {
+                        setConfirmCancel(false);
+                        act('cancel', () => hub.cancel(session.id, 'via painel'), 'Pedido de encerramento aceito pelo Hub.');
+                      }}
+                    >
+                      Encerrar sessão
+                    </button>
+                    <button onClick={() => setConfirmCancel(false)}>Manter rodando</button>
+                  </div>
+                </div>
+              )}
 
               <button className="btn-delegate-full" onClick={onDelegate}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

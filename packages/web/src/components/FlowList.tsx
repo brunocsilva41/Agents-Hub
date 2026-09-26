@@ -12,7 +12,12 @@ interface Props {
   expanded: ReadonlySet<string>;
   onToggle: (rootId: string) => void;
   onSelect: (sessionId: string) => void;
-  revision: number;
+  /**
+   * Revisão do grafo POR fluxo: sobe só quando chega evento estrutural daquele
+   * fluxo. Com uma revisão global, qualquer evento de qualquer sessão refazia o
+   * `/graph` de todo fluxo aberto.
+   */
+  revisionOf: (rootId: string) => number;
 }
 
 /**
@@ -32,7 +37,7 @@ export function FlowList({
   expanded,
   onToggle,
   onSelect,
-  revision,
+  revisionOf,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -49,6 +54,12 @@ export function FlowList({
 
   return (
     <div ref={listRef} onKeyDown={onKeyDown}>
+      {flows.length === 0 && (
+        // Barra lateral em branco não diz se é filtro, busca ou Hub vazio.
+        <div className="empty flow-list-empty">
+          <span className="empty-hint">Nenhum fluxo com este filtro. Tente “Todos” ou limpe a busca.</span>
+        </div>
+      )}
       {flows.map((flow) => (
         <FlowItem
           key={flow.rootId}
@@ -57,7 +68,7 @@ export function FlowList({
           selectedId={selectedId}
           onToggle={onToggle}
           onSelect={onSelect}
-          revision={revision}
+          revision={revisionOf(flow.rootId)}
         />
       ))}
     </div>

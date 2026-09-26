@@ -14,6 +14,12 @@ export type EventType =
   | 'turn.started'
   | 'turn.completed'
   | 'message'
+  /**
+   * Fala do humano (ou de quem chamou `send`) para a sessão. Tipo à parte, e
+   * não `message` com um `role`: histórico reconstruído, resumo de tarefa e
+   * retorno de delegação leem `message` como fala do AGENTE.
+   */
+  | 'user.message'
   | 'message.delta'
   | 'reasoning'
   | 'tool.call'

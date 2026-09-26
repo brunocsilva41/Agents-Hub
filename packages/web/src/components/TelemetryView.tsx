@@ -1,7 +1,7 @@
 import React from 'react';
 import type { SessionSummary, AgentSummary } from '@agents-hub/client';
 import type { FlowSummary } from '../useHubState';
-import { agentColor } from '../hub';
+import { agentColor, isLiveState } from '../hub';
 
 interface Props {
   sessions: SessionSummary[];
@@ -10,9 +10,15 @@ interface Props {
 }
 
 export function TelemetryView({ sessions, flows }: Props): React.JSX.Element {
-  const activeSessions = sessions.filter((s) => s.state === 'running' || s.state === 'waiting_approval').length;
+  // Mesma definição de "ao vivo" da pílula do topo e da lista (inclui pausada
+  // e ociosa, que ocupam vaga); antes cada tela contava de um jeito.
+  const activeSessions = sessions.filter((s) => isLiveState(s.state)).length;
   const completedSessions = sessions.filter((s) => s.state === 'completed').length;
-  const successRate = sessions.length > 0 ? Math.round((completedSessions / sessions.length) * 100) : 100;
+  // Taxa sobre o que TERMINOU: sessão em andamento não é fracasso, e sem
+  // nenhuma terminada não há taxa a mostrar (antes aparecia 100%).
+  const finishedSessions = sessions.filter((s) => !isLiveState(s.state)).length;
+  const successRate =
+    finishedSessions > 0 ? `${Math.round((completedSessions / finishedSessions) * 100)}%` : '—';
 
   // Sessões por Agente
   const byAgent: Record<string, { count: number; active: number }> = {};
@@ -22,7 +28,7 @@ export function TelemetryView({ sessions, flows }: Props): React.JSX.Element {
     }
     const current = byAgent[s.agentId]!;
     current.count += 1;
-    if (s.state === 'running' || s.state === 'waiting_approval') {
+    if (isLiveState(s.state)) {
       current.active += 1;
     }
   }
@@ -58,8 +64,10 @@ export function TelemetryView({ sessions, flows }: Props): React.JSX.Element {
 
         <div className="kpi-card">
           <div className="kpi-label">Taxa de Conclusão</div>
-          <div className="kpi-val highlight-amber">{successRate}%</div>
-          <div className="kpi-sub">{completedSessions} sessões concluídas</div>
+          <div className="kpi-val highlight-amber">{successRate}</div>
+          <div className="kpi-sub">
+            {completedSessions} de {finishedSessions} {finishedSessions === 1 ? 'terminada' : 'terminadas'}
+          </div>
         </div>
       </div>
 

@@ -1,0 +1,118 @@
+/*
+ * Estilos das peças novas do painel ao vivo (timeline paginada, fala do
+ * usuário, avisos honestos, confirmação de encerrar, árvore do grafo).
+ *
+ * Arquivo à parte de styles.css de propósito: só usa os tokens de :root de lá
+ * (--accent, --warn, --bg-panel…), então herda qualquer troca de paleta/tema
+ * sem precisar ser editado junto.
+ */
+
+/* Aviso "a ação respondeu, mas não fez o que o botão promete". */
+.toast-warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 14%, var(--bg-panel));
+}
+
+/* Fala do usuário: alinhada à direita, sem avatar de agente. */
+.ev-message-bubble.from-user {
+  align-self: flex-end;
+  margin-left: auto;
+  max-width: min(680px, 88%);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.ev-message-bubble.from-user .ev-bubble-author {
+  color: var(--accent);
+}
+
+.ev-message-bubble.from-user .ev-text {
+  white-space: pre-wrap;
+}
+
+/* Histórico falhou mas há eventos ao vivo: faixa, não tela cheia. */
+.timeline-notice {
+  margin: 8px 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-resume-hint {
+  color: var(--text-dim);
+  border: 1px dashed var(--border-strong);
+}
+
+.confirm-cancel {
+  margin-top: 10px;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.flow-list-empty {
+  padding: 18px 14px;
+  text-align: center;
+}
+
+/* Grafo: árvore com recuo por nível e aresta visível até o pai. */
+.dag-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 6px;
+  overflow-x: auto;
+}
+
+.dag-tree-row {
+  --dag-indent: 28px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: calc(var(--dag-depth, 0) * var(--dag-indent));
+}
+
+/* Traço vertical que liga o nó ao nível do pai. */
+.dag-tree-row:not(.dag-edge-root)::before {
+  content: '';
+  position: absolute;
+  left: calc((var(--dag-depth, 1) - 1) * var(--dag-indent) + 10px);
+  top: -10px;
+  bottom: 50%;
+  border-left: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  width: 14px;
+  border-bottom-left-radius: 6px;
+}
+
+.dag-edge-handoff::before {
+  border-style: dashed;
+  border-color: var(--handoff);
+}
+
+.dag-edge-label {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.dag-edge-label-handoff {
+  color: var(--handoff);
+}
+
+.dag-tree .dag-node-card {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: min(420px, 100%);
+  margin-left: 0;
+}
+
+.dag-tree .dag-node-card:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}

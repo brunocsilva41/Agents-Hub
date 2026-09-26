@@ -19,3 +19,6 @@ packages/web/dist/
 # `git add -A` distraído publicaria tudo isso. Nunca versionar.
 session-export-*/
 session-export-*.zip
+
+# lógica pura do painel compilada para node:test (packages/web/tsconfig.test.json)
+packages/web/dist-test/

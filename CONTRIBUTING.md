@@ -45,6 +45,15 @@ portão e tem prioridade sobre o que você estava fazendo.
 > Um portão que protege menos do que diz proteger é pior do que nenhum, porque
 > compra confiança sem lastro.
 
+> **Testes do painel (`packages/web`):** a lógica que não depende de navegador
+> — mescla/paginação da timeline, agendador de recarga, estado dos botões,
+> árvore do grafo, avisos — mora em `packages/web/src/lib/` e tem testes
+> `*.test.ts` com `node:test`. O `tsc -b` da raiz compila essa pasta por
+> `packages/web/tsconfig.test.json` para `packages/web/dist-test/` (não `dist/`,
+> que é a build do Vite), e `scripts/run-tests.mjs` coleta de lá também. Código
+> em `src/lib/` não pode importar React nem tocar DOM; imports relativos entre
+> esses módulos levam `.js`, como no resto do monorepo.
+
 ---
 
 ## Critério de pronto
