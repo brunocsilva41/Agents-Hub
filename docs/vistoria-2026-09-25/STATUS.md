@@ -14,7 +14,8 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 - Onda 2: 1.3+1.4+1.5+2.4 (gate) | 1.6+1.10 (token + política/auditoria API/CLI) | 1.9 (TOFU env/prompts) | Fase 3 | 4.1+4.3+4.5 | 4.2+4.4 | web 6.1/6.2/6.7/6.8 | web 6.3/6.4/6.9/6.10 | web 6.5/6.6/6.11.
 - Onda 2 mesclada; verify 1098/1098; e2e 24/24.
 - INCIDENTE (onda 2): o agente de 4.2/4.4 matou por engano um processo brave.exe (PID 15884) ao limpar processos por padrão de porta. Regra 9 adicionada às instruções dos agentes. Informar o usuário.
-- FLAKE conhecido: operator-auth.test às vezes recebe 200/400 sem token (requisição cai em servidor sem checagem). Visto só com outras suítes/sessões rodando na máquina; não reproduz isolado (6/6) nem em script. Correção estrutural (porta 0 real, sem portaLivre) na Fase 7.
+- FLAKE operator-auth: resolvido na onda 3 (ver Fase 7). A hipótese de "outro processo na porta" estava errada.
+- Onda 3 mesclada (9 agentes + investigação do flake); verify 1411/1411; e2e 64/64. Integrações feitas pelo coordenador: teto de concorrência (2.7 × 2.10), start/watch extraídos (5.2) + aviso de modo (2.9), canonização de caminhos (5.5) em cost/init e testes, detach idempotente (2.8 × 6.12a), detecção de hook main.js|bin.js movida ao daemon (5.7 × 6.12b), mcpServerEntrypoint relativo ao pacote.
 - Nota de integração: o teste %E0 da 0.6 passou a esperar MALFORMED_URL (código da 1.8); ambos 400.
 
 ## Linha de base confirmada nesta data
@@ -46,7 +47,9 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 
 ## Fase 2 — Ciclo de vida de sessão
 - [x] 2.4 — junto do merge 4fff125 (send/handoff em waiting_approval → ILLEGAL_STATE citando apv)
-- [ ] 2.1 2.2 2.3 2.5 2.6 2.7 2.8 2.9 2.10 — ver docs/12-goal-mvp-completo.md (relatórios 06/13)
+- [x] 2.1 2.2 2.3 — merge 468ce58/af8c04a; session-lifecycle.integration.test.ts (16; corrida cancel 20/20 killed/canceled; 15 vermelhos na main); cancel→canceled, interrupt/pause = fim de turno retomável (resume nativo), falha de launch desfaz sessão/task/worktree/reserva. Não feito: validação não conta no teto de concorrência; pause não cascateia (documentado)
+- [x] 2.5 2.6 2.7 2.8 — merge 494f026; tetos por evento/linha/sessão/página, AsyncQueue cede o loop (/health responde na rajada), prune commita o trabalho em hub/<id> antes de recolher, órfãos/meio-apagados, trava de reentrada, handoff persiste agent_id e não conta 2x, reconciliação com evento, leases de raízes adotadas (heartbeat MCP), wait cancelável, limites no hub_agent_call; migração 8 (índices parciais)
+- [x] 2.9 2.10 — merge 4a20fe0; workflow segue fallback, retry por código, passo seguinte herda o código (commit em hub/<id> + baseSessionIds, fan-in por merge), espera aprovação e retoma; overrides de projeto valem (retries/fallback/watch/maxDepth/maxConcurrency por projeto), aviso de modo capado, SSE de task segue fallback, orçamento em segundos, aprovar estouro não relança — ver docs/12-goal-mvp-completo.md (relatórios 06/13)
 
 ## Fase 3 — Custo e orçamento
 - [x] 3.1 3.2 3.3 3.4 — merge 559db1f; turn-cost (final = verdade, parciais estimam), Copilot por AI Credits (nano-AIU→US$0,01), BudgetLedger (fatia própria, NaN/negativo, reserve idempotente), replay pelos últimos N (tail), preços verificados online 2026-09-26 (Opus 5.5 4/20 etc.). Não verificados: kimi-k2-5/k2, modelo padrão do agy/kimi. Pendente: tokens de cache fora do teto de tokens (decisão de produto)
@@ -54,19 +57,24 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 ## Fase 4 — Adapters
 - [x] 4.1 4.3 4.5 — merge f88df96; PATH×PATHEXT em JS (acentos), cache negativo 30 s; manifest.model {supported,args}; /agents expõe model/verified; versões verificadas por --version. Pendente: OpenCodeAdapter usar modeloDaRun/provider
 - [x] 4.2 4.4 — merge 3fdc4a4; OpenCode com agentes hub-supervised/semi/autonomous via OPENCODE_CONFIG_DIR (regras conferidas no avaliador do opencode serve); Kimi 2.0.0 (--agent plan; -p recusa -y/--auto/--plan); generic-json com sessão/custo; discovery do agy no caminho real
-- [ ] 4.6
+- [x] 4.6 — merge 6f231e2; doctor/status com auth do discover (quebrado vs atenção por versão), doctor --smoke com confirmação/--yes, US$0,10, série, projeto git temporário (smoke real não executado)
 
 ## Fase 5 — CLI e primeira execução
-- [ ] 5.1 a 5.7 (relatórios 01/02/07/09/12/14)
+- [x] 5.1 5.4 5.7 — merge 2c75f7b; bin.js reexecuta com --experimental-sqlite só no Node 22.5–22.12 (testado com binários reais 22.5.0/22.12.0), sem ExperimentalWarning, hook leve (~250 ms), AGENTS_HUB_PORT e config.json validados (arquivo:linha:coluna), tarball autocontido (npm run pack:dist / test:install), hooks/MCP apontam para a instalação, hub autostart enable|disable|status (não ativado aqui). Licença MIT aplicada depois (8f64fc4) por escolha do usuário
+- [x] 5.2 5.3 5.5 — merge 6f231e2; watch/budget/graph de id inexistente = erro/404, watch --root de fluxo terminado, send após pause; start em subpasta, repo sem commit, exit≠0, fallback avisado, --mode/--isolation validados; caminhos 8.3/caixa canônicos
+- [x] 5.6 — merge 3881e98; hub init/open/logs/restart/update/version, --json uniforme, export, cost, merge/apply (prévia, sem push), backup/restore (VACUUM INTO, WAL-safe)
 
 ## Fase 6 — Painel web
 - [x] 6.5 6.6 6.11 — merge fa7ee18; testes de lógica do web (packages/web/src/logic, runner dist-test), 10 vermelhos sem a correção; onboarding sem projeto; tabela de env por agente no core. Pendências: trocar de aba no topo descarta edição sem aviso (App.tsx); classes .settings-vazio/.settings-erro sem CSS
 - [x] 6.1 6.2 6.7 6.8 — merge 9979203; e2e Playwright (Edge local) `npm run test:e2e` 24/24 em 375/768/1100/1440 (22 vermelhos no código antigo)
 - [x] 6.3 6.4 6.9 6.10 — merge 1e29f83; timeline pelos recentes + paginação, user.message, controles honestos, DAG com arestas/teclado, refetch agrupado (50 eventos → 1 busca). 6.4 "Interromper marca FALHOU" depende do 2.2
-- [ ] 6.12 (+ UI de confiança do projeto, editor de política/auditoria, modelo por agente no painel)
+- [x] 6.12 — merges c5fb763 (aba Operação: tasks, diff, artefatos, orçamento editável PUT /budget/:root, workflow validar/rodar/acompanhar, pastas, adopt/detach, saúde, re-sondar, sweep) e 4dc9650 (aba Segurança: política com prévia dryRun e aviso "afrouxa", confiança do projeto, gate/MCP com diff e hash base, histórico de aprovações, auditoria com filtros/export; modelo por agente; aviso de edição não salva). e2e 64/64 em 4 viewports
 
 ## Fase 7 — Testes/CI
-- [ ] 7.1 a 7.4 (relatórios 01/04/12)
+- [x] 7.1 7.3 — merge ab3a0af; listen(port 0) grava a porta real, testes sem portaLivre, esperas por condição, cobertura de reaper/project-registry/hooks-install/workflow-cmd/daemon-control/client/gate composto, npm run coverage (84,7% linhas), npm audit 0 vulnerabilidades, LICENSE MIT
+- [~] 7.2 — CI com permissions: contents: read, job Linux roda verify (informativo), job de cobertura. Falta ESLint (no-floating-promises) e formatador
+- [x] 7.4 — e2e Playwright (Edge local) npm run test:e2e, 64 testes
+- Flake do operator-auth: RESOLVIDO (merge 03f4c4d) — era do teste: o token "quase certo" era o certo quando o aleatório terminava em 0 (1/16); o /shutdown autenticado derrubava o processo. Produto sem falha. Nova operator-routes-table.test.ts percorre TODAS as rotas operator:true
 
 ## Fase 8 — Documentação/demo
 - [ ] 8.1 a 8.4 (relatórios 01/02/14)
