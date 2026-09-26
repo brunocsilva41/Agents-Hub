@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import type { AgentSummary, BriefInput, ProjectSummary } from '@agents-hub/client';
 import { pushToast, useAction } from '../actions';
 import { agentColor, hub } from '../hub';
 import { delegationFeedback } from '../lib/sessionControls';
+import { useDialog, useFecharPeloFundo } from '../useDialog';
 
 interface Props {
   agents: AgentSummary[];
@@ -72,6 +73,11 @@ export function SessionModal({
   const [supervision, setSupervision] = useState<'supervised' | 'semi' | 'autonomous'>('semi');
   const [isolation, setIsolation] = useState<'worktree' | 'none'>('worktree');
   const action = useAction();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const objectiveRef = useRef<HTMLTextAreaElement>(null);
+  const base = useId();
+  const tituloId = `${base}-titulo`;
+  const descricaoId = `${base}-descricao`;
 
   useEffect(() => {
     if (delegateFrom) return;
@@ -150,217 +156,231 @@ export function SessionModal({
 
   const isValid = agent.length > 0 && objective.trim().length >= 6 && (delegateFrom || projectId);
 
+  const sujo = objective.trim() !== '' || criteria.trim() !== '';
+  useDialog(dialogRef, onClose, { focoInicial: objectiveRef });
+  const fundo = useFecharPeloFundo(onClose, sujo);
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" {...fundo}>
       <div
+        ref={dialogRef}
         className="modal wizard-modal"
         role="dialog"
         aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
+        aria-labelledby={tituloId}
+        aria-describedby={descricaoId}
       >
-        <div className="modal-header-banner">
-          <div className="modal-icon-badge">{delegateFrom ? '🔄' : '⚡'}</div>
-          <div>
-            <h2>{delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}</h2>
-            <p className="hint">
-              {delegateFrom
-                ? 'Transfere uma sub-tarefa para outro agente especialista.'
-                : 'Selecione o projeto, agente e defina os objetivos da execução.'}
-            </p>
+        <div className="modal-body">
+          <div className="modal-header-banner">
+            <div className="modal-icon-badge" aria-hidden="true">{delegateFrom ? '🔄' : '⚡'}</div>
+            <div>
+              <h2 id={tituloId}>{delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}</h2>
+              <p className="hint" id={descricaoId}>
+                {delegateFrom
+                  ? 'Transfere uma sub-tarefa para outro agente especialista.'
+                  : 'Selecione o projeto, agente e defina os objetivos da execução.'}
+              </p>
+            </div>
           </div>
-        </div>
 
-        {action.error && (
-          <div className="error-banner" role="alert">
-            {action.error}
-          </div>
-        )}
+          {action.error && (
+            <div className="error-banner" role="alert">
+              {action.error}
+            </div>
+          )}
 
-        {/* 1. Seleção de Projeto */}
-        {!delegateFrom && (
+          {/* 1. Seleção de Projeto */}
+          {!delegateFrom && (
+            <div className="field">
+              <div className="field-label-row">
+                <label htmlFor="modal-project">Projeto & Pasta</label>
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => {
+                    onClose();
+                    onNewProject();
+                  }}
+                >
+                  + Registrar nova pasta
+                </button>
+              </div>
+              <select
+                id="modal-project"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+              >
+                {projects.length === 0 && <option value="">Nenhum projeto registrado</option>}
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.path}
+                  </option>
+                ))}
+              </select>
+              {projectsFailed && (
+                <div className="notice warn" role="alert">
+                  ⚠️ Não foi possível buscar os projetos — tente de novo mais tarde.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/*
+            Agente: os instalados primeiro, e os ausentes desabilitados.
+
+            Antes os nove apareciam com o mesmo peso, inclusive os que não estão
+            na máquina. Escolher um deles montava a sessão inteira para falhar
+            depois, com um erro de binário não encontrado que não tem relação
+            aparente com a escolha feita aqui. O dado de instalação já vinha na
+            sondagem; só não estava sendo mostrado.
+          */}
           <div className="field">
             <div className="field-label-row">
-              <label htmlFor="modal-project">Projeto & Pasta</label>
-              <button
-                type="button"
-                className="linkish"
-                onClick={() => {
-                  onClose();
-                  onNewProject();
-                }}
-              >
-                + Registrar nova pasta
-              </button>
+              <label id={`${base}-agente`}>Agente</label>
+              {indisponiveis.length > 0 && (
+                <span className="help">
+                  {indisponiveis.length} não {indisponiveis.length === 1 ? 'está' : 'estão'} nesta
+                  máquina
+                </span>
+              )}
             </div>
-            <select
-              id="modal-project"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-            >
-              {projects.length === 0 && <option value="">Nenhum projeto registrado</option>}
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.path}
-                </option>
-              ))}
-            </select>
-            {projectsFailed && (
-              <div className="notice warn" role="alert">
-                ⚠️ Não foi possível buscar os projetos — tente de novo mais tarde.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/*
-          Agente: os instalados primeiro, e os ausentes desabilitados.
-
-          Antes os nove apareciam com o mesmo peso, inclusive os que não estão
-          na máquina. Escolher um deles montava a sessão inteira para falhar
-          depois, com um erro de binário não encontrado que não tem relação
-          aparente com a escolha feita aqui. O dado de instalação já vinha na
-          sondagem; só não estava sendo mostrado.
-        */}
-        <div className="field">
-          <div className="field-label-row">
-            <label>Agente</label>
-            {indisponiveis.length > 0 && (
-              <span className="help">
-                {indisponiveis.length} não {indisponiveis.length === 1 ? 'está' : 'estão'} nesta
-                máquina
-              </span>
-            )}
-          </div>
-          <div className="agent-selection-grid">
-            {agentesOrdenados.map((a) => {
-              const isSelected = agent === a.id;
-              const color = agentColor(a.id);
-              const disponivel = estaInstalado(a);
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  disabled={!disponivel}
-                  aria-pressed={isSelected}
-                  title={
-                    disponivel
-                      ? `${a.name} — ${a.vendor}`
-                      : `${a.name} não está instalado: ${a.probe?.error ?? 'binário não encontrado'}`
-                  }
-                  className={`agent-card-select ${isSelected ? 'selected' : ''} ${
-                    disponivel ? '' : 'indisponivel'
-                  }`}
-                  style={{ '--agent-color': color } as React.CSSProperties}
-                  onClick={() => setAgent(a.id)}
-                >
-                  <div className="agent-card-avatar" style={{ background: color }}>
-                    {a.id.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="agent-card-meta">
-                    <div className="agent-card-name">{a.name}</div>
-                    <div className="agent-card-vendor">
-                      {disponivel ? a.vendor : 'não instalado'}
+            <div className="agent-selection-grid" role="group" aria-labelledby={`${base}-agente`}>
+              {agentesOrdenados.map((a) => {
+                const isSelected = agent === a.id;
+                const color = agentColor(a.id);
+                const disponivel = estaInstalado(a);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    disabled={!disponivel}
+                    aria-pressed={isSelected}
+                    title={
+                      disponivel
+                        ? `${a.name} — ${a.vendor}`
+                        : `${a.name} não está instalado: ${a.probe?.error ?? 'binário não encontrado'}`
+                    }
+                    className={`agent-card-select ${isSelected ? 'selected' : ''} ${
+                      disponivel ? '' : 'indisponivel'
+                    }`}
+                    style={{ '--agent-color': color } as React.CSSProperties}
+                    onClick={() => setAgent(a.id)}
+                  >
+                    <div className="agent-card-avatar" style={{ background: color }}>
+                      {a.id.slice(0, 2).toUpperCase()}
                     </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 3. Templates Rápidos */}
-        <div className="template-chips-row">
-          <span className="template-label">Templates:</span>
-          {TASK_TEMPLATES.map((tpl) => (
-            <button
-              key={tpl.label}
-              type="button"
-              className="template-chip-btn"
-              onClick={() => applyTemplate(tpl)}
-            >
-              {tpl.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 4. Objetivo e Critérios */}
-        <div className="field">
-          <label htmlFor="objective">Objetivo da Tarefa</label>
-          <textarea
-            id="objective"
-            rows={3}
-            placeholder="Descreva claramente o que o agente deve realizar..."
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-          />
-        </div>
-
-        <div className="field">
-          <label htmlFor="criteria">Critérios de Aceite (Opcional)</label>
-          <textarea
-            id="criteria"
-            rows={2}
-            placeholder="- Um critério por linha (ex: passar em npm test)..."
-            value={criteria}
-            onChange={(e) => setCriteria(e.target.value)}
-          />
-        </div>
-
-        {/* 5. Parâmetros e Orçamento */}
-        <div className="field-row">
-          <div className="field">
-            <label>Supervisão</label>
-            <select
-              value={supervision}
-              onChange={(e) => setSupervision(e.target.value as any)}
-            >
-              <option value="semi">Semi-Autônomo (Pausa em irreversíveis)</option>
-              <option value="supervised">Supervisionado (Aprova todo comando)</option>
-              <option value="autonomous">Autônomo (Sem atrito)</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Isolamento</label>
-            <select
-              value={isolation}
-              onChange={(e) => setIsolation(e.target.value as any)}
-            >
-              <option value="worktree">Git Worktree (Seguro e isolado)</option>
-              <option value="none">Direto no diretório principal</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Teto Orçamentário (USD)</label>
-            <div className="budget-input-wrap">
-              <input
-                type="number"
-                step="0.50"
-                min="0.10"
-                max="50.00"
-                value={budgetUsd}
-                onChange={(e) => setBudgetUsd(e.target.value)}
-              />
+                    <div className="agent-card-meta">
+                      <div className="agent-card-name">{a.name}</div>
+                      <div className="agent-card-vendor">
+                        {disponivel ? a.vendor : 'não instalado'}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
+
+          {/* 3. Templates Rápidos */}
+          <div className="template-chips-row">
+            <span className="template-label">Templates:</span>
+            {TASK_TEMPLATES.map((tpl) => (
+              <button
+                key={tpl.label}
+                type="button"
+                className="template-chip-btn"
+                onClick={() => applyTemplate(tpl)}
+              >
+                {tpl.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 4. Objetivo e Critérios */}
+          <div className="field">
+            <label htmlFor="objective">Objetivo da Tarefa</label>
+            <textarea
+              id="objective"
+              ref={objectiveRef}
+              rows={3}
+              placeholder="Descreva claramente o que o agente deve realizar..."
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="criteria">Critérios de Aceite (Opcional)</label>
+            <textarea
+              id="criteria"
+              rows={2}
+              placeholder="- Um critério por linha (ex: passar em npm test)..."
+              value={criteria}
+              onChange={(e) => setCriteria(e.target.value)}
+            />
+          </div>
+
+          {/* 5. Parâmetros e Orçamento */}
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor={`${base}-supervisao`}>Supervisão</label>
+              <select
+                id={`${base}-supervisao`}
+                value={supervision}
+                onChange={(e) => setSupervision(e.target.value as any)}
+              >
+                <option value="semi">Semi-Autônomo (Pausa em irreversíveis)</option>
+                <option value="supervised">Supervisionado (Aprova todo comando)</option>
+                <option value="autonomous">Autônomo (Sem atrito)</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label htmlFor={`${base}-isolamento`}>Isolamento</label>
+              <select
+                id={`${base}-isolamento`}
+                value={isolation}
+                onChange={(e) => setIsolation(e.target.value as any)}
+              >
+                <option value="worktree">Git Worktree (Seguro e isolado)</option>
+                <option value="none">Direto no diretório principal</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label htmlFor={`${base}-teto`}>Teto Orçamentário (USD)</label>
+              <div className="budget-input-wrap">
+                <input
+                  id={`${base}-teto`}
+                  type="number"
+                  step="0.50"
+                  min="0.10"
+                  max="50.00"
+                  value={budgetUsd}
+                  onChange={(e) => setBudgetUsd(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/*
+            O interruptor de "incluir memórias" saiu daqui.
+
+            Ele ligava e desligava uma leitura do `localStorage` desta aba. Agora
+            a memória do projeto é aplicada pelo daemon em toda sessão dele —
+            inclusive nas delegadas, que a aba nunca alcançou —, então o controle
+            não teria como desligar coisa alguma. Um interruptor que não desliga
+            nada é pior do que nenhum: ele afirma que existe uma escolha.
+          */}
+          <div className="memory-toggle-row">
+            <span className="help">
+              As diretrizes deste projeto entram automaticamente. Edite-as em Configurações.
+            </span>
+          </div>
         </div>
 
-        {/*
-          O interruptor de "incluir memórias" saiu daqui.
-
-          Ele ligava e desligava uma leitura do `localStorage` desta aba. Agora
-          a memória do projeto é aplicada pelo daemon em toda sessão dele —
-          inclusive nas delegadas, que a aba nunca alcançou —, então o controle
-          não teria como desligar coisa alguma. Um interruptor que não desliga
-          nada é pior do que nenhum: ele afirma que existe uma escolha.
-        */}
-        <div className="memory-toggle-row">
-          <span className="help">
-            As diretrizes deste projeto entram automaticamente. Edite-as em Configurações.
-          </span>
-        </div>
-
+        {/* Rodapé fora da área rolável: Cancelar/Iniciar sempre à vista,
+            mesmo com erro no topo empurrando o formulário para baixo. */}
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={action.busy !== null}>
             Cancelar

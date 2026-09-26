@@ -1,12 +1,16 @@
 /* ==========================================================================
    AGENTS-HUB — REVOLUTIONARY OPERATIONAL DESIGN SYSTEM (2026 UX/UI)
-   Plus Jakarta Sans & Inter Typography, Rounded Floating Sidebars,
-   Centered 760px Chat Container, Obsidian High-Tech Surfaces.
+   Fonte do sistema, Rounded Floating Sidebars,
+   Centered 760px Chat Container, tema escuro e claro.
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+/* Sem Google Fonts: o painel controla agentes LOCAIS e não tem por que avisar
+   um terceiro a cada abertura (nem atrasar o primeiro desenho quando a rede
+   está restrita). A pilha do sistema cobre Windows, macOS e Linux. */
 
 :root {
+  color-scheme: dark;
+
   /* Obsidian High-Tech Surfaces */
   --bg: #06080d;
   --bg-panel: #0d121c;
@@ -26,8 +30,25 @@
   /* Typography */
   --text: #f8fafc;
   --text-dim: #94a3b8;
-  --text-faint: #64748b;
+  /* #64748b dava ~4,1:1 sobre o painel — abaixo do AA (4,5:1) em textos de
+     9-11 px. Este fica acima de 4,9:1 em todos os fundos. */
+  --text-faint: #8593a8;
   --text-invert: #06080d;
+  --warn-text: #fbbf24;
+  --danger-text: #f87171;
+
+  /* Cor por agente (hub.ts `agentColor`). Usada como texto sobre os fundos
+     e como fundo de avatar com texto `--on-agent`; todas passam 4,5:1 nos
+     dois papéis. Antes nenhuma destas existia e barras/avatares sumiam. */
+  --agent-1: #38bdf8;
+  --agent-2: #a78bfa;
+  --agent-3: #34d399;
+  --agent-4: #fbbf24;
+  --agent-5: #f472b6;
+  --agent-6: #fb923c;
+  --agent-7: #2dd4bf;
+  --agent-8: #a3e635;
+  --on-agent: #06080d;
 
   /* Semantic Neon Accents */
   --accent: #38bdf8;
@@ -59,22 +80,139 @@
   --transition-fast: 0.15s var(--ease-fluid);
   --transition-normal: 0.24s var(--ease-fluid);
 
-  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
-  --sans: "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ==========================================================================
+   TEMA CLARO
+   Segue o sistema (`prefers-color-scheme`) quando não há escolha salva; a
+   alternância da topbar grava `data-theme` no <html> e vence o sistema.
+   Os dois blocos abaixo são idênticos de propósito (CSS não tem mixin).
+   ========================================================================== */
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #eef1f6;
+    --bg-panel: #ffffff;
+    --bg-raised: #f1f4f9;
+    --bg-card: #fbfcfe;
+    --bg-hover: #e4e9f1;
+    --bg-active: #d8e1ee;
+    --bg-code: #eef2f7;
+    --bg-glass: rgba(255, 255, 255, 0.88);
+    --border: rgba(15, 23, 42, 0.12);
+    --border-subtle: rgba(15, 23, 42, 0.06);
+    --border-strong: rgba(15, 23, 42, 0.24);
+    --border-focus: rgba(3, 105, 161, 0.6);
+    --text: #0f172a;
+    --text-dim: #3f4c5f;
+    --text-faint: #536176;
+    --text-invert: #ffffff;
+    --warn-text: #92400e;
+    --danger-text: #b91c1c;
+    --accent: #0369a1;
+    --accent-hover: #075985;
+    --accent-glow: rgba(3, 105, 161, 0.18);
+    --ok: #047857;
+    --ok-glow: rgba(4, 120, 87, 0.18);
+    --warn: #92400e;
+    --warn-glow: rgba(180, 83, 9, 0.18);
+    --danger: #b91c1c;
+    --danger-glow: rgba(185, 28, 28, 0.18);
+    --busy: #7e22ce;
+    --busy-glow: rgba(126, 34, 206, 0.18);
+    --handoff: #4f46e5;
+    --agent-1: #0369a1;
+    --agent-2: #6d28d9;
+    --agent-3: #047857;
+    --agent-4: #92400e;
+    --agent-5: #be185d;
+    --agent-6: #c2410c;
+    --agent-7: #0f766e;
+    --agent-8: #3f6212;
+    --on-agent: #ffffff;
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.12);
+    --shadow-md: 0 6px 18px rgba(15, 23, 42, 0.12);
+    --shadow-lg: 0 14px 40px rgba(15, 23, 42, 0.18);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef1f6;
+  --bg-panel: #ffffff;
+  --bg-raised: #f1f4f9;
+  --bg-card: #fbfcfe;
+  --bg-hover: #e4e9f1;
+  --bg-active: #d8e1ee;
+  --bg-code: #eef2f7;
+  --bg-glass: rgba(255, 255, 255, 0.88);
+  --border: rgba(15, 23, 42, 0.12);
+  --border-subtle: rgba(15, 23, 42, 0.06);
+  --border-strong: rgba(15, 23, 42, 0.24);
+  --border-focus: rgba(3, 105, 161, 0.6);
+  --text: #0f172a;
+  --text-dim: #3f4c5f;
+  --text-faint: #536176;
+  --text-invert: #ffffff;
+  --warn-text: #92400e;
+  --danger-text: #b91c1c;
+  --accent: #0369a1;
+  --accent-hover: #075985;
+  --accent-glow: rgba(3, 105, 161, 0.18);
+  --ok: #047857;
+  --ok-glow: rgba(4, 120, 87, 0.18);
+  --warn: #92400e;
+  --warn-glow: rgba(180, 83, 9, 0.18);
+  --danger: #b91c1c;
+  --danger-glow: rgba(185, 28, 28, 0.18);
+  --busy: #7e22ce;
+  --busy-glow: rgba(126, 34, 206, 0.18);
+  --handoff: #4f46e5;
+  --agent-1: #0369a1;
+  --agent-2: #6d28d9;
+  --agent-3: #047857;
+  --agent-4: #92400e;
+  --agent-5: #be185d;
+  --agent-6: #c2410c;
+  --agent-7: #0f766e;
+  --agent-8: #3f6212;
+  --on-agent: #ffffff;
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.12);
+  --shadow-md: 0 6px 18px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 14px 40px rgba(15, 23, 42, 0.18);
 }
 
 *, *::before, *::after {
   box-sizing: border-box;
 }
 
+/* `100dvh`: no celular `100vh` inclui a barra do navegador e cortava o
+   compositor. `100vw` incluía a barra de rolagem vertical no desktop. */
 html, body, #root {
-  height: 100vh;
-  max-height: 100vh;
-  width: 100vw;
-  max-width: 100vw;
+  height: 100%;
+  max-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
+}
+
+html {
+  height: 100dvh;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 body {
@@ -315,6 +453,17 @@ textarea {
   gap: 8px;
   cursor: pointer;
   user-select: none;
+  /* É um <button> (antes <div onClick>, inalcançável por teclado). */
+  background: none;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  transform: none !important;
+}
+
+.brand:hover:not(:disabled) {
+  background: none;
+  border: none;
 }
 
 .brand-logo-icon {
@@ -422,6 +571,17 @@ textarea {
   color: var(--text);
 }
 
+/* O texto encolhe com reticências em vez de quebrar em várias linhas e
+   invadir a pílula "ao vivo" (visto em 1100 px na vistoria). */
+.spotlight-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
 .kbd-shortcut {
   font-family: var(--mono);
   font-size: 10px;
@@ -494,13 +654,183 @@ textarea {
   font-size: 12px;
 }
 
+.theme-toggle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* ==========================================================================
+   TOPBAR RESPONSIVA
+   Degraus: 1200 (abas só ícone, sem versão), 1000 (busca e marca só ícone),
+   768 (ações só ícone), 600 (abas e tema vão para o menu "Mais opções").
+   Nenhum degrau esconde um controle sem oferecer outro caminho até ele, e o
+   rótulo recortado (`.rotulo-compacto`) continua no nome acessível.
+   Verificado por packages/web/e2e/painel.spec.ts em 375/768/1100/1440.
+   ========================================================================== */
+
+.topbar-menu {
+  position: relative;
+  display: none;
+}
+
+.topbar-menu .menu-toggle {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.topbar-menu-popup {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  min-width: 220px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topbar-menu-item {
+  justify-content: flex-start;
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  transform: none !important;
+}
+
+.topbar-menu-item:hover:not(:disabled),
+.topbar-menu-item:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.topbar-menu-item.ativo {
+  font-weight: 700;
+  background: var(--bg-raised);
+  border-color: var(--border-strong);
+}
+
+.topbar-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+/* Recorta o rótulo visualmente sem tirá-lo do nome acessível (sr-only). */
+@media (max-width: 1200px) {
+  .brand-version {
+    display: none;
+  }
+  .nav-tab {
+    padding: 5px 9px;
+  }
+  .nav-tab .tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .topbar-left {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .topbar {
+    gap: 10px;
+    padding: 0 14px;
+  }
+  .topbar-center {
+    flex: 0 0 auto;
+    margin: 0;
+  }
+  .brand-text,
+  .spotlight-text,
+  .kbd-shortcut {
+    display: none;
+  }
+  .spotlight-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+    border-radius: var(--radius);
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar-right {
+    gap: 8px;
+  }
+  .rotulo-acao {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .btn-hero-new,
+  .panel-toggle {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .topbar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+  .topbar-left {
+    gap: 8px;
+  }
+  .nav-tabs,
+  .theme-toggle {
+    display: none;
+  }
+  .topbar-menu {
+    display: block;
+  }
+  .status-rotulo {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .pill.status {
+    padding: 4px 8px;
+  }
+}
+
 /* ==========================================================================
    APPROVALS BANNER
    ========================================================================== */
 
 .approvals {
   border-bottom: 1px solid rgba(245, 158, 11, 0.4);
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.14) 0%, rgba(13, 18, 28, 0.95) 100%);
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.14) 0%, var(--bg-panel) 100%);
   flex-shrink: 0;
   max-height: 200px;
   overflow-y: auto;
@@ -523,7 +853,7 @@ textarea {
 .approvals-count {
   font-family: var(--mono);
   background: var(--warn);
-  color: #06080d;
+  color: var(--text-invert);
   border-radius: var(--radius-full);
   padding: 1px 7px;
   font-size: 11px;
@@ -1031,7 +1361,7 @@ textarea {
   width: 32px;
   height: 32px;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--on-agent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1193,7 +1523,7 @@ textarea {
   width: 30px;
   height: 30px;
   border-radius: var(--radius-sm);
-  color: #fff;
+  color: var(--on-agent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1332,7 +1662,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   padding: 7px 12px;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--bg-code);
   border-bottom: 1px solid var(--border-subtle);
   min-width: 0;
 }
@@ -1383,7 +1713,7 @@ textarea {
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 /* Handoff Banner */
@@ -1584,6 +1914,8 @@ textarea {
 
 .section-header-row {
   display: flex;
+  flex-wrap: wrap;
+  row-gap: 6px;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
@@ -1843,13 +2175,13 @@ textarea {
 .notice.warn {
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #fbbf24;
+  color: var(--warn-text);
 }
 
 .notice.danger {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #f87171;
+  color: var(--danger-text);
 }
 
 .sidepanel-empty {
@@ -1940,7 +2272,7 @@ textarea {
   width: 40px;
   height: 40px;
   border-radius: var(--radius-md);
-  color: #ffffff;
+  color: var(--on-agent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2168,7 +2500,7 @@ textarea {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  color: #fff;
+  color: var(--on-agent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2382,9 +2714,20 @@ textarea {
   animation: scaleUp 0.18s var(--ease-fluid);
 }
 
+/* O cartão não rola: rola só o corpo, e o rodapé (Cancelar/Iniciar) fica
+   sempre à vista. Antes, com um erro no topo, os botões passavam da borda
+   inferior e era preciso rolar o formulário para achá-los. */
 .modal {
-  padding: 24px 28px;
+  padding: 0;
+  overflow: hidden;
+  max-height: min(85vh, 85dvh);
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  padding: 24px 28px 8px;
 }
 
 .modal h2 {
@@ -2428,8 +2771,25 @@ textarea {
 .modal-actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-top: 20px;
+  flex-shrink: 0;
+  padding: 14px 28px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+@media (max-width: 600px) {
+  .cmd-backdrop,
+  .modal-backdrop {
+    padding: 10px;
+  }
+  .modal-body {
+    padding: 18px 16px 8px;
+  }
+  .modal-actions {
+    padding: 12px 16px;
+  }
 }
 
 .cmd-input-wrap {
@@ -2500,9 +2860,43 @@ textarea {
   transform: none !important;
 }
 
-.cmd-item:hover {
+.cmd-item {
+  cursor: pointer;
+  min-width: 0;
+}
+
+.cmd-item.ativo {
   background: var(--bg-hover);
-  border-color: var(--border);
+  border-color: var(--border-strong);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.cmd-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.cmd-footer kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-right: 3px;
 }
 
 .cmd-item-label {
@@ -2555,6 +2949,16 @@ textarea {
 .cmd-status-badge.state-completed {
   border-color: var(--ok);
   color: var(--ok);
+}
+
+.cmd-status-badge {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cmd-status-badge.state-waiting_approval {
+  border-color: var(--warn);
+  color: var(--warn-text);
 }
 
 .cmd-empty {
@@ -2637,6 +3041,25 @@ textarea {
   display: none;
 }
 
+/* Gavetas: em tela estreita as colunas laterais deslizam POR CIMA da timeline.
+   Ficam dentro de `.columns` (position: absolute), e não mais `fixed` com
+   `top: 60px`: assim começam abaixo do banner de aprovações e do de erro,
+   qualquer que seja a altura deles, e não cobrem "Liberar/Negar".
+   Fechadas: `visibility: hidden` (depois da transição) + `inert` no JS, fora
+   da ordem de Tab e da árvore de acessibilidade. Uma de cada vez (App.tsx).
+   z-index acima do compositor (10), que antes cobria o fim da gaveta. */
+.columns {
+  position: relative;
+}
+
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.45);
+  animation: fadeIn 0.15s var(--ease-fluid);
+}
+
 @media (max-width: 1200px) {
   .columns {
     grid-template-columns: 280px minmax(0, 1fr);
@@ -2645,17 +3068,21 @@ textarea {
     display: inline-flex;
   }
   .col-right {
-    position: fixed;
-    top: 60px;
+    position: absolute;
+    top: 8px;
     right: 10px;
-    bottom: 10px;
-    width: min(340px, 90vw);
-    z-index: 8;
+    bottom: 8px;
+    width: min(340px, calc(100% - 20px));
+    z-index: 40;
     box-shadow: var(--shadow-lg);
-    transform: translateX(120%);
+    transform: translateX(calc(100% + 20px));
+    visibility: hidden;
+    transition: transform var(--transition-normal), visibility 0s linear 0.24s;
   }
   .app.panel-open .col-right {
     transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--transition-normal), visibility 0s;
   }
 }
 
@@ -2667,17 +3094,55 @@ textarea {
     display: inline-flex;
   }
   .col-left {
-    position: fixed;
-    top: 60px;
+    position: absolute;
+    top: 8px;
     left: 10px;
-    bottom: 10px;
-    width: min(340px, 90vw);
-    z-index: 8;
+    bottom: 8px;
+    width: min(340px, calc(100% - 20px));
+    z-index: 40;
     box-shadow: var(--shadow-lg);
-    transform: translateX(-120%);
+    transform: translateX(calc(-100% - 20px));
+    visibility: hidden;
+    transition: transform var(--transition-normal), visibility 0s linear 0.24s;
   }
   .app.flows-open .col-left {
     transform: translateX(0);
+    visibility: visible;
+    transition: transform var(--transition-normal), visibility 0s;
+  }
+}
+
+/* Celular: cabeçalho da timeline, aprovações e compositor se reorganizam em
+   vez de cortar controles ("Detalhado" saía 24 px da tela em 375 px). */
+@media (max-width: 600px) {
+  .columns {
+    padding: 6px;
+  }
+  .col-header.timeline-header {
+    height: auto;
+    max-height: none;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .timeline-header .head-actions {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+    width: 100%;
+  }
+  .approval {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .approval-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .composer {
+    padding: 10px;
+  }
+  .composer-hint-badge {
+    display: none;
   }
 }
 
@@ -2842,7 +3307,7 @@ textarea {
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  color: #fff;
+  color: var(--on-agent);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -31,7 +31,21 @@ portão e tem prioridade sobre o que você estava fazendo.
 | `npm run build:packages` | só `tsc -b` — o laço rápido |
 | `npm run build` | pacotes + Web UI, que é o que o CI compila |
 | `npm test` | a suíte inteira (30 arquivos, 273 testes) |
+| `npm run test:e2e` | e2e do painel no navegador (fora do `npm test`, ver abaixo) |
 | `npm run clean` | apaga `dist/` e `.tsbuildinfo` |
+
+> **Sobre `npm run test:e2e`:** compila o painel e roda
+> `packages/web/e2e/painel.spec.ts` (Playwright) contra o build estático,
+> servido por um servidor falso com dados fixos numa porta livre — sem daemon,
+> sem agentes, sem tocar em `~/.agents-hub`. Em 375/768/1100/1440 px mede por JS
+> que nenhum botão/aba/link/campo visível fica coberto (`elementFromPoint` do
+> centro devolve o próprio controle), fora do viewport horizontal ou com o
+> documento rolando na horizontal; e cobre Ctrl/⌘+K, setas+Enter na paleta,
+> modais (foco preso, Esc, foco devolvido, rodapé visível), gavetas (uma fecha
+> a outra, fechadas `inert`) e o tema claro/escuro com contraste AA. Fica fora
+> do `npm test` porque precisa de navegador: usa o Edge ou o Chrome instalados
+> (`channel`), sem baixar nada. Sem nenhum dos dois, rode
+> `npx playwright install chromium` uma vez e `PW_CHANNEL= npm run test:e2e`.
 
 > **Sobre `npm test`:** a descoberta dos arquivos é feita em JavaScript
 > (`scripts/run-tests.mjs`), não por glob de shell. O motivo é concreto: a
