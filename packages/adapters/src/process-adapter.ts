@@ -558,9 +558,13 @@ export function montarInvocacao(
 
   // A política nativa do agente vem do modo da sessão: é o que impede o
   // sandbox do próprio CLI de contradizer o isolamento que o Hub já montou.
+  const modeArgs =
+    nativeSessionId !== null && manifest.invoke.resumeModeArgs
+      ? manifest.invoke.resumeModeArgs[ctx.mode]
+      : manifest.invoke.modeArgs[ctx.mode];
   const args = [
     ...argsTemplate,
-    ...manifest.invoke.modeArgs[ctx.mode],
+    ...modeArgs,
     ...manifest.invoke.extraArgs,
     ...(ctx.extraArgs ?? []),
   ]

@@ -123,6 +123,39 @@ describe('translateOpenCodeEvent', () => {
     );
   });
 
+  test('o prompt do usuário ecoado pelo servidor não vira evento (vistoria 11: brief impresso 2x)', () => {
+    for (const tipo of ['session.next.prompt.admitted', 'session.next.prompted']) {
+      assert.deepEqual(translateOpenCodeEvent(evento(tipo, { prompt: { text: '# Tarefa ...' } })), [], tipo);
+    }
+  });
+
+  test('marcadores internos (started/delta) e o espelho v1 são descartados', () => {
+    for (const tipo of [
+      'session.next.reasoning.started',
+      'session.next.reasoning.delta',
+      'session.next.text.started',
+      'session.next.tool.input.delta',
+      'message.part.updated',
+      'session.updated',
+    ]) {
+      assert.deepEqual(translateOpenCodeEvent(evento(tipo, { reasoningID: 'r1' })), [], tipo);
+    }
+    assert.deepEqual(translateOpenCodeEvent(evento('session.status', { status: { type: 'busy' } })), []);
+  });
+
+  test('log de evento desconhecido traz texto curto, não o JSON cru', () => {
+    const [mapped] = translateOpenCodeEvent(evento('todo.updated', { todos: [] }));
+    assert.equal(mapped?.payload['text'], 'OpenCode: todo.updated');
+  });
+
+  test('pedido de permissão não vira approval.requested (ninguém no Hub responde a ele)', () => {
+    const mapped = translateOpenCodeEvent(
+      evento('permission.v2.asked', { id: 'per_1', action: 'bash', resources: ['git push'] }),
+    );
+    assert.deepEqual(mapped.map((m) => m.type), ['log']);
+    assert.match(String(mapped[0]?.payload['text']), /bash git push — recusado pelo Hub/);
+  });
+
   test('entrada malformada não lança', () => {
     for (const lixo of [null, undefined, 42, 'texto', [], {}]) {
       assert.doesNotThrow(() => translateOpenCodeEvent(lixo));
