@@ -1,8 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { HubError, newId, nowIso } from '@agents-hub/core';
+import { HubError, newId, nowIso, type SessionMode } from '@agents-hub/core';
 import { AsyncQueue } from '../async-queue.js';
 import { montarSpawn, resolveBin } from '../bin-resolver.js';
+import { ProcessAgentAdapter } from '../process-adapter.js';
 import { killProcessTree } from '../process-tree.js';
 import type {
   AgentAdapter,
@@ -16,15 +19,33 @@ import type {
 import {
   SseDecoder,
   openCodeIdleSignal,
+  openCodePendingRequest,
   openCodeSessionId,
   translateOpenCodeEvent,
+  type OpenCodePendingRequest,
 } from './events.js';
+import {
+  OPENCODE_AGENTE_DO_MODO,
+  OPENCODE_AGENTE_NATIVO_DO_MODO,
+  prepararConfigDoHub,
+} from './permissions.js';
 
 export interface OpenCodeAdapterOptions {
   host?: string;
   port?: number;
   /** Sobe um `opencode serve` próprio quando não houver um respondendo. */
   autoStart?: boolean;
+  /**
+   * Diretório (do Hub) com o `opencode.json` dos agentes `hub-*`, passado ao
+   * servidor que o Hub sobe via `OPENCODE_CONFIG_DIR`. Ver `permissions.ts`.
+   */
+  configDir?: string;
+}
+
+/** Agente do OpenCode escolhido para o modo, e o aviso quando a restrição é parcial. */
+interface EscolhaDeAgente {
+  agent: string;
+  aviso: string | null;
 }
 
 /**
@@ -91,6 +112,7 @@ export class OpenCodeAdapter implements AgentAdapter {
   readonly #host: string;
   readonly #port: number;
   readonly #autoStart: boolean;
+  readonly #configDir: string;
   readonly #runs = new Map<string, RunState>();
 
   /** Servidor que ESTE adapter subiu — só ele pode derrubar. */
@@ -109,42 +131,38 @@ export class OpenCodeAdapter implements AgentAdapter {
     this.#host = options.host ?? '127.0.0.1';
     this.#port = options.port ?? 4790;
     this.#autoStart = options.autoStart ?? true;
+    this.#configDir = options.configDir ?? path.join(os.tmpdir(), 'agents-hub-opencode-config');
   }
 
   get baseUrl(): string {
     return `http://${this.#host}:${this.#port}`;
   }
 
+  /**
+   * Versão pelo `--version` do binário, como os demais agentes (antes: um
+   * servidor no ar devolvia `version: 'servidor no ar'` e `authenticated: true`
+   * sem base nenhuma — o servidor responder não diz nada sobre login).
+   */
   async probe(): Promise<ProbeResult> {
-    const base: ProbeResult = {
-      agentId: this.manifest.id,
-      installed: false,
-      version: null,
-      authenticated: null,
-      binPath: null,
-      error: null,
-      checkedAt: nowIso(),
-    };
+    const doBinario = await new ProcessAgentAdapter(this.manifest).probe();
+    if (doBinario.installed) return doBinario;
 
-    // Servidor no ar já responde tudo que interessa, e sem pagar o start a frio
-    // do .exe — que no Windows chega a 20s.
+    // Binário fora do PATH, mas alguém serve na porta: dá para usar, sem versão.
     if (await this.#healthy()) {
-      return { ...base, installed: true, version: 'servidor no ar', authenticated: true };
+      return { ...doBinario, installed: true, error: null };
     }
-
-    const resolved = await resolveBin(this.manifest.bin);
-    if (!resolved) {
-      return { ...base, error: `binário "${this.manifest.bin}" não encontrado no PATH` };
-    }
-    return { ...base, installed: true, binPath: resolved.path };
+    return doBinario;
   }
 
   async start(ctx: RunContext, prompt: string): Promise<RunHandle> {
     await this.#ensureServer(ctx);
+    const escolha = await this.#agenteDoModo(ctx.mode);
 
     const created = await this.#json<{ data?: { id?: string } }>('POST', '/api/session', {
       // É assim que o worktree isolado é honrado sem um servidor por sessão.
       location: { directory: ctx.workdir },
+      // O modo do Hub vira permissão nativa aqui — ver `permissions.ts`.
+      agent: escolha.agent,
       ...(ctx.model ? { model: { providerID: 'opencode', id: ctx.model } } : {}),
     });
 
@@ -153,7 +171,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       throw new HubError('ADAPTER_FAILURE', 'OpenCode não devolveu id de sessão', { created });
     }
 
-    return this.#run(ctx, nativeSessionId, prompt);
+    return this.#run(ctx, nativeSessionId, prompt, escolha.aviso);
   }
 
   async resume(ctx: RunContext, nativeSessionId: string, prompt: string): Promise<RunHandle> {
@@ -181,7 +199,13 @@ export class OpenCodeAdapter implements AgentAdapter {
       }).catch(() => undefined);
     }
 
-    return this.#run(ctx, nativeSessionId, prompt);
+    // O modo pode ter mudado entre turnos (ou a sessão veio de antes desta
+    // correção, com o `build` allow-all). Sem conseguir trocar, NÃO seguimos:
+    // rodar com o agente antigo seria executar num modo mais frouxo que o pedido.
+    const escolha = await this.#agenteDoModo(ctx.mode);
+    await this.#json('POST', `/api/session/${nativeSessionId}/agent`, { agent: escolha.agent });
+
+    return this.#run(ctx, nativeSessionId, prompt, escolha.aviso);
   }
 
   /**
@@ -231,7 +255,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   // ------------------------------------------------------------------- run
 
-  #run(ctx: RunContext, nativeSessionId: string, prompt: string): RunHandle {
+  #run(ctx: RunContext, nativeSessionId: string, prompt: string, aviso: string | null = null): RunHandle {
     const queue = new AsyncQueue<MappedEvent>({
       highWaterMark: QUEUE_HIGH_WATER_MARK,
       lowWaterMark: QUEUE_LOW_WATER_MARK,
@@ -361,6 +385,12 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     this.#runs.set(run.id, run);
 
+    // Restrição parcial precisa estar na timeline, não só no log do daemon:
+    // é quem olha a sessão que precisa saber que `supervised` aqui não barra shell.
+    if (aviso) {
+      queue.push({ type: 'log', payload: { level: 'warn', text: aviso }, raw: null });
+    }
+
     void (async () => {
       // O stream abre ANTES do prompt de propósito: a rota de replay por sessão
       // está quebrada na 1.17.15, então evento perdido é perdido para sempre.
@@ -438,6 +468,9 @@ export class OpenCodeAdapter implements AgentAdapter {
             // das outras.
             if (openCodeSessionId(evento) !== nativeSessionId) continue;
 
+            const pendente = openCodePendingRequest(evento);
+            if (pendente) void this.#recusarPendente(pendente);
+
             const mapeados = translateOpenCodeEvent(evento);
             // Qualquer evento desta sessão já prova que o loop rodou — não
             // precisamos esperar o poll confirmar.
@@ -466,6 +499,58 @@ export class OpenCodeAdapter implements AgentAdapter {
         if (!run.abort.signal.aborted) finish('error', describe(err));
       }
     })();
+  }
+
+  // ------------------------------------------------------------ permissões
+
+  /**
+   * Agente do OpenCode para o modo do Hub.
+   *
+   * Pede o `hub-*` só se ele aparece em `GET /api/agent`: agente inexistente é
+   * aceito pelo servidor e vira "nega tudo" (medido na 1.18.32), o que quebraria
+   * a sessão em silêncio. Sem os `hub-*` (servidor subido pelo usuário, sem o
+   * `OPENCODE_CONFIG_DIR` do Hub), cai no nativo e explica o que fica de fora.
+   */
+  async #agenteDoModo(mode: SessionMode): Promise<EscolhaDeAgente> {
+    const desejado = OPENCODE_AGENTE_DO_MODO[mode];
+    const disponiveis = await this.#json<{ data?: unknown }>('GET', '/api/agent')
+      .then((r) =>
+        Array.isArray(r.data)
+          ? new Set(
+              r.data
+                .map((a) => (a && typeof a === 'object' ? (a as Record<string, unknown>)['id'] : null))
+                .filter((id): id is string => typeof id === 'string'),
+            )
+          : new Set<string>(),
+      )
+      .catch(() => new Set<string>());
+
+    if (disponiveis.has(desejado)) return { agent: desejado, aviso: null };
+
+    const nativo = OPENCODE_AGENTE_NATIVO_DO_MODO[mode];
+    const quem = `o "opencode serve" em ${this.baseUrl} não foi subido pelo Hub (sem o agente "${desejado}")`;
+    const aviso =
+      mode === 'supervised'
+        ? `${quem}: supervised usa o agente nativo "plan" do OpenCode — edição negada, mas comandos de shell NÃO são barrados pelo OpenCode, só vigiados pelo Hub depois do fato`
+        : `${quem}: ${mode} usa o agente nativo "build" do OpenCode, que permite tudo — comandos irreversíveis e leitura de segredos NÃO são negados pelo OpenCode, só vigiados pelo Hub`;
+    return { agent: nativo, aviso };
+  }
+
+  /** Recusa pedido de permissão/pergunta que ninguém no Hub vai responder. */
+  async #recusarPendente(pedido: OpenCodePendingRequest): Promise<void> {
+    const rota =
+      pedido.kind === 'permission'
+        ? `/api/session/${pedido.sessionId}/permission/${pedido.id}/reply`
+        : pedido.kind === 'permission-v1'
+          ? `/permission/${pedido.id}/reply`
+          : `/api/session/${pedido.sessionId}/question/${pedido.id}/reject`;
+    const corpo =
+      pedido.kind === 'question'
+        ? undefined
+        : { reply: 'reject', message: 'Recusado pelo Agents Hub: sessão sem canal de aprovação.' };
+    await this.#request('POST', rota, corpo).catch((err: unknown) => {
+      console.error(`[opencode] não foi possível recusar o pedido ${pedido.id}: ${describe(err)}`);
+    });
   }
 
   // --------------------------------------------------------------- servidor
@@ -539,7 +624,23 @@ export class OpenCodeAdapter implements AgentAdapter {
     // `filtrarEnvDeProjeto` antes de chegar aqui) só tem efeito para QUEM sobe
     // o servidor — ver `#warnEnvMismatch` sobre o que acontece quando outra
     // sessão pede um ambiente diferente depois.
-    const spawnEnv = { ...process.env, ...env };
+    //
+    // `OPENCODE_CONFIG_DIR` acrescenta os agentes `hub-*` (um por modo) SEM
+    // substituir a config global do usuário — provedores, modelos e login
+    // continuam os dele. É por esses agentes que o modo do Hub vira permissão
+    // real no OpenCode (ver `permissions.ts`).
+    const herdado = env['OPENCODE_CONFIG_DIR'] ?? process.env['OPENCODE_CONFIG_DIR'];
+    if (herdado && path.resolve(herdado) !== path.resolve(this.#configDir)) {
+      console.error(
+        `[opencode] OPENCODE_CONFIG_DIR=${herdado} do ambiente foi substituído pelo diretório do Hub ` +
+          `(${this.#configDir}) no servidor que o Hub sobe — é por ele que o modo da sessão vira permissão`,
+      );
+    }
+    const spawnEnv = {
+      ...process.env,
+      ...env,
+      OPENCODE_CONFIG_DIR: prepararConfigDoHub(this.#configDir),
+    };
     // `montarSpawn` desembrulha o shim npm (`opencode.cmd` → o `opencode.exe`
     // real) e só cai no `cmd.exe`, com escape próprio, para `.cmd` desconhecido.
     const comando = montarSpawn(resolved, args);

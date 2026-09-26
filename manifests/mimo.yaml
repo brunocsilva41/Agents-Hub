@@ -61,10 +61,9 @@ session:
 
 stream:
   format: jsonl
-  # Sendo fork do OpenCode, os eventos brutos têm forma parecida, mas a versão
-  # aqui é mais antiga e o vocabulário não foi confirmado evento a evento.
-  # O mapper genérico entrega timeline utilizável sem fingir precisão que não
-  # foi verificada.
+  # O `--format json` do MiMo é o envelope `run` da família OpenCode
+  # (`{type, sessionID, part}`), que o mapper genérico reconhece — ver
+  # packages/adapters/src/mappers/generic.ts.
   mapper: generic-json
 
 capabilities:
@@ -85,7 +84,6 @@ defaults:
 caveats:
   - "modeArgs verificado contra `mimo run --help`: sem meio-termo nativo no comando headless — supervised e semi rodam sem nenhuma flag de permissão (o que o binário pede por padrão em ações sensíveis não foi confirmado além disso), e só autonomous usa `--yolo`/`--dangerously-skip-permissions`. A diferença entre supervised e semi, neste agente, é só a política do Hub por cima — não o próprio MiMo."
   - "É fork do OpenCode, mas expõe a API v1 LEGADA (rotas na raiz, sem /api) — o adapter HTTP do Hub fala só v2, então este agente roda por CLI."
-  - "A API v1 não tem custo por passo; o custo do Hub sai estimado pela tabela de preços."
-  - "Vocabulário de eventos do `--format json` não confirmado evento a evento: usa o mapper genérico."
+  - "Envelope do `run --format json` conferido no bundle do `mimo.exe` 0.1.14 (não em execução real, para não chamar provedor): `{type, timestamp, sessionID, part}` com `step_start|text|reasoning|tool_use|step_finish|error`. O mapper `generic-json` entende esse envelope: texto, shell/escrita vigiáveis, erro, id da sessão e custo/tokens do `step_finish` (`part.cost`/`part.tokens`)."
   - "A memória persistente do MiMo vive fora do Hub: o que ele lembra não aparece na auditoria."
-  - "session.strategy: native é aspiracional aqui: o mapper generic-json (packages/adapters/src/mappers/generic.ts) nunca preenche mapped.nativeSessionId, só produz eventos message/log/error. Sem nativeSessionId, resume() nunca é chamado de fato — todo turno cai em rebuildConversation (replay). Fechar isto de verdade exige um mapper dedicado do MiMo (item aberto no roadmap), não uma mudança de manifesto."
+  - "session.strategy: native: o `sessionID` de cada linha do `--format json` vira `nativeSessionId` (mapper generic-json), e o turno seguinte usa `run --session <id>`. Validado por teste com o envelope do bundle, não por execução real."

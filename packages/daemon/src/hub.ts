@@ -76,6 +76,8 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
   if (registry.has('opencode')) {
     opencode = createOpenCodeAdapter(registry.get('opencode').manifest, {
       port: config.opencodePort,
+      // Agentes `hub-*` (modo → permissão nativa) do servidor que o Hub sobe.
+      configDir: path.join(config.home, 'opencode-config'),
     });
     registry.registerAdapter(opencode);
   }

@@ -157,7 +157,8 @@ retomada usa `POST /api/session/{id}/model` antes do prompt.
 | Evento OpenCode | → Hub | Campos usados |
 |---|---|---|
 | `session.created` | `session.started` | `sessionID`, `info` |
-| `session.next.prompt.admitted` | `log` | `messageID`, `prompt.text` |
+| `session.next.prompt.admitted`, `session.next.prompted` | — (descartado: é o prompt do próprio Hub ecoado) | |
+| `*.started`, `reasoning.delta`, `tool.input.*`, `message.*` (espelho v1) | — (descartado: ruído) | |
 | `session.next.step.started` | `turn.started` | `assistantMessageID`, `agent`, `model` |
 | `session.next.step.ended` | `turn.completed` (+ `file.changed`) | `finish`, `cost`, `tokens`, `files` |
 | `session.next.step.failed` | `error` | `error.message` |
@@ -174,8 +175,8 @@ retomada usa `POST /api/session/{id}/model` antes do prompt.
 | `session.error` | `error` | `error.name`, `error.data.message` |
 | `session.idle` | `session.ended` | `sessionID` |
 | `session.status` (`idle`/`retry`) | `session.ended` / `log` | `status` |
-| `permission.asked`, `permission.v2.asked` | `approval.requested` | `action`, `resources` |
-| `permission.replied`, `permission.v2.replied` | `approval.resolved` | `reply` |
+| `permission.asked`, `permission.v2.asked`, `question.*asked` | `log` (warn) + recusa automática (§8) | `action`, `resources` |
+| `permission.replied`, `permission.v2.replied` | — | |
 | `command.executed` | `command.executed` | `name`, `arguments` |
 | `todo.updated` | `log` | `todos` |
 
@@ -209,3 +210,27 @@ sessões do Hub, atribuí-lo a uma delas seria chute. Os arquivos alterados vêm
 
 O servidor avisa no boot: `OPENCODE_SERVER_PASSWORD is not set; server is unsecured`.
 O adapter sobe sempre em `127.0.0.1`, nunca em `0.0.0.0`.
+
+## 8. Modo do Hub → permissão (opencode 1.18.32)
+
+Medido com um `opencode serve` isolado (HOME temporário, `--pure`), **sem chamar
+modelo**: `POST /api/session/{id}/permission` com `{action, resources}` só *avalia*
+a regra do agente da sessão e devolve `allow`/`deny`/`ask`.
+
+| Tentativa | Resultado |
+|---|---|
+| Agente padrão `build` | `* → allow`: `git push`, `rm -rf`, edição, tudo passa |
+| Agente nativo `plan` | edição `deny`, mas `bash` livre (`git push` → `allow`) |
+| `permission` por sessão (`PATCH /session/{id}` ou `POST /session`, v1) | gravado e **ignorado** pela avaliação v2 |
+| `OPENCODE_CONFIG_CONTENT` / `OPENCODE_CONFIG` | não chegam à camada v2 |
+| `OPENCODE_CONFIG_DIR` com `opencode.json` declarando agentes | **funciona** e é aditivo à config global do usuário; os agentes aparecem em `GET /api/agent` |
+| `agent` inexistente em `POST /api/session` | aceito, e vira "nega tudo" |
+| Agente customizado sem regra para uma ação | `ask` |
+
+Daí o desenho (`packages/adapters/src/opencode/permissions.ts`): o servidor que o Hub
+sobe recebe `OPENCODE_CONFIG_DIR=<home do Hub>/opencode-config` com `hub-supervised`,
+`hub-semi` e `hub-autonomous`; o adapter confere em `GET /api/agent` e manda o do modo
+na criação (e em `POST /api/session/{id}/agent` no resume). Em servidor alheio, cai para
+`plan`/`build` com aviso na timeline. `ask` é evitado: nada no Hub responde a
+`permission.v2.asked`, e o adapter recusa (`.../permission/{id}/reply` com `reject`) o
+que ainda chegar, em vez de deixar o turno travado até o heartbeat.

@@ -568,10 +568,14 @@ export function montarInvocacao(
   // O modelo entra como PAR de argumentos (`--model x`) e só quando existe:
   // `{{model}}` vazio sumiria, mas a flag ficaria sozinha e engoliria o
   // argumento seguinte.
+  const modeArgs =
+    nativeSessionId !== null && manifest.invoke.resumeModeArgs
+      ? manifest.invoke.resumeModeArgs[ctx.mode]
+      : manifest.invoke.modeArgs[ctx.mode];
   const args = [
     ...argsTemplate,
     ...(model ? manifest.model.args : []),
-    ...manifest.invoke.modeArgs[ctx.mode],
+    ...modeArgs,
     ...manifest.invoke.extraArgs,
     ...(ctx.extraArgs ?? []),
   ]

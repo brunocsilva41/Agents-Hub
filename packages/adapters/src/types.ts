@@ -109,6 +109,20 @@ export const AgentManifestSchema = z.object({
         autonomous: z.array(z.string()).default([]),
       })
       .default({}),
+
+    /**
+     * `modeArgs` para o `resume`, quando diferem. Existe porque há CLI em que a
+     * flag de modo só vale na criação e é REJEITADA junto do id de sessão (Kimi
+     * 2.0.0: `--agent` + `--session` → "Cannot combine"; o agente fica preso à
+     * sessão). Ausente → o resume usa `modeArgs`.
+     */
+    resumeModeArgs: z
+      .object({
+        supervised: z.array(z.string()).default([]),
+        semi: z.array(z.string()).default([]),
+        autonomous: z.array(z.string()).default([]),
+      })
+      .optional(),
   }),
 
   /**

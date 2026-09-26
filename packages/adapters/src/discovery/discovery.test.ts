@@ -261,9 +261,32 @@ describe('antigravity', () => {
     assert.equal(d.instructionFiles.length, 1);
   });
   it('ausente e malformado', async () => {
-    assert.equal((await run('antigravity', fakeHome())).auth.state, 'absent');
+    // O agy guarda o token no keyring do SO: sem arquivo, o estado é desconhecido, não "ausente".
+    assert.equal((await run('antigravity', fakeHome())).auth.state, 'unknown');
     const d = await run('antigravity', fakeHome({ '.gemini/settings.json': '{{' }));
     assert.ok(d.warnings.some((w) => w.includes('settings.json')));
+  });
+  it('agy 1.2.6: lê .gemini/antigravity-cli/settings.json (modelo por nome de exibição → id do --model)', async () => {
+    const home = fakeHome({
+      '.gemini/antigravity-cli/settings.json': JSON.stringify({
+        model: 'Gemini 3.1 Pro (Low)',
+        permissions: { allow: ['Bash(npm test)', 'Read(*)'] },
+        allowNonWorkspaceAccess: true,
+      }),
+      // O settings.json da raiz é do Gemini CLI: não pode vencer o do agy.
+      '.gemini/settings.json': JSON.stringify({ model: { name: 'gemini-velho' } }),
+    });
+    const d = await run('antigravity', home);
+    assert.equal(d.defaults.model, 'gemini-3.1-pro-low');
+    assert.ok(d.files.some((f) => f.exists && /antigravity-cli[\\/]settings\.json$/.test(f.path)));
+    assert.ok(d.warnings.some((w) => w.includes('2 regra(s) em permissions.allow')));
+    assert.ok(d.warnings.some((w) => w.includes('allowNonWorkspaceAccess')));
+  });
+  it('nome de exibição fora do padrão Gemini fica como está', async () => {
+    const home = fakeHome({
+      '.gemini/antigravity-cli/settings.json': JSON.stringify({ model: 'Claude Sonnet 4.6 (Thinking)' }),
+    });
+    assert.equal((await run('antigravity', home)).defaults.model, 'Claude Sonnet 4.6 (Thinking)');
   });
 });
 

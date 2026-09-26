@@ -75,12 +75,87 @@ export function openCodeIdleSignal(raw: unknown): boolean {
   return status !== null && text(status, 'type') === 'idle';
 }
 
+/**
+ * Pedido que o servidor deixa pendurado esperando resposta humana.
+ *
+ * O Hub ainda não tem canal para responder permissão/pergunta do OpenCode; um
+ * pedido sem resposta trava o turno até o heartbeat. O adapter recusa na hora
+ * (ver `OpenCodeAdapter#recusarPendente`) — os agentes `hub-*` evitam `ask`,
+ * mas o servidor do usuário (agentes nativos) ainda pergunta, ex. ao ler `.env`.
+ */
+export interface OpenCodePendingRequest {
+  kind: 'permission' | 'permission-v1' | 'question';
+  id: string;
+  sessionId: string;
+  /** Descrição curta para a timeline. */
+  what: string;
+}
+
+export function openCodePendingRequest(raw: unknown): OpenCodePendingRequest | null {
+  const event = record(raw);
+  const type = event ? text(event, 'type') : null;
+  const data = record(event?.['data']);
+  if (!type || !data) return null;
+  const id = text(data, 'id');
+  const sessionId = text(data, 'sessionID');
+  if (!id || !sessionId) return null;
+
+  switch (type) {
+    case 'permission.v2.asked':
+      return { kind: 'permission', id, sessionId, what: describePermission(text(data, 'action'), data['resources']) };
+    case 'permission.asked':
+      return {
+        kind: 'permission-v1',
+        id,
+        sessionId,
+        what: describePermission(text(data, 'permission'), data['patterns']),
+      };
+    case 'question.v2.asked':
+    case 'question.asked':
+      return { kind: 'question', id, sessionId, what: 'pergunta ao usuário' };
+    default:
+      return null;
+  }
+}
+
+function describePermission(action: string | null, resources: unknown): string {
+  const alvos = list(resources).filter((r): r is string => typeof r === 'string');
+  return `${action ?? 'ação'}${alvos.length > 0 ? ` ${alvos.slice(0, 3).join(', ')}` : ''}`;
+}
+
+/**
+ * Eventos de fio que não dizem nada a quem lê a timeline: marcadores de início,
+ * deltas de raciocínio/entrada de ferramenta e o espelho v1 (`message.*`) do
+ * que já chega por `session.next.*`. Viravam linhas de JSON cru no terminal
+ * (vistoria 11: 8 de 13 eventos de um turno trivial eram isto).
+ */
+const RUIDO = new Set([
+  'session.next.text.started',
+  'session.next.reasoning.started',
+  'session.next.reasoning.delta',
+  'session.next.tool.input.started',
+  'session.next.tool.input.delta',
+  'session.next.tool.input.ended',
+  'session.next.tool.progress',
+  'session.next.context.updated',
+  'session.next.compaction.started',
+  'session.next.compaction.delta',
+  'session.updated',
+  'session.diff',
+  'message.updated',
+  'message.removed',
+  'message.part.updated',
+  'message.part.delta',
+  'message.part.removed',
+]);
+
 export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
   const event = record(raw);
   if (!event) return [];
 
   const type = text(event, 'type');
   if (!type) return [];
+  if (RUIDO.has(type)) return [];
 
   const data = record(event['data']) ?? {};
   const sessionId = text(data, 'sessionID');
@@ -109,7 +184,18 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
       const status = record(data['status']);
       const kind = status ? text(status, 'type') : null;
       if (kind === 'idle') return [emit('session.ended', { reason: 'idle' })];
-      return [emit('log', { opencodeType: type, status: kind, detail: status })];
+      // `busy` chega a cada passo e não informa nada além de "está rodando".
+      if (kind === 'busy') return [];
+      return [
+        emit('log', {
+          opencodeType: type,
+          status: kind,
+          detail: status,
+          text: `OpenCode: status ${kind ?? 'desconhecido'}${
+            status && text(status, 'message') ? ` — ${text(status, 'message')}` : ''
+          }`,
+        }),
+      ];
     }
 
     case 'session.error': {
@@ -123,16 +209,26 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
       ];
     }
 
+    // É o NOSSO prompt voltando pelo stream. Como `log` com `text`, o brief
+    // inteiro aparecia duas vezes no terminal como se fosse fala do agente
+    // (vistoria 11). O Hub já registra o que enviou; aqui não há nada novo.
     case 'session.next.prompt.admitted':
     case 'session.next.prompted':
+      return [];
+
+    case 'session.next.agent.switched':
+    case 'session.next.model.switched':
       return [
         emit('log', {
           opencodeType: type,
-          messageId: text(data, 'messageID'),
-          delivery: text(data, 'delivery'),
-          text: text(record(data['prompt']) ?? {}, 'text'),
+          agent: text(data, 'agent'),
+          model: record(data['model']),
+          text: `OpenCode: ${type === 'session.next.agent.switched' ? 'agente' : 'modelo'} trocado`,
         }),
       ];
+
+    case 'session.next.compaction.ended':
+      return [emit('log', { opencodeType: type, text: 'OpenCode: contexto compactado' })];
 
     case 'session.next.step.started':
       return [
@@ -232,34 +328,46 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
         }),
       ];
 
-    case 'session.next.retried':
+    case 'session.next.retried': {
+      const attempt = number(data, 'attempt');
+      const message = text(record(data['error']) ?? {}, 'message');
       return [
         emit('log', {
           opencodeType: type,
-          attempt: number(data, 'attempt'),
-          message: text(record(data['error']) ?? {}, 'message'),
+          level: 'warn',
+          attempt,
+          message,
+          text: `OpenCode: nova tentativa${attempt !== null ? ` ${attempt}` : ''}${message ? ` — ${message}` : ''}`,
         }),
       ];
+    }
 
+    // Não vira `approval.requested`: nada no Hub responde a este pedido (a
+    // aprovação do Hub é outra fila), e o evento deixava o painel mostrando
+    // "aguardando aprovação" para sempre. O adapter recusa o pedido na hora
+    // (`openCodePendingRequest`); aqui só fica o registro legível.
     case 'permission.asked':
     case 'permission.v2.asked':
+    case 'question.asked':
+    case 'question.v2.asked': {
+      const pedido = openCodePendingRequest(raw);
       return [
-        emit('approval.requested', {
+        emit('log', {
+          opencodeType: type,
+          level: 'warn',
           requestId: text(data, 'id'),
-          action: text(data, 'action') ?? text(data, 'permission'),
-          resources: list(data['resources']),
-          tool: text(data, 'tool'),
+          text: `OpenCode pediu ${pedido?.what ?? 'confirmação'} — recusado pelo Hub (sem canal de aprovação para o OpenCode; a sessão segue sem essa ação)`,
         }),
       ];
+    }
 
     case 'permission.replied':
     case 'permission.v2.replied':
-      return [
-        emit('approval.resolved', {
-          requestId: text(data, 'requestID'),
-          reply: data['reply'] ?? null,
-        }),
-      ];
+    case 'question.replied':
+    case 'question.rejected':
+    case 'question.v2.replied':
+    case 'question.v2.rejected':
+      return [];
 
     // `file.edited` traz só `{ file }`, sem `sessionID`. Num servidor com várias
     // sessões do Hub, atribuí-lo a uma delas seria chute — os arquivos alterados
@@ -270,7 +378,8 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
     default:
       // Só o que pertence a uma sessão vira log: o stream é global e carrega
       // ruído de servidor (pty, lsp, watcher, upgrade) que não é da run.
-      return sessionId ? [emit('log', { opencodeType: type, data })] : [];
+      // `text` curto: sem ele o terminal imprimia o `data` inteiro como JSON.
+      return sessionId ? [emit('log', { opencodeType: type, data, text: `OpenCode: ${type}` })] : [];
   }
 }
 
