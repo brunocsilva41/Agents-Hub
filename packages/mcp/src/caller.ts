@@ -1,4 +1,4 @@
-import type { HubClient, SessionSummary } from '@agents-hub/client';
+import { HubApiError, type HubClient, type SessionSummary } from '@agents-hub/client';
 
 /**
  * Descobre QUEM está chamando — o problema mais sutil do MCP server.
@@ -47,18 +47,66 @@ export class CallerIdentity {
 
     // Chamadas concorrentes na largada não podem adotar duas raízes: o fluxo
     // ficaria partido em duas árvores com dois orçamentos.
-    this.#adopting ??= this.client
+    //
+    // Mas a promessa REJEITADA não pode ficar guardada: com o daemon fora do
+    // ar na primeira chamada, toda tool que precisa de identidade seguia
+    // dizendo "o daemon não está rodando" mesmo depois de ele voltar, até
+    // reiniciar o MCP server (vistoria 2026-09-25, 08-mcp-hooks achado 7).
+    const adocao = (this.#adopting ??= this.client
       .adopt({
         agentId: this.agentId,
         projectPath: this.projectPath,
         title: `${this.agentId} (principal externo)`,
       })
-      .then((result) => result.session);
+      .then((result) => result.session));
 
-    const session = await this.#adopting;
+    let session: SessionSummary;
+    try {
+      session = await adocao;
+    } catch (err) {
+      if (this.#adopting === adocao) this.#adopting = null;
+      throw err;
+    }
+    // Uma raiz esquecida (expirou) entre a adoção e aqui não pode ressuscitar.
+    if (this.#adopting !== adocao) return this.resolve();
     this.#adopted = session;
     this.#sessionId = session.id;
     return session.id;
+  }
+
+  /**
+   * Sinal de vida da raiz adotada. Sem ele, o daemon encerra a raiz depois do
+   * prazo — é o que evita raiz `running` para sempre quando o hospedeiro mata
+   * este processo sem fechar stdin (achado 13). Se o daemon diz que a raiz
+   * não existe mais ou já terminou (expirou, daemon reiniciou), esquece a
+   * identidade adotada: a próxima tool adota uma raiz nova em vez de delegar
+   * para uma morta. Falha de rede é só ignorada — o daemon pode estar
+   * reiniciando.
+   */
+  async heartbeat(): Promise<void> {
+    const adotada = this.#adopted;
+    if (!adotada) return;
+    try {
+      await this.client.heartbeat(adotada.id);
+    } catch (err) {
+      if (
+        err instanceof HubApiError &&
+        (err.code === 'SESSION_NOT_FOUND' || err.code === 'ILLEGAL_STATE') &&
+        this.#adopted === adotada
+      ) {
+        this.#adopted = null;
+        this.#sessionId = null;
+        this.#adopting = null;
+      }
+    }
+  }
+
+  /** Liga o sinal de vida periódico. Devolve a função que o desliga. */
+  startHeartbeat(intervalMs: number): () => void {
+    const timer = setInterval(() => void this.heartbeat(), intervalMs);
+    // O sinal de vida não pode ser o motivo de o processo não sair.
+    timer.unref?.();
+    return () => clearInterval(timer);
   }
 
   /** Encerra a raiz adotada sem matar o que ela delegou. */

@@ -199,6 +199,15 @@ export class HubClient {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/detach`, {});
   }
 
+  /**
+   * Sinal de vida de uma raiz adotada. Sem ele, o daemon encerra a raiz depois
+   * do prazo (`leaseMs`) — é o que impede raiz `running` eterna quando o MCP
+   * server morre sem fechar stdin.
+   */
+  async heartbeat(sessionId: string): Promise<{ ok: boolean; leaseMs: number | null }> {
+    return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/heartbeat`, {});
+  }
+
   async delegate(sessionId: string, brief: BriefInput): Promise<DelegationResult> {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/delegate`, { brief });
   }

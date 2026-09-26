@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { EventEnvelope, Session } from '@agents-hub/core';
-import { createStore } from './index.js';
+import { createStore, openDatabase, SqliteUnitOfWork, type Db } from './index.js';
 
 /**
  * "Não encontrado" precisa devolver `null`, nunca uma linha fantasma.
@@ -287,5 +287,133 @@ describe('costOf / graphRows ignoram custo provisório', () => {
     const [linha] = store.sessions.graphRows(sessionId);
     assert.ok(Math.abs((linha?.usd ?? 0) - 0.1378276) < 1e-12);
     assert.equal(linha?.tokens, 6);
+  });
+});
+
+/**
+ * Handoff troca o agente da sessão (vistoria 2026-09-25, item 2.7): o
+ * `UPDATE sessions` não tinha `agent_id`, e a troca virava no-op no banco.
+ */
+describe('sessions.update persiste agentId', () => {
+  test('mudar agentId sobrevive a uma releitura do banco', () => {
+    const store = createStore(':memory:');
+    const project = store.projects.create({ name: 'p', path: '/p/handoff', defaultBranch: 'main' });
+    const id = `ses_${Math.random().toString(36).slice(2)}`;
+    store.sessions.create({
+      id,
+      projectId: project.id,
+      agentId: 'alfa',
+      nativeSessionId: null,
+      rootId: id,
+      parentId: null,
+      depth: 0,
+      path: [],
+      state: 'running',
+      mode: 'semi',
+      isolation: 'none',
+      workdir: '/tmp/x',
+      title: null,
+      createdAt: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+      endedAt: null,
+      pid: null,
+    });
+
+    store.sessions.update(id, { agentId: 'gama' });
+
+    assert.equal(store.sessions.get(id)?.agentId, 'gama');
+    assert.equal(store.sessions.list({ rootId: id })[0]?.agentId, 'gama');
+    assert.equal(store.sessions.graphRows(id)[0]?.agentId, 'gama');
+  });
+});
+
+/**
+ * Compactação em lotes e consultas agregadas por índice parcial (vistoria
+ * 2026-09-25, 09-store-core, MÉDIOs de compactação e agregados).
+ */
+describe('compactação em lotes e índices parciais', () => {
+  function semear(db: Db, store: ReturnType<typeof createStore>, eventos: number): string {
+    const project = store.projects.create({
+      name: `p-${Math.random()}`,
+      path: `/p/${Math.random()}`,
+      defaultBranch: 'main',
+    });
+    const id = `ses_${Math.random().toString(36).slice(2)}`;
+    store.sessions.create({
+      id,
+      projectId: project.id,
+      agentId: 'claude',
+      nativeSessionId: null,
+      rootId: id,
+      parentId: null,
+      depth: 0,
+      path: [],
+      state: 'completed',
+      mode: 'semi',
+      isolation: 'none',
+      workdir: '/tmp/x',
+      title: null,
+      createdAt: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+      endedAt: '2020-01-01T00:00:00.000Z',
+      pid: null,
+    });
+    const ins = db.prepare(
+      `INSERT INTO events (id, seq, ts, session_id, task_id, agent_id, type, payload_json, cost_json, raw_json)
+       VALUES (?, ?, '2020-01-01T00:00:00.000Z', ?, NULL, 'claude', 'log', '{}', ?, '{"bruto":1}')`,
+    );
+    db.exec('BEGIN');
+    for (let seq = 1; seq <= eventos; seq += 1) {
+      ins.run(`evt_${id}_${seq}`, seq, id, seq % 10 === 0 ? '{"usd":0.5,"inputTokens":1}' : null);
+    }
+    db.exec('COMMIT');
+    return id;
+  }
+
+  test('compactRawBefore(limit) afeta no máximo `limit` linhas por chamada', () => {
+    const db = openDatabase(':memory:');
+    const store = new SqliteUnitOfWork(db);
+    semear(db, store, 25);
+
+    const corte = '2024-01-01T00:00:00.000Z';
+    assert.equal(store.events.compactRawBefore(corte, 10), 10);
+    assert.equal(store.events.compactRawBefore(corte, 10), 10);
+    assert.equal(store.events.compactRawBefore(corte, 10), 5);
+    assert.equal(store.events.compactRawBefore(corte, 10), 0);
+    const restantes = db
+      .prepare('SELECT COUNT(*) AS n FROM events WHERE raw_json IS NOT NULL')
+      .get() as { n: number };
+    assert.equal(restantes.n, 0);
+  });
+
+  test('a passada de compactação e as somas de custo usam os índices parciais', () => {
+    const db = openDatabase(':memory:');
+    const store = new SqliteUnitOfWork(db);
+    const id = semear(db, store, 50);
+    db.exec('ANALYZE');
+
+    const plano = (sql: string, ...params: Array<string | number>): string =>
+      (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as Array<{ detail: string }>)
+        .map((r) => r.detail)
+        .join(' | ');
+
+    const compactacao = plano(
+      `SELECT e.rowid FROM sessions s
+       JOIN events e ON e.session_id = s.id AND e.raw_json IS NOT NULL
+       WHERE s.ended_at IS NOT NULL AND s.ended_at < ? LIMIT ?`,
+      '2024-01-01T00:00:00.000Z',
+      10,
+    );
+    assert.match(compactacao, /idx_events_raw/, compactacao);
+
+    const custo = plano(
+      `SELECT SUM(json_extract(cost_json, '$.usd')) FROM events WHERE session_id = ? AND cost_json IS NOT NULL`,
+      id,
+    );
+    assert.match(custo, /idx_events_custo/, custo);
+
+    // E o resultado das somas não muda com o filtro.
+    assert.equal(store.events.costOf(id).usd, 2.5);
+    assert.equal(store.sessions.graphRows(id)[0]?.usd, 2.5);
   });
 });

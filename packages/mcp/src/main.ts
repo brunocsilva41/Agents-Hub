@@ -24,6 +24,14 @@ const client = new HubClient(hubUrl);
 const caller = new CallerIdentity(client, agentId, process.cwd(), sessionId);
 const server = buildMcpServer(client, caller);
 
+// Sinal de vida da raiz adotada (só faz algo depois de uma adoção). Sem ele,
+// um hospedeiro que mata este processo sem fechar stdin deixava a raiz
+// `running` para sempre no daemon.
+const heartbeatMs = Number(process.env['AGENTS_HUB_MCP_HEARTBEAT_MS'] ?? 30_000);
+const pararHeartbeat = caller.startHeartbeat(
+  Number.isFinite(heartbeatMs) && heartbeatMs > 0 ? heartbeatMs : 30_000,
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
@@ -46,6 +54,7 @@ let closing = false;
 const shutdown = async (grace: number): Promise<void> => {
   if (closing) return;
   closing = true;
+  pararHeartbeat();
   if (grace > 0) await new Promise((resolve) => setTimeout(resolve, grace));
   await caller.release();
   await server.close().catch(() => {});

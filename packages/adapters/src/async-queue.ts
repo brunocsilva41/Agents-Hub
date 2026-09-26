@@ -29,6 +29,19 @@ interface DrainWaiter {
 
 const DEFAULT_HIGH_WATER_MARK = 1000;
 
+/**
+ * Tempo máximo que o consumidor passa recebendo itens já enfileirados sem
+ * devolver a vez ao event loop.
+ *
+ * Com a fila cheia, cada `next()` resolvia na hora (microtask) e o `for
+ * await` do consumidor — que faz uma escrita SQLite síncrona por evento —
+ * drenava milhares de itens sem nunca ceder: uma rajada de 20 MB de saída
+ * deixou `GET /health` esperando 17 s (vistoria 2026-09-25, item 2.5). Passado
+ * este tempo, o próximo item é entregue depois de um `setImmediate`, e o
+ * HTTP, os timers e as outras sessões são atendidos no meio da rajada.
+ */
+const FATIA_MS = 20;
+
 export class AsyncQueue<T> implements AsyncIterable<T> {
   readonly #items: T[] = [];
   readonly #waiters: Array<(result: IteratorResult<T>) => void> = [];
@@ -38,6 +51,8 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
   readonly #onPressureChange?: (aboveHigh: boolean) => void;
   #aboveHigh = false;
   #closed = false;
+  /** Início da sequência atual de entregas síncronas (sem ceder o loop). */
+  #fatiaDesde: number | null = null;
 
   constructor(options: AsyncQueueOptions = {}) {
     this.#highWaterMark = options.highWaterMark ?? DEFAULT_HIGH_WATER_MARK;
@@ -114,8 +129,23 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
         const item = this.#items.shift();
         if (item !== undefined) {
           this.#afterConsume();
+          const agora = Date.now();
+          if (this.#fatiaDesde === null) this.#fatiaDesde = agora;
+          if (agora - this.#fatiaDesde >= FATIA_MS) {
+            // Fatia esgotada: entrega este item só depois de o event loop
+            // atender o que estiver esperando (I/O, timers, HTTP).
+            return new Promise((resolve) =>
+              setImmediate(() => {
+                this.#fatiaDesde = Date.now();
+                resolve({ value: item, done: false });
+              }),
+            );
+          }
           return Promise.resolve({ value: item, done: false });
         }
+        // Fila vazia: a próxima entrega virá de um `push` num tick futuro, que
+        // já é uma volta do event loop — a fatia recomeça do zero.
+        this.#fatiaDesde = null;
         if (this.#closed) return Promise.resolve({ value: undefined as never, done: true });
         return new Promise((resolve) => this.#waiters.push(resolve));
       },

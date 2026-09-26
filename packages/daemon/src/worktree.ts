@@ -1,5 +1,13 @@
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, rmdirSync, unlinkSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  rmdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -71,6 +79,69 @@ function desligarLink(caminho: string): void {
     rmdirSync(caminho);
   }
 }
+
+/**
+ * Apaga uma árvore de diretórios SEM seguir link nenhum, em qualquer nível.
+ *
+ * Existe para o diretório meio-apagado/órfão (o git já não o reconhece como
+ * worktree, então `git worktree remove` não serve). `rmSync({ recursive })`
+ * está fora de questão pelo mesmo motivo de `desligarLink`: em versões do
+ * Node/Windows ele atravessa junction e apaga o alvo — o `node_modules` real
+ * do projeto. Aqui todo link é desfeito como link, e só diretório de verdade
+ * é percorrido. Arquivo somente-leitura (objetos do git no Windows) ganha
+ * permissão de escrita antes do `unlink`.
+ */
+export function removerSemSeguirLinks(
+  alvo: string,
+  desligar: (caminho: string) => void = desligarLink,
+): void {
+  let info;
+  try {
+    info = lstatSync(alvo);
+  } catch {
+    return; // já não existe
+  }
+  if (info.isSymbolicLink()) {
+    desligar(alvo);
+    return;
+  }
+  if (info.isDirectory()) {
+    for (const nome of readdirSync(alvo)) removerSemSeguirLinks(path.join(alvo, nome), desligar);
+    rmdirSync(alvo);
+    return;
+  }
+  try {
+    unlinkSync(alvo);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EPERM' && (err as NodeJS.ErrnoException).code !== 'EACCES') {
+      throw err;
+    }
+    chmodSync(alvo, 0o666);
+    unlinkSync(alvo);
+  }
+}
+
+/** Caminho comparável entre o que o git imprime e o que o Hub guardou (caixa, barras, 8.3). */
+function caminhoComparavel(p: string): string {
+  let real = p;
+  try {
+    real = realpathSync.native(p);
+  } catch {
+    /* inexistente: compara como veio */
+  }
+  const norm = path.resolve(real).replace(/[\\/]+$/, '');
+  return process.platform === 'win32' ? norm.replace(/\//g, '\\').toLowerCase() : norm;
+}
+
+/** Identidade dos commits automáticos do Hub — não depende do `user.*` da máquina. */
+const IDENTIDADE_DO_HUB = [
+  '-c',
+  'user.name=Agents-Hub',
+  '-c',
+  'user.email=agents-hub@localhost',
+  '-c',
+  'commit.gpgsign=false',
+];
 
 /**
  * Isolamento por git worktree (ADR 01.3).
@@ -201,14 +272,26 @@ export class WorktreeManager {
   }
 
   /**
-   * Remove o worktree ao encerrar a sessão. O branch é PRESERVADO: o trabalho
-   * do agente continua acessível por `git log hub/<sessionId>` mesmo depois da
-   * limpeza — descartar seria destruir resultado sem você ter revisado.
+   * Remove o worktree. O branch `hub/<sessionId>` nunca é apagado.
+   *
+   * Sem `preserveWork` (uso direto), a remoção é conservadora: worktree sujo
+   * fica no disco, a menos que `force` seja pedido.
+   *
+   * Com `preserveWork` (o reaper), o trabalho do agente é COMMITADO no branch
+   * do worktree antes da remoção — só assim a promessa "o trabalho continua em
+   * `git log hub/<id>`" é verdadeira. Antes nada commitava: o branch ficava no
+   * commit-base e todo worktree em que o agente escreveu falhava para sempre
+   * no `git worktree remove` sem `--force` (vistoria 2026-09-25, item 2.6).
+   * Com o trabalho no branch, a remoção pode forçar (sobram só arquivos
+   * ignorados, como artefatos de build). Diretório meio-apagado ou órfão (o
+   * git já não o reconhece) é apagado sem seguir links, e o registro velho sai
+   * com `git worktree prune`.
    */
   async release(params: {
     projectPath: string;
     worktreePath: string;
     force?: boolean;
+    preserveWork?: { sessionId: string };
   }): Promise<ReleaseResult> {
     if (!existsSync(params.worktreePath)) return { removed: true };
 
@@ -216,6 +299,8 @@ export class WorktreeManager {
     // `node_modules` e apaga o conteúdo do diretório REAL do projeto. Todo
     // link de primeiro nível sai antes do git rodar; se algum não sair, a
     // remoção é recusada — o reaper tenta de novo na próxima passada.
+    // (Também vem antes do commit automático: um link commitado levaria o
+    // `node_modules` inteiro para o branch.)
     const recusa = this.#desfazerLinks(params.worktreePath);
     if (recusa !== null) {
       // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
@@ -223,14 +308,58 @@ export class WorktreeManager {
       return { removed: false, reason: recusa };
     }
 
+    let force = params.force === true;
+    if (params.preserveWork) {
+      const registrado = await this.#registrado(params.projectPath, params.worktreePath);
+      if (registrado === null) {
+        await this.#ligarDependencias(params.projectPath, params.worktreePath);
+        return {
+          removed: false,
+          reason: `não foi possível consultar os worktrees de ${params.projectPath} — nada removido`,
+        };
+      }
+      if (!registrado) {
+        // Órfão: o git do projeto não conhece este diretório (sobra de uma
+        // remoção que falhou no meio). Não há branch para onde levar nada.
+        return this.#apagarOrfao(params.projectPath, params.worktreePath);
+      }
+
+      const falha = await this.#preservarTrabalho(
+        params.worktreePath,
+        params.preserveWork.sessionId,
+      );
+      if (falha !== null) {
+        if (!(await this.#reconhecidoPeloGit(params.worktreePath))) {
+          // Registrado, mas meio-apagado (sem `.git`/admin dir): o git não
+          // consegue nem ler o estado dele, quanto mais commitar.
+          return this.#apagarOrfao(params.projectPath, params.worktreePath);
+        }
+        await this.#ligarDependencias(params.projectPath, params.worktreePath);
+        // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+        console.error(
+          `[worktree] trabalho de ${params.worktreePath} não pôde ser commitado: ${falha}`,
+        );
+        return { removed: false, reason: `trabalho não commitado, worktree mantido: ${falha}` };
+      }
+      // Trabalho já está no branch: o que sobrar no diretório é ignorado pelo git.
+      force = true;
+    }
+
     try {
       await execFileAsync(
         'git',
-        ['worktree', 'remove', params.worktreePath, ...(params.force ? ['--force'] : [])],
+        ['worktree', 'remove', params.worktreePath, ...(force ? ['--force'] : [])],
         { cwd: params.projectPath, maxBuffer: GIT_MAX_BUFFER },
       );
       return { removed: true };
     } catch (err) {
+      const motivo = (err as Error).message;
+      if (params.preserveWork && existsSync(params.worktreePath)) {
+        // O git desistiu no meio ("Directory not empty", "is not a working
+        // tree", arquivo preso): o trabalho já está commitado, então o que
+        // restou é lixo — apaga sem seguir links e poda o registro.
+        return this.#apagarOrfao(params.projectPath, params.worktreePath);
+      }
       // Worktree sujo (build artifacts, arquivos não rastreados) ou outro erro
       // real do `git worktree remove`: mantemos o diretório em vez de forçar
       // remoção e perder algo que você queria ver — mas o motivo real (não só
@@ -241,8 +370,99 @@ export class WorktreeManager {
       // para o worktree retido continuar utilizável (build/testes) durante a
       // inspeção.
       await this.#ligarDependencias(params.projectPath, params.worktreePath);
-      return { removed: false, reason: (err as Error).message };
+      return { removed: false, reason: motivo };
     }
+  }
+
+  /**
+   * Commita tudo o que o agente deixou no worktree (inclusive arquivos novos)
+   * no branch dele. Devolve `null` quando o trabalho está a salvo (commitado
+   * agora ou nada a commitar), ou o motivo da falha.
+   *
+   * Identidade e assinatura fixas e `--no-verify`: é um instantâneo
+   * automático do Hub num branch próprio, não um commit do usuário — não pode
+   * depender de `user.email` configurado, de GPG nem de hook de lint do repo
+   * (um hook lento ou quebrado faria o worktree nunca ser recolhido).
+   *
+   * HEAD destacado (o agente fez checkout de um commit): o commit não teria
+   * branch nenhum apontando para ele e se perderia com o worktree, então ganha
+   * um branch próprio `hub/<sessionId>-preservado`.
+   */
+  async #preservarTrabalho(worktreePath: string, sessionId: string): Promise<string | null> {
+    const git = (args: string[]) =>
+      execFileAsync('git', args, { cwd: worktreePath, maxBuffer: GIT_MAX_BUFFER });
+    try {
+      await git(['add', '-A']);
+      const { stdout } = await git(['status', '--porcelain']);
+      if (stdout.trim().length > 0) {
+        await git([
+          ...IDENTIDADE_DO_HUB,
+          'commit',
+          '--no-verify',
+          '-q',
+          '-m',
+          `hub: trabalho da sessão ${sessionId} preservado antes de recolher o worktree`,
+        ]);
+      }
+      const emBranch = await git(['symbolic-ref', '-q', 'HEAD']).then(
+        () => true,
+        () => false,
+      );
+      if (!emBranch) {
+        await git(['branch', '-f', `hub/${sessionId}-preservado`, 'HEAD']);
+      }
+      return null;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
+
+  /**
+   * O git do projeto lista este diretório como worktree? `null` quando nem
+   * deu para perguntar (git ausente, projeto sumiu) — aí nada é apagado.
+   */
+  async #registrado(projectPath: string, worktreePath: string): Promise<boolean | null> {
+    let stdout: string;
+    try {
+      ({ stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+        cwd: projectPath,
+        maxBuffer: GIT_MAX_BUFFER,
+      }));
+    } catch {
+      return null;
+    }
+    const alvo = caminhoComparavel(worktreePath);
+    return stdout
+      .split(/\r?\n/)
+      .filter((l) => l.startsWith('worktree '))
+      .some((l) => caminhoComparavel(l.slice('worktree '.length)) === alvo);
+  }
+
+  /** O diretório ainda é um checkout que o git consegue ler? */
+  async #reconhecidoPeloGit(worktreePath: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: worktreePath,
+        maxBuffer: GIT_MAX_BUFFER,
+      });
+      return caminhoComparavel(stdout.trim()) === caminhoComparavel(worktreePath);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Apaga diretório órfão/meio-apagado sem seguir links e poda o registro do git. */
+  async #apagarOrfao(projectPath: string, worktreePath: string): Promise<ReleaseResult> {
+    try {
+      removerSemSeguirLinks(worktreePath, this.desligarFn);
+    } catch (err) {
+      return {
+        removed: false,
+        reason: `diretório órfão não pôde ser apagado: ${(err as Error).message}`,
+      };
+    }
+    await this.prune(projectPath);
+    return { removed: true };
   }
 
   /**

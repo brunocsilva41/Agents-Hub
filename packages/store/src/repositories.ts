@@ -230,12 +230,17 @@ class SqliteSessionRepository implements SessionRepository {
     const next: Session = { ...current, ...patch, id, updatedAt: nowIso() };
     this.db
       .prepare(
+        // `agent_id` entra no UPDATE: o handoff troca o agente da sessão, e
+        // sem esta coluna a troca era no-op no banco (vistoria 2026-09-25,
+        // item 2.7) — grafo, concorrência por agente e reinício seguiam
+        // tratando a sessão como do agente antigo.
         `UPDATE sessions SET
-           native_session_id = ?, state = ?, mode = ?, isolation = ?, workdir = ?,
+           agent_id = ?, native_session_id = ?, state = ?, mode = ?, isolation = ?, workdir = ?,
            title = ?, depth = ?, path_json = ?, updated_at = ?, ended_at = ?, pid = ?
          WHERE id = ?`,
       )
       .run(
+        next.agentId,
         next.nativeSessionId,
         next.state,
         next.mode,
@@ -295,7 +300,10 @@ class SqliteSessionRepository implements SessionRepository {
                 ${SOMA_USD('e.')} AS usd,
                 ${SOMA_TOKENS('e.')} AS tokens
          FROM sessions s
-         LEFT JOIN events e ON e.session_id = s.id
+         -- Só eventos COM custo entram na soma (os demais somariam NULL). O
+         -- filtro no JOIN deixa o SQLite usar o índice parcial
+         -- \`idx_events_custo\` em vez de ler todos os eventos da árvore.
+         LEFT JOIN events e ON e.session_id = s.id AND e.cost_json IS NOT NULL
          WHERE s.root_id = ?
          GROUP BY s.id
          ORDER BY s.created_at`,
@@ -494,7 +502,7 @@ class SqliteEventRepository implements EventRepository {
       .prepare(
         `SELECT ${SOMA_USD('')} AS usd,
                 ${SOMA_TOKENS('')} AS tokens
-         FROM events WHERE session_id = ?`,
+         FROM events WHERE session_id = ? AND cost_json IS NOT NULL`,
       )
       .get(sessionId) as Row | undefined;
     return { usd: num(row?.['usd']), tokens: num(row?.['tokens']), seconds: 0 };
@@ -509,16 +517,28 @@ class SqliteEventRepository implements EventRepository {
    * dia a dia, e é o que cresce sem limite junto com `payload_json` na mesma
    * tabela.
    */
-  compactRawBefore(cutoffIso: string): number {
+  compactRawBefore(cutoffIso: string, limit?: number): number {
+    // Em lotes: um UPDATE único sobre 100k eventos segurava o daemon (o
+    // `DatabaseSync` roda no thread principal) por segundos. Com `limit`, cada
+    // chamada zera no máximo N linhas e quem chama cede o event loop entre os
+    // lotes. O índice parcial `idx_events_raw` (só linhas com `raw_json`) faz a
+    // passada "sem nada a fazer" custar O(sessões encerradas), não O(eventos).
+    const lote =
+      limit !== undefined && Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : -1;
     const result = this.db
       .prepare(
         `UPDATE events SET raw_json = NULL
-         WHERE raw_json IS NOT NULL
-           AND session_id IN (SELECT id FROM sessions WHERE ended_at IS NOT NULL AND ended_at < ?)`,
+         WHERE rowid IN (
+           SELECT e.rowid FROM sessions s
+           JOIN events e ON e.session_id = s.id AND e.raw_json IS NOT NULL
+           WHERE s.ended_at IS NOT NULL AND s.ended_at < ?
+           LIMIT ?
+         )`,
       )
-      .run(cutoffIso);
+      .run(cutoffIso, lote);
     return num(result.changes);
   }
+
 }
 
 class SqliteApprovalRepository implements ApprovalRepository {

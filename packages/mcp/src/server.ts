@@ -43,6 +43,24 @@ const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] })
 const fail = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
 
 /**
+ * Tetos de tamanho do `hub_agent_call` (vistoria 2026-09-25, 08-mcp-hooks
+ * achado 11). Sem eles um objetivo de 2 milhões de caracteres foi aceito,
+ * mandado ao Claude real ("Prompt is too long") e repassado por fallback a
+ * mais dois agentes — tokens e processos queimados por uma chamada só (loop
+ * de agente ou texto injetado). O brief é um pedido, não o conteúdo: arquivo
+ * grande vai por `artifacts`/`context_refs`, que o destino lê sob demanda.
+ */
+const LIMITE_OBJETIVO = 20_000;
+const LIMITE_ITENS = 50;
+const LIMITE_ITEM = 2_000;
+const itemCurto = z.string().max(LIMITE_ITEM, `item acima de ${LIMITE_ITEM} caracteres`);
+/** Caminho de artefato: relativo ao projeto, sem subir de diretório. */
+const caminhoDoProjeto = itemCurto.refine(
+  (p) => !path.isAbsolute(p) && !/^[a-zA-Z]:/.test(p) && !p.split(/[\\/]+/).includes('..'),
+  'caminho de artefato precisa ser relativo ao projeto, sem ".."',
+);
+
+/**
  * Id do Hub como argumento de tool. O argumento vem do modelo — texto livre —
  * e o client monta a URL com ele: `session_id: "../shutdown#"` já chegou a
  * `POST /shutdown` e derrubou o daemon, com a tool respondendo sucesso. O
@@ -149,27 +167,32 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         objective: z
           .string()
           .min(8)
+          .max(LIMITE_OBJETIVO, `objetivo acima de ${LIMITE_OBJETIVO} caracteres: resuma e aponte arquivos em "artifacts"`)
           .describe('a tarefa, no imperativo e autossuficiente. Um objetivo por chamada'),
         acceptance_criteria: z
-          .array(z.string())
+          .array(itemCurto)
+          .max(LIMITE_ITENS)
           .optional()
           .describe('como você vai validar a entrega; também alimenta o portão de validação'),
         constraints: z
-          .array(z.string())
+          .array(itemCurto)
+          .max(LIMITE_ITENS)
           .optional()
           .describe('o que o agente NÃO deve fazer, ex.: "não tocar em migrations"'),
         artifacts: z
           .array(
             z.object({
-              path: z.string(),
+              path: caminhoDoProjeto,
               mode: z.enum(['read', 'write']).optional(),
-              note: z.string().optional(),
+              note: itemCurto.optional(),
             }),
           )
+          .max(LIMITE_ITENS)
           .optional()
-          .describe('arquivos relevantes para a tarefa'),
+          .describe('arquivos relevantes para a tarefa (caminho relativo ao projeto)'),
         context_refs: z
-          .array(z.string())
+          .array(itemCurto)
+          .max(LIMITE_ITENS)
           .optional()
           .describe(
             'ponteiros de contexto no formato "session:<id>#event:<seq>". O agente destino ' +
@@ -287,17 +310,40 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           .describe('padrão 300s; use 0 para aguardar sem limite de tempo'),
       },
     },
-    async ({ task_id, timeout_seconds }): Promise<ToolResult> => {
+    async ({ task_id, timeout_seconds }, extra): Promise<ToolResult> => {
       // timeout_seconds=0 significa "sem limite"; Infinity garante que o
       // `Date.now() >= deadline` nunca dispara.
       const deadline = timeout_seconds === 0 ? Infinity : Date.now() + timeout_seconds * 1000;
+      // Cancelamento/timeout do CLIENTE (notifications/cancelled, conexão
+      // fechada): antes o laço seguia consultando o daemon até a task terminar
+      // — com `0`, para sempre (vistoria 2026-09-25, 08-mcp-hooks achado 8).
+      const signal = extra.signal;
+      const progressToken = extra._meta?.progressToken;
+      let polls = 0;
 
       try {
         // Backoff crescente: tarefas longas não precisam ser consultadas a cada
         // segundo, e cada consulta é uma requisição no daemon.
         let intervalMs = 1500;
         for (;;) {
+          if (signal.aborted) return fail('espera cancelada pelo cliente; a TAREFA CONTINUA RODANDO');
           const status = await client.task(task_id);
+          if (signal.aborted) return fail('espera cancelada pelo cliente; a TAREFA CONTINUA RODANDO');
+          polls += 1;
+          if (progressToken !== undefined) {
+            // Progresso a cada consulta: mantém vivo o timeout do cliente que
+            // reinicia com progresso, e mostra que a espera não travou.
+            await extra
+              .sendNotification({
+                method: 'notifications/progress',
+                params: {
+                  progressToken,
+                  progress: polls,
+                  message: `tarefa ${task_id}: ${status.task.state}`,
+                },
+              })
+              .catch(() => {});
+          }
           if (TERMINAL_STATES.has(status.task.state) || status.task.state === 'input_required') {
             return ok(formatTaskStatus(status));
           }
@@ -308,7 +354,10 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
                 `Consulte de novo com hub_agent_status("${task_id}").`,
             );
           }
-          await sleep(Math.min(intervalMs, deadline === Infinity ? intervalMs : Math.max(0, deadline - Date.now())));
+          await sleep(
+            Math.min(intervalMs, deadline === Infinity ? intervalMs : Math.max(0, deadline - Date.now())),
+            signal,
+          );
           intervalMs = Math.min(intervalMs * 1.4, 10_000);
         }
       } catch (err) {
@@ -884,8 +933,21 @@ function formatIssues(details: unknown): string {
   return `${NEWLINE}campos inválidos:${NEWLINE}${linhas.map((l) => `- ${l}`).join(NEWLINE)}`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Espera `ms`; resolve ANTES se `signal` abortar (quem chama confere `aborted`). */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const acordar = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', acordar);
+      resolve();
+    };
+    const timer = setTimeout(acordar, ms);
+    signal?.addEventListener('abort', acordar, { once: true });
+  });
 }
 
 /**

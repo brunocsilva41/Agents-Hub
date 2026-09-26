@@ -2,9 +2,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createInterface } from 'node:readline';
 import { nowIso, newId, HubError } from '@agents-hub/core';
 import { AsyncQueue } from './async-queue.js';
+import { lerLinhas } from './line-reader.js';
 import { montarSpawn, resolveBin, type ResolvedBin } from './bin-resolver.js';
 import { resolveMapper } from './mappers/index.js';
 import { killProcessTree } from './process-tree.js';
@@ -412,8 +412,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
     };
 
     // --- stdout: a timeline de verdade ---------------------------------------
-    const stdout = createInterface({ input: child.stdout, crlfDelay: Infinity });
-    stdout.on('line', (line) => {
+    // Teto de linha (`lerLinhas`): `readline` acumulava a linha inteira, e uma
+    // linha de 60 MB sem quebra virava 400 MB de RSS e um evento gigante.
+    lerLinhas(child.stdout, (line) => {
       if (saturada) return;
       handle.touch();
       for (const mapped of this.#mapLine(line)) {
@@ -426,8 +427,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
     });
 
     // --- stderr: diagnóstico, nunca descartado -------------------------------
-    const stderr = createInterface({ input: child.stderr, crlfDelay: Infinity });
-    stderr.on('line', (line) => {
+    lerLinhas(child.stderr, (line) => {
       if (saturada || line.trim().length === 0) return;
       handle.touch();
       tail.push(line);

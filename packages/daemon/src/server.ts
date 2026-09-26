@@ -35,6 +35,7 @@ import {
   parseSseSince,
 } from './http-schemas.js';
 import type { WorktreeReaper } from './reaper.js';
+import type { AdoptedRootLeases } from './adopted-leases.js';
 import type { SessionManager } from './session-manager.js';
 import { serveStatic } from './static.js';
 import { resumoDaFerramenta, type AuditTrail } from './audit.js';
@@ -140,6 +141,8 @@ export class HubServer {
     private readonly discovery: DiscoveryService,
     private readonly importer: ImportService,
     private readonly operator: OperatorDeps,
+    /** Prazo das raízes adotadas (item 2.8); opcional para testes que montam o servidor à mão. */
+    private readonly leases: AdoptedRootLeases | null = null,
   ) {
     this.#registerRoutes();
   }
@@ -614,19 +617,34 @@ export class HubServer {
             : process.cwd(),
         ).id;
 
-      sendJson(res, 201, {
-        session: this.sessions.adoptExternal({
-          agentId: body.agentId,
-          projectId,
-          title: body.title,
-          budget: body.budget,
-        }),
+      const session = this.sessions.adoptExternal({
+        agentId: body.agentId,
+        projectId,
+        title: body.title,
+        budget: body.budget,
       });
+      this.leases?.track(session.id);
+      sendJson(res, 201, { session });
     });
 
     this.#route('POST', '/sessions/:id/detach', async (_req, res, params) => {
-      await this.sessions.detach(param(params['id'], SessionIdSchema, 'id'));
+      const id = param(params['id'], SessionIdSchema, 'id');
+      this.leases?.forget(id);
+      await this.sessions.detach(id);
       sendJson(res, 200, { ok: true });
+    });
+
+    /**
+     * Sinal de vida da raiz adotada (MCP server de agente externo). Sem ele a
+     * raiz expira — ver `adopted-leases.ts`.
+     */
+    this.#route('POST', '/sessions/:id/heartbeat', (_req, res, params) => {
+      const id = param(params['id'], SessionIdSchema, 'id');
+      if (!this.leases) {
+        sendJson(res, 200, { ok: true, leaseMs: null });
+        return;
+      }
+      sendJson(res, 200, { ok: true, ...this.leases.heartbeat(id) });
     });
 
     this.#route('GET', '/sessions/:id/artifacts', (_req, res, params) => {

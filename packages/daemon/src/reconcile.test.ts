@@ -163,6 +163,34 @@ describe('reconciliação na subida do daemon', () => {
     );
   });
 
+  test('sessão encerrada na reconciliação emite session.ended e fecha a tentativa (item 2.8)', async () => {
+    const { session, task } = semear('running');
+    hub.store.tasks.update(task.id, {
+      attempts: [
+        { n: 1, agentId: 'fantasma', startedAt: nowIso(), endedAt: null, outcome: null, error: null },
+      ],
+    });
+    const recebidos: string[] = [];
+    const desinscrever = hub.bus.subscribe({ sessionId: session.id }, (e) => recebidos.push(e.type));
+
+    try {
+      await hub.sessions.reconcileOnStartup();
+    } finally {
+      desinscrever();
+    }
+
+    const eventos = hub.store.events.list({ sessionId: session.id });
+    const fim = eventos.find((e) => e.type === 'session.ended');
+    assert.ok(fim, 'a timeline precisa dizer por que a sessão acabou');
+    assert.match(String(fim.payload['reason']), /daemon reiniciou/);
+    assert.equal(fim.taskId, task.id);
+    assert.deepEqual(recebidos, ['session.ended'], 'quem escuta o barramento também precisa saber');
+
+    const tentativa = hub.store.tasks.get(task.id)?.attempts[0];
+    assert.ok(tentativa?.endedAt, 'a tentativa não pode ficar aberta para sempre');
+    assert.equal(tentativa?.outcome, 'error');
+  });
+
   test('sessão esperando aprovação humana SOBREVIVE ao reinício', async () => {
     const { session, task } = semear('waiting_approval', true);
 
