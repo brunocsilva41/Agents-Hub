@@ -1,6 +1,9 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import { parseToml } from '@agents-hub/adapters';
+import { gravarComBackup, lerJsonDeConfig } from './safe-write.js';
 
 /**
  * Alvos de configuração MCP de cada agente e o merge de servidores neles.
@@ -10,7 +13,8 @@ import path from 'node:path';
  * A tabela de alvos e os formatos moram só aqui; a CLI reexporta.
  *
  * Regra: config de outra ferramenta nunca é sobrescrita — merge, com backup
- * `.bak` antes de qualquer escrita, e nunca apagando entrada existente.
+ * versionado (`.bak-YYYYMMDD-HHMMSS`, nunca sobrescrito) antes de qualquer
+ * escrita, escrita atômica, e nunca apagando entrada existente.
  */
 
 export type ConfigFormat = 'json-mcp-servers' | 'json-mcp' | 'toml-codex';
@@ -151,17 +155,26 @@ export interface McpMergeOutcome {
 const JSON_KEY = (target: McpTarget): 'mcp' | 'mcpServers' =>
   target.format === 'json-mcp' ? 'mcp' : 'mcpServers';
 
-function jsonEntry(target: McpTarget, s: PortableMcpServer): Record<string, unknown> {
+/**
+ * Entrada de um servidor no formato JSON do agente-alvo.
+ *
+ * OpenCode (`json-mcp`) tem schema próprio e ESTRITO: o valor precisa ser
+ * `{ type: "local", command: [bin, ...args], environment, enabled }` ou
+ * `{ type: "remote", url, enabled }`. Gravar o formato do Claude
+ * (`command`/`args`/`env`) faz o OpenCode rejeitar a config INTEIRA
+ * ("Configuration is invalid ... Expected { type: "local" } | { type: "remote" }").
+ */
+export function jsonEntry(target: McpTarget, s: PortableMcpServer): Record<string, unknown> {
   if (target.format === 'json-mcp') {
-    // Formato do OpenCode: comando como array, `environment`, `type` local/remote.
     if (s.transport === 'stdio') {
       return {
         type: 'local',
         command: [s.command ?? '', ...(s.args ?? [])],
         ...(s.env && Object.keys(s.env).length > 0 ? { environment: s.env } : {}),
+        enabled: true,
       };
     }
-    return { type: 'remote', url: s.url };
+    return { type: 'remote', url: s.url, enabled: true };
   }
   if (s.transport === 'stdio') {
     return {
@@ -178,7 +191,7 @@ function jsonEntry(target: McpTarget, s: PortableMcpServer): Record<string, unkn
 const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/;
 const tomlKey = (k: string): string => (BARE_TOML_KEY.test(k) ? k : JSON.stringify(k));
 
-function tomlSection(s: PortableMcpServer): string {
+export function tomlSection(s: PortableMcpServer): string {
   const lines = [`[mcp_servers.${tomlKey(s.name)}]`];
   if (s.transport === 'stdio') {
     lines.push(`command = ${JSON.stringify(s.command ?? '')}`);
@@ -212,22 +225,226 @@ export function existingServerNames(target: McpTarget, configPath: string): Set<
   const raw = readFileSync(configPath, 'utf8');
   if (target.format === 'toml-codex') return tomlServerNames(raw);
   if (raw.trim().length === 0) return new Set();
-  const doc = parseJsonDoc(configPath, raw);
+  const doc = lerJsonDeConfig(configPath).doc;
   const servers = doc[JSON_KEY(target)];
   return new Set(
     servers !== null && typeof servers === 'object' ? Object.keys(servers as object) : [],
   );
 }
 
-function parseJsonDoc(configPath: string, raw: string): Record<string, unknown> {
-  try {
-    const doc = JSON.parse(raw) as unknown;
-    if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) throw new Error('raiz não é objeto');
-    return doc as Record<string, unknown>;
-  } catch (err) {
-    // Sobrescrever um config que não entendemos destruiria o que já existe.
-    throw new Error(`${configPath} não é JSON válido (${(err as Error).message}); nada foi gravado.`);
+/** Bucket de servidores (`mcp`/`mcpServers`) de um doc JSON, recusando tipo estranho. */
+function jsonBucket(configPath: string, doc: Record<string, unknown>, key: string): Record<string, unknown> {
+  const atual = doc[key];
+  if (atual === undefined || atual === null) return {};
+  if (typeof atual !== 'object' || Array.isArray(atual)) {
+    throw new Error(`${configPath}: a chave "${key}" não é um objeto; nada foi gravado.`);
   }
+  return atual as Record<string, unknown>;
+}
+
+/** Lê um config.toml para editar; recusa (sem gravar) o que não parseia. */
+function lerTomlDeConfig(configPath: string, raw: string): Record<string, unknown> {
+  if (raw.trim().length === 0) return {};
+  try {
+    return parseToml(raw);
+  } catch (err) {
+    throw new Error(
+      `${configPath} não é TOML válido (${(err as Error).message}). ` +
+        'Nada foi gravado: corrija o arquivo (ou cole o trecho manualmente) e rode de novo.',
+    );
+  }
+}
+
+/** Reparseia o TOML que vamos gravar: saída que o Codex recusaria nunca vai ao disco. */
+function tomlGeradoOuFalha(configPath: string, next: string): Record<string, unknown> {
+  try {
+    return parseToml(next);
+  } catch (err) {
+    throw new Error(
+      `a edição de ${configPath} geraria TOML inválido (${(err as Error).message}); nada foi gravado.`,
+    );
+  }
+}
+
+function servidoresToml(doc: Record<string, unknown>): Record<string, unknown> {
+  const s = doc['mcp_servers'];
+  return s !== null && typeof s === 'object' && !Array.isArray(s) ? (s as Record<string, unknown>) : {};
+}
+
+/** Cópia do doc TOML sem o servidor `name` — para provar que o resto ficou intacto. */
+function semServidor(doc: Record<string, unknown>, name: string): Record<string, unknown> {
+  const copia = structuredClone(doc);
+  const servers = servidoresToml(copia);
+  delete servers[name];
+  if ('mcp_servers' in copia && Object.keys(servers).length === 0) delete copia['mcp_servers'];
+  return copia;
+}
+
+/** Valor que `tomlSection(s)` produz depois de parseado. */
+function tomlEntry(s: PortableMcpServer): Record<string, unknown> {
+  return {
+    ...(s.transport === 'stdio' ? { command: s.command ?? '', args: s.args ?? [] } : { url: s.url ?? '' }),
+    ...(s.env && Object.keys(s.env).length > 0 ? { env: s.env } : {}),
+  };
+}
+
+/** Separa um caminho de chave TOML (`a."b.c".d`) em segmentos; `null` se não for chave. */
+function segmentosDeChave(texto: string): string[] | null {
+  const out: string[] = [];
+  const s = texto.trim();
+  let i = 0;
+  while (i < s.length) {
+    while (s[i] === ' ' || s[i] === '\t') i++;
+    const c = s[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      let seg = '';
+      while (j < s.length && s[j] !== c) {
+        if (c === '"' && s[j] === '\\') {
+          seg += s[j + 1] ?? '';
+          j += 2;
+        } else seg += s[j++];
+      }
+      if (j >= s.length) return null;
+      out.push(seg);
+      i = j + 1;
+    } else {
+      const m = /^[A-Za-z0-9_-]+/.exec(s.slice(i));
+      if (!m) return null;
+      out.push(m[0]);
+      i += m[0].length;
+    }
+    while (s[i] === ' ' || s[i] === '\t') i++;
+    if (i >= s.length) break;
+    if (s[i] !== '.') return null;
+    i++;
+  }
+  return out.length > 0 ? out : null;
+}
+
+const CABECALHO_TOML = /^\s*(\[\[?)([^[\]]*?)(\]\]?)\s*(#.*)?$/;
+
+/**
+ * Remove do texto TOML TODAS as tabelas do servidor `name` — a principal
+ * `[mcp_servers.<name>]` e as sub-tabelas (`[mcp_servers.<name>.env]`, que é
+ * como `codex mcp add --env` grava) — e põe `section` no lugar da primeira.
+ * O resto do arquivo (comentários, ordem, outros servidores) fica byte a byte.
+ *
+ * Substituir só até o próximo `[` deixava a sub-tabela `.env` antiga junto
+ * com o `env = {...}` novo: chave duplicada, e o Codex parava de iniciar.
+ */
+export function substituirServidorToml(text: string, name: string, section: string): string {
+  const linhas = text.split('\n');
+  const saida: string[] = [];
+  let removendo = false;
+  let inserido = false;
+  let multilinha: string | null = null;
+
+  for (const linha of linhas) {
+    let cabecalho: string[] | null = null;
+    if (multilinha === null) {
+      const m = CABECALHO_TOML.exec(linha.replace(/\r$/, ''));
+      if (m && (m[1] === '[' ? m[3] === ']' : m[3] === ']]')) cabecalho = segmentosDeChave(m[2] ?? '');
+    }
+
+    if (cabecalho) {
+      if (cabecalho[0] === 'mcp_servers' && cabecalho[1] === name) {
+        removendo = true;
+        if (!inserido) {
+          saida.push(...section.split('\n'), '');
+          inserido = true;
+        }
+        continue;
+      }
+      removendo = false;
+    }
+
+    if (!removendo) saida.push(linha);
+
+    // Acompanha strings multilinha para não confundir `[x]` dentro delas com cabeçalho.
+    for (const delim of ['"""', "'''"]) {
+      const n = linha.split(delim).length - 1;
+      if (multilinha === delim) {
+        if (n % 2 === 1) multilinha = null;
+      } else if (multilinha === null && n % 2 === 1) {
+        multilinha = delim;
+      }
+    }
+  }
+
+  let resultado = saida.join('\n');
+  if (!inserido) {
+    const sep = resultado.length === 0 ? '' : resultado.endsWith('\n') ? '\n' : '\n\n';
+    return `${resultado}${sep}${section}\n`;
+  }
+  // A seção removida podia ser a última: sem linhas em branco sobrando no fim.
+  resultado = resultado.replace(/\n+$/, '');
+  return `${resultado}\n`;
+}
+
+export interface McpUpsertOutcome {
+  path: string;
+  action: 'created' | 'merged' | 'unchanged';
+  /** Backup versionado criado nesta execução (`null` se nada foi gravado ou o arquivo não existia). */
+  backup: string | null;
+  avisos: string[];
+}
+
+/**
+ * Cria ou SUBSTITUI um servidor (o do próprio Hub) no config de um agente.
+ *
+ * Diferente de `addMcpServers` (que nunca toca em nome existente), aqui a
+ * entrada com o mesmo nome é trocada inteira — é assim que `hub mcp install`
+ * atualiza caminho/porta. Todo o resto do arquivo é preservado, a saída é
+ * reparseada antes de gravar e nada é escrito quando já está correto.
+ */
+export function upsertMcpServer(
+  target: McpTarget,
+  configPath: string,
+  server: PortableMcpServer,
+  agora: Date = new Date(),
+): McpUpsertOutcome {
+  const existed = existsSync(configPath);
+  const raw = existed ? readFileSync(configPath, 'utf8') : '';
+
+  let next: string;
+  let avisos: string[] = [];
+  if (target.format === 'toml-codex') {
+    const antes = lerTomlDeConfig(configPath, raw);
+    const esperado = tomlEntry(server);
+    if (isDeepStrictEqual(servidoresToml(antes)[server.name], esperado)) {
+      return { path: configPath, action: 'unchanged', backup: null, avisos };
+    }
+    next = substituirServidorToml(raw, server.name, tomlSection(server));
+    const depois = tomlGeradoOuFalha(configPath, next);
+    // Prova de que só o nosso servidor mudou e de que ficou exatamente como pedido.
+    if (
+      !isDeepStrictEqual(servidoresToml(depois)[server.name], esperado) ||
+      !isDeepStrictEqual(semServidor(depois, server.name), semServidor(antes, server.name))
+    ) {
+      throw new Error(
+        `${configPath}: o servidor "${server.name}" está declarado de um jeito que não sei ` +
+          'substituir com segurança (ex.: tabela inline ou chaves pontuadas). Nada foi gravado; ' +
+          'edite à mão com o trecho de `hub mcp show codex`.',
+      );
+    }
+  } else {
+    const lido = lerJsonDeConfig(configPath);
+    avisos = lido.avisos;
+    const doc = lido.doc;
+    const key = JSON_KEY(target);
+    const bucket = jsonBucket(configPath, doc, key);
+    const entrada = jsonEntry(target, server);
+    if (isDeepStrictEqual(bucket[server.name], entrada)) {
+      return { path: configPath, action: 'unchanged', backup: null, avisos };
+    }
+    bucket[server.name] = entrada;
+    doc[key] = bucket;
+    next = `${JSON.stringify(doc, null, 2)}\n`;
+  }
+
+  const backup = gravarComBackup(configPath, next, agora);
+  return { path: configPath, action: existed ? 'merged' : 'created', backup, avisos };
 }
 
 /**
@@ -236,7 +453,8 @@ function parseJsonDoc(configPath: string, raw: string): Record<string, unknown> 
  * - nunca duplica: nome já existente no destino fica INTACTO (vai em `existing`);
  * - nunca apaga nem reordena o resto do arquivo (JSON preserva as demais chaves;
  *   TOML só recebe seções ao final);
- * - `.bak` do estado anterior é criado antes da escrita, e só se houver escrita.
+ * - backup versionado do estado anterior antes da escrita, só se houver
+ *   escrita, e nunca sobrescrevendo um backup existente.
  */
 export function addMcpServers(
   target: McpTarget,
@@ -264,23 +482,19 @@ export function addMcpServers(
 
   let next: string;
   if (target.format === 'toml-codex') {
+    lerTomlDeConfig(configPath, raw);
     const sep = raw.length === 0 ? '' : raw.endsWith('\n') ? '\n' : '\n\n';
     next = `${raw}${sep}${fresh.map(tomlSection).join('\n\n')}\n`;
+    tomlGeradoOuFalha(configPath, next);
   } else {
-    const doc = raw.trim().length > 0 ? parseJsonDoc(configPath, raw) : {};
+    const doc = lerJsonDeConfig(configPath).doc;
     const key = JSON_KEY(target);
-    const bucket = (doc[key] !== null && typeof doc[key] === 'object' ? doc[key] : {}) as Record<
-      string,
-      unknown
-    >;
+    const bucket = jsonBucket(configPath, doc, key);
     for (const s of fresh) bucket[s.name] = jsonEntry(target, s);
     doc[key] = bucket;
     next = `${JSON.stringify(doc, null, 2)}\n`;
   }
 
-  mkdirSync(path.dirname(configPath), { recursive: true });
-  const backup = existed ? `${configPath}.bak` : null;
-  if (backup) copyFileSync(configPath, backup);
-  writeFileSync(configPath, next, 'utf8');
+  const backup = gravarComBackup(configPath, next);
   return { path: configPath, added, existing, action: existed ? 'merged' : 'created', backup };
 }

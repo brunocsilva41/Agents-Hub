@@ -1,7 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import {
+  gravarComBackup,
+  lerJsonDeConfig,
+  lerJsonParaExibir,
+  type JsonDeConfig,
+} from '@agents-hub/daemon';
 
 /**
  * Registro do gate pré-execução na config do agente.
@@ -112,25 +119,43 @@ export function hookInstalado(config: Record<string, unknown>): boolean {
   return preToolUse.some((e) => e.hooks?.some((h) => h.command?.includes('main.js" hook')));
 }
 
+/**
+ * Leitura só para EXIBIR (`hub hooks`): tolerante a JSONC e a lixo no fim,
+ * para mostrar o status real em vez de "não instalado" por causa de um
+ * comentário. Nunca use o resultado disto para regravar o arquivo.
+ */
 export function lerConfig(file: string): Record<string, unknown> {
-  if (!existsSync(file)) return {};
-  try {
-    return JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
+  return lerJsonParaExibir(file);
 }
 
-/** Grava com backup: mexer na config do editor de alguém pede rede de segurança. */
-export function gravarConfig(file: string, conteudo: Record<string, unknown>): string | null {
-  mkdirSync(path.dirname(file), { recursive: true });
+/**
+ * Leitura para EDITAR: aceita JSON estrito e JSONC; recusa (lança, sem gravar
+ * nada) arquivo que não parseia por inteiro. Antes, o erro virava `{}` e a
+ * regravação apagava permissões, modelo e hooks da pessoa.
+ */
+export function lerConfigParaGravar(file: string): JsonDeConfig {
+  return lerJsonDeConfig(file);
+}
 
-  let backup: string | null = null;
-  if (existsSync(file)) {
-    backup = `${file}.bak`;
-    copyFileSync(file, backup);
-  }
+export interface GravacaoDeHook {
+  acao: 'criado' | 'atualizado' | 'inalterado';
+  /** Backup versionado (`settings.json.bak-YYYYMMDD-HHMMSS`) desta execução. */
+  backup: string | null;
+}
 
-  writeFileSync(file, `${JSON.stringify(conteudo, null, 2)}\n`, 'utf8');
-  return backup;
+/**
+ * Grava com backup versionado (nunca sobrescreve um backup anterior) e escrita
+ * atômica. Se o conteúdo já é o desejado, não grava nem cria backup — rodar
+ * duas vezes não multiplica arquivos nem apaga comentários à toa.
+ */
+export function gravarConfig(
+  file: string,
+  atual: Record<string, unknown>,
+  conteudo: Record<string, unknown>,
+  agora: Date = new Date(),
+): GravacaoDeHook {
+  const existia = existsSync(file);
+  if (existia && isDeepStrictEqual(atual, conteudo)) return { acao: 'inalterado', backup: null };
+  const backup = gravarComBackup(file, `${JSON.stringify(conteudo, null, 2)}\n`, agora);
+  return { acao: existia ? 'atualizado' : 'criado', backup };
 }

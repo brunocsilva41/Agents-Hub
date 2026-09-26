@@ -44,3 +44,7 @@ export {
   openCodeIdleSignal,
 } from './opencode/events.js';
 export { discoverAgent, type DiscoverOptions } from './discovery/index.js';
+// Parsers de config alheia reutilizados pelos instaladores (mcp/hooks) para
+// ler com tolerância e reparsear a saída antes de gravar.
+export { parseToml } from './discovery/toml.js';
+export { parseJsonTolerant, type JsonParse } from './discovery/util.js';

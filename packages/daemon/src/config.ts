@@ -11,6 +11,7 @@ import {
   type PolicyDocument,
 } from '@agents-hub/core';
 import { readHubEnv } from './env.js';
+import { gravarComBackup, lerJsonDeConfig } from './safe-write.js';
 
 export interface HubConfig {
   /** Raiz do estado global do Hub. Multiprojeto vive aqui (ADR 05.2). */
@@ -249,6 +250,34 @@ export function saveConfig(config: HubConfig): void {
     `${JSON.stringify(serializable, null, 2)}\n`,
     'utf8',
   );
+}
+
+/**
+ * Liga `codexGate.bypassHookTrust` no `config.json` do home do Hub mexendo SÓ
+ * nessa chave.
+ *
+ * `saveConfig({...config})` serializava a config EFETIVA inteira (política com
+ * todos os defaults, caminhos absolutos do repo): o arquivo do usuário virava
+ * um snapshot que congelava defaults futuros, e o original era sobrescrito sem
+ * backup. Aqui: lê o JSON cru, recusa o que não parseia (sem gravar), backup
+ * versionado e escrita atômica; já ligado -> nada é gravado.
+ */
+export function ligarBypassDoGateCodex(
+  home: string,
+  agora: Date = new Date(),
+): { path: string; action: 'created' | 'merged' | 'unchanged'; backup: string | null } {
+  const file = path.join(home, 'config.json');
+  const existed = existsSync(file);
+  const { doc } = lerJsonDeConfig(file);
+  const gate = doc['codexGate'];
+  if (gate !== undefined && (gate === null || typeof gate !== 'object' || Array.isArray(gate))) {
+    throw new Error(`${file}: "codexGate" não é um objeto. Nada foi gravado.`);
+  }
+  const atual = (gate ?? {}) as Record<string, unknown>;
+  if (atual['bypassHookTrust'] === true) return { path: file, action: 'unchanged', backup: null };
+  doc['codexGate'] = { ...atual, bypassHookTrust: true };
+  const backup = gravarComBackup(file, `${JSON.stringify(doc, null, 2)}\n`, agora);
+  return { path: file, action: existed ? 'merged' : 'created', backup };
 }
 
 /** Endereço base do daemon, usado por CLI, TUI e Web UI. */

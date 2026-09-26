@@ -14,7 +14,7 @@ hub discover --json [--refresh]   # JSON; --refresh ignora o cache de 30s
 
 hub import claude                                   # plano (dry-run): instructions + env
 hub import claude --kinds instructions,env,mcp --to codex,cursor
-hub import claude --to codex,cursor --write         # grava (backup .bak + merge)
+hub import claude --to codex,cursor --write         # grava (merge + backup versionado .bak-<data>)
 hub import claude --to cursor --include-env --write # também copia env dos servidores MCP
 hub import claude --overwrite --write               # substitui instrução/env que o projeto já tem
 ```
@@ -57,7 +57,7 @@ Corpo de `POST /projects/:id/import` (`strict`; campo desconhecido = 422):
   Não sobrescreve variável já definida sem `overwrite`.
 - `mcp`: copia os servidores MCP da origem (exceto o próprio Hub) para a config MCP dos
   `targetAgents`, com os mesmos alvos/formatos de `hub mcp install`. Nome que já existe
-  no destino é mantido; nunca duplica nem apaga; `.bak` antes de escrever. Destino sem
+  no destino é mantido; nunca duplica nem apaga; backup versionado (`.bak-YYYYMMDD-HHMMSS`, nunca sobrescrito) antes de escrever. Destino sem
   caminho/formato confirmado (`verified: false`, ex. kimi, mimo) é pulado, não adivinhado.
 
 ## Modelo de segurança
@@ -73,7 +73,7 @@ Corpo de `POST /projects/:id/import` (`strict`; campo desconhecido = 422):
    do arquivo de origem só na hora de gravar, e só se existir ali (a máscara `***` não
    conta); vai direto para o arquivo de destino (config do próprio usuário) e nunca
    aparece em resposta, plano ou log — só os nomes.
-5. **Config alheia é tratada com cuidado:** merge, backup `.bak`, recusa a sobrescrever
+5. **Config alheia é tratada com cuidado:** merge, backup versionado `.bak-<data>`, recusa a sobrescrever
    JSON inválido, nunca remove entrada existente.
 6. Só leitura e escrita locais; o daemon continua aceitando apenas localhost (`guard.ts`).
 
