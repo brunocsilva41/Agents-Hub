@@ -5,6 +5,7 @@ export {
   defaultHome,
   baseUrl,
   cliHookEntrypoint,
+  mcpServerEntrypoint,
   DEFAULT_RETENTION,
   DEFAULT_CODEX_GATE,
   type HubConfig,
@@ -66,6 +67,17 @@ export {
   type HookPermission,
   type ToolCall,
 } from './pretool-gate.js';
+export {
+  MATCHER_DE_RISCO,
+  mergeHooks,
+  hookInstalado,
+  avisoDeTimeoutDoHook,
+  hookTargets,
+  comandoDoHook,
+  comandoDoHub,
+  type AlvoDeHook,
+  type EntradaDeHook,
+} from './hooks-config.js';
 export { guardRequest, type GuardVerdict } from './guard.js';
 export { createHub, type Hub, type HubDeps } from './hub.js';
 export { instalarRedeDeSeguranca } from './safety-net.js';
@@ -75,6 +87,7 @@ export {
   resolveConfigPath,
   addMcpServers,
   upsertMcpServer,
+  planUpsertMcpServer,
   existingServerNames,
   jsonEntry,
   tomlSection,
@@ -84,6 +97,7 @@ export {
   type PortableMcpServer,
   type McpMergeOutcome,
   type McpUpsertOutcome,
+  type McpUpsertPlan,
 } from './mcp-config.js';
 export {
   backupVersionado,
@@ -121,3 +135,13 @@ export {
   type BackupResult,
   type RestoreResult,
 } from '@agents-hub/store';
+export {
+  estadoDasIntegracoes,
+  planejarIntegracao,
+  aplicarIntegracao,
+  HUB_MCP_SERVER_NAME,
+  type IntegracoesDeps,
+  type EstadoDeIntegracao,
+  type PlanoDeIntegracao,
+} from './integrations.js';
+export { diffDeLinhas, mascararLinha, type LinhaDeDiff } from './line-diff.js';

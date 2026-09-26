@@ -119,6 +119,7 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
       token: operatorToken,
       audit,
       policy: new PolicyService(config, store),
+      userHome: homeDir,
     },
     leases,
   );

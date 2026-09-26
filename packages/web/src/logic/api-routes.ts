@@ -23,6 +23,7 @@ export const API_ROUTES: readonly string[] = [
   '/policy',
   '/audit',
   '/workflows',
+  '/integrations',
 ];
 
 /**

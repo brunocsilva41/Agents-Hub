@@ -182,6 +182,15 @@ export function cliHookEntrypoint(): string {
   return path.resolve(here, '..', '..', 'cli', 'dist', 'bin.js');
 }
 
+/** Executável do MCP server do Hub (o que `hub mcp install` registra nos CLIs). */
+export function mcpServerEntrypoint(): string {
+  // Relativo ao pacote do daemon, como `cliHookEntrypoint`: vale no clone
+  // (packages/daemon/dist → packages/mcp/dist) e instalado pelo tarball
+  // (node_modules/@agents-hub/daemon/dist → node_modules/@agents-hub/mcp/dist).
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, '..', '..', 'mcp', 'dist', 'main.js');
+}
+
 /**
  * Valida `config.json` ANTES do merge com os padrões.
  *

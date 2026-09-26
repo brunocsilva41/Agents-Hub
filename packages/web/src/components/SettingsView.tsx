@@ -40,6 +40,11 @@ interface Props {
   projects: ProjectSummary[];
   /** Abre o modal de registrar projeto (primeira execução, sem projetos). */
   onNewProject?: () => void;
+  /**
+   * Edição não salva: o `App` pergunta antes de trocar de aba no topo — a
+   * troca desmonta esta tela e a edição sumia sem aviso (vistoria 03).
+   */
+  onSujoChange?: (sujo: boolean) => void;
 }
 
 /** Endpoints locais comuns, para não obrigar a decorar a porta. */
@@ -57,7 +62,7 @@ const ENDPOINTS_SUGERIDOS = [
  */
 const PREFIXOS_ENV_PERMITIDOS = prefixosDeEnvPermitidos();
 
-export function SettingsView({ agents, projects, onNewProject }: Props): React.JSX.Element {
+export function SettingsView({ agents, projects, onNewProject, onSujoChange }: Props): React.JSX.Element {
   const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
   // Sem projeto, a única aba útil é a que não depende de projeto: é por ela
   // que a primeira execução começa (ver os agentes que a máquina já tem).
@@ -107,6 +112,11 @@ export function SettingsView({ agents, projects, onNewProject }: Props): React.J
   useEffect(() => {
     if (projectId === '' && projects[0]) setProjectId(projects[0].id);
   }, [projects, projectId]);
+
+  useEffect(() => {
+    onSujoChange?.(sujo);
+  }, [sujo, onSujoChange]);
+  useEffect(() => () => onSujoChange?.(false), [onSujoChange]);
 
   // Fechar/recarregar a página com alteração não salva pergunta antes.
   useEffect(() => {
@@ -168,11 +178,13 @@ export function SettingsView({ agents, projects, onNewProject }: Props): React.J
 
   // Só as variáveis que ESTE agente lê (tabela em `core/agent-env.ts`); o
   // resto do env dele vai para "Outras variáveis".
-  const camposFixos = camposDeEnvDoAgente(agenteSelecionado);
+  // O modelo só ganha campo quando o CLI aceita modelo por invocação
+  // (`model.supported` do `/agents`, item 4.3).
+  const camposFixos = camposDeEnvDoAgente(agenteSelecionado, agenteAtual);
   const campoBaseUrl = camposFixos.find((c) => c.papel === 'baseUrl');
   const campoChave = camposFixos.find((c) => c.papel === 'apiKey');
   const campoModelo = camposFixos.find((c) => c.papel === 'model');
-  const extras = extrasDoAgente(envDoAgente, agenteSelecionado);
+  const extras = extrasDoAgente(envDoAgente, agenteSelecionado, agenteAtual);
 
   /**
    * Risco distinto do vazamento de chave (aviso ao lado do campo "Chave"
@@ -480,9 +492,9 @@ export function SettingsView({ agents, projects, onNewProject }: Props): React.J
               </div>
               )}
 
-              {/* Só aparece se o agente lê uma variável de modelo. O antigo campo
-                  `MODEL` genérico não tinha consumidor em adapter nenhum. Modelo
-                  por flag do manifesto: ver TODO em `camposDeEnvDoAgente`. */}
+              {/* Só aparece quando o CLI aceita modelo por invocação
+                  (`model.supported`): grava `MODEL`, que o adapter transforma
+                  na flag do manifesto. Ver `camposDeEnvDoAgente`. */}
               {campoModelo && (
                 <div className="field">
                   <label htmlFor="modelo">
@@ -492,10 +504,17 @@ export function SettingsView({ agents, projects, onNewProject }: Props): React.J
                     id="modelo"
                     type="text"
                     disabled={bloqueado}
-                    placeholder="nome do modelo no provedor"
+                    placeholder={campoModelo.formato ?? 'nome do modelo no provedor'}
                     value={envDoAgente[campoModelo.nome] ?? ''}
                     onChange={(e) => mudarEnv(agenteSelecionado, campoModelo.nome, e.target.value)}
                   />
+                  {campoModelo.viaFlag && (
+                    <div className="help">
+                      Vai ao CLI como flag de modelo do manifesto
+                      {campoModelo.formato ? <> — formato: {campoModelo.formato}</> : null}. Vazio: o
+                      CLI usa o modelo padrão dele. Não pode começar com <code>-</code>.
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -27,7 +27,7 @@ const PROJETOS = [
   { id: 'prj_beta', name: 'beta-monorepo', path: 'C:\\projetos\\beta', defaultBranch: 'main', createdAt: ha(500) },
 ];
 
-function agente(id: string, name: string, vendor: string, installed = true) {
+function agente(id: string, name: string, vendor: string, installed = true, modelo = true) {
   return {
     id,
     name,
@@ -38,6 +38,8 @@ function agente(id: string, name: string, vendor: string, installed = true) {
     streamFormat: 'jsonl',
     caveats: [],
     loginHint: '',
+    model: { supported: modelo, format: modelo ? 'provider/model' : '' },
+    verified: { status: 'verified', version: '1.0.0', date: '2026-09-26', notes: '' },
     probe: {
       agentId: id,
       installed,
@@ -54,7 +56,7 @@ const AGENTES = [
   agente('codex', 'Codex CLI', 'OpenAI'),
   agente('copilot', 'GitHub Copilot CLI', 'GitHub'),
   agente('opencode', 'OpenCode', 'SST'),
-  agente('cursor', 'Cursor Agent', 'Anysphere', false),
+  agente('cursor', 'Cursor Agent', 'Anysphere', false, false),
 ];
 
 function sessao(
@@ -162,6 +164,171 @@ const ORCAMENTO = {
   projection: { projectedUsd: 2.4312, projectedTokens: 280000, burnRateUsdPerSec: 0.0012 },
 };
 
+/* ---------------------------------------------------------------- Segurança */
+
+/** Toda escrita que o painel fez (método, caminho, corpo), para o teste conferir. */
+export const ESCRITAS: Array<{ method: string; path: string; body: unknown }> = [];
+/** Última consulta a /audit (query string), para conferir os filtros. */
+export const CONSULTAS_DE_AUDITORIA: string[] = [];
+
+const POLITICA_EFETIVA = {
+  maxDepth: 3,
+  risk: { read: 'allow', write: 'allow', high: 'approve', irreversible: 'approve' },
+  commands: { allow: ['npm test'], deny: ['rm -rf /'] },
+};
+
+function politica(projectId: string | null) {
+  return {
+    global: {
+      file: 'C:\\Users\\teste\\.agents-hub\\config.json',
+      layer: { maxDepth: 3 },
+      effective: POLITICA_EFETIVA,
+    },
+    project: projectId
+      ? {
+          projectId,
+          path: 'C:\\projetos\\alfa',
+          file: 'C:\\projetos\\alfa\\.agents-hub\\config.yaml',
+          trusted: false,
+          error: null,
+          ignoredExecFields: ['validation.command'],
+          clamped: ['validation.command'],
+          layer: { validation: { command: 'npm test' } },
+          effective: POLITICA_EFETIVA,
+        }
+      : null,
+  };
+}
+
+const REPO = {
+  path: 'C:\\projetos\\alfa\\.agents-hub\\config.yaml',
+  trust: 'suspended',
+  sensitiveFields: [
+    'validation.command = npm run check-tudo-antes-de-cada-task-com-um-nome-bem-comprido',
+    'env.claude.ANTHROPIC_BASE_URL = http://servidor-de-alguem.example.com:8080/v1/um/caminho/longo',
+    'env.codex.OPENAI_API_KEY',
+    'prompts.codex',
+    'memory',
+  ],
+  warning: 'config.yaml MUDOU desde que você confiou neste projeto',
+  context: {},
+};
+
+function integracoes() {
+  const hook = (instalado: boolean, avisoTimeout: string | null) => ({
+    modo: 'arquivo',
+    arquivo: 'C:\\Users\\teste\\.claude\\settings.json',
+    instalado,
+    avisoTimeout,
+    erro: null,
+    nota: 'o hook é consultado antes de cada Bash/Write/Edit e pode bloquear a chamada',
+    comando: 'hub hooks install claude --write',
+    instalavelPeloPainel: true,
+  });
+  const mcp = (registrado: boolean, atualizado: boolean, verificado = true) => ({
+    arquivo: 'C:\\Users\\teste\\.codex\\config.toml',
+    precisaDeProjeto: false,
+    formato: 'toml-codex',
+    verificado,
+    nota: null,
+    registrado,
+    atualizado,
+    erro: null,
+    comando: 'hub mcp install codex --write',
+  });
+  return {
+    entrypoints: { cli: 'C:\\hub\\cli\\main.js', mcp: 'C:\\hub\\mcp\\main.js', cliExiste: true, mcpExiste: true },
+    integrations: [
+      {
+        agentId: 'claude',
+        hook: hook(true, 'hook do gate instalado com timeout 10 s (precisa de 120 s): ação que pede aprovação roda sem ela'),
+        mcp: mcp(false, false),
+      },
+      {
+        agentId: 'codex',
+        hook: {
+          modo: 'codex-inline',
+          arquivo: 'C:\\Users\\teste\\.agents-hub\\config.json',
+          instalado: false,
+          avisoTimeout: null,
+          erro: null,
+          nota: 'o Hub monta o hook a cada invocação',
+          comando: 'hub hooks install codex --write',
+          instalavelPeloPainel: false,
+        },
+        mcp: mcp(true, false),
+      },
+      {
+        agentId: 'cursor',
+        hook: {
+          modo: 'nenhum',
+          arquivo: null,
+          instalado: false,
+          avisoTimeout: null,
+          erro: null,
+          nota: 'sem gate pré-execução: o Hub só vigia os eventos depois que a ferramenta roda',
+          comando: null,
+          instalavelPeloPainel: false,
+        },
+        mcp: mcp(true, true, false),
+      },
+    ],
+  };
+}
+
+const PLANO = {
+  agentId: 'claude',
+  tipo: 'hook',
+  arquivo: 'C:\\Users\\teste\\.claude\\settings.json',
+  acao: 'atualizar',
+  avisos: [],
+  base: 'sha256:abc',
+  diff: [
+    { tipo: '@', texto: '… 12 linha(s) iguais' },
+    { tipo: ' ', texto: '        "hooks": [' },
+    { tipo: '-', texto: '          { "type": "command", "command": "\"node\" \"C:/hub/cli/main.js\" hook", "timeout": 10 }' },
+    { tipo: '+', texto: '          { "type": "command", "command": "\"node\" \"C:/hub/cli/main.js\" hook", "timeout": 120 }' },
+    { tipo: ' ', texto: '        ]' },
+  ],
+};
+
+function auditoria(kind: string | null) {
+  const e = (p: Record<string, unknown>) => ({
+    id: `aud_${Math.random().toString(36).slice(2, 8)}`,
+    ts: ha(5),
+    actor: 'gate',
+    kind: 'gate.decision',
+    sessionId: 'ses_filho1',
+    projectId: 'prj_alfa',
+    approvalId: null,
+    action: 'Bash: npm run migrate -- --env=producao --force --com-um-argumento-bem-comprido-para-quebrar',
+    decision: 'approve',
+    risk: 'high',
+    reason: 'comando irreversível fora da lista de permitidos',
+    detail: { tool: 'Bash' },
+    ...p,
+  });
+  const todas = [
+    e({ kind: 'approval.resolved', actor: 'web', approvalId: 'apv_velha', decision: 'denied', ts: ha(3), risk: null }),
+    e({ kind: 'approval.requested', approvalId: 'apv_velha', ts: ha(4) }),
+    e({}),
+    e({ kind: 'policy.updated', actor: 'cli:bruno', sessionId: null, action: 'PUT /policy (camada global)', decision: 'loosened', reason: 'afrouxa: risk.irreversible', risk: null, detail: {} }),
+  ];
+  return kind ? todas.filter((x) => x.kind === kind) : todas;
+}
+
+async function corpo(req: IncomingMessage): Promise<unknown> {
+  const partes: Buffer[] = [];
+  for await (const p of req) partes.push(p as Buffer);
+  const texto = Buffer.concat(partes).toString('utf8');
+  if (texto === '') return undefined;
+  try {
+    return JSON.parse(texto);
+  } catch {
+    return texto;
+  }
+}
+
 const TIPOS: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -197,10 +364,28 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
   // Aba Operação (item 6.12): rotas com resposta própria, inclusive as escritas.
   if (await rotearOperacao(req, res, p)) return;
 
-  if (req.method === 'POST') {
-    // Nenhuma ação é exercida pelo teste; responder algo plausível evita
+  if (req.method === 'PUT' || req.method === 'POST') {
+    const body = await corpo(req);
+    ESCRITAS.push({ method: req.method, path: p + url.search, body });
+    const dryRun = url.searchParams.get('dryRun') === '1';
+    if (req.method === 'PUT' && p === '/policy') {
+      return json(res, 200, dryRun
+        ? { dryRun: true, loosened: ['risk.irreversible'], effective: POLITICA_EFETIVA }
+        : { policy: politica(null), loosened: ['risk.irreversible'], backup: 'C:\\Users\\teste\\.agents-hub\\config.json.bak-20260926-101010' });
+    }
+    if (req.method === 'PUT' && /^\/projects\/prj_[a-z0-9]+\/policy$/i.test(p)) {
+      return json(res, 200, dryRun
+        ? { dryRun: true, clamped: ['risk.irreversible'], ignoredExecFields: [], effective: POLITICA_EFETIVA }
+        : { project: politica('prj_alfa').project, clamped: ['risk.irreversible'], ignoredExecFields: [] });
+    }
+    if (/^\/integrations\/[a-z0-9-]+\/(hook|mcp)$/i.test(p)) {
+      const b = (body ?? {}) as { dryRun?: boolean };
+      return json(res, 200, b.dryRun === false
+        ? { dryRun: false, plan: PLANO, backup: 'C:\\Users\\teste\\.claude\\settings.json.bak-20260926-101010' }
+        : { dryRun: true, plan: PLANO });
+    }
+    // O resto não é exercido pelo teste; responder algo plausível evita
     // toasts de erro que mudariam o layout medido.
-    req.resume();
     json(res, 200, { ok: true });
     return;
   }
@@ -232,9 +417,19 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
   m = /^\/graph\/(ses_[a-z0-9]+)$/i.exec(p);
   if (m) return json(res, 200, { graph: grafoDe(m[1]!) });
   if (/^\/budget\/ses_[a-z0-9]+$/i.test(p)) return json(res, 200, { budget: ORCAMENTO });
-  if (/^\/projects\/prj_[a-z0-9]+\/context$/i.test(p)) {
-    return json(res, 200, { context: { memory: 'Usar TypeScript estrito.' } });
+  // O beta falha ao carregar o contexto: exercita o estado de erro das Configurações.
+  if (p === '/projects/prj_beta/context') {
+    return json(res, 500, { error: { code: 'INTERNAL', message: 'falha simulada ao ler o contexto' } });
   }
+  if (/^\/projects\/prj_[a-z0-9]+\/context$/i.test(p)) {
+    return json(res, 200, { context: { memory: 'Usar TypeScript estrito.' }, repo: REPO });
+  }
+  if (p === '/policy') return json(res, 200, { policy: politica(url.searchParams.get('projectId')) });
+  if (p === '/audit') {
+    CONSULTAS_DE_AUDITORIA.push(url.search);
+    return json(res, 200, { entries: auditoria(url.searchParams.get('kind')) });
+  }
+  if (p === '/integrations') return json(res, 200, integracoes());
 
   await estatico(res, p);
 }

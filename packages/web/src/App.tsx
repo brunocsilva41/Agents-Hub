@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionSummary } from '@agents-hub/client';
 import { Approvals } from './components/Approvals';
 import { Composer } from './components/Composer';
@@ -6,6 +6,8 @@ import { FlowList } from './components/FlowList';
 import { SessionModal } from './components/SessionModal';
 import { ProjectModal } from './components/ProjectModal';
 import { SettingsView } from './components/SettingsView';
+import { SecurityView } from './components/SecurityView';
+import { podeTrocarDeAba } from './logic/security';
 import { Onboarding } from './components/Onboarding';
 import { precisaDeBoasVindas } from './logic/settings-form';
 import { SidePanel } from './components/SidePanel';
@@ -23,7 +25,7 @@ import { OperationView } from './components/OperationView';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
 import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES, timelineStatus } from './useHubState';
 
-type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'operation' | 'settings';
+type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'operation' | 'settings' | 'security';
 
 export function App() {
   const state = useHubState();
@@ -36,7 +38,30 @@ export function App() {
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('timeline');
+  const [activeTab, setAbaAtiva] = useState<ActiveTab>('timeline');
+
+  // Edição não salva por área (Configurações, editor de política). Trocar de
+  // aba desmonta a área e a edição sumia sem aviso (vistoria 03): TODA troca
+  // de aba passa por aqui e pergunta antes. Ref, não estado — marcar "sujo" a
+  // cada tecla não precisa re-renderizar o App.
+  const sujosRef = useRef<Record<string, boolean>>({});
+  const abaAtualRef = useRef<ActiveTab>('timeline');
+  abaAtualRef.current = activeTab;
+  const setActiveTab = useCallback((destino: ActiveTab): boolean => {
+    const ok = podeTrocarDeAba(abaAtualRef.current, destino, sujosRef.current, () =>
+      window.confirm('Há alterações não salvas nesta aba. Sair e descartá-las?'),
+    );
+    if (!ok) return false;
+    if (destino !== abaAtualRef.current) sujosRef.current = {};
+    setAbaAtiva(destino);
+    return true;
+  }, []);
+  const marcarSujoConfig = useCallback((sujo: boolean) => {
+    sujosRef.current = { ...sujosRef.current, settings: sujo };
+  }, []);
+  const marcarSujoSeguranca = useCallback((sujo: boolean) => {
+    sujosRef.current = { ...sujosRef.current, security: sujo };
+  }, []);
   const [flowFilter, setFlowFilter] = useState<'active' | 'all'>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [flowsOpen, setFlowsOpen] = useState(false);
@@ -123,14 +148,14 @@ export function App() {
 
   const alternarFluxos = () => {
     const abrir = !(flowsOpen && activeTab === 'timeline');
-    setActiveTab('timeline');
+    if (!setActiveTab('timeline')) return;
     setFlowsOpen(abrir);
     if (abrir) setPanelOpen(false);
   };
 
   const alternarPainel = () => {
     const abrir = !(panelOpen && activeTab === 'timeline');
-    setActiveTab('timeline');
+    if (!setActiveTab('timeline')) return;
     setPanelOpen(abrir);
     if (abrir) setFlowsOpen(false);
   };
@@ -207,6 +232,7 @@ export function App() {
     { id: 'telemetry', rotulo: 'Telemetria', icone: '📊' },
     { id: 'operation', rotulo: 'Operação', icone: '🛠' },
     { id: 'settings', rotulo: 'Configurações', icone: '⚙️' },
+    { id: 'security', rotulo: 'Segurança', icone: '🔐' },
   ];
 
   return (
@@ -368,8 +394,7 @@ export function App() {
         sessions={state.sessions}
         onSelectSession={(id) => {
           // O banner aparece em todas as abas: "ver a sessão" precisa levar à timeline.
-          selectSession(id);
-          setActiveTab('timeline');
+          if (setActiveTab('timeline')) selectSession(id);
         }}
         onResolved={() => state.refresh()}
       />
@@ -392,6 +417,20 @@ export function App() {
             agents={state.agents}
             projects={state.projects}
             onNewProject={() => setProjectModalOpen(true)}
+            onSujoChange={marcarSujoConfig}
+          />
+        </main>
+      ) : activeTab === 'security' ? (
+        <main className="tab-view-container">
+          <SecurityView
+            agents={state.agents}
+            projects={state.projects}
+            sessions={state.sessions}
+            onSujoChange={marcarSujoSeguranca}
+            onSelectSession={(id) => {
+              if (setActiveTab('timeline')) selectSession(id);
+            }}
+            onProjectsChanged={() => void state.refresh()}
           />
         </main>
       ) : activeTab === 'swarm' ? (

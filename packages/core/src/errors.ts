@@ -13,6 +13,10 @@ export type HubErrorCode =
   | 'PROJECT_FOLDER_CONFLICT'
   | 'PROJECT_CONFIG_INVALID'
   | 'HUB_CONFIG_INVALID'
+  /** Config de OUTRA ferramenta (settings.json, config.toml) que não sabemos editar sem perda. */
+  | 'AGENT_CONFIG_INVALID'
+  /** O arquivo mudou entre a prévia e a confirmação: nada foi gravado. */
+  | 'CONFIG_CHANGED'
   | 'FOLDER_NOT_FOUND'
   | 'FOLDER_IS_PRIMARY'
   | 'INVALID_BRIEF'

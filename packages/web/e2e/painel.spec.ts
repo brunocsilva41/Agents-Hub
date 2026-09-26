@@ -13,7 +13,12 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 import { acionarNaTopbar, problemasDeLayout, VIEWPORTS } from './medir';
-import { subirServidorFalso, type ServidorFalso } from './servidor-falso';
+import {
+  CONSULTAS_DE_AUDITORIA,
+  ESCRITAS,
+  subirServidorFalso,
+  type ServidorFalso,
+} from './servidor-falso';
 
 let servidor: ServidorFalso;
 
@@ -25,7 +30,26 @@ test.afterAll(async () => {
   await servidor?.fechar();
 });
 
-const ABAS = ['Timeline', 'Grafo DAG', 'Swarm', 'Telemetria', 'Operação', 'Configurações'];
+const ABAS = ['Timeline', 'Grafo DAG', 'Swarm', 'Telemetria', 'Operação', 'Configurações', 'Segurança'];
+
+const SECOES_SEGURANCA = ['Política', 'Confiança do projeto', 'Gate e MCP', 'Aprovações', 'Auditoria'];
+
+async function abrirSeguranca(page: Page): Promise<void> {
+  await acionarNaTopbar(page, /^Segurança/);
+  await expect(page.getByRole('heading', { name: 'Segurança', exact: true })).toBeVisible();
+}
+
+async function irParaSecao(page: Page, nome: string): Promise<void> {
+  await page
+    .getByRole('navigation', { name: 'Seções de segurança' })
+    .getByRole('button', { name: new RegExp(`^${nome}`) })
+    .click();
+}
+
+/** Última escrita (PUT/POST) que o painel mandou ao servidor falso para `caminho`. */
+function ultimaEscrita(caminho: string | RegExp): { method: string; path: string; body: unknown } | undefined {
+  return [...ESCRITAS].reverse().find((e) => (typeof caminho === 'string' ? e.path === caminho : caminho.test(e.path)));
+}
 
 async function abrir(page: Page): Promise<void> {
   await page.goto(servidor.url);
@@ -147,6 +171,100 @@ for (const vp of VIEWPORTS) {
       // O foco volta a quem abriu (o botão da topbar, ou o menu compacto).
       const focado = await page.evaluate(() => document.activeElement?.closest('.topbar') !== null);
       expect(focado).toBe(true);
+    });
+
+    test('Segurança: cada seção sem controle coberto, cortado ou fora da tela', async ({ page }) => {
+      await abrir(page);
+      await abrirSeguranca(page);
+      for (const secao of SECOES_SEGURANCA) {
+        await irParaSecao(page, secao);
+        await expect(page.locator('.settings-content .card-title').first()).toBeVisible();
+        // Conteúdo carregado (nada de "carregando…" medido no meio).
+        await expect(page.locator('.settings-content')).not.toContainText('carregando…');
+        expect(await problemasDeLayout(page), secao).toEqual([]);
+      }
+    });
+
+    test('política: revisar mostra que AFROUXA antes de gravar, e gravar pede confirmação', async ({ page }) => {
+      ESCRITAS.length = 0;
+      await abrir(page);
+      await abrirSeguranca(page);
+      const editor = page.locator('#sec-camada');
+      await expect(editor).toHaveValue(/maxDepth/);
+      const gravar = page.getByRole('button', { name: 'Gravar…' });
+      await editor.fill('{"risk": {"irreversible": "allow"}}');
+      await expect(gravar).toBeDisabled();
+      await page.getByRole('button', { name: 'Revisar alterações' }).click();
+      await expect(page.locator('.sec-previa')).toContainText('AFROUXA');
+      await expect(page.locator('.sec-previa')).toContainText('risk.irreversible');
+      expect(ultimaEscrita('/policy?dryRun=1')?.body).toEqual({ policy: { risk: { irreversible: 'allow' } } });
+      expect(ultimaEscrita('/policy'), 'revisar não grava').toBeUndefined();
+      // Mudou o texto depois de revisar: gravar volta a exigir revisão.
+      await editor.fill('{"risk": {"irreversible": "allow"}, "maxDepth": 2}');
+      await expect(gravar).toBeDisabled();
+      await page.getByRole('button', { name: 'Revisar alterações' }).click();
+      await expect(gravar).toBeEnabled();
+      await gravar.click();
+      const dialogo = page.getByRole('dialog');
+      await expect(dialogo).toHaveAccessibleName(/Gravar a política global/);
+      await expect(dialogo.getByRole('button', { name: 'Cancelar' })).toBeFocused();
+      expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
+      await dialogo.getByRole('button', { name: 'Afrouxar e gravar' }).click();
+      await expect(dialogo).toHaveCount(0);
+      expect(ultimaEscrita('/policy')?.body).toEqual({ policy: { risk: { irreversible: 'allow' }, maxDepth: 2 } });
+      await expect(page.locator('.sec-previa')).toContainText('Gravado: isto AFROUXA');
+    });
+
+    test('edição não salva: trocar de aba no topo pergunta antes de descartar', async ({ page }) => {
+      await abrir(page);
+      await abrirSeguranca(page);
+      await page.locator('#sec-camada').fill('{"maxDepth": 1}');
+      page.once('dialog', (d) => void d.dismiss());
+      await acionarNaTopbar(page, /^Timeline/);
+      await expect(page.getByRole('heading', { name: 'Segurança', exact: true })).toBeVisible();
+      await expect(page.locator('#sec-camada')).toHaveValue('{"maxDepth": 1}');
+      page.once('dialog', (d) => void d.accept());
+      await acionarNaTopbar(page, /^Timeline/);
+      await expect(page.locator('.columns')).toBeVisible();
+    });
+
+    test('confiança: suspensa, mostra o BASE_URL do repo e confiar exige confirmação', async ({ page }) => {
+      ESCRITAS.length = 0;
+      await abrir(page);
+      await abrirSeguranca(page);
+      await irParaSecao(page, 'Confiança do projeto');
+      await expect(page.locator('.sec-confianca')).toContainText('confiança suspensa');
+      await expect(page.locator('.settings-content')).toContainText('servidor-de-alguem.example.com');
+      await page.getByRole('button', { name: 'Confiar no conteúdo novo…' }).click();
+      const dialogo = page.getByRole('dialog');
+      await expect(dialogo).toContainText('ANTHROPIC_BASE_URL');
+      expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
+      expect(ultimaEscrita(/\/trust$/), 'nada antes de confirmar').toBeUndefined();
+      await dialogo.getByRole('button', { name: 'Confiar', exact: true }).click();
+      await expect(dialogo).toHaveCount(0);
+      expect(ultimaEscrita('/projects/prj_alfa/trust')?.body).toEqual({ trusted: true });
+    });
+
+    test('gate e MCP: timeout antigo, prévia com diff, gravar devolve o base da prévia', async ({ page }) => {
+      ESCRITAS.length = 0;
+      await abrir(page);
+      await abrirSeguranca(page);
+      await irParaSecao(page, 'Gate e MCP');
+      await expect(page.locator('.settings-content')).toContainText('timeout antigo');
+      await expect(page.locator('.settings-content')).toContainText('só vigilância');
+      await page.getByRole('button', { name: /Atualizar gate em Claude Code/ }).click();
+      const dialogo = page.getByRole('dialog');
+      await expect(dialogo.locator('.sec-diff-mais')).toContainText('"timeout": 120');
+      await expect(dialogo.locator('.sec-diff-menos')).toContainText('"timeout": 10');
+      expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
+      expect(ultimaEscrita('/integrations/claude/hook')?.body).toEqual({ dryRun: true, projectId: 'prj_alfa' });
+      await dialogo.getByRole('button', { name: 'Gravar no arquivo' }).click();
+      await expect(dialogo).toHaveCount(0);
+      expect(ultimaEscrita('/integrations/claude/hook')?.body).toEqual({
+        dryRun: false,
+        base: 'sha256:abc',
+        projectId: 'prj_alfa',
+      });
     });
 
     test('paleta: Ctrl+K abre e fecha, setas + Enter navegam, Esc devolve o foco', async ({ page }) => {
@@ -278,5 +396,69 @@ test.describe('tema e cores', () => {
     await abrir(page);
     await page.waitForTimeout(800);
     expect(externas).toEqual([]);
+  });
+});
+
+test.describe('Segurança e Configurações (1100px)', () => {
+  test.use({ viewport: { width: 1100, height: 800 } });
+
+  test('aprovações mostram quem decidiu; filtros da auditoria vão na consulta', async ({ page }) => {
+    await abrir(page);
+    await abrirSeguranca(page);
+    await irParaSecao(page, 'Aprovações');
+    const item = page.locator('.sec-item').first();
+    await expect(item).toContainText('negada');
+    await expect(item).toContainText('decidida por web');
+    await irParaSecao(page, 'Auditoria');
+    await expect(page.locator('.sec-item').first()).toBeVisible();
+    CONSULTAS_DE_AUDITORIA.length = 0;
+    await page.getByLabel('Tipo').selectOption('policy.updated');
+    await expect.poll(() => CONSULTAS_DE_AUDITORIA.at(-1) ?? '').toContain('kind=policy.updated');
+    expect(CONSULTAS_DE_AUDITORIA.at(-1)).toContain('since=24h');
+    await expect(page.locator('.sec-item')).toHaveCount(1);
+    await expect(page.locator('.sec-item')).toContainText('cli:bruno');
+  });
+
+  test('campo de modelo só para agente com model.supported', async ({ page }) => {
+    await abrir(page);
+    await acionarNaTopbar(page, /^Configurações/);
+    await page.getByRole('button', { name: /Modelos locais/ }).click();
+    await page.getByRole('tab', { name: 'OpenCode' }).click();
+    await expect(page.locator('#modelo')).toBeVisible();
+    await expect(page.locator('label[for="modelo"]')).toContainText('MODEL');
+    await page.getByRole('tab', { name: 'Cursor Agent' }).click();
+    await expect(page.locator('#modelo')).toHaveCount(0);
+  });
+
+  test('estados de erro e vazio têm destaque (.settings-erro/.settings-vazio com CSS)', async ({ page }) => {
+    await abrir(page);
+    await acionarNaTopbar(page, /^Configurações/);
+    await page.getByLabel('Projeto').selectOption('prj_beta');
+    const erro = page.locator('.settings-erro').filter({ hasText: 'falha simulada' });
+    await expect(erro).toBeVisible();
+    const estiloErro = await erro.evaluate((el) => {
+      const c = getComputedStyle(el);
+      return { fundo: c.backgroundColor, borda: c.borderLeftWidth, display: c.display };
+    });
+    expect(estiloErro.fundo).not.toBe('rgba(0, 0, 0, 0)');
+    expect(estiloErro.borda).toBe('4px');
+    expect(estiloErro.display).toBe('flex');
+
+    await acionarNaTopbar(page, /^Segurança/);
+    await page.getByLabel('Projeto').selectOption('');
+    await irParaSecao(page, 'Confiança do projeto');
+    const vazio = page.locator('.settings-vazio').first();
+    await expect(vazio).toBeVisible();
+    expect(await vazio.evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe('dashed');
+  });
+
+  test('configurações: edição não salva também pergunta ao trocar de aba', async ({ page }) => {
+    await abrir(page);
+    await acionarNaTopbar(page, /^Configurações/);
+    await page.getByRole('button', { name: /Memória do projeto/ }).click();
+    await page.locator('#memoria').fill('regra nova');
+    page.once('dialog', (d) => void d.dismiss());
+    await acionarNaTopbar(page, /^Segurança/);
+    await expect(page.locator('#memoria')).toHaveValue('regra nova');
   });
 });

@@ -134,6 +134,38 @@ describe('Modelos locais: só as variáveis que o agente lê', () => {
   });
 });
 
+describe('campo de modelo por agente (item 4.3: só quando model.supported)', () => {
+  const comModelo = { model: { supported: true, format: 'provider/model' } };
+  const semModelo = { model: { supported: false, format: '' } };
+
+  test('agente com suporte ganha "Modelo" que grava MODEL (vira a flag do manifesto)', () => {
+    const campos = camposDeEnvDoAgente('opencode', comModelo);
+    const modelo = campos.find((c) => c.papel === 'model');
+    assert.equal(modelo?.nome, 'MODEL');
+    assert.equal(modelo?.viaFlag, true);
+    assert.equal(modelo?.formato, 'provider/model');
+  });
+
+  test('agente sem suporte não ganha campo de modelo — nem o da variável própria', () => {
+    assert.ok(!camposDeEnvDoAgente('claude', semModelo).some((c) => c.papel === 'model'));
+    assert.deepEqual(camposDeEnvDoAgente('cursor', semModelo), []);
+  });
+
+  test('com suporte, a variável própria de modelo sai dos fixos (um campo só) e vira extra se gravada', () => {
+    const nomes = camposDeEnvDoAgente('claude', comModelo).map((c) => c.nome);
+    assert.deepEqual(nomes, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'MODEL']);
+    const extras = extrasDoAgente({ MODEL: 'opus', ANTHROPIC_MODEL: 'legado' }, 'claude', comModelo);
+    assert.deepEqual(extras.map(([k]) => k), ['ANTHROPIC_MODEL']);
+  });
+
+  test('daemon sem o campo `model` (anterior ao 4.3): comportamento antigo, sem quebrar', () => {
+    assert.deepEqual(
+      camposDeEnvDoAgente('claude', {}).map((c) => c.nome),
+      ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL'],
+    );
+  });
+});
+
 describe('primeira execução', () => {
   test('boas-vindas só depois de carregar e sem projeto nenhum', () => {
     assert.equal(precisaDeBoasVindas(false, 0), false);

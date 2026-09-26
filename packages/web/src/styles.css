@@ -3634,6 +3634,101 @@ textarea {
   line-height: 1.5;
 }
 
+/* Estados de erro e vazio das telas de configuração. As classes existiam no
+   JSX (`.settings-erro`, `.settings-vazio`, `.error-banner`) sem regra
+   nenhuma: o erro de carga aparecia como texto solto, sem destaque, e o
+   "tentar de novo" colado na frase (vistoria 03). */
+.error-banner,
+.settings-erro {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--danger);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--danger-glow);
+  color: var(--danger-text);
+  font-size: 12.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.settings-erro button,
+.error-banner button {
+  margin-left: auto;
+}
+
+.settings-vazio {
+  margin: 0 0 16px;
+  padding: 18px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+.settings-vazio.settings-card {
+  text-align: left;
+}
+
+.settings-header {
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.settings-header-actions {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.field-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.field-inline select {
+  min-width: 180px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+}
+
+/* Abaixo de 900 px a navegação lateral das configurações vira uma faixa de
+   botões que quebra linha (nada escondido fora da tela); os 240 px fixos
+   apertavam o conteúdo até estourar. */
+@media (max-width: 900px) {
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .settings-nav-btn {
+    flex: 0 0 auto;
+    padding: 8px 12px;
+  }
+  .settings-nav-btn .nav-text span {
+    display: none;
+  }
+  .settings-card {
+    padding: 16px;
+  }
+}
+
 /* ---- Agentes detectados ------------------------------------------------ */
 .disc-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .disc-lista { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
