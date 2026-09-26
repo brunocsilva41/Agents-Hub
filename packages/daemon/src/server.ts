@@ -47,6 +47,7 @@ import {
   shouldIssueOperatorCookie,
 } from './operator-auth.js';
 import { registerOperatorRoutes } from './operator-routes.js';
+import { registerMaintenanceRoutes } from './maintenance-routes.js';
 import type { PolicyService } from './policy-service.js';
 import { startSseChannel } from './sse.js';
 import type { DiscoveryService, ImportService } from './absorption.js';
@@ -959,6 +960,11 @@ export class HubServer {
     // Editor de política e auditoria (item 1.10) — ver `operator-routes.ts`.
     registerOperatorRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
       policy: this.operator.policy,
+      audit: this.operator.audit,
+    });
+    // Backup do banco (item 5.6) — ver `maintenance-routes.ts`.
+    registerMaintenanceRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
+      config: this.config,
       audit: this.operator.audit,
     });
 

@@ -111,3 +111,13 @@ export {
   type ProjectPolicyView,
 } from './policy-service.js';
 export { instanteDoFiltro } from './operator-routes.js';
+// Backup/restauração do banco (item 5.6): a CLI usa direto quando o daemon
+// está parado (restaurar só pode ser assim).
+export {
+  backupDatabase,
+  restoreDatabase,
+  conferirBanco,
+  backupFileName,
+  type BackupResult,
+  type RestoreResult,
+} from '@agents-hub/store';
