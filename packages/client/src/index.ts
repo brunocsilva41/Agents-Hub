@@ -111,7 +111,7 @@ export class HubClient {
   }
 
   /** `dryRun` é verdadeiro por padrão no daemon: só grava com `dryRun: false`. */
-  importFromAgent(
+  async importFromAgent(
     projectId: string,
     body: {
       agentId: string;
@@ -122,12 +122,12 @@ export class HubClient {
       includeEnv?: boolean;
     },
   ): Promise<ImportResult> {
-    return this.#post(`/projects/${encodeURIComponent(projectId)}/import`, body);
+    return this.#post(`/projects/${idSegment(projectId, 'prj')}/import`, body);
   }
 
   /** Marca/desmarca o projeto como confiável (libera `validation.command` do repo). */
-  setProjectTrusted(projectId: string, trusted: boolean): Promise<{ project: ProjectSummary }> {
-    return this.#post(`/projects/${encodeURIComponent(projectId)}/trust`, { trusted });
+  async setProjectTrusted(projectId: string, trusted: boolean): Promise<{ project: ProjectSummary }> {
+    return this.#post(`/projects/${idSegment(projectId, 'prj')}/trust`, { trusted });
   }
 
   // ----------------------------------------------------------------- sessões
