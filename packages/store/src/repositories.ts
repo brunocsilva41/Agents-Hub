@@ -35,6 +35,20 @@ import {
 import type { Brief } from '@agents-hub/core';
 import { fromJson, nullableJson, toJson, type Db, type SqlValue } from './db.js';
 
+/**
+ * Custo que entra nas somas: estimativas parciais (`cost.provisional`) ficam
+ * de fora, porque o custo final do turno já as substitui — somar as duas
+ * coisas era a dupla/tripla contagem do Claude (vistoria 2026-09-25).
+ */
+const CUSTO_CONTA = (alias: string): string =>
+  `COALESCE(json_extract(${alias}cost_json, '$.provisional'), 0) = 0`;
+const SOMA_USD = (alias: string): string =>
+  `COALESCE(SUM(CASE WHEN ${CUSTO_CONTA(alias)} THEN json_extract(${alias}cost_json, '$.usd') END), 0)`;
+const SOMA_TOKENS = (alias: string): string =>
+  `COALESCE(SUM(CASE WHEN ${CUSTO_CONTA(alias)} THEN
+     COALESCE(json_extract(${alias}cost_json, '$.inputTokens'), 0) +
+     COALESCE(json_extract(${alias}cost_json, '$.outputTokens'), 0) END), 0)`;
+
 type Row = Record<string, unknown>;
 
 /**
@@ -278,11 +292,8 @@ class SqliteSessionRepository implements SessionRepository {
                 s.depth         AS depth,
                 s.created_at    AS started_at,
                 s.ended_at      AS ended_at,
-                COALESCE(SUM(json_extract(e.cost_json, '$.usd')), 0) AS usd,
-                COALESCE(SUM(
-                  COALESCE(json_extract(e.cost_json, '$.inputTokens'), 0) +
-                  COALESCE(json_extract(e.cost_json, '$.outputTokens'), 0)
-                ), 0) AS tokens
+                ${SOMA_USD('e.')} AS usd,
+                ${SOMA_TOKENS('e.')} AS tokens
          FROM sessions s
          LEFT JOIN events e ON e.session_id = s.id
          WHERE s.root_id = ?
@@ -430,6 +441,7 @@ class SqliteEventRepository implements EventRepository {
     newest?: boolean;
     types?: EventType[];
     limit?: number;
+    tail?: boolean;
   }): EventEnvelope[] {
     const clauses: string[] = [];
     const params: Array<string | number> = [];
@@ -454,8 +466,13 @@ class SqliteEventRepository implements EventRepository {
       params.push(...filter.types);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-    const limit = Math.min(filter.limit ?? 500, 5000);
-    const newest = filter.newest === true || typeof filter.beforeSeq === 'number';
+    // `LIMIT -1` no SQLite é "sem limite": o teto precisa valer para qualquer
+    // entrada, não só para a que já passou pela validação HTTP.
+    const pedido = filter.limit ?? 500;
+    const limit = Number.isFinite(pedido) ? Math.min(Math.max(1, Math.trunc(pedido)), 5000) : 500;
+    // `tail` (replay: os ÚLTIMOS N) e `newest` (painel) são o mesmo pedido.
+    const newest =
+      filter.newest === true || filter.tail === true || typeof filter.beforeSeq === 'number';
     const order = newest ? 'session_id DESC, seq DESC' : 'session_id, seq';
     const rows = this.db
       .prepare(`SELECT * FROM events ${where} ORDER BY ${order} LIMIT ?`)
@@ -475,11 +492,8 @@ class SqliteEventRepository implements EventRepository {
   costOf(sessionId: string): BudgetUsage {
     const row = this.db
       .prepare(
-        `SELECT COALESCE(SUM(json_extract(cost_json, '$.usd')), 0) AS usd,
-                COALESCE(SUM(
-                  COALESCE(json_extract(cost_json, '$.inputTokens'), 0) +
-                  COALESCE(json_extract(cost_json, '$.outputTokens'), 0)
-                ), 0) AS tokens
+        `SELECT ${SOMA_USD('')} AS usd,
+                ${SOMA_TOKENS('')} AS tokens
          FROM events WHERE session_id = ?`,
       )
       .get(sessionId) as Row | undefined;

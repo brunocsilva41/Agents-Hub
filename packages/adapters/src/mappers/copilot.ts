@@ -1,5 +1,14 @@
+import { COPILOT_USD_PER_AI_CREDIT } from '@agents-hub/core';
 import type { MappedEvent } from '../types.js';
 import { firstString, numberOf } from './generic.js';
+
+/**
+ * 1 AI Credit = 1e9 nano-AIU. Não há fonte oficial para a unidade "nano-AIU";
+ * a conversão foi conferida no caso real da vistoria de 2026-09-25: o
+ * `totalNanoAiu` 529821900 da sessão corresponde ao "AI Credits 0.53" que o
+ * próprio CLI imprimiu no resumo.
+ */
+const NANO_AIU_POR_CREDITO = 1e9;
 
 /**
  * Mapper do GitHub Copilot CLI — `copilot -p "<texto>" --output-format json`.
@@ -67,9 +76,6 @@ export function copilotMapper(line: unknown): MappedEvent[] {
         events.push({
           type: 'message',
           payload: { text: content, ...(model ? { model } : {}) },
-          // `outputTokens` é o único número de uso que o Copilot expõe por
-          // mensagem; entrada não vem, então a estimativa sai por baixo.
-          cost: { outputTokens: numberOf(data['outputTokens']) },
           raw: line,
         });
       }
@@ -89,7 +95,52 @@ export function copilotMapper(line: unknown): MappedEvent[] {
         });
       }
 
+      // `outputTokens` é o único número de uso por mensagem no JSONL (a
+      // entrada não vem). Vai como estimativa: o dinheiro de verdade chega
+      // pelos créditos de `session.usage_checkpoint`, que manda sobre ela.
+      const outputTokens = numberOf(data['outputTokens']);
+      const primeiro = events[0];
+      if (primeiro && outputTokens !== undefined) {
+        const messageId = firstString(data['messageId']) ?? firstString(obj['id']);
+        primeiro.cost = {
+          outputTokens,
+          provisional: true,
+          ...(messageId ? { partId: messageId } : {}),
+        };
+      }
+
       return events;
+    }
+
+    /**
+     * Único número de dinheiro que o `--output-format json` entrega: o
+     * ACUMULADO da sessão em nano-AIU (`assistant.usage` e `session.shutdown`,
+     * que têm tokens e créditos por chamada, ficam de fora do JSONL — lista de
+     * exclusão do próprio binário, conferida no 1.0.88). É acumulado da sessão
+     * NATIVA inteira, inclusive turnos anteriores retomados com `--resume`
+     * (conferido no `events.jsonl` real: 5,45 → 11,74 → 18,55 créditos em três
+     * processos da mesma sessão), por isso vai como `cumulative`.
+     */
+    case 'session.usage_checkpoint': {
+      const nano = numberOf(data['totalNanoAiu']);
+      if (nano === undefined || nano < 0) return [];
+      const creditos = nano / NANO_AIU_POR_CREDITO;
+      return [
+        {
+          type: 'log',
+          payload: {
+            text: `uso do Copilot: ${creditos.toFixed(2)} AI Credits (acumulado da sessão)`,
+            aiCreditsTotal: creditos,
+          },
+          cost: {
+            usd: creditos * COPILOT_USD_PER_AI_CREDIT,
+            credits: creditos,
+            provisional: true,
+            cumulative: true,
+          },
+          raw: line,
+        },
+      ];
     }
 
     case 'assistant.reasoning': {

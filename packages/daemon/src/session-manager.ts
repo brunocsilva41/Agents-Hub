@@ -27,6 +27,9 @@ import {
   renderBriefAsPrompt,
   type ContextoDoProjeto,
   resolveEventCost,
+  TurnCostTracker,
+  usoDoCusto,
+  EVENTOS_NARRATIVOS,
   watchForMode,
   agentOwnDirs,
   type Approval,
@@ -85,6 +88,7 @@ import {
 import { effectiveProjectContext, repoTrustWarning } from './repo-trust.js';
 import { captureBaseline, captureDiff, loadBaseline, saveBaseline } from './diff-capture.js';
 import { capturarMudancas } from './artifact-capture.js';
+import { baseDoAcumulado, CUSTO_FECHADO } from './turn-cost-base.js';
 import { interpretarRevisao } from './review-verdict.js';
 import {
   actionsOfToolCall,
@@ -1239,7 +1243,7 @@ export class SessionManager {
       ? text
       : rebuildConversation({
           brief: task.brief,
-          history: this.store.events.list({ sessionId, limit: 400 }),
+          history: this.#historicoRecente(sessionId),
           message: text,
         });
 
@@ -1384,7 +1388,7 @@ export class SessionManager {
 
       const prompt = rebuildConversation({
         brief: task.brief,
-        history: this.store.events.list({ sessionId, limit: 400 }),
+        history: this.#historicoRecente(sessionId),
         message: `Você está assumindo esta sessão que estava sob responsabilidade de ${fromAgentId}. Motivo da transferência: ${reason ?? 'continuidade de trabalho'}. Continue a tarefa de onde parou.`,
       });
 
@@ -1535,7 +1539,9 @@ export class SessionManager {
     this.#session(sessionId);
 
     if (match[2] === undefined) {
-      return { ref, events: this.store.events.list({ sessionId, limit: 200 }) };
+      // Os ÚLTIMOS 200: antes vinham os primeiros, e numa sessão longa o
+      // filho recebia a exploração inicial em vez do estado atual.
+      return { ref, events: this.store.events.list({ sessionId, tail: true, limit: 200 }) };
     }
 
     const seq = Number(match[2]);
@@ -1551,6 +1557,21 @@ export class SessionManager {
 
   listSessions(filter: { projectId?: string; rootId?: string } = {}): Session[] {
     return this.store.sessions.list(filter);
+  }
+
+  /**
+   * Histórico para reconstruir a conversa (replay/handoff): os ÚLTIMOS 400
+   * eventos narrativos. `condensarHistorico` preserva o fim; antes a consulta
+   * entregava os 400 PRIMEIROS (e gastava o limite com log/delta), então em
+   * sessão longa o fim — justamente o que importa — nunca chegava.
+   */
+  #historicoRecente(sessionId: string): EventEnvelope[] {
+    return this.store.events.list({
+      sessionId,
+      types: [...EVENTOS_NARRATIVOS],
+      tail: true,
+      limit: 400,
+    });
   }
 
   listEvents(
@@ -1753,6 +1774,9 @@ export class SessionManager {
   async #pump(session: Session, task: Task, handle: RunHandle): Promise<void> {
     const ledger = this.#ledger(session.rootId);
     let nativeSeen = session.nativeSessionId;
+    // O custo final do turno substitui as estimativas parciais em vez de
+    // somar a elas (ver `TurnCostTracker`).
+    const custos = new TurnCostTracker(baseDoAcumulado(this.store, session));
 
     try {
       for await (const bruto of handle.events) {
@@ -1773,11 +1797,11 @@ export class SessionManager {
         }
 
         if (mapped.cost) {
-          const snapshot = ledger.charge({
-            usd: mapped.cost.usd ?? 0,
-            tokens: (mapped.cost.inputTokens ?? 0) + (mapped.cost.outputTokens ?? 0),
-            seconds: 0,
-          });
+          const passo = custos.observe(mapped.cost);
+          const snapshot =
+            passo.kind === 'final'
+              ? ledger.charge(usoDoCusto(passo.cost), task.id)
+              : ledger.estimate(task.id, usoDoCusto(passo.total));
           this.#persistLedger(ledger);
           this.#checkBudgetWarning(session, task.id, snapshot);
 
@@ -1822,6 +1846,8 @@ export class SessionManager {
         payload: { message: (err as Error).message, phase: 'pump' },
       });
     }
+
+    this.#fecharCustoDoTurno(session, task, custos, ledger);
 
     const outcome = await handle.done;
     const live = this.#runs.get(session.id);
@@ -2334,6 +2360,52 @@ export class SessionManager {
     };
   }
 
+  /**
+   * Turno que acabou sem custo final do agente (Copilot nunca manda um; um
+   * processo morto no meio também não): a última estimativa vira custo num
+   * evento próprio, para o store/grafo e o orçamento não perderem o gasto.
+   */
+  #fecharCustoDoTurno(
+    session: Session,
+    task: Task,
+    custos: TurnCostTracker,
+    ledger: BudgetLedger,
+  ): void {
+    const cumulativeUsd = custos.cumulativeUsd;
+    const cumulativeCredits = custos.cumulativeCredits;
+    const aberto = custos.flush();
+    if (!aberto) return;
+
+    const creditos = aberto.credits;
+    const event = makeEvent(
+      {
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'log',
+        payload: {
+          kind: CUSTO_FECHADO,
+          text:
+            typeof creditos === 'number'
+              ? `custo do turno: ${creditos.toFixed(2)} AI Credits (US$ ${(aberto.usd ?? 0).toFixed(4)})`
+              : `custo do turno fechado pela estimativa: US$ ${(aberto.usd ?? 0).toFixed(4)} (o agente não informou o total)`,
+          costBasis: typeof creditos === 'number' ? 'reported' : 'estimated',
+          ...(cumulativeUsd !== null ? { cumulativeUsd } : {}),
+          ...(cumulativeCredits !== null ? { cumulativeCredits } : {}),
+        },
+        cost: aberto,
+        raw: null,
+      },
+      this.#nextSeq(session.id),
+    );
+    this.store.events.append(event);
+    this.bus.publish(event);
+
+    const snapshot = ledger.charge(usoDoCusto(aberto), task.id);
+    this.#persistLedger(ledger);
+    this.#checkBudgetWarning(session, task.id, snapshot);
+  }
+
   #persistMapped(session: Session, task: Task, mapped: MappedEvent): void {
     const event = makeEvent(
       {
@@ -2667,6 +2739,10 @@ export class SessionManager {
 
       const handle = await adapter.start(ctx, prompt);
       const textos: string[] = [];
+      // Revisão nova, sessão nativa nova: acumulado começa do zero.
+      const custos = new TurnCostTracker();
+      const escopo = `${task.id}#revisao`;
+      const ledger = this.#ledger(session.rootId);
 
       for await (const evento of handle.events) {
         if (evento.type === 'message') {
@@ -2674,16 +2750,19 @@ export class SessionManager {
           if (typeof texto === 'string') textos.push(texto);
         }
         // O custo da revisão é do fluxo como qualquer outro: sai do mesmo
-        // orçamento, senão ligar a revisão furaria o teto em silêncio.
+        // orçamento, senão ligar a revisão furaria o teto em silêncio. Com a
+        // mesma regra do turno normal: o custo final substitui as parciais.
         if (evento.cost) {
-          const snapshot = this.#ledger(session.rootId).charge({
-            usd: evento.cost.usd ?? 0,
-            tokens: (evento.cost.inputTokens ?? 0) + (evento.cost.outputTokens ?? 0),
-            seconds: 0,
-          });
+          const passo = custos.observe(evento.cost);
+          const snapshot =
+            passo.kind === 'final'
+              ? ledger.charge(usoDoCusto(passo.cost), escopo)
+              : ledger.estimate(escopo, usoDoCusto(passo.total));
           this.#checkBudgetWarning(session, task.id, snapshot);
         }
       }
+      const aberto = custos.flush();
+      if (aberto) ledger.charge(usoDoCusto(aberto), escopo);
 
       await handle.done;
       this.#persistLedger(this.#ledger(session.rootId));

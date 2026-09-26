@@ -1,5 +1,5 @@
 import { renderBriefAsPrompt, type Brief } from './brief.js';
-import type { EventEnvelope } from './events.js';
+import type { EventEnvelope, EventType } from './events.js';
 
 /**
  * Reconstrução de contexto para agentes sem sessão nativa.
@@ -15,14 +15,15 @@ import type { EventEnvelope } from './events.js';
  */
 
 /** Eventos que contam a história; o resto é ruído de infraestrutura. */
-const NARRATIVOS = new Set([
+export const EVENTOS_NARRATIVOS: readonly EventType[] = [
   'message',
   'command.executed',
   'file.changed',
   'error',
   'delegation.requested',
   'delegation.completed',
-]);
+];
+const NARRATIVOS = new Set<string>(EVENTOS_NARRATIVOS);
 
 export interface RebuildInput {
   brief: Brief;

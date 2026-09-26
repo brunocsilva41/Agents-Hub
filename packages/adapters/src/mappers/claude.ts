@@ -59,14 +59,20 @@ export function claudeMapper(line: unknown): MappedEvent[] {
         }
       }
 
+      // O `usage` de uma linha `assistant` é PARCIAL: a mesma mensagem vem
+      // quebrada em uma linha por bloco, todas repetindo o `usage` completo, e
+      // o `result` do fim traz o total real (`total_cost_usd`). Por isso ele
+      // vai como estimativa marcada com o `message.id` — parciais do mesmo id
+      // se substituem, e o `result` substitui todas (ver `TurnCostTracker`).
       const usage = message?.['usage'] as Record<string, unknown> | undefined;
       if (usage && events.length > 0) {
         const last = events[events.length - 1];
         if (last) {
+          const messageId = typeof message?.['id'] === 'string' ? message['id'] : undefined;
           last.cost = {
-            inputTokens: numberOf(usage['input_tokens']),
-            outputTokens: numberOf(usage['output_tokens']),
-            cachedTokens: numberOf(usage['cache_read_input_tokens']),
+            ...usoDoClaude(usage),
+            provisional: true,
+            ...(messageId ? { partId: messageId } : {}),
           };
         }
       }
@@ -101,11 +107,11 @@ export function claudeMapper(line: unknown): MappedEvent[] {
           durationMs: obj['duration_ms'],
           numTurns: obj['num_turns'],
         },
+        // Fonte de verdade do turno: substitui as estimativas das linhas
+        // `assistant` em vez de somar a elas.
         cost: {
           usd: numberOf(obj['total_cost_usd']),
-          inputTokens: numberOf(usage?.['input_tokens']),
-          outputTokens: numberOf(usage?.['output_tokens']),
-          cachedTokens: numberOf(usage?.['cache_read_input_tokens']),
+          ...usoDoClaude(usage ?? {}),
         },
         raw: line,
       };
@@ -116,6 +122,21 @@ export function claudeMapper(line: unknown): MappedEvent[] {
     default:
       return [{ type: 'log', payload: { data: obj }, raw: line }];
   }
+}
+
+/** Tokens do `usage` da API da Anthropic (entrada já exclui o cache). */
+function usoDoClaude(usage: Record<string, unknown>): {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+} {
+  return {
+    inputTokens: numberOf(usage['input_tokens']),
+    outputTokens: numberOf(usage['output_tokens']),
+    cachedTokens: numberOf(usage['cache_read_input_tokens']),
+    cacheWriteTokens: numberOf(usage['cache_creation_input_tokens']),
+  };
 }
 
 /**

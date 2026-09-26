@@ -23,7 +23,9 @@ isso já existia antes deste documento e é o que torna a auditoria possível:
   `GOOGLE_SRC`, `MOONSHOT_SRC`, `XIAOMI_SRC`, `CURSOR_SRC` — constantes no topo
   do arquivo).
 - `collectedAt`: data ISO da coleta daquela linha específica.
-- `PRICING_COLLECTED_AT` (`'2026-08-27'`): data de referência do lote inteiro,
+- `PRICING_COLLECTED_AT` (`'2026-09-26'`, revisão da Fase 3.4 contra as
+  páginas oficiais; o comentário da constante lista o que mudou e o que ficou
+  sem verificação): data de referência do lote inteiro,
   exportada e citada em [`docs/referencias/precos-modelos.md`](referencias/precos-modelos.md),
   que documenta o *porquê* da tabela e o significado de `basis`/`confidence`
   (`reported` / `estimated` / `unknown`).

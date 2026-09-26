@@ -176,3 +176,116 @@ describe('compactRawBefore', () => {
     assert.equal(store.events.compactRawBefore(cutoff), 0);
   });
 });
+
+/** Sessão com `n` eventos (seq 1..n); `tipo(i)` e `custo(i)` opcionais. */
+function sessaoComEventos(
+  store: ReturnType<typeof createStore>,
+  n: number,
+  tipo: (i: number) => EventEnvelope['type'] = () => 'message',
+  custo: (i: number) => EventEnvelope['cost'] = () => null,
+): string {
+  const project = store.projects.create({
+    name: `p-${Math.random()}`,
+    path: `/p/${Math.random()}`,
+    defaultBranch: 'main',
+  });
+  const sessionId = `ses_${Math.random().toString(36).slice(2)}`;
+  store.sessions.create({
+    id: sessionId,
+    projectId: project.id,
+    agentId: 'claude',
+    nativeSessionId: null,
+    rootId: sessionId,
+    parentId: null,
+    depth: 0,
+    path: [],
+    state: 'running',
+    mode: 'semi',
+    isolation: 'none',
+    workdir: '/tmp/x',
+    title: null,
+    createdAt: '2020-01-01T00:00:00.000Z',
+    updatedAt: '2020-01-01T00:00:00.000Z',
+    endedAt: null,
+    pid: null,
+  });
+  store.transaction(() => {
+    for (let i = 1; i <= n; i += 1) {
+      store.events.append({
+        id: `evt_${sessionId}_${i}`,
+        seq: i,
+        ts: '2020-01-01T00:00:00.000Z',
+        sessionId,
+        taskId: null,
+        agentId: 'claude',
+        type: tipo(i),
+        payload: { text: `passo ${i}` },
+        cost: custo(i),
+        raw: null,
+      });
+    }
+  });
+  return sessionId;
+}
+
+/**
+ * Fase 3.3 (vistoria 2026-09-25, relatório 09): o replay e o
+ * `hub_context_fetch` pediam `limit` e recebiam os PRIMEIROS N eventos.
+ */
+describe('events.list: cauda da sessão', () => {
+  test('1000 eventos, tail + limit 400 => seq 601..1000 em ordem crescente', () => {
+    const store = createStore(':memory:');
+    const sessionId = sessaoComEventos(store, 1000);
+
+    const cauda = store.events.list({ sessionId, tail: true, limit: 400 });
+    assert.equal(cauda.length, 400);
+    assert.equal(cauda[0]?.seq, 601);
+    assert.equal(cauda.at(-1)?.seq, 1000);
+    assert.ok(cauda.every((e, i) => i === 0 || e.seq > (cauda[i - 1]?.seq ?? 0)), 'ordem crescente');
+
+    // Sem `tail` o comportamento de paginação (sinceSeq + limit) não muda.
+    const inicio = store.events.list({ sessionId, limit: 400 });
+    assert.equal(inicio[0]?.seq, 1);
+  });
+
+  test('tail combina com filtro de tipo: os últimos N narrativos, não N de ruído', () => {
+    const store = createStore(':memory:');
+    // 1000 eventos, só os múltiplos de 10 são mensagem; o resto é log.
+    const sessionId = sessaoComEventos(store, 1000, (i) => (i % 10 === 0 ? 'message' : 'log'));
+    const cauda = store.events.list({ sessionId, types: ['message'], tail: true, limit: 5 });
+    assert.deepEqual(
+      cauda.map((e) => e.seq),
+      [960, 970, 980, 990, 1000],
+    );
+  });
+
+  test('limit negativo, zero ou NaN não vira "sem limite" (LIMIT -1 do SQLite)', () => {
+    const store = createStore(':memory:');
+    const sessionId = sessaoComEventos(store, 30);
+    assert.equal(store.events.list({ sessionId, limit: -1 }).length, 1);
+    assert.equal(store.events.list({ sessionId, limit: Number.NaN }).length, 30);
+    assert.equal(store.events.list({ sessionId, limit: 10_000 }).length, 30);
+  });
+});
+
+/** Fase 3.1: estimativa parcial não entra nas somas de custo. */
+describe('costOf / graphRows ignoram custo provisório', () => {
+  test('parciais + final: soma só o final', () => {
+    const store = createStore(':memory:');
+    const sessionId = sessaoComEventos(
+      store,
+      3,
+      (i) => (i === 3 ? 'turn.completed' : 'message'),
+      (i) =>
+        i === 3
+          ? { usd: 0.1378276, inputTokens: 2, outputTokens: 4 }
+          : { usd: 0.013189, inputTokens: 2, outputTokens: 4, provisional: true, partId: 'msg_1' },
+    );
+    const custo = store.events.costOf(sessionId);
+    assert.ok(Math.abs(custo.usd - 0.1378276) < 1e-12, `US$ ${custo.usd}`);
+    assert.equal(custo.tokens, 6);
+    const [linha] = store.sessions.graphRows(sessionId);
+    assert.ok(Math.abs((linha?.usd ?? 0) - 0.1378276) < 1e-12);
+    assert.equal(linha?.tokens, 6);
+  });
+});
