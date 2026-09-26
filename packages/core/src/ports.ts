@@ -5,6 +5,7 @@ import type {
   BudgetRecord,
   Project,
   ProjectFolder,
+  ProjectHubContext,
   Session,
   SessionState,
   Task,
@@ -20,9 +21,15 @@ import type { GraphNode } from './graph.js';
  */
 
 export interface ProjectRepository {
-  create(input: Omit<Project, 'id' | 'createdAt' | 'trusted'>): Project;
-  /** Marca/desmarca o projeto como confiável (ver `Project.trusted`). */
-  setTrusted(id: string, trusted: boolean): Project | null;
+  create(input: Omit<Project, 'id' | 'createdAt' | 'trusted' | 'trustedHash'>): Project;
+  /**
+   * Marca/desmarca o projeto como confiável (ver `Project.trusted`), gravando
+   * junto o hash do conteúdo sensível que foi confiado (`Project.trustedHash`).
+   */
+  setTrusted(id: string, trusted: boolean, contentHash?: string | null): Project | null;
+  /** Contexto configurado pelo usuário via Hub (ver `ProjectHubContext`); `{}` se nenhum. */
+  getHubContext(id: string): ProjectHubContext;
+  setHubContext(id: string, ctx: ProjectHubContext): void;
   get(id: string): Project | null;
   getByPath(path: string): Project | null;
   list(): Project[];

@@ -178,9 +178,18 @@ describe('GET /discovery e POST /projects/:id/import', () => {
     assert.equal(corpo.dryRun, false);
     assert.ok(corpo.items.every((i) => i.applied));
 
-    const yaml = readFileSync(path.join(projetoPath, '.agents-hub', 'config.yaml'), 'utf8');
-    assert.match(yaml, /Explique a decisão antes de aplicar\./);
-    assert.match(yaml, /ANTHROPIC_MODEL: claude-x/);
+    // Item 1.9 do GOAL: o que o usuário importa pelo Hub vai para o banco do
+    // Hub (contexto confiável), não para o config.yaml versionado do repo.
+    const ctxRes = await fetch(`${baseUrl}/projects/${projectId}/context`);
+    const { context } = (await ctxRes.json()) as {
+      context: { prompts?: Record<string, string>; env?: Record<string, Record<string, string>> };
+    };
+    assert.match(Object.values(context.prompts ?? {}).join(' '), /Explique a decisão antes de aplicar\./);
+    assert.equal(
+      Object.values(context.env ?? {}).find((e) => e['ANTHROPIC_MODEL'] !== undefined)?.['ANTHROPIC_MODEL'],
+      'claude-x',
+    );
+    assert.equal(existsSync(path.join(projetoPath, '.agents-hub', 'config.yaml')), false);
     const cursor = readFileSync(path.join(home, '.cursor', 'mcp.json'), 'utf8');
     assert.ok(cursor.includes('"fs"'));
     assert.ok(!cursor.includes(SEGREDO));

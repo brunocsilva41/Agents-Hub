@@ -65,9 +65,10 @@ Corpo de `POST /projects/:id/import` (`strict`; campo desconhecido = 422):
 1. **Segredo nunca sai.** A resposta de `/discovery` é sanitizada no daemon mesmo que o
    leitor de um agente vaze: todo valor de env de servidor MCP vira `***` (só os nomes
    ficam) e credenciais embutidas em URL são mascaradas.
-2. **Dry-run não escreve nada** — nem `.agents-hub/config.yaml`, nem config de outro agente.
-3. **Env do projeto pela lista de permissão.** O `.agents-hub/config.yaml` é versionado;
-   por isso só entram nomes aceitos pelo filtro e nunca valores com cara de segredo.
+2. **Dry-run não escreve nada** — nem o contexto do projeto no Hub, nem config de outro agente.
+3. **Env do projeto pela lista de permissão.** Instruções e env importados vão para o
+   contexto do projeto no banco do Hub (fora do repositório, item 1.9 do GOAL); mesmo assim
+   só entram nomes aceitos pelo filtro e nunca valores com cara de segredo.
 4. **Env de servidor MCP é opt-in.** Sem `includeEnv: true` nenhuma variável é copiada
    (o `skipped` diz quais nomes ficaram de fora). Com `includeEnv`, o valor real é relido
    do arquivo de origem só na hora de gravar, e só se existir ali (a máscara `***` não

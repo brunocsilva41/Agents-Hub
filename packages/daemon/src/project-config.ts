@@ -156,6 +156,24 @@ export function loadProjectOverrides(
   };
 }
 
+/**
+ * Campos de execução do YAML do repositório SEM o filtro de confiança — só
+ * para calcular o hash do conteúdo sensível (`repo-trust.ts`). Nunca use o
+ * retorno para montar política.
+ */
+export function rawRepoExecFields(projectPath: string): {
+  command?: unknown;
+  reviewEnabled?: unknown;
+  reviewAgent?: unknown;
+} {
+  const validation = lerOverridesBrutos(projectPath).loaded.overrides.validation;
+  const campos: { command?: unknown; reviewEnabled?: unknown; reviewAgent?: unknown } = {};
+  if (validation?.command !== undefined) campos.command = validation.command;
+  if (validation?.review?.enabled !== undefined) campos.reviewEnabled = validation.review.enabled;
+  if (validation?.review?.agent !== undefined) campos.reviewAgent = validation.review.agent;
+  return campos;
+}
+
 /** Leitura crua (sem o filtro de confiança), com o cache por mtime+size. */
 function lerOverridesBrutos(projectPath: string): {
   loaded: Omit<LoadedProjectOverrides, 'ignoredExecFields'>;
@@ -184,7 +202,12 @@ function lerOverridesBrutos(projectPath: string): {
 
   try {
     const parsed = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
-    const candidato = parsed['policy'] ?? parsed;
+    // Sem bloco `policy`, a raiz é a política — menos as chaves de contexto
+    // (`memory`, `prompts`, `env`), que moram no mesmo arquivo e são lidas
+    // por `loadProjectContext`. Sem tirá-las, `.strict()` recusava como
+    // "política inválida" todo arquivo que só tinha memória/prompts/env.
+    const { memory: _m, prompts: _p, env: _e, ...semContexto } = parsed;
+    const candidato = parsed['policy'] ?? semContexto;
 
     // YAML sintaticamente válido, mas semanticamente fora do que
     // `PolicyDocument` permite (campo desconhecido, ou campo conhecido com
@@ -327,7 +350,14 @@ export function loadProjectContext(projectPath: string): LoadedProjectContext {
 }
 
 /**
- * Grava memória e prompts, preservando o resto do arquivo.
+ * Grava memória e prompts no `config.yaml` DO REPOSITÓRIO, preservando o resto
+ * do arquivo.
+ *
+ * O Hub NÃO usa mais isto para o que o usuário configura pelo painel/CLI
+ * (item 1.9 do GOAL): o que ele grava aqui vira conteúdo do repositório e só
+ * vale com `hub project trust`. O contexto do usuário mora no banco
+ * (`ProjectRegistry.setContext`). Fica como utilitário para quem QUER
+ * versionar as regras da casa junto do código.
  *
  * Reescrever o YAML inteiro a partir do que a tela conhece apagaria o bloco
  * `policy` — que é onde vivem os limites de segurança do projeto e que nenhuma

@@ -13,6 +13,7 @@ import type {
   HealthSummary,
   ProbeSummary,
   ProjectContextDto,
+  RepoConfigStatusDto,
   ProjectFolder,
   ProjectSummary,
   SessionSummary,
@@ -126,7 +127,10 @@ export class HubClient {
   }
 
   /** Marca/desmarca o projeto como confiável (libera `validation.command` do repo). */
-  async setProjectTrusted(projectId: string, trusted: boolean): Promise<{ project: ProjectSummary }> {
+  async setProjectTrusted(
+    projectId: string,
+    trusted: boolean,
+  ): Promise<{ project: ProjectSummary; repo?: RepoConfigStatusDto }> {
     return this.#post(`/projects/${idSegment(projectId, 'prj')}/trust`, { trusted });
   }
 
@@ -300,8 +304,13 @@ export class HubClient {
     );
   }
 
-  /** Memória e prompts por agente do projeto. */
-  async projectContext(projectId: string): Promise<{ context: ProjectContextDto }> {
+  /**
+   * Memória, prompts e env por agente que o usuário configurou pelo Hub
+   * (`context`), e o estado do `config.yaml` do repositório (`repo`).
+   */
+  async projectContext(
+    projectId: string,
+  ): Promise<{ context: ProjectContextDto; repo?: RepoConfigStatusDto }> {
     return this.#get(`/projects/${idSegment(projectId, 'prj')}/context`);
   }
 

@@ -17,6 +17,7 @@ import {
   type GraphNode,
   type Project,
   type ProjectFolder,
+  type ProjectHubContext,
   type ProjectRepository,
   type Session,
   type SessionRepository,
@@ -65,8 +66,14 @@ const numOrNull = (v: unknown): number | null => (v === null || v === undefined 
 class SqliteProjectRepository implements ProjectRepository {
   constructor(private readonly db: Db) {}
 
-  create(input: Omit<Project, 'id' | 'createdAt'>): Project {
-    const project: Project = { ...input, id: newId('prj'), createdAt: nowIso(), trusted: false };
+  create(input: Omit<Project, 'id' | 'createdAt' | 'trusted' | 'trustedHash'>): Project {
+    const project: Project = {
+      ...input,
+      id: newId('prj'),
+      createdAt: nowIso(),
+      trusted: false,
+      trustedHash: null,
+    };
     this.db
       .prepare(
         `INSERT INTO projects (id, name, path, default_branch, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -80,9 +87,32 @@ class SqliteProjectRepository implements ProjectRepository {
     return row ? mapProject(row) : null;
   }
 
-  setTrusted(id: string, trusted: boolean): Project | null {
-    this.db.prepare('UPDATE projects SET trusted = ? WHERE id = ?').run(trusted ? 1 : 0, id);
+  setTrusted(id: string, trusted: boolean, contentHash: string | null = null): Project | null {
+    // Desconfiar apaga o hash: uma confiança nova sempre grava o conteúdo de agora.
+    this.db
+      .prepare('UPDATE projects SET trusted = ?, trusted_hash = ? WHERE id = ?')
+      .run(trusted ? 1 : 0, trusted ? contentHash : null, id);
     return this.get(id);
+  }
+
+  getHubContext(id: string): ProjectHubContext {
+    const row = one<Row>(this.db.prepare('SELECT hub_context FROM projects WHERE id = ?'), id);
+    const bruto = row ? strOrNull(row['hub_context']) : null;
+    if (!bruto) return {};
+    try {
+      const parsed: unknown = JSON.parse(bruto);
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as ProjectHubContext)
+        : {};
+    } catch {
+      // Coluna corrompida não derruba o daemon: o contexto só some, como um
+      // YAML quebrado faz com o do repositório.
+      return {};
+    }
+  }
+
+  setHubContext(id: string, ctx: ProjectHubContext): void {
+    this.db.prepare('UPDATE projects SET hub_context = ? WHERE id = ?').run(JSON.stringify(ctx), id);
   }
 
   getByPath(p: string): Project | null {
@@ -658,6 +688,7 @@ function mapProject(row: Row): Project {
     createdAt: str(row['created_at']),
     // Mesmo cuidado de `isPrimary`: só `1` é verdadeiro.
     trusted: Number(row['trusted']) === 1,
+    trustedHash: strOrNull(row['trusted_hash']),
   };
 }
 

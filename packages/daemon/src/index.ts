@@ -37,6 +37,14 @@ export {
   type LoadedProjectOverrides,
   type LoadProjectOverridesOptions,
 } from './project-config.js';
+export {
+  evaluateRepoTrust,
+  effectiveProjectContext,
+  repoSensitiveContent,
+  repoTrustWarning,
+  type RepoTrust,
+  type RepoTrustState,
+} from './repo-trust.js';
 export { runValidation } from './validation.js';
 export { interpretarRevisao } from './review-verdict.js';
 export { captureDiff, persistDiff, type DiffCapture } from './diff-capture.js';

@@ -377,11 +377,11 @@ export class HubServer {
     // banco do Hub, fora do repo — ver `ProjectRegistry.setTrusted`.
     this.#route('POST', '/projects/:id/trust', async (req, res, params) => {
       const body = await readBody(req, ProjectTrustSchema);
+      const projectId = param(params['id'], ProjectIdSchema, 'id');
       sendJson(res, 200, {
-        project: this.sessions.setProjectTrusted(
-          param(params['id'], ProjectIdSchema, 'id'),
-          body.trusted,
-        ),
+        project: this.sessions.setProjectTrusted(projectId, body.trusted),
+        // O que acabou de ser confiado (ou não), para a CLI mostrar.
+        repo: this.sessions.getProjectRepoStatus(projectId),
       });
     });
 
@@ -414,9 +414,15 @@ export class HubServer {
 
     // Memória e prompts do projeto. Vivem no daemon, e não no navegador,
     // porque precisam valer também para a sessão que um agente delega a outro.
+    //
+    // `context` é SÓ o que o usuário configurou pelo Hub (banco); `repo` é o
+    // `.agents-hub/config.yaml` do repositório, com o estado da confiança —
+    // separados para o PUT nunca promover conteúdo do repo a confiável.
     this.#route('GET', '/projects/:id/context', (_req, res, params) => {
+      const projectId = param(params['id'], ProjectIdSchema, 'id');
       sendJson(res, 200, {
-        context: this.sessions.getProjectContext(param(params['id'], ProjectIdSchema, 'id')),
+        context: this.sessions.getProjectContext(projectId),
+        repo: this.sessions.getProjectRepoStatus(projectId),
       });
     });
 

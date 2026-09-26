@@ -177,4 +177,20 @@ CREATE INDEX idx_sessions_ended ON sessions(ended_at);
 ALTER TABLE projects ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0;
 `,
   },
+  {
+    version: 6,
+    name: 'confianca com hash e contexto do hub',
+    sql: `
+-- Item 1.9 do GOAL (vistoria 2026-09-25): \`env\` (\`*_BASE_URL\`), \`prompts\` e
+-- \`memory\` do \`.agents-hub/config.yaml\` do repositório também precisam de
+-- confiança, e ela é trust-on-first-use: grava-se o hash do conteúdo sensível
+-- confiado; se o repo mudar esse conteúdo, a confiança fica suspensa até o
+-- usuário reconfirmar. NULL = confiança anterior ao hash (também suspensa).
+ALTER TABLE projects ADD COLUMN trusted_hash TEXT;
+-- Contexto (memória, instruções, env por agente) configurado PELO USUÁRIO no
+-- Hub — painel, \`hub project env|prompt\`, \`hub import\`. Mora aqui, fora do
+-- repositório, e por isso é confiável sem \`hub project trust\`. JSON.
+ALTER TABLE projects ADD COLUMN hub_context TEXT;
+`,
+  },
 ];

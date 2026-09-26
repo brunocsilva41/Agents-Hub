@@ -1,6 +1,25 @@
 import path from 'node:path';
 import { HubError, validarNovaPasta, type Project, type ProjectFolder, type UnitOfWork } from '@agents-hub/core';
-import { loadProjectContext, saveProjectContext, type ProjectContext } from './project-config.js';
+import { loadProjectContext, projectConfigPath, type ProjectContext } from './project-config.js';
+import {
+  evaluateRepoTrust,
+  repoSensitiveContent,
+  repoTrustWarning,
+  sanitizeHubContext,
+  type RepoTrustState,
+} from './repo-trust.js';
+
+/** Como está o `.agents-hub/config.yaml` do repositório, para o painel/CLI. */
+export interface RepoConfigStatus {
+  path: string;
+  trust: RepoTrustState;
+  /** Campos sensíveis declarados no repositório (ver `RepoTrust.sensitiveFields`). */
+  sensitiveFields: string[];
+  /** Aviso quando campos do repositório estão sendo ignorados; `null` se nada. */
+  warning: string | null;
+  /** O contexto declarado no repositório — para revisar ANTES de confiar. */
+  context: ProjectContext;
+}
 
 /**
  * CRUD de projetos e pastas — extraído de `session-manager.ts` (dívida
@@ -81,16 +100,21 @@ export class ProjectRegistry {
   /**
    * Marca (ou desmarca) o projeto como confiável NESTA máquina.
    *
-   * É o único caminho para `validation.command` e a revisão declarados no
-   * `.agents-hub/config.yaml` do repositório passarem a valer: esses campos
-   * viram processo, e o arquivo é versionado — sem confiança explícita,
+   * É o único caminho para os campos sensíveis do `.agents-hub/config.yaml`
+   * do repositório passarem a valer — `validation.command`/revisão (viram
+   * processo), `env` (destino de rede e credenciais), `prompts` e `memory`
+   * (instruções ao agente; ver `repo-trust.ts`). O arquivo é versionado — sem confiança explícita,
    * clonar um repo malicioso bastaria para executar código. A marca mora no
    * banco do Hub, fora do repo, então o repositório não consegue se
    * autodeclarar confiável.
    */
   setTrusted(projectId: string, trusted: boolean): Project {
-    this.get(projectId);
-    const atualizado = this.store.projects.setTrusted(projectId, trusted);
+    const project = this.get(projectId);
+    // Trust-on-first-use: confia-se no conteúdo sensível DE AGORA (hash). Se o
+    // repo mudar `env`/`prompts`/`memory`/`validation.command` depois, a
+    // confiança fica suspensa até este comando rodar de novo (`repo-trust.ts`).
+    const hash = trusted ? repoSensitiveContent(project.path).contentHash : null;
+    const atualizado = this.store.projects.setTrusted(projectId, trusted, hash);
     if (!atualizado) {
       throw new HubError('PROJECT_NOT_FOUND', `Projeto ${projectId} não encontrado`, {
         projectId,
@@ -99,16 +123,42 @@ export class ProjectRegistry {
     return atualizado;
   }
 
-  /** Memória e prompts do projeto, como estão no arquivo. */
+  /**
+   * Memória, instruções e env que o USUÁRIO configurou pelo Hub (painel,
+   * `hub project env|prompt`, `hub import`).
+   *
+   * Só a camada do Hub — nunca o que veio do repositório. Devolver o efetivo
+   * faria o painel/CLI (que leem, editam e gravam de volta o objeto inteiro)
+   * "lavar" um `ANTHROPIC_BASE_URL` do repo não confiável para a camada
+   * confiável na primeira gravação. O do repositório sai em `repoStatus`.
+   */
   getContext(projectId: string): ProjectContext {
-    return loadProjectContext(this.get(projectId).path).ctx;
+    this.get(projectId);
+    return this.store.projects.getHubContext(projectId);
   }
 
-  /** Grava memória e prompts, preservando o bloco de política do arquivo. */
+  /**
+   * Grava o contexto do usuário no banco do Hub — fora do repositório (item
+   * 1.9 do GOAL). Antes ia para `<repo>/.agents-hub/config.yaml`, onde ficava
+   * indistinguível do que um repo clonado declara.
+   */
   setContext(projectId: string, ctx: ProjectContext): ProjectContext {
+    this.get(projectId);
+    this.store.projects.setHubContext(projectId, sanitizeHubContext(ctx));
+    return this.store.projects.getHubContext(projectId);
+  }
+
+  /** Estado do `config.yaml` do repositório: confiança, campos sensíveis, aviso. */
+  repoStatus(projectId: string): RepoConfigStatus {
     const project = this.get(projectId);
-    saveProjectContext(project.path, ctx);
-    return loadProjectContext(project.path).ctx;
+    const trust = evaluateRepoTrust(project);
+    return {
+      path: projectConfigPath(project.path),
+      trust: trust.state,
+      sensitiveFields: trust.sensitiveFields,
+      warning: repoTrustWarning(project.path, trust),
+      context: loadProjectContext(project.path).ctx,
+    };
   }
 
   listFolders(projectId: string): ProjectFolder[] {
