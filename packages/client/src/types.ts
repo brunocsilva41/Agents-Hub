@@ -106,7 +106,6 @@ export interface HealthSummary {
   ok: boolean;
   version: string;
   now: string;
-  home: string;
   liveSessions: number;
   subscribers: number;
 }

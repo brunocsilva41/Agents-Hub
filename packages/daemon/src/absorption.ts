@@ -39,14 +39,98 @@ const MASK = '***';
 
 // ------------------------------------------------------------- sanitização
 
-/** Troca credencial embutida em URL (`user:senha@`, `?token=`) por máscara. */
+/**
+ * Troca credencial embutida em URL por máscara: `user:senha@` e o VALOR de
+ * todo parâmetro de query/fragmento. Lista de nomes "perigosos" não basta —
+ * `?sig=`, `?sas=`, `?code=`, `#access_token=` escapavam — e para exibir no
+ * painel o nome do parâmetro já diz tudo que o usuário precisa.
+ */
 export function redactUrl(value: string): string {
   return value
     .replace(/\/\/[^/@\s]*@/, `//${MASK}@`)
-    .replace(/([?&](?:key|token|api_key|apikey|access_token|secret)=)[^&\s]*/gi, `$1${MASK}`);
+    .replace(/([?&#][^=&#\s]*=)[^&#\s]*/g, `$1${MASK}`);
 }
 
-/** Cópia da descoberta com QUALQUER valor de env mascarado. Defesa em profundidade. */
+/** Nome de flag/variável/cabeçalho que costuma carregar credencial. */
+const NOME_SENSIVEL =
+  /(key|token|secret|passw|pwd|auth|bearer|credential|cookie|session|signature|\bsig\b)/i;
+/** Flags cujo valor é um cabeçalho HTTP inteiro (`mcp-remote --header`, `curl -H`). */
+const FLAG_DE_CABECALHO = /^(--headers?|-H)$/i;
+/** Token em texto livre: `Bearer xxx`, `Basic xxx`, chaves com prefixo conhecido. */
+const TOKEN_EM_TEXTO =
+  /\b(Bearer|Basic|Token)\s+\S+|\b(sk|pk|rk)-[A-Za-z0-9_-]{6,}|\b(ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_]{6,}|\bxox[abprs]-[A-Za-z0-9-]{6,}|\bAKIA[0-9A-Z]{8,}|\bAIza[0-9A-Za-z_-]{20,}/g;
+
+/** `Authorization: Bearer x` → `Authorization: ***`. Cabeçalho em args quase sempre é credencial. */
+function redactHeaderLine(linha: string): string {
+  const m = /^([^:]+):\s*(.*)$/s.exec(linha);
+  return m ? `${m[1]}: ${MASK}` : MASK;
+}
+
+function redactTexto(texto: string): string {
+  if (looksLikeSecret(texto)) return MASK;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(texto)) return redactUrl(texto).replace(TOKEN_EM_TEXTO, MASK);
+  return texto.replace(TOKEN_EM_TEXTO, MASK);
+}
+
+/**
+ * Args de servidor MCP sem segredo. Antes saíam intactos em `/discovery`:
+ * `--api-key sk-...`, `--header "Authorization: Bearer ..."`, `--token=...`.
+ */
+export function redactArgs(args: readonly string[]): string[] {
+  const out: string[] = [];
+  let proximo: 'segredo' | 'cabecalho' | null = null;
+  for (const bruto of args) {
+    const a = typeof bruto === 'string' ? bruto : String(bruto);
+    if (proximo === 'segredo') {
+      out.push(MASK);
+      proximo = null;
+      continue;
+    }
+    if (proximo === 'cabecalho') {
+      out.push(redactHeaderLine(a));
+      proximo = null;
+      continue;
+    }
+
+    const flagIgual = /^(--?[\w.-]+)=(.*)$/s.exec(a);
+    if (flagIgual) {
+      const [, flag = '', valor = ''] = flagIgual;
+      if (FLAG_DE_CABECALHO.test(flag)) out.push(`${flag}=${redactHeaderLine(valor)}`);
+      else if (NOME_SENSIVEL.test(flag)) out.push(`${flag}=${MASK}`);
+      else out.push(`${flag}=${redactTexto(valor)}`);
+      continue;
+    }
+    if (/^--?[\w.-]+$/.test(a)) {
+      if (FLAG_DE_CABECALHO.test(a)) proximo = 'cabecalho';
+      else if (NOME_SENSIVEL.test(a)) proximo = 'segredo';
+      out.push(a);
+      continue;
+    }
+    const kv = /^([A-Za-z_][\w.-]*)=(.*)$/s.exec(a);
+    if (kv && NOME_SENSIVEL.test(kv[1] ?? '')) {
+      out.push(`${kv[1]}=${MASK}`);
+      continue;
+    }
+    const cabecalho = /^([A-Za-z][\w-]*):\s+\S/.exec(a);
+    if (cabecalho && NOME_SENSIVEL.test(cabecalho[1] ?? '')) {
+      out.push(redactHeaderLine(a));
+      continue;
+    }
+    out.push(redactTexto(a));
+  }
+  return out;
+}
+
+function mascararValores(obj: unknown): Record<string, string> | undefined {
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return undefined;
+  return Object.fromEntries(Object.keys(obj).map((k) => [k, MASK]));
+}
+
+/**
+ * Cópia da descoberta sem segredo: env e headers com QUALQUER valor
+ * mascarado, args e URLs saneados. Defesa em profundidade — vale mesmo que o
+ * leitor de um agente esqueça de mascarar.
+ */
 export function sanitizeDiscovery(d: AgentDiscovery): AgentDiscovery {
   return {
     ...d,
@@ -54,13 +138,19 @@ export function sanitizeDiscovery(d: AgentDiscovery): AgentDiscovery {
       ...d.defaults,
       ...(d.defaults.baseUrl !== undefined ? { baseUrl: redactUrl(d.defaults.baseUrl) } : {}),
     },
-    mcpServers: d.mcpServers.map((s) => ({
-      ...s,
-      ...(s.url !== undefined ? { url: redactUrl(s.url) } : {}),
-      ...(s.env !== undefined
-        ? { env: Object.fromEntries(Object.keys(s.env).map((k) => [k, MASK])) }
-        : {}),
-    })),
+    mcpServers: d.mcpServers.map((s) => {
+      // `headers` não está no contrato, mas um leitor pode repassá-lo cru
+      // (`...spec`); se vier, só os NOMES saem.
+      const extra = s as typeof s & { headers?: unknown };
+      const headers = extra.headers !== undefined ? mascararValores(extra.headers) : undefined;
+      return {
+        ...s,
+        ...(s.args !== undefined ? { args: redactArgs(s.args) } : {}),
+        ...(s.url !== undefined ? { url: redactUrl(s.url) } : {}),
+        ...(s.env !== undefined ? { env: mascararValores(s.env) ?? {} } : {}),
+        ...(extra.headers !== undefined ? { headers: headers ?? {} } : {}),
+      };
+    }),
   };
 }
 

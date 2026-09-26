@@ -196,7 +196,7 @@ async function main(): Promise<void> {
     case 'stop':
       return stopDaemon(client);
     case 'status':
-      return withDaemon(() => status(client));
+      return withDaemon(() => status(client, config.home));
     case 'health':
       return withDaemon(async () => {
         console.log(JSON.stringify(await client.health(), null, 2));
@@ -1121,7 +1121,7 @@ async function stopDaemon(client: HubClient): Promise<void> {
 }
 
 /** Uma tela com tudo que importa saber antes de começar a trabalhar. */
-async function status(client: HubClient): Promise<void> {
+async function status(client: HubClient, home: string): Promise<void> {
   const [saude, { agents }, { sessions }, { approvals }] = await Promise.all([
     client.health(),
     client.agents(),
@@ -1132,7 +1132,9 @@ async function status(client: HubClient): Promise<void> {
   const disponiveis = agents.filter((a) => a.probe?.installed === true);
   const vivas = sessions.filter((s) => s.state === 'running' || s.state === 'waiting_approval');
 
-  console.log(`${green('●')} daemon no ar ${dim(saude.home)}`);
+  // `home` vem do config local da CLI: o `/health` deixou de expor o caminho
+  // do usuário.
+  console.log(`${green('●')} daemon no ar ${dim(`v${saude.version} · ${home}`)}`);
   console.log(
     `${dim('agentes:  ')} ${disponiveis.length}/${agents.length} disponíveis ${dim(
       disponiveis.map((a) => a.id).join(', '),

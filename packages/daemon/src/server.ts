@@ -6,6 +6,8 @@ import type { AgentRegistry } from '@agents-hub/adapters';
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { guardRequest } from './guard.js';
+import { decodificarSegmento, ehErroDeUrl, readJsonBody } from './http-body.js';
+import { validarDiretorioDeProjeto } from './project-path.js';
 import { explainToAgent, toHookPermission } from './pretool-gate.js';
 import { generateApiDescriptor, formatTaskResponse } from './api-tasks.js';
 import {
@@ -116,7 +118,12 @@ export class HubServer {
 
   listen(): Promise<{ host: string; port: number }> {
     return new Promise((resolve, reject) => {
-      const server = createServer((req, res) => void this.#dispatch(req, res));
+      // `.catch`: sem ele, qualquer exceção fora do `try` das rotas (URL
+      // malformada, por exemplo) virava promessa rejeitada sem tratamento e
+      // a conexão ficava pendurada até o cliente desistir.
+      const server = createServer((req, res) => {
+        this.#dispatch(req, res).catch((err: unknown) => falhaDeDespacho(res, err));
+      });
       server.on('error', reject);
       server.listen(this.config.port, this.config.host, () => {
         this.#server = server;
@@ -168,7 +175,7 @@ export class HubServer {
 
       const params: Record<string, string> = {};
       route.keys.forEach((key, i) => {
-        params[key] = decodeURIComponent(match[i + 1] ?? '');
+        params[key] = decodificarSegmento(match[i + 1] ?? '');
       });
 
       try {
@@ -192,7 +199,8 @@ export class HubServer {
         ok: true,
         version: '0.1.0',
         now: nowIso(),
-        home: this.config.home,
+        // `home` NÃO sai aqui: é o caminho absoluto do usuário (revela o nome
+        // da conta) e nenhum cliente precisa dele — a CLI lê o próprio config.
         liveSessions: this.sessions.liveCount(),
         subscribers: this.bus.subscriberCount,
       });
@@ -264,7 +272,11 @@ export class HubServer {
       const body = await readBody(req, CreateTaskSchema);
       const projectId =
         body.projectId ??
-        this.sessions.registerProject(body.projectPath ?? process.cwd()).id;
+        this.sessions.registerProject(
+          body.projectPath !== undefined
+            ? validarDiretorioDeProjeto(body.projectPath, 'projectPath')
+            : process.cwd(),
+        ).id;
 
       const result = await this.sessions.start({
         projectId,
@@ -351,7 +363,8 @@ export class HubServer {
 
     this.#route('POST', '/projects', async (req, res) => {
       const body = await readBody(req, CreateProjectSchema);
-      sendJson(res, 201, { project: this.sessions.registerProject(body.path, body.name) });
+      const dir = validarDiretorioDeProjeto(body.path);
+      sendJson(res, 201, { project: this.sessions.registerProject(dir, body.name) });
     });
 
     // Pastas do projeto. Um projeto agrupa N pastas; a sessão roda em UMA
@@ -367,7 +380,7 @@ export class HubServer {
       sendJson(res, 201, {
         folder: this.sessions.addProjectFolder(
           param(params['id'], ProjectIdSchema, 'id'),
-          body.path,
+          validarDiretorioDeProjeto(body.path),
           body.label,
         ),
       });
@@ -448,7 +461,12 @@ export class HubServer {
       const body = await readBody(req, AdoptSessionSchema);
 
       const projectId =
-        body.projectId ?? this.sessions.registerProject(body.projectPath ?? process.cwd()).id;
+        body.projectId ??
+        this.sessions.registerProject(
+          body.projectPath !== undefined
+            ? validarDiretorioDeProjeto(body.projectPath, 'projectPath')
+            : process.cwd(),
+        ).id;
 
       sendJson(res, 201, {
         session: this.sessions.adoptExternal({
@@ -756,6 +774,10 @@ function sendError(res: ServerResponse, err: unknown): void {
     sendJson(res, statusFor(err.code), { error: err.toJSON() });
     return;
   }
+  if (ehErroDeUrl(err)) {
+    sendJson(res, 400, { error: { code: 'MALFORMED_URL', message: 'URL malformada' } });
+    return;
+  }
   sendJson(res, 500, {
     error: { code: 'INTERNAL', message: (err as Error).message ?? 'erro desconhecido' },
   });
@@ -782,7 +804,12 @@ export function statusFor(code: string): number {
     case 'TIMEOUT':
       return 504;
     case 'INVALID_QUERY':
+    case 'INVALID_JSON':
+    case 'INVALID_PATH':
+    case 'MALFORMED_URL':
       return 400;
+    case 'PAYLOAD_TOO_LARGE':
+      return 413;
     case 'AGENT_NOT_INSTALLED':
     case 'AGENT_NOT_AUTHENTICATED':
     case 'CAPABILITY_UNRESOLVED':
@@ -805,7 +832,7 @@ export function statusFor(code: string): number {
  * virar exceção obscura no meio do domínio.
  */
 async function readBody<T>(req: IncomingMessage, schema: ZodType<T>): Promise<T> {
-  const raw = await readJson<unknown>(req);
+  const raw = await readJsonBody(req);
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
     throw new HubError('INVALID_BRIEF', 'corpo da requisição inválido', {
@@ -827,15 +854,18 @@ function param<T>(valor: string | undefined, schema: ZodType<T>, nome: string): 
   return parsed.data;
 }
 
-async function readJson<T>(req: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    const buf = chunk as Buffer;
-    size += buf.length;
-    if (size > 5_000_000) throw new Error('corpo da requisição maior que 5 MB');
-    chunks.push(buf);
+/**
+ * Último recurso quando o despacho falha FORA do `try` das rotas: responde em
+ * vez de deixar a conexão pendurada. Se o cabeçalho já saiu, só encerra.
+ */
+function falhaDeDespacho(res: ServerResponse, err: unknown): void {
+  if (res.headersSent) {
+    res.destroy();
+    return;
   }
-  const raw = Buffer.concat(chunks).toString('utf8');
-  return raw.length === 0 ? ({} as T) : (JSON.parse(raw) as T);
+  try {
+    sendError(res, err);
+  } catch {
+    res.destroy();
+  }
 }
