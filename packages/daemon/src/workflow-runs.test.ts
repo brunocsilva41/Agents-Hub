@@ -70,11 +70,13 @@ steps:
 function hostFalso(opts: { ticks?: number; bloquear?: string } = {}) {
   const tarefas = new Map<string, { agente: string; consultas: number }>();
   const inicios: string[] = [];
+  const bases = new Map<string, string[] | undefined>();
   let n = 0;
   const host: WorkflowHost = {
     async start(input) {
       n += 1;
       const id = `ses_f${n}`;
+      bases.set(String(input.brief['agent']), input.baseSessionIds);
       tarefas.set(id, { agente: String(input.brief['agent']), consultas: 0 });
       inicios.push(`${String(input.brief['agent'])}:${id}`);
       return { session: { id }, task: { id: `tsk_f${n}` } };
@@ -96,7 +98,7 @@ function hostFalso(opts: { ticks?: number; bloquear?: string } = {}) {
     budget: () => ({ consumed: { usd: 0.25 } }),
     getProject: () => ({}),
   };
-  return { host, inicios };
+  return { host, inicios, bases };
 }
 
 async function ate(cond: () => boolean, ms = 3000): Promise<void> {
@@ -129,6 +131,19 @@ describe('WorkflowRunner', () => {
     // Teto repartido: o plano leva o saldo inteiro do seu lote.
     assert.equal(fim.steps[0]?.capUsd, 3);
     assert.deepEqual(runner.list().map((r) => r.id), [run.id]);
+  });
+
+  test('passo dependente em worktree parte do branch hub/<id> da dependência (baseSessionIds)', async () => {
+    // Vistoria 2026-09-25, demo ampliada (8.3): pelo painel/API o segundo
+    // passo nascia do HEAD do projeto — só o resumo chegava, o código não.
+    const { host, bases } = hostFalso();
+    const runner = new WorkflowRunner(host, { intervaloMs: 1 });
+    const yaml = DOIS_PASSOS.replace(/(objective: [^\n]+)/g, '$1\n    isolation: worktree');
+    const run = runner.start({ yaml, projectId: 'prj_a' });
+    await ate(() => runner.get(run.id).state !== 'running');
+    assert.equal(runner.get(run.id).state, 'completed');
+    assert.equal(bases.get('claude'), undefined, 'o primeiro passo não tem de onde partir');
+    assert.deepEqual(bases.get('codex'), ['ses_f1']);
   });
 
   test('passo parado em aprovação fica `blocked` e o dependente é pulado', async () => {

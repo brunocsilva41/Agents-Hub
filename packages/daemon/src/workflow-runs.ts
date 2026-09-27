@@ -138,6 +138,8 @@ export interface WorkflowHost {
     agentId: string;
     brief: Record<string, unknown>;
     title?: string;
+    /** Sessões de cujo branch `hub/<id>` o worktree do passo nasce. */
+    baseSessionIds?: string[];
   }): Promise<{ session: { id: string }; task: { id: string } }>;
   listTasks(sessionId: string): Array<{
     state: string;
@@ -257,7 +259,7 @@ export class WorkflowRunner {
         workflow,
         run.batches,
         {
-          start: async ({ step, upstream, capUsd }) => {
+          start: async ({ step, upstream, capUsd, baseSessionIds }) => {
             if (this.#fechado) throw new Error('o daemon está encerrando');
             const res = await this.host.start({
               projectId: run.projectId,
@@ -276,6 +278,10 @@ export class WorkflowRunner {
                 supervision: step.supervision ?? 'semi',
               },
               title: `[${workflow.name}] Step: ${step.id}`,
+              // Sem isto o passo dependente nascia do HEAD do projeto, não do
+              // código que a dependência produziu (a CLI já passava; o painel
+              // não) — o `upstream` acima leva só o resumo.
+              ...(baseSessionIds.length > 0 ? { baseSessionIds } : {}),
             });
             return { sessionId: res.session.id, taskId: res.task.id };
           },

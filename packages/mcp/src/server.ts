@@ -746,7 +746,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         const { project: proj } = await client.addProject(project ?? process.cwd());
 
         const deps: WorkflowRunDeps = {
-          start: async ({ step, upstream, capUsd }) => {
+          start: async ({ step, upstream, capUsd, baseSessionIds }) => {
             const res = await client.startSession({
               projectId: proj.id,
               brief: {
@@ -763,6 +763,9 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
                 supervision: step.supervision ?? 'semi',
               },
               title: `[${workflow.name}] Step: ${step.id}`,
+              // O CÓDIGO da dependência (branch `hub/<id>`), não só o resumo em
+              // `upstream` — sem isto o passo em worktree nascia do HEAD.
+              ...(baseSessionIds.length > 0 ? { baseSessionIds } : {}),
             });
             return { sessionId: res.session.id, taskId: res.task.id };
           },

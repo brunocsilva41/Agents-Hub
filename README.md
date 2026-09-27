@@ -74,7 +74,7 @@ hub graph <rootId>
 npm run build && npm run demo
 ```
 
-Sobe um daemon isolado (home temporária, porta efêmera; não toca em `~/.agents-hub` nem na porta 4747) com três agentes falsos (raiz, filho, neto) e percorre o fluxo principal só por HTTP: abre a sessão-raiz, delega raiz → filho → neto (profundidade 2), espera os estados terminais e imprime o grafo com estado e custo. Também confere que o painel (`GET /`) e `/health` respondem. Cada passo sai como `PASS`/`FAIL`, o código de saída é 0 só se tudo passou, e o daemon e o temp são removidos ao final, mesmo em falha. Custo: zero, nenhum agente real é chamado.
+Sobe um daemon isolado (home temporária, porta efêmera; não toca em `~/.agents-hub` nem na porta 4747) com agentes falsos em Node e percorre, só por HTTP: delegação raiz → filho → neto, painel (`GET /` com o cookie de operador na navegação), token de operador (rota protegida sem token → 401), gate pré-execução (aprovar → `allow`, negar → `deny` com a sessão viva), cancel, interrupt/pause + `send` retomando, fallback depois de um 429, workflow de 2 passos em que o segundo parte do branch `hub/<id>` do primeiro, custo sem dupla contagem e estouro com aprovação, handoff, prune preservando o trabalho no branch e `.agents-hub/config.yaml` de repositório não confiável ignorado (com aviso). Cada checagem sai como `PASS`/`FAIL`, o total como `N/N`, o código de saída é 0 só se tudo passou, e o daemon e o temp são removidos ao final, mesmo em falha. Leva uns 20 s. Custo: zero, nenhum agente real é chamado.
 
 ## Usar o que você já tem instalado
 
@@ -246,11 +246,12 @@ A descoberta dos arquivos de teste é feita em JavaScript (`scripts/run-tests.mj
 
 Os testes de domínio cobrem o que não pode quebrar em silêncio: não-escalação de privilégio, herança de orçamento e detecção de ciclo no grafo de delegação.
 
-Contra os agentes de verdade, que gastam tokens:
+Smoke do MCP server por stdio (JSON-RPC de verdade, como um agente hospedeiro):
 
 ```bash
-python scripts/mcp-smoke.py                    # MCP, só leitura, sem custo
-python scripts/mcp-smoke.py --delegate codex   # delega de verdade
+python scripts/mcp-smoke.py                                  # daemon isolado próprio + agentes falsos: as 16 tools, custo zero
+python scripts/mcp-smoke.py --url http://127.0.0.1:PORTA     # daemon já no ar (ou AGENTS_HUB_URL): só leitura
+python scripts/mcp-smoke.py --url ... --delegate codex       # delega de verdade (gasta tokens)
 ```
 
 Como contribuir, e o que precisa ser verdade para um item do roadmap receber `[x]`: [CONTRIBUTING.md](CONTRIBUTING.md). Modelo de ameaça e o que o Hub explicitamente **não** garante: [SECURITY.md](SECURITY.md).
