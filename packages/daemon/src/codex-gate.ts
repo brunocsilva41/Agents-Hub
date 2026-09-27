@@ -182,14 +182,24 @@ export function montarConfigDoGate(
   const args = ['-c', hooks];
 
   if (!permitirBypassDeConfianca) {
+    // O aviso antigo mandava "conceder a confiança no TUI do Codex uma vez" —
+    // caminho que não existe para o Hub (vistoria 11, R11-05): a confiança do
+    // TUI é gravada por hook (hash), o comando do hook do Hub muda a cada
+    // sessão (leva `--session <id>`) e o Hub não tem como verificar confiança
+    // alheia, então `garantido` continuaria falso e o supervised, recusado.
+    // Sondado na 0.155.0 (`codex --help`/`codex exec --help`): não há
+    // subcomando de confiança de hook nem `--ask-for-approval` no `exec`; o
+    // `--sandbox read-only` não substitui o gate (leituras e comandos seguem
+    // sem passar pela política). Resta o opt-in explícito do usuário.
     return {
       args,
       garantido: false,
       aviso:
         'o hook do gate foi configurado, mas o Codex só executa hook confiável — e hook não confiável ' +
-        'é IGNORADO EM SILÊNCIO, com a ferramenta rodando normalmente. Sem a confiança concedida, ' +
-        'esta sessão não tem prevenção. Conceda a confiança no TUI do Codex uma vez, ou autorize o ' +
-        'bypass para esta invocação.',
+        'é IGNORADO EM SILÊNCIO, com a ferramenta rodando normalmente. Sem a confiança, esta sessão não ' +
+        'tem prevenção. Para ligar: rode "hub hooks install codex --write" (autoriza o Codex a rodar SÓ o ' +
+        'hook do Hub sem a revisão do TUI; o hook só consegue negar, nunca liberar) e reinicie o daemon; ' +
+        'ou rode o Codex em --mode semi/autonomous, sem a promessa de prevenção.',
     };
   }
 

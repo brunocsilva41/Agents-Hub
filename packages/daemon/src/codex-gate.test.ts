@@ -22,6 +22,16 @@ describe('configuração do gate do Codex', () => {
     assert.match(String(config.aviso), /IGNORADO EM SIL[ÊE]NCIO/i);
   });
 
+  test('a recusa ensina o caminho que FUNCIONA, não a confiança do TUI (R11-05)', () => {
+    // O aviso antigo mandava conceder a confiança no TUI do Codex — que o Hub
+    // não detecta (e o comando muda por sessão), então o supervised seguia
+    // recusado depois de o usuário obedecer.
+    const aviso = String(montarConfigDoGate(ALVO, false).aviso);
+    assert.match(aviso, /hub hooks install codex --write/);
+    assert.match(aviso, /--mode semi\/autonomous/);
+    assert.doesNotMatch(aviso, /Conceda a confiança no TUI/i);
+  });
+
   test('com bypass autorizado, o gate é garantido e a flag entra', () => {
     const config = montarConfigDoGate(ALVO, true);
     assert.equal(config.garantido, true);
