@@ -1,5 +1,9 @@
 name: Pipeline de Refatoração e Testes Multi-Agente
-description: Orquestra Claude, Codex e OpenCode em um DAG com passos sequenciais e paralelos
+# Os quatro passos formam uma CADEIA (cada um depende do anterior): 4 lotes de
+# 1 passo, nada roda em paralelo. Passos sem dependência entre si cairiam no
+# mesmo lote e rodariam juntos (`hub workflow validate` mostra os lotes).
+description: Orquestra Claude, Codex e OpenCode em uma cadeia de passos sequenciais
+
 version: "1.0"
 
 steps:

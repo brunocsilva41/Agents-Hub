@@ -2,12 +2,23 @@
 
 Ordem derivada do ADR 04.4: **vertical fina primeiro**. Cada fase termina com algo que roda de verdade.
 
-> **Leia junto:** [07 — Progresso real](07-progresso-real.md) confere cada caixa deste
-> arquivo contra o código, o binário e o banco. Onde os dois discordarem, o 07 é a
-> fonte — ele foi verificado, este aqui foi declarado. As caixas da Fase 3 abaixo já
-> foram corrigidas a partir dele. [08 — Endurecimento](08-endurecimento.md) faz o
-> mesmo pelo processo e pela operação: o que impede o repositório de quebrar sem
-> ninguém perceber, e o que quebra quando o daemon roda por dias.
+> **Estado atual (2026-09-26):** o acompanhamento vivo está em
+> [`vistoria-2026-09-25/STATUS.md`](vistoria-2026-09-25/STATUS.md) (execução do
+> [GOAL](12-goal-mvp-completo.md), item a item, com commit e teste) e
+> [`vistoria-2026-09-25/INVENTARIO.md`](vistoria-2026-09-25/INVENTARIO.md) (225 achados da
+> vistoria de 2026-09-25). O [07 — Progresso real](07-progresso-real.md) é uma **foto de
+> 2026-08-28** e deixou de ser a fonte: ele ganhou no topo um quadro com o que mudou desde
+> então. [08 — Endurecimento](08-endurecimento.md) cobre o processo e a operação.
+>
+> **Números citados nas entradas abaixo são da data de cada entrada** (ex.: "suíte (410
+> testes) verde"). Medido em 2026-09-26: `npm test` = 1411 testes em 142 arquivos, 0
+> falhas; `npx playwright test -c packages/web/playwright.config.ts --list` = 64 testes em
+> 2 arquivos; 16 tools MCP; 9 manifestos; `npm run demo` = 19/19 PASS.
+>
+> **Revisão de marcas de 2026-09-26** (critério 4 do [CONTRIBUTING](../CONTRIBUTING.md):
+> "foi exercido fora do teste"): itens `[x]` cuja própria descrição admitia não terem
+> rodado fora do teste foram rebaixados para `[~]` ou `🕳️`, com a nota
+> "*(rebaixado em 2026-09-26)*" e o que falta.
 
 ## O que cada marca significa
 
@@ -61,7 +72,7 @@ Objetivo: uma sessão real com agentes de verdade, ponta a ponta, provando o con
 
 ### Concluído e validado em 2026-08-27
 
-- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial (hoje são **12**, com `hub_session_handoff`); validado com um agente
+- [x] **MCP server do Hub** — 11 tools sobre o SDK oficial (hoje são **16**, ver [03 §1](03-mcp-e-painel.md)); validado com um agente
       externo simulado delegando ao Codex e recebendo o resultado
 - [x] **Adoção de agente externo**: quando o principal roda fora do Hub, o MCP server
       adota uma sessão-raiz na primeira chamada que precise de identidade
@@ -195,16 +206,30 @@ errados**, dois deles de forma que quebraria a invocação:
 
 ### Restante da fase 2
 
-- [x] **Mapper dedicado e manifesto verificado do Antigravity (agy)** — validado
-      contra o binário real `agy.exe` (1.1.22), com stream-json e retomada nativa via `--conversation`
+- 🕳️ **Mapper dedicado e manifesto verificado do Antigravity (agy)** — conferido
+      contra o binário real `agy.exe` (1.1.22), com stream-json e retomada nativa via `--conversation`.
+      *(rebaixado em 2026-09-26)*: o agente nunca completou uma sessão pelo Hub. Na rodada
+      real de 2026-09-25 (agy 1.2.6) o prompt **nunca chegava** ao agente (`-p` engolia
+      `--output-format`); corrigido no item 0.2 do GOAL (`-p=<prompt>`, `prompt-delivery.test.ts`),
+      sem nova execução real
 - [ ] Mapper dedicado para Cursor (aguardando disponibilidade de CLI headless independente)
 - [ ] Mapper dedicado do MiMo, quando o vocabulário de eventos da v1 for confirmado
-- [x] **Gate PRÉ-execução** (Claude Code) — contrato confirmado por sonda contra o
-      binário, não deduzido: a decisão de perguntar é `escalate` (não `ask`), e
-      `AGENTS_HUB_SESSION_ID` chega no hook, o que resolve a correlação de sessão.
-      Validado com o agente real: `git push` barrado antes de executar
-- [x] **Gate pré-execução para o Codex** — fechado em 2026-09-18, verificado
+- [~] **Gate PRÉ-execução** (Claude Code) — contrato confirmado por sonda contra o
+      binário, não deduzido: `AGENTS_HUB_SESSION_ID` chega no hook, o que resolve a
+      correlação de sessão. Validado com o agente real: `git push` barrado antes de executar.
+      *(rebaixado em 2026-09-26)*: a frase "a decisão de perguntar é `escalate` (não `ask`)"
+      estava errada (o schema do binário 2.1.283 tem `allow|deny|ask|defer`), e o gate virou
+      **bloqueante** depois dessa validação (itens 1.3/1.5 do GOAL: espera de 55 s, hook
+      com teto de 100 s e `timeout` 120 s, `deny` por tempo, negar não mata a sessão,
+      `gate.failMode`). O caminho novo tem teste de integração HTTP (`gate-bloqueante.test.ts`)
+      mas não foi exercido contra o `claude` real — Fase 9 do GOAL
+- [~] **Gate pré-execução para o Codex** — fechado em 2026-09-18, verificado
       contra o binário real (0.155.0) nesta máquina, não só contra o falso.
+      *(rebaixado em 2026-09-26)*: validado antes de o gate virar bloqueante; o
+      comportamento atual (a aprovação decide só a chamada, a sessão não é encerrada ao
+      negar) não foi exercido contra o `codex` real. Na rodada de 2026-09-25 a sessão
+      `supervised` foi recusada (`CODEX_GATE_NOT_GUARANTEED`) porque o bypass não estava
+      ligado na máquina de teste.
       Contrato: sistema de hooks compatível com o do Claude (`PreToolUse`,
       `hookSpecificOutput`), mas **dialeto de resposta oposto** (permitir é
       não escrever nada; não existe `ask`, `approve` vira `deny` com motivo
@@ -308,17 +333,18 @@ errados**, dois deles de forma que quebraria a invocação:
       - aprovação pendente e estouro de espera são desfechos próprios (`blocked`,
         `timeout`) — a sessão continua viva no daemon e o relatório diz onde ela está.
       11 testes novos; verificado também contra o daemon real
-- [x] **Handoff de sessão**: transferência de controle em tempo de execução entre
+- 🕳️ **Handoff de sessão**: transferência de controle em tempo de execução entre
       agentes (`POST /sessions/:id/handoff`), evento de domínio `session.handoff`, CLI
-      `hub handoff` e MCP tool `hub_session_handoff`. **Ressalva: nunca executado fora
-      do teste unitário** — zero eventos `session.handoff` no banco
+      `hub handoff` e MCP tool `hub_session_handoff`. **Nunca executado fora do teste** —
+      zero eventos `session.handoff` no banco. *(rebaixado em 2026-09-26; a corrida
+      `#runs.delete`/`#launch` do doc 08 #13 foi corrigida no item 2.8 do GOAL)*
 - [x] **Validação por revisão cruzada** (segundo agente revisa o resultado do primeiro) — implementada na fase 2
-- [~] **Painel de custos com projeção e alertas de orçamento**: `project()` e
-      `isWarning` existem, e o painel mostra taxa de queima e aviso de 80%. Mas
-      `projectedUsd`/`projectedTokens` **não são exibidos**, o evento `budget.warning`
-      é o **único tipo do vocabulário sem emissor**, e a projeção usa
-      `consumed.seconds`, que só é liquidado no `settle()` do fim da run — ou seja,
-      ela não existe enquanto seria útil
+- [~] **Painel de custos com projeção e alertas de orçamento**: os três defeitos que
+      esta linha descrevia foram corrigidos (ver "Emissor para `budget.warning`" na Fase 5):
+      a projeção é exibida (`SidePanel.tsx`), `budget.warning` tem emissor e a projeção
+      usa o tempo de parede da raiz. Segue `[~]` porque o painel nunca foi observado com
+      uma sessão real longa em andamento (critério 4). O teto passou a ser editável pelo
+      painel (`PUT /budget/:root`, item 6.12 do GOAL)
 - [ ] Isolamento por container como modo opcional (`isolation: container`)
 - [ ] ACP: expor o Hub como agente dentro de Zed/JetBrains/Neovim
 
@@ -326,8 +352,12 @@ errados**, dois deles de forma que quebraria a invocação:
 
 O que o usuário pediu desde o primeiro dia e **nunca virou item de plano**. Não é
 funcionalidade nova: é provar, agente por agente, o que o código já permite em tese. A
-[§5 do doc 07](07-progresso-real.md) mede isto e a foto é dura — 2 de 9 agentes com
-supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
+[§5 do doc 07](07-progresso-real.md) mediu isto em 2026-08-28 e a foto era dura — 2 de 9
+agentes com supervisão real, 1 capaz de orquestrar, 3 que já executaram alguma sessão.
+Em 2026-09-26: modo de supervisão aplicado no próprio agente em 7 dos 9 (6 por `modeArgs`,
+o OpenCode por agentes `hub-*`; MiMo só em `autonomous`, Cursor sem nada), caminho de MCP
+confirmado para 7 dos 9; execução real continua limitada a Claude, Codex e OpenCode (a
+rodada da Fase 9 do GOAL cobre Claude, Codex, OpenCode, Antigravity e Copilot).
 
 - 🕳️ **`hub doctor --smoke`**: abre uma sessão trivial com cada agente instalado e
       registra (processo subiu, `turn.completed` chegou, custo e `nativeSessionId`
@@ -825,7 +855,7 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       nenhuma vez, então `AGENTS_HUB_PORT=abc` fazia o Node escutar numa porta
       aleatória só nesse caminho. Corrigido nos dois. `env.test.ts` +
       `daemon-run.test.ts` cobrem os dois entrypoints
-- [x] **`.on('error')` nos `spawn`** que não têm, e callback no `stdin.write`
+- [~] **`.on('error')` nos `spawn`** que não têm, e callback no `stdin.write`
       (EPIPE quando o CLI sai antes de consumir). Auditoria dos 5 `spawn()` do
       repositório (`packages/adapters`, `packages/daemon`, `packages/cli`):
       4 já tinham `.on('error')` de correções anteriores; faltava em
@@ -841,7 +871,8 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
       nível do SO até o processo sair, e um processo que sai rápido sempre
       vence a corrida contra o callback assíncrono de erro da escrita. O fix
       ficou coberto por revisão de código (mesmo padrão de `send()`, já em
-      produção) em vez de teste automatizado
+      produção) em vez de teste automatizado. *(rebaixado em 2026-09-26: o caminho do
+      EPIPE não tem teste que falhe sem a mudança nem execução real)*
 - [x] **PID por sessão no schema**: `Session.pid` (migração versão 3) e
       `RunHandle.pid` (`ProcessAgentAdapter` preenche com o PID real; `OpenCodeAdapter`
       sempre `null` — documentado que a sessão roda num servidor HTTP
@@ -1341,6 +1372,9 @@ nada aqui seja tratado como acidente na próxima vistoria.
 Tudo que bloqueava a Fase 2 foi decidido no [ADR 06](decisoes/06-resiliencia-retencao.md):
 falha final termina em `failed` sem travar o fluxo, fallback é `claude → codex → opencode`,
 eventos ficam para sempre e worktrees por 7 dias, e o modelo é o default de cada CLI.
+*(Estado em 2026-09-26: a cadeia padrão ganhou `openclaude` e varia por capability; o `raw`
+dos eventos é compactado após 7 dias; há modelo por agente opcional — ver a nota no
+próprio ADR 06.)*
 
 ## Auditoria da Web UI — 2026-09-22
 
@@ -1350,7 +1384,12 @@ não tem script `test`, e não há `*.test.*`/`*.spec.*` em `src/`); onde não h
 um teste automatizado, a verificação foi por leitura de código + passos manuais descritos
 abaixo, não por execução visual nesta sessão.
 
-- [x] **CRÍTICO — painel de orçamento lia o ledger errado para sessões delegadas.**
+> *(Revisão de 2026-09-26)*: as caixas desta rodada foram rebaixadas de `[x]` para `[~]`:
+> a verificação manual descrita não foi executada (critério 4 do CONTRIBUTING). Desde
+> então o painel ganhou testes de lógica (`packages/web/src/logic`, `src/lib`) e e2e
+> (`npm run test:e2e`, 64 testes), mas sem mapeamento item a item para estes achados.
+
+- [~] **CRÍTICO — painel de orçamento lia o ledger errado para sessões delegadas.**
       `App.tsx` chamava `hub.budget(selected.id)`, mas `GET /budget/:rootId`
       (`packages/daemon/src/session-manager.ts`, método `#ledger`) é chaveado pela
       sessão-RAIZ, não pela sessão selecionada — se a chave não existir, `#ledger` cria um
@@ -1365,28 +1404,28 @@ abaixo, não por execução visual nesta sessão.
       confirmar que o orçamento mostrado é o mesmo da sessão-raiz (não um valor
       zerado/cheio novo). Esses passos não foram executados nesta sessão — não há
       ambiente de browser interativo disponível aqui.
-- [x] **MÉDIO — timeline "fluxo inteiro" embaralhava eventos entre agentes diferentes.**
+- [~] **MÉDIO — timeline "fluxo inteiro" embaralhava eventos entre agentes diferentes.**
       `App.tsx` intercalava eventos de sessões distintas ordenando por `seq`, que só é
       monotônico DENTRO de uma sessão. Corrigido trocando por `mergeFlowEvents` de
       `useHubState.ts` (ordena por timestamp entre sessões), que já existia com o
       comentário explicando exatamente esse problema e também nunca tinha sido importada
       (confirmado por `Grep`).
-- [x] **MÉDIO — grafo DAG podia rotular o nó errado como "Root Coordinator".**
+- [~] **MÉDIO — grafo DAG podia rotular o nó errado como "Root Coordinator".**
       `DagCanvasView.tsx` assumia que a raiz do fluxo está sempre na última posição de
       `flow.sessions` (ordenado por `updatedAt` decrescente) — falha quando a raiz
       continua ativa depois de uma sub-sessão já ter terminado. Corrigido com
       `flow.sessions.find((s) => s.id === flow.rootId) ?? ...`, mesmo padrão já usado em
       `useHubState.ts` (`flows`, linha ~210).
-- [x] **BAIXO — falha silenciosa ao carregar projetos no modal de nova sessão.**
+- [~] **BAIXO — falha silenciosa ao carregar projetos no modal de nova sessão.**
       `SessionModal.tsx` engolia o erro de `hub.projects()` com `.catch(() => {})`, e a UI
       mostrava "Nenhum projeto registrado" indistinguível de rede/daemon fora do ar.
       Corrigido com um estado `projectsFailed` e aviso explícito, mesmo padrão de
       `projectContextFailed` em `SidePanel.tsx`.
-- [x] **BAIXO — chave de API em texto plano.** `SettingsView.tsx` tinha o campo
+- [~] **BAIXO — chave de API em texto plano.** `SettingsView.tsx` tinha o campo
       `#api-key` como `type="text"`. Corrigido para `type="password"` com um botão de
       mostrar/ocultar local (`mostrarChaveApi`), mantendo o aviso já existente sobre o
       arquivo versionado.
-- [x] **BAIXO — texto estático incorreto na visão Swarm.** `AgentSwarmView.tsx` tinha
+- [~] **BAIXO — texto estático incorreto na visão Swarm.** `AgentSwarmView.tsx` tinha
       "8 de 9 agentes..." fixo no JSX. Corrigido para uma contagem real a partir de
       `agents.filter((a) => a.probe?.installed === true).length` sobre `agents.length`.
 
@@ -1398,7 +1437,12 @@ acima (`packages/web/src`). Mesma ressalva: sem harness de teste de componente n
 código + passos manuais descritos abaixo — não executados nesta sessão por falta de browser
 interativo.
 
-- [x] **ALTO — troca rápida de projeto em `SettingsView.tsx` podia salvar configuração de um
+> *(Revisão de 2026-09-26)*: as caixas desta rodada foram rebaixadas de `[x]` para `[~]`:
+> a verificação manual descrita não foi executada (critério 4 do CONTRIBUTING). Desde
+> então o painel ganhou testes de lógica (`packages/web/src/logic`, `src/lib`) e e2e
+> (`npm run test:e2e`, 64 testes), mas sem mapeamento item a item para estes achados.
+
+- [~] **ALTO — troca rápida de projeto em `SettingsView.tsx` podia salvar configuração de um
       projeto sob o ID de outro.** `carregar(projectId)` não tinha guarda de cancelamento: se
       o usuário selecionasse o Projeto A e trocasse para o Projeto B antes da resposta de A
       chegar, e a resposta de A chegasse DEPOIS da de B, `setCtx` aplicava os dados de A sob o
@@ -1408,7 +1452,7 @@ interativo.
       selecionar Projeto A, trocar rapidamente para Projeto B antes da resposta chegar (rede
       throttled no DevTools ajuda a reproduzir), confirmar que o formulário mostrado corresponde
       sempre ao projeto selecionado no dropdown, nunca a um projeto anterior.
-- [x] **MÉDIO/ALTO — falha de rede na timeline principal era indistinguível de "sessão sem
+- [~] **MÉDIO/ALTO — falha de rede na timeline principal era indistinguível de "sessão sem
       eventos".** `useHubState.ts` (`eventsOf`) já marcava `eventsFailed[sessionId]` e expunha
       `eventsFailedFor`, mas nada em `App.tsx`/`Timeline.tsx` lia esse sinal — uma falha de
       `hub.events()` no momento de selecionar uma sessão mostrava a mesma mensagem de "nenhum
@@ -1419,7 +1463,7 @@ interativo.
       selecionar uma sessão, matar a conexão de rede momentaneamente (offline no DevTools) e
       selecionar outra sessão ainda não cacheada — deve aparecer "Falha ao carregar os eventos
       desta sessão", não "Nenhum evento".
-- [x] **MÉDIO — lane de sub-nós em `DagCanvasView.tsx` ainda assumia raiz na última posição.**
+- [~] **MÉDIO — lane de sub-nós em `DagCanvasView.tsx` ainda assumia raiz na última posição.**
       A correção da primeira auditoria já buscava a raiz certa (`root`) para o card principal,
       mas a lane de sub-nós, ~60 linhas abaixo, ainda fazia
       `flow.sessions.slice(0, flow.sessions.length - 1)` — removendo por posição em vez de por
@@ -1429,14 +1473,14 @@ interativo.
       Verificação manual: abrir a aba Grafo DAG num fluxo com uma raiz ainda ativa e 2+
       sub-sessões já terminadas em momentos diferentes; confirmar que a raiz aparece só no card
       principal e todas as sub-sessões aparecem na lane, nenhuma duplicada nem faltando.
-- [x] **MÉDIO — `useFlowGraph` mascarava falha de rede como "grafo vazio".** O `.catch` fazia
+- [~] **MÉDIO — `useFlowGraph` mascarava falha de rede como "grafo vazio".** O `.catch` fazia
       `setGraph([])`, indistinguível de um fluxo sem sessões; `FlowTree.tsx` mostrava sempre
       "Este fluxo não possui sessões registradas". Corrigido: `useFlowGraph` agora devolve
       `{ graph, failed }`, propagado por `FlowList.tsx` até uma nova prop `failed` em
       `FlowTree.tsx`, que mostra um aviso distinto quando a busca falhou. Verificação manual:
       na lista de fluxos da coluna esquerda, abrir um fluxo (dispara `/graph`) durante uma
       queda de rede simulada; confirmar o aviso de falha em vez de "não possui sessões".
-- [x] **BAIXO — busca de eventos do "Fluxo inteiro" era ilimitada.** `App.tsx` disparava
+- [~] **BAIXO — busca de eventos do "Fluxo inteiro" era ilimitada.** `App.tsx` disparava
       `state.eventsOf(s.id)` para toda sessão-irmã do fluxo sem teto — um fluxo com 30+
       sub-sessões dispara ~30 requisições simultâneas ao abrir "Fluxo inteiro". Corrigido
       reaproveitando `MAX_FLOW_HISTORIES` (agora exportado de `useHubState.ts`) para limitar a
@@ -1444,13 +1488,13 @@ interativo.
       Verificação manual: abrir um fluxo com muitas sub-sessões, alternar para "Fluxo inteiro" e
       confirmar na aba Rede do DevTools que o número de requisições a `/events` fica limitado
       (não uma por sessão-irmã).
-- [x] **BAIXO (informativo) — 3 exports mortos em `useHubState.ts` removidos.**
+- [~] **BAIXO (informativo) — 3 exports mortos em `useHubState.ts` removidos.**
       `useSessionHistory`, `useFlowHistories` e `mergeEvents` nunca eram importados fora do
       próprio arquivo (confirmado por `Grep` em todo o repositório, não só em `src/`) — o mesmo
       padrão que causou o achado CRÍTICO da primeira auditoria (hook correto, nunca importado).
       Removidos; `MAX_FLOW_HISTORIES` foi preservado (agora exportado) porque passou a ser usado
       de fato pelo achado do teto de "Fluxo inteiro" acima.
-- [x] **MÉDIO — `cursor.yaml`/`mimo.yaml` prometiam retomada nativa que o mapper genérico nunca
+- [~] **MÉDIO — `cursor.yaml`/`mimo.yaml` prometiam retomada nativa que o mapper genérico nunca
       cumpre.** Os dois manifestos declaram `session.strategy: native`, mas usam o mapper
       `generic-json` (`packages/adapters/src/mappers/generic.ts`), que nunca escreve
       `mapped.nativeSessionId` — só produz eventos `message`/`log`/`error`. Sem esse id,
@@ -1466,7 +1510,8 @@ interativo.
       mais fraca que a dos agentes com gate. Verificação: `npm run build && npm test` seguem
       verdes (426/426) sem tocar nenhum `.ts` — os dois YAMLs continuam validados pelo schema Zod
       de manifestos (`packages/adapters/src/types.ts`), exercido pelos testes de registry que
-      carregam os manifestos reais.
+      carregam os manifestos reais. *(2026-09-26: o `generic-json` passou a capturar o id
+      de sessão — item 4.4 do GOAL —; Cursor e MiMo seguem sem execução real)*
 
 ## Auditoria da Web UI (terceira rodada) — 2026-09-23
 
@@ -1478,7 +1523,12 @@ pacote web não tem harness de teste de componente (`packages/web/package.json` 
 (build limpo, suíte inteira do monorepo verde) — não houve interação visual com a interface
 nesta sessão, sem ambiente de browser disponível aqui.
 
-- [x] **CRÍTICO (parte que cabia neste escopo) — mensagem de validação por campo descartada
+> *(Revisão de 2026-09-26)*: as caixas desta rodada foram rebaixadas de `[x]` para `[~]`:
+> a verificação manual descrita não foi executada (critério 4 do CONTRIBUTING). Desde
+> então o painel ganhou testes de lógica (`packages/web/src/logic`, `src/lib`) e e2e
+> (`npm run test:e2e`, 64 testes), mas sem mapeamento item a item para estes achados.
+
+- [~] **CRÍTICO (parte que cabia neste escopo) — mensagem de validação por campo descartada
       na Web UI.** `HubApiError` (`packages/client/src/index.ts`) já captura
       `error.details` da resposta do daemon — inclusive `details.issues`, a lista
       `{path, message}` por campo que `readBody`/`param` em
@@ -1495,7 +1545,7 @@ nesta sessão, sem ambiente de browser disponível aqui.
       equivalente (não executada aqui): abrir o modal de nova sessão, submeter um brief sem
       `objective` (campo obrigatório) e confirmar que o toast de erro mostra algo como
       `objective: <mensagem de validação do Zod>`, não só "corpo da requisição inválido".
-- [x] **MÉDIO (item B6 do plano de MVP) — aviso de sequestro de `*_BASE_URL` ausente na Web
+- [~] **MÉDIO (item B6 do plano de MVP) — aviso de sequestro de `*_BASE_URL` ausente na Web
       UI.** Pendência registrada nas auditorias de segurança de 2026-09-19 e 2026-09-22 (ver
       acima): `packages/core/src/agent-env.ts` documenta que uma variável `*_BASE_URL`
       (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, etc. — qualquer uma dos 14 prefixos em
@@ -1549,7 +1599,7 @@ Como o escopo desta tarefa não permitia extrair para um novo arquivo, a verific
       chamada de rede, quando o valor não é finito e positivo. Verificado contra daemon
       real: `hub start --agent claude --budget-usd abc "teste"` sai com `--budget-usd
       inválido: "abc"` e `exitCode 1` **sem** subir sessão nem tocar a rede.
-- [x] **MÉDIO — `hub hooks install --write` sem try/catch, ao contrário de `hub mcp install
+- [~] **MÉDIO — `hub hooks install --write` sem try/catch, ao contrário de `hub mcp install
       --write`.** `case 'hooks'` chamava `hooksCommand` direto; `gravarConfig`/
       `installCodexGate`/`saveConfig`, chamados por dentro (I/O de arquivo real —
       `mkdirSync`/`copyFileSync`/`writeFileSync`), podem lançar por permissão negada, disco

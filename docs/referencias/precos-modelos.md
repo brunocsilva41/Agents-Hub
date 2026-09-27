@@ -10,7 +10,7 @@ O orçamento do Hub é do fluxo inteiro e é em dólares (ADR 03.2). Só que cad
 
 - **Claude Code** manda `total_cost_usd` no evento `result` — dólar de verdade, cobrado pelo provedor.
 - **Codex** manda só tokens no `turn.completed` (`input_tokens`, `output_tokens`, `cached_input_tokens`) — **nenhum dólar**.
-- **Cursor, Copilot, OpenCode, Antigravity, Kimi e MiMo** hoje não reportam nem uma coisa nem outra: o mapper genérico não extrai custo.
+- ~~**Cursor, Copilot, OpenCode, Antigravity, Kimi e MiMo** hoje não reportam nem uma coisa nem outra: o mapper genérico não extrai custo.~~ *(Superado. Estado em 2026-09-26, tabela em [docs/10](../10-manutencao-de-precos.md): OpenCode reporta dólar; Copilot reporta AI Credits, convertidos a US$ 0,01; Kimi e Antigravity reportam tokens; MiMo e Cursor, via `generic-json`, quando o evento traz `cost`/`tokens`.)*
 
 O resultado aparecia no painel assim:
 

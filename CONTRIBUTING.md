@@ -3,8 +3,11 @@
 Este documento existe por um motivo específico e verificável: em 2026-09-18, o
 commit de topo de `main` não compilava. Treze erros de TypeScript, seis arquivos
 de teste caindo na carga, e o gate pré-execução respondendo ao hook do agente
-com uma Promise serializada como `{}` — ou seja, **falhando aberto** no único
-caso que ele existe para pegar.
+com uma Promise serializada como `{}` — ou seja, **falhando aberto com o daemon
+respondendo**, no único caso que ele existe para pegar. (O que acontece hoje
+quando o daemon *não* responde é decisão documentada, não bug: fechado em sessão
+do Hub, aberto fora dela — `gate.failMode`, ver
+[docs/04](docs/04-resiliencia-e-politica.md#o-gate-pré-execução).)
 
 Nada disso era invisível. Bastava rodar `tsc -b` num checkout limpo. O que
 faltava não era cuidado, era **portão**: nenhuma máquina, em nenhum momento,
@@ -21,7 +24,9 @@ npm ci          # exatamente o que está no lockfile, nada de resolver versões
 npm run verify  # build completo (pacotes + Web UI) e a suíte inteira
 ```
 
-`npm run verify` é o mesmo que o CI roda. Se passa aqui e falha lá, é bug do
+`npm run verify` (`npm run build && npm test`) cobre os mesmos passos que o job
+bloqueante do CI roda (`build:packages`, build da Web UI, `npm test`), mais a
+checagem de árvore limpa que só o CI faz. Se passa aqui e falha lá, é bug do
 portão e tem prioridade sobre o que você estava fazendo.
 
 ### Comandos individuais
@@ -30,12 +35,15 @@ portão e tem prioridade sobre o que você estava fazendo.
 |---|---|
 | `npm run build:packages` | só `tsc -b` — o laço rápido |
 | `npm run build` | pacotes + Web UI, que é o que o CI compila |
-| `npm test` | a suíte inteira (30 arquivos, 273 testes) |
-| `npm run test:e2e` | e2e do painel no navegador (fora do `npm test`, ver abaixo) |
-| `npm run clean` | apaga `dist/` e `.tsbuildinfo` |
+| `npm test` | a suíte inteira (`scripts/run-tests.mjs`; em 2026-09-26: 142 arquivos, 1411 testes — o script imprime a contagem, confira rodando) |
+| `npm run test:e2e` | e2e do painel no navegador (fora do `npm test` e fora do CI, ver abaixo; 64 testes em 2026-09-26) |
+| `npm run coverage` | a suíte com cobertura por pacote (`coverage/lcov.info`) |
+| `npm run demo` | fluxo raiz → filho → neto com agentes falsos, daemon isolado |
+| `npm run pack:dist` / `npm run test:install` | tarball autocontido / instalação dele num diretório limpo |
+| `npm run clean` | `tsc -b --clean`: apaga o `dist/` e o `.tsbuildinfo` dos pacotes TypeScript; **não** apaga `packages/web/dist` (build do Vite) |
 
 > **Sobre `npm run test:e2e`:** compila o painel e roda
-> `packages/web/e2e/painel.spec.ts` (Playwright) contra o build estático,
+> `packages/web/e2e/painel.spec.ts` e `operacao.spec.ts` (Playwright) contra o build estático,
 > servido por um servidor falso com dados fixos numa porta livre — sem daemon,
 > sem agentes, sem tocar em `~/.agents-hub`. Em 375/768/1100/1440 px mede por JS
 > que nenhum botão/aba/link/campo visível fica coberto (`elementFromPoint` do
@@ -51,7 +59,7 @@ portão e tem prioridade sobre o que você estava fazendo.
 > (`scripts/run-tests.mjs`), não por glob de shell. O motivo é concreto: a
 > forma anterior — `node --test packages/*/dist/**/*.test.js` — dependia de
 > **quem** expandia o glob. No PowerShell a string chegava intacta ao Node, que
-> a expandia certo e coletava os 30 arquivos. No bash, o shell expandia
+> a expandia certo e coletava os 30 arquivos (de então). No bash, o shell expandia
 > primeiro, e `**` sem `globstar` vale por um `*` só: casava **3 arquivos**,
 > saía verde, e todo o domínio (política, orçamento, grafo, resiliência) e todo
 > o daemon nunca rodavam. Um CI em Linux teria rodado a versão cega.
@@ -85,7 +93,10 @@ O roadmap deste projeto já marcou como `[x]` coisas que não estavam prontas �
 um "A2A server" que nenhum peer A2A conversa, um motor de workflows que validava
 o DAG e o ignorava na execução, um evento de alerta de orçamento sem nenhum
 emissor. A auditoria em [`docs/07-progresso-real.md`](docs/07-progresso-real.md)
-conferiu item a item e reclassificou o que não se sustentava.
+conferiu item a item e reclassificou o que não se sustentava (hoje é foto de
+2026-08-28; o estado vivo está em
+[`docs/vistoria-2026-09-25/STATUS.md`](docs/vistoria-2026-09-25/STATUS.md)). Em
+2026-09-26 o roadmap passou por nova revisão de marcas com este critério.
 
 Para não repetir, **um item só recebe `[x]` quando as cinco linhas abaixo são
 verdade**:
@@ -172,11 +183,15 @@ Quando o commit conserta algo, o corpo diz **como aquilo passava despercebido**.
 - [ ] Nenhum item de roadmap marcado `[x]` sem as cinco linhas do critério de pronto
 - [ ] Se mudou comportamento documentado, o documento mudou junto
 
-O CI roda Windows (Node 22.5 e 24) como portão, com um job
-`portão-de-qualidade` que agrega as duas combinações — é ele, e só ele, que a
+Não há template de PR, CODEOWNERS, dependabot nem lint/formatador no
+repositório (lint é o item 7.2 do GOAL, pendente): a lista acima é o checklist.
+
+O CI (`.github/workflows/ci.yml`, `permissions: contents: read`) roda Windows
+(Node 22.5 e 24) como portão, com um job
+`portão de qualidade` que agrega as duas combinações — é ele, e só ele, que a
 proteção de branch deve exigir (checks nomeados por combinação de matriz
-quebram silenciosamente toda vez que a matriz muda). Os jobs de Linux e de
-auditoria de dependências são **informativos** — o Hub nunca foi executado no
+quebram silenciosamente toda vez que a matriz muda). Os jobs de Linux, de
+cobertura e de auditoria de dependências são **informativos** — o Hub nunca foi executado no
 Linux, e a auditoria de CVE em dependência transitiva ainda não tem uma
 política decidida sobre o que bloqueia e o que espera — e existem para
 descobrir o que falta, não para bloquear. Cada um deixa de ser informativo no

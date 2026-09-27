@@ -7,12 +7,22 @@
 
 ## O problema em uma frase
 
-`packages/core/src/pricing.ts` (929 linhas) é a única razão pela qual o teto de
-orçamento em dólares (ADR 03.2) significa alguma coisa para Codex, Cursor,
-Copilot, OpenCode, Antigravity, Kimi e MiMo — nenhum deles reporta dólares
-nativamente. Só o Claude Code manda `total_cost_usd` de verdade. Toda estimativa
-para os outros oito agentes depende de uma tabela que **os provedores mudam sem
-avisar o Hub**, e hoje não existe processo nenhum que note quando isso acontece.
+`packages/core/src/pricing.ts` é a única razão pela qual o teto de orçamento em
+dólares (ADR 03.2) significa alguma coisa para os agentes que só reportam
+tokens. Quem reporta o quê (conferido nos mappers em 2026-09-26):
+
+| Agente | O que chega | Origem |
+|---|---|---|
+| Claude Code, OpenClaude | dólar (`total_cost_usd` no `result`) | `mappers/claude.ts` |
+| OpenCode | dólar (`cost` do passo) + tokens | `opencode/events.ts` |
+| Copilot | AI Credits (`session.usage_checkpoint`), convertidos a US$ 0,01 por crédito, acumulados por sessão | `mappers/copilot.ts` |
+| MiMo | `cost` + tokens **se** o evento trouxer (formato do OpenCode); não verificado em execução real | `mappers/generic.ts` (`generic-json`) |
+| Codex, Kimi, Antigravity | só tokens → estimativa pela tabela | `mappers/codex.ts`, `kimi.ts`, `antigravity.ts` |
+| Cursor | idem MiMo; manifesto não verificado | `generic-json` |
+
+Toda estimativa para os agentes que não mandam dólar depende de uma tabela que
+**os provedores mudam sem avisar o Hub**, e não existe processo automático que
+note quando isso acontece.
 
 ## De onde vieram os preços atuais
 

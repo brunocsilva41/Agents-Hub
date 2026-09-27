@@ -15,62 +15,87 @@ O Hub roda os agentes como **processos opacos**. Ele não intercepta syscall: v�
 
 Chamar a vigilância de "aprovação prévia" seria mentira, e mentira em recurso de segurança é pior que ausência dele.
 
-**Existe um terceiro nível, e ele é o mais forte:** o *gate pré-execução* por hook do agente, hoje implementado para o Claude Code. Aí a resposta do Hub decide se a ferramenta roda — o agente pergunta antes, não depois.
+**Existe um terceiro nível, e ele é o mais forte:** o *gate pré-execução* por hook do agente. Aí a resposta do Hub decide se a ferramenta roda — o agente pergunta antes, não depois.
 
 | Nível | Como funciona | Cobertura hoje |
 |---|---|---|
-| **Gate pré-execução** | O agente consulta o Hub antes de executar a ferramenta e obedece à resposta | Claude Code (`PreToolUse`) |
+| **Gate pré-execução** | O agente consulta o Hub antes de executar a ferramenta e obedece à resposta | Claude Code (`PreToolUse`) e Codex (hook compatível, dialeto próprio). OpenClaude: `hub hooks install openclaude` grava o hook, mas o comportamento em runtime nunca foi exercido |
 | **Portão** | Ação que passa por dentro do Hub: delegação, reserva de orçamento | Todos |
-| **Vigilância** | Evento do que já aconteceu; para a próxima ação | Todos |
+| **Vigilância** | Evento do que já aconteceu; para a próxima ação | Todos cujo mapper emite `command.executed`/`file.changed` |
+
+O gate só age em sessões criadas pelo Hub (o processo do hook recebe `AGENTS_HUB_SESSION_ID`). Chamada de fora de uma sessão do Hub recebe `allow` — não há política de quem aplicar.
 
 ### O gate pré-execução
 
-Contrato confirmado **empiricamente** contra o binário, não deduzido da documentação — uma sonda que registrava tudo o que chegava ao hook resolveu três dúvidas que a documentação deixava em aberto:
+Contrato confirmado contra o binário, não deduzido da documentação:
 
 - o hook recebe `{ session_id, cwd, tool_name, tool_input, tool_use_id, permission_mode }`;
-- a resposta é `hookSpecificOutput.permissionDecision` com `allow | deny | **escalate**` — **não** `ask`, como parecia;
-- `AGENTS_HUB_SESSION_ID`, injetada pelo Hub ao spawnar o agente, **chega no processo do hook**. É ela que correlaciona a chamada com a sessão, sem depender de adivinhar por diretório.
+- no **Claude Code** a resposta é `hookSpecificOutput.permissionDecision` com `allow | deny | ask` (medido no schema embutido no binário 2.1.283; versões anteriores deste documento diziam `escalate`, que não existe nesse vocabulário);
+- no **Codex** o dialeto é outro (`toCodexHookOutput`, `packages/daemon/src/pretool-gate.ts`): permitir é **não escrever nada**, e não existe `ask` — o que não é `allow` sai como `deny` com motivo obrigatório. O Codex ignora hook não confiável em silêncio: sem `codexGate.bypassHookTrust` (ligado por `hub hooks install codex --write`), sessão `supervised` do Codex é recusada ao iniciar (`CODEX_GATE_NOT_GUARANTEED`) e `semi`/`autonomous` rodam com aviso na timeline;
+- `AGENTS_HUB_SESSION_ID`, injetada pelo Hub ao spawnar o agente, **chega no processo do hook**. É ela que correlaciona a chamada com a sessão.
 
-Duas decisões de projeto que mudam o resultado na prática:
+**O gate é bloqueante.** Quando a política decide `approve`, o daemon abre uma `Approval` (visível em `hub approvals` e no painel), põe a sessão em `waiting_approval` e **segura a resposta do hook** até alguém decidir. O agente recebe `allow` (liberado por humano) ou `deny` (negado por humano, ou ninguém respondeu a tempo) — nunca um "pergunte você". Negar nega **só aquela chamada**: a sessão segue, e a mensagem devolvida ao agente diz o motivo real (negado por humano × tempo esgotado × sessão já encerrada) e que não deve contornar.
 
-**`approve` do Hub vira `escalate`, nunca `deny`.** Transformar "precisa de aprovação" em "negado" faria o agente concluir que a ação é impossível e procurar outro caminho para o mesmo efeito — exatamente o comportamento que um gate não pode induzir. A mensagem devolvida diz explicitamente para não contornar.
+**Três relógios, nesta ordem** (constantes em `pretool-gate.ts`):
 
-**O hook falha ABERTO.** Ele pode estar instalado globalmente e disparar em toda sessão do agente, inclusive quando o Hub não está envolvido. Bloquear porque o daemon está desligado transformaria o Hub numa dependência do editor, e a primeira reação de qualquer pessoa seria desinstalar o hook — o pior desfecho possível para um controle de segurança. A garantia que fica de pé é a que importa: **quando o daemon responde e diz não, a ferramenta não roda.**
+| Relógio | Valor | O que acontece ao estourar |
+|---|---|---|
+| espera do daemon por decisão humana | 55 s (`ESPERA_DO_GATE_MS`) | a aprovação fecha como `denied` por "tempo esgotado" e o hook recebe `deny` |
+| teto HTTP do processo do hook | 100 s (`TETO_HTTP_DO_HOOK_MS`) | o hook aplica o modo de falha (abaixo) |
+| `timeout` gravado na config do agente | 120 s (`TIMEOUT_DO_HOOK_SEC`) | o agente desiste do hook — e, medido com o `claude` real, a ferramenta **roda** |
 
-O matcher cobre só `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch`. Cada chamada gateada custa um processo Node novo; incluir `Read`, `Glob` e `Grep` — que a política sempre libera — colocaria esse custo no caminho quente de toda leitura, em troca de nenhuma proteção.
+Quem desiste primeiro é sempre o daemon, e a desistência dele é `deny`. Instalações antigas gravaram `timeout: 10`, o que fazia a ação pendente rodar sem aprovação depois de 10 s; `hub doctor`/`hub hooks` acusam o timeout antigo, e reinstalar corrige.
+
+**Modo de falha (`gate.failMode` no `config.json` global).** Se o daemon não responder (fora do ar, erro, teto HTTP): padrão **fechado** em sessão do Hub (shell, escrita e rede negadas; leitura passa) e **aberto** fora dela, onde o Hub não está envolvido e bloquear transformaria o daemon numa dependência do editor. `gate.failMode: "open" | "closed"` força um dos dois. Detalhes e modelo de ameaça em [SECURITY.md](../SECURITY.md).
+
+O matcher cobre só `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch` (`MATCHER_DE_RISCO`). Cada chamada gateada custa um processo Node novo; incluir `Read`, `Glob` e `Grep` colocaria esse custo no caminho quente de toda leitura. Consequência: leitura de segredo pela ferramenta `Read` não passa pelo gate; por `cat`/`type`/`Get-Content` em shell, passa (e é `irreversible`).
 
 ```bash
 hub hooks install claude --write
+hub hooks install codex --write
 ```
 
-Validado com o Claude Code de verdade: mandado a rodar `git push origin main`, o comando foi barrado antes de executar, e o Hub registrou o evento de auditoria com ferramenta, risco e motivo.
+Validado com o Claude Code e com o Codex de verdade (2026-09, versão anterior do gate): mandados a rodar `git push origin main`, o comando foi barrado antes de executar. **O caminho bloqueante atual** (espera de 55 s, deny por tempo, deny que não mata a sessão) é coberto por teste de integração HTTP (`gate-bloqueante.test.ts`) e ainda **não foi exercido contra o binário real** — está na rodada real da Fase 9 do GOAL.
 
 ### Níveis de risco
 
-| Nível | Exemplos | Padrão |
+| Nível | Exemplos | Decisão da política padrão (`risk.*`) |
 |---|---|---|
-| `read` | ler arquivo, listar dir, `git status`/`log`/`diff` | permitir |
+| `read` | ler arquivo comum, listar dir, `git status`/`log`/`diff` | permitir |
 | `write` | escrever dentro do worktree da sessão | permitir |
 | `exec` | comando na allow list (build, testes, lint), delegação | permitir |
-| `escalate` | escrever fora do worktree, comando fora da allow list, rede não liberada | alertar |
+| `escalate` | escrever fora do worktree, comando fora da allow list, rede não liberada | aprovação |
 | `budget` | estourar o orçamento do fluxo | aprovação |
-| `irreversible` | `git push`, `rm -rf`, publish, deletes, caminho sensível (`.ssh`, `.env`) | **parar a sessão** |
+| `irreversible` | `git push`, `rm -rf`, publish, ler/escrever segredo ou caminho sensível (`.ssh`, `.env`, `.git/hooks`) | aprovação |
+| deny list | `sudo`, `shutdown`, `mkfs`, `reg delete`... | negado em todo modo |
 
-O modo de supervisão da sessão é um *overlay* que só endurece: em `supervised`, `escalate` também para a sessão e **toda** delegação passa por você.
+Sobre isso vem o modo da sessão, que só endurece (`decisionForMode`): `supervised` pede aprovação para tudo acima de `read`; `semi` para tudo acima de `exec`; `autonomous` só para `irreversible`/`budget`. A tabela completa risco × modo está no [README](../README.md#segurança).
 
-### Por que o padrão não para em `escalate`
+**O que "aprovação" significa depende do nível de controle.** No gate (Claude, Codex) é prévia e bloqueante, como descrito acima. Na vigilância, a decisão vem de `watch.pauseOn` (padrão `irreversible`; em `supervised` também `escalate`) e `watch.flagOn` (padrão `escalate`): o evento já aconteceu, e o Hub para a sessão ou só marca um alerta na timeline.
 
-Um agente executa dezenas de comandos legítimos que nenhuma allow list razoável prevê. Se cada um deles congelasse a sessão, o recurso seria desligado na primeira hora — e um controle de segurança desligado protege zero. O padrão pausa só no irreversível; o resto vira alerta visível na timeline. Quem quer o rigor máximo usa `supervised`.
+### Escrita fora do worktree: o que é detectado de verdade
+
+`escalate` para escrita fora do worktree só vale quando o Hub **vê** a escrita:
+
+- no gate, pela ferramenta `Write`/`Edit`/`MultiEdit`/`NotebookEdit` ou pelo alvo de um comando de shell que o classificador entende (`mkdir`, `cp`, `mv`, `touch`, `rm`, redirecionamento `>`);
+- na vigilância, pelo `file.changed` com caminho ou pelo `command.executed` que o mapper do agente emite.
+
+Não é detectada a escrita feita por dentro de um programa (`node script.js`, `python x.py` gravando onde quiser) nem a de agente cujo mapper não emite esses eventos. Reproduzido na vistoria de 2026-09-25 (relatório 06): um agente de teste gravou fora do worktree, a sessão terminou `completed` e nenhum alerta saiu. O worktree isola o checkout, **não é sandbox** ([SECURITY.md](../SECURITY.md)).
+
+### Por que a vigilância não para em `escalate` em `semi`
+
+Um agente executa dezenas de comandos legítimos que nenhuma allow list razoável prevê. Parar a sessão *depois do fato* a cada um deles não desfaz nada e faria o recurso ser desligado na primeira hora. Por isso, sem gate, `escalate` em `semi` vira alerta na timeline. **Com gate é diferente:** lá `escalate` pede aprovação em `semi`, porque o gate previne — e por isso a allow list padrão foi ampliada e o classificador passou a separar o que só lê (`read`) do que executa (`exec`), para que `escalate` signifique só o que sai do combinado.
 
 ## 2. Fila de aprovações
 
-Quando um portão retém ou a vigilância para uma sessão, nasce uma `Approval`:
+Quando o gate, um portão ou a vigilância pede decisão, nasce uma `Approval`:
 
 - a sessão vai para `waiting_approval`, a task para `input_required`;
-- a fila aparece **no topo do painel**, sem como ignorar — sessão parada é trabalho congelado e orçamento reservado sem uso;
-- `hub approvals`, `hub approve <id>`, `hub deny <id>` fazem o mesmo pela CLI;
-- **liberar** retoma de onde parou: delegação retida vira execução, sessão vigiada recebe uma mensagem dizendo o que exatamente foi liberado — o agente precisa saber que houve decisão humana, senão repete a ação achando que falhou;
-- **negar** encerra a sessão e tudo que ela havia delegado.
+- a fila aparece **no topo do painel** e em `hub approvals`; `hub approve <id>` / `hub deny <id>` decidem pela CLI (exigem o token de operador, ver §6);
+- **aprovação do gate** (`detail.kind: tool-call`): liberar devolve `allow` ao hook que está esperando; negar devolve `deny` só para aquela chamada — a sessão volta a `running` e segue;
+- **delegação retida**: liberar sobe a sessão filha; negar rejeita a task e encerra a sessão;
+- **orçamento**: liberar amplia o teto pelo incremento pedido e retoma;
+- **vigilância**: liberar manda à sessão uma mensagem dizendo o que exatamente foi liberado — o agente precisa saber que houve decisão humana, senão repete a ação achando que falhou; negar encerra a sessão e tudo que ela havia delegado.
 
 O `hub_agent_call` do MCP devolve `DELEGAÇÃO RETIDA` em vez de `delegado`, com instrução explícita para o agente não ficar em polling. Sem isso ele consultaria para sempre uma tarefa que nunca começou.
 
@@ -121,14 +146,18 @@ policy:
 
 **O projeto só pode APERTAR.** `maxDepth` e `maxConcurrency` só descem; a allow list de comandos só perde itens; a deny list e a vigilância só ganham. Se um repositório pudesse elevar o próprio teto, bastaria um `.agents-hub/config.yaml` malicioso num repo clonado para o Hub virar execução arbitrária na sua máquina. A fusão em `packages/daemon/src/project-config.ts` garante isso, e há teste para cada direção.
 
-O cache é invalidado por `mtime`: reler a cada evento seria caro, e cachear para sempre obrigaria a reiniciar o daemon depois de editar o arquivo.
+O cache é invalidado por `mtime` + tamanho do arquivo: reler a cada evento seria caro, e cachear para sempre obrigaria a reiniciar o daemon depois de editar o arquivo.
+
+Os campos do `config.yaml` que mudam o que a máquina **faz** — `validation.command`/revisão, `env`, `prompts`, `memory` — só valem com `hub project trust` (hash do conteúdo confiado no banco do Hub; se o arquivo mudar, a confiança fica suspensa). Detalhes no [README](../README.md#quando-um-agente-falha) e em [SECURITY.md](../SECURITY.md).
 
 ## 5. Como isto é testado
 
 Testar retry e fallback contra agentes de verdade seria caro, lento e dependente de rede — três motivos para o teste nunca rodar. O teste de integração usa **agentes falsos**: scripts Node que falham sob comando, declarados por manifesto como qualquer outro agente. O pipeline não sabe a diferença, e o custo é zero.
 
 ```bash
-node --test packages/core/dist/*.test.js packages/daemon/dist/*.test.js
+npm run build:packages && npm test    # a suíte inteira (scripts/run-tests.mjs)
+# um arquivo só (a flag é exigida no Node 22.5–22.12):
+node --experimental-sqlite --test packages/daemon/dist/resilience.integration.test.js
 ```
 
 ## 6. Guarda de borda do daemon
@@ -180,7 +209,7 @@ A política tem duas camadas editáveis, as mesmas que o daemon funde para decid
 | `PUT /projects/:id/policy` | sim | `{ "policy": <camada parcial> }` (preserva memória/prompts/env/comentários do YAML) | `{ project, clamped: string[], ignoredExecFields: string[] }` |
 | `GET /audit` | não | `sessionId`, `projectId`, `kind`, `since`, `until` (ISO ou `30m`/`2h`/`7d`), `limit` (≤ 5000, padrão 200) | `{ entries: AuditEntry[] }`, mais recente primeiro |
 
-`AuditEntry` = `{ id, ts, actor, kind, sessionId, projectId, approvalId, action, decision, risk, reason, detail }`. `kind`: `gate.decision` (toda decisão do gate pré-execução numa sessão do Hub, autor `gate`), `approval.requested` (autor `gate` ou `policy`), `approval.resolved` (autor = quem decidiu: `cli:<usuário>`, `web`, `tempo esgotado`), `policy.updated`, `project.trust`, `project.context`, `project.import` (só aplicado), `project.folders`, `maintenance.sweep`, `daemon.shutdown`. Tabela própria (`audit_log`, migração 6), só-acréscimo, fora da retenção de eventos.
+`AuditEntry` = `{ id, ts, actor, kind, sessionId, projectId, approvalId, action, decision, risk, reason, detail }`. `kind`: `gate.decision` (toda decisão do gate pré-execução numa sessão do Hub, autor `gate`), `approval.requested` (autor `gate` ou `policy`), `approval.resolved` (autor = quem decidiu: `cli:<usuário>`, `web`, `tempo esgotado`), `policy.updated`, `project.trust`, `project.context`, `project.import` (só aplicado), `project.folders`, `maintenance.sweep`, `daemon.shutdown`. Tabela própria (`audit_log`, migração 7), só-acréscimo, fora da retenção de eventos.
 
 No cliente (`@agents-hub/client`): `policy(projectId?)`, `setGlobalPolicy(layer)`, `setProjectPolicy(projectId, layer)`, `audit(query)`. Na CLI:
 

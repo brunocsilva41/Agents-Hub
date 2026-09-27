@@ -28,3 +28,12 @@ O orçamento é **da sessão-raiz**, não do agente. Todo `agent.call` reserva u
 
 ## Anti-loop: regra do grafo
 Cada task carrega `root_id`, `parent_id`, `depth` e `path[]` (cadeia de agentes). Rejeita a chamada se: `depth > max_depth` **ou** o par `(agent, objective_hash)` já aparece em `path[]` (ciclo semântico, não só ciclo de identidade).
+
+## Estado atual (nota de 2026-09-26 — a decisão acima não foi reescrita)
+
+Conferido no código para o item 8.1 do [GOAL](../12-goal-mvp-completo.md):
+
+- **3.1 Credenciais:** o Hub continua sem ler os arquivos de credencial dos CLIs, mas **persiste** o env que o usuário configura por projeto (`hub project env`, painel, `hub import`) em texto no banco do Hub. `CredentialProvider` não existe no código. Ver [SECURITY.md](../../SECURITY.md).
+- **3.3 Observabilidade:** "requisitos da Web UI e da TUI" — **não há TUI**; tudo foi entregue na Web UI e na CLI.
+- **3.4 Brief:** os nomes reais são `camelCase` no contrato interno (`acceptanceCriteria`, `contextRefs`, `packages/core/src/brief.ts`) e `snake_case` só na tool MCP (`acceptance_criteria`, `context_refs`, `budget_usd`). `agent.call` é a tool `hub_agent_call`. O brief também tem `upstream` (fan-in de workflow), `supervision` e `labels`; `isolation: container` é aceito no schema mas recusado ao executar.
+- **Controle de rede** (citado no doc 01 §7 a partir deste ADR): aplicado pelo gate (`WebFetch`/`WebSearch`) e pelo classificador de comando (`curl`, `wget`...); agentes sem gate e sem eventos de comando não têm controle de rede.

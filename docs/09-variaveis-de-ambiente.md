@@ -1,24 +1,47 @@
 # Variáveis de ambiente
 
-Seis variáveis `AGENTS_HUB_*` configuram o Hub de fora — todas lidas e
-validadas num lugar só, [`packages/core/src/hub-env.ts`](../packages/core/src/hub-env.ts)
-(`readHubEnv`), usado pelo daemon, pela CLI (via `loadConfig`) e pelo MCP
-server. Valor inválido é recusado com o nome da variável, em uma linha (sem
-stack trace), por qualquer comando.
+Seis variáveis `AGENTS_HUB_*` configuram o Hub de fora. Elas são lidas e
+validadas por [`packages/core/src/hub-env.ts`](../packages/core/src/hub-env.ts)
+(`readHubEnv`), que o daemon (`daemon/src/main.ts` e `loadConfig`), a CLI (via
+`loadConfig` e `daemon-control.ts`) e o MCP server (`mcp/src/main.ts`) usam.
+Valor inválido é recusado com o nome da variável, em uma linha (sem stack
+trace).
 Antes deste módulo existir, cada entrypoint lia `process.env` cru, e uma
 variável mal formada (ex. `AGENTS_HUB_PORT=abc`) virava `NaN` silencioso em vez
 de erro — o daemon subia mesmo assim, só que numa porta aleatória escolhida
 pelo SO.
 
-Duas outras, `AGENTS_HUB_SESSION_ID` e `AGENTS_HUB_AGENT_ID`/`AGENTS_HUB_TASK_ID`,
-**não aparecem aqui** de propósito: são internas, injetadas pelo Hub no
-processo do agente (ver `packages/adapters/src/process-adapter.ts`), não algo
-que você configura.
+**Leituras que NÃO passam por `readHubEnv`** (conferido no código em
+2026-09-26 — a frase "tudo num lugar só" das versões anteriores deste documento
+não era verdade):
+
+| Onde | Variável | Efeito de valor inválido |
+|---|---|---|
+| `packages/mcp/src/main.ts` | `AGENTS_HUB_MCP_HEARTBEAT_MS` (intervalo do sinal de vida da raiz adotada, padrão 30000) | não numérico ou ≤ 0 volta ao padrão, sem aviso |
+| `packages/web/vite.config.ts` (só `npm run web:dev`) | `AGENTS_HUB_URL`, `AGENTS_HUB_HOME` | lidos crus; URL inválida quebra o proxy de desenvolvimento |
+| `packages/client/src/operator-token.ts` | `AGENTS_HUB_HOME` (onde procurar o `operator-token`) | lido cru; é o mesmo valor que o daemon valida |
+| `packages/cli/src/hook-run.ts`, `packages/mcp/src/main.ts` | `AGENTS_HUB_SESSION_ID` | interna (ver abaixo) |
+
+Três outras, `AGENTS_HUB_SESSION_ID`, `AGENTS_HUB_AGENT_ID` e
+`AGENTS_HUB_TASK_ID`, são **internas**: injetadas pelo Hub no processo do
+agente (ver `packages/adapters/src/process-adapter.ts`), não algo que você
+configura. É por `AGENTS_HUB_SESSION_ID` que o hook do gate e o MCP server
+sabem a que sessão pertencem.
+
+**Não confundir com `config.json`.** `host`, `port`, `opencodePort`,
+`maxSseConnections`, `policy`, `retention`, `gate.failMode` e
+`codexGate.bypassHookTrust` são chaves de `<AGENTS_HUB_HOME>/config.json`
+(schema em `packages/daemon/src/config.ts`), não variáveis de ambiente. Só a
+porta tem as duas formas.
+
+Não existe variável de ambiente para o token de operador, de propósito: o
+daemon repassa o próprio ambiente aos agentes, e um token em env acabaria no
+processo que ele existe para barrar.
 
 ## `AGENTS_HUB_HOME`
 
-Raiz do estado global do Hub — banco, worktrees, artefatos, logs, manifestos e
-`config.json`. Padrão: `~/.agents-hub`.
+Raiz do estado global do Hub — banco, worktrees, artefatos, logs, manifestos,
+`config.json` e `operator-token`. Padrão: `~/.agents-hub`.
 
 ```bash
 AGENTS_HUB_HOME=/mnt/dados/agents-hub hub daemon
@@ -59,8 +82,8 @@ AGENTS_HUB_NO_AUTOSTART=1 hub status   # falha em vez de subir o daemon sozinho
 ## `AGENTS_HUB_URL`
 
 Base URL do daemon, para quem fala com ele de fora do processo: o MCP server
-(`packages/mcp/src/main.ts`) e o proxy de dev da Web UI
-(`packages/web/vite.config.ts`). Padrão: `http://127.0.0.1:4747`.
+(`packages/mcp/src/main.ts`, validada) e o proxy de dev da Web UI
+(`packages/web/vite.config.ts`, lida crua). Padrão: `http://127.0.0.1:4747`.
 
 ```bash
 AGENTS_HUB_URL=http://127.0.0.1:5050 npx agents-hub-mcp
@@ -72,13 +95,15 @@ Identidade do agente principal quando o MCP server roda **fora** do Hub — por
 exemplo, você abriu o Cursor na mão e ele chama `hub_agent_call` sem que exista
 uma sessão do Hub por trás. Sem isto, a sessão adotada aparece no grafo como
 `"externo"`. `hub mcp install` já grava esta variável automaticamente na config
-de cada agente (ver `packages/cli/src/mcp-install.ts`).
+de cada agente (ver `packages/cli/src/mcp-install.ts`). Dentro de uma sessão do
+Hub, `AGENTS_HUB_AGENT_ID` (interna) tem precedência.
 
 ## `AGENTS_HUB_MCP_GRACE_MS`
 
 Carência, em milissegundos, que o MCP server espera antes de sair depois que o
 hospedeiro fecha o stdin — dá tempo de uma resposta já calculada terminar de
-ser escrita em stdout antes do processo morrer. Padrão: `3000`.
+ser escrita em stdout antes do processo morrer. Padrão: `3000`. Inteiro ≥ 0;
+valor inválido encerra o MCP server com a mensagem no stderr.
 
 ```bash
 AGENTS_HUB_MCP_GRACE_MS=500 npx agents-hub-mcp

@@ -19,3 +19,9 @@
 5. **Validação reprova** → conta como falha e volta ao passo 2.
 
 > **Assunção registrada (falta decisão explícita):** como *escalar para humano* NÃO foi marcado, quando retry + fallback + validação se esgotam a task termina em `failed`, com todo o contexto preservado e um evento de alta prioridade no stream/UI — o fluxo não fica pendurado esperando você. Orçamento estourado continua indo para `input_required` (ADR 03), pois ali a decisão é inerentemente humana.
+
+## Estado atual (nota de 2026-09-26 — a decisão acima não foi reescrita)
+
+- **4.1:** são 9 agentes, não 8. Não há TUI; o painel obriga a escolha do agente ao abrir sessão.
+- **Passo 3:** a cadeia de fallback real é por capability e inclui `openclaude` — ver a nota do ADR 06.
+- **Passo 4:** `criteria` **não** é checado por heurística de texto (decisão posterior, [docs/04 §3](../04-resiliencia-e-politica.md)); os critérios vão no brief da revisão por segundo agente. O portão por comando e a revisão vêm **desligados** por padrão (`validation.command: null`, `review.enabled: false`) e, quando vêm do `config.yaml` do repositório, só valem com `hub project trust`.
