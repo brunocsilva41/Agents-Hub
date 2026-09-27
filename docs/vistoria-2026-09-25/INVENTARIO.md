@@ -86,7 +86,7 @@ Como a contagem foi feita:
 | R02-11 | BAIXO | JSON malformado devolve 500 INTERNAL com mensagem do parser | 1.8 | [x] |
 | R02-12 | BAIXO | POST sem corpo e sem Content-Type recusado com 415 | — | [x] POST vazio aceito |
 | R02-13 | BAIXO | docs/10 e precos-modelos dizem que só o Claude reporta USD (OpenCode também) | 8.1 | [x] |
-| R02-14 | BAIXO | Exemplo YAML promete paralelismo que não tem | — | [ ] |
+| R02-14 | BAIXO | Exemplo YAML promete paralelismo que não tem | — | [x] exemplo diz "sequencial" (75afd04) |
 | R02-15 | BAIXO | Exports de sessão `.txt` soltos na raiz, fora do .gitignore | 8.3 | [x] /*.txt no .gitignore (1a3ce75) |
 
 ## R03 — 03-web-estatico.md
