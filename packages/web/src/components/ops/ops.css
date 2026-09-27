@@ -42,7 +42,6 @@
   border-radius: var(--radius-full);
   padding: 6px 12px;
   font-size: 12.5px;
-  transform: none !important;
 }
 
 .ops-subnav button.on {
@@ -97,11 +96,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.ops-card button,
-.ops-toolbar button {
-  margin-left: 0;
 }
 
 .ops-toolbar {

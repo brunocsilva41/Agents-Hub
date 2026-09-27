@@ -15,6 +15,15 @@ export function isTerminalState(state: string): boolean {
   return TERMINAL_STATES.has(state);
 }
 
+/**
+ * "Ao vivo": ocupa vaga e ainda pode mudar (inclui pausada e ociosa). Uma só
+ * definição para a pílula do topo, a lista de fluxos e a telemetria — antes
+ * cada tela contava de um jeito.
+ */
+export function isLiveState(state: string): boolean {
+  return state === 'running' || state === 'waiting_approval' || state === 'paused' || state === 'idle';
+}
+
 export interface ControlState {
   enabled: boolean;
   /** Por que está desabilitado (vira `title` do botão). `null` quando habilitado. */

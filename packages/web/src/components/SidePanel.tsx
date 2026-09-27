@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import type { AgentSummary, BudgetSummary, SessionSummary } from '@agents-hub/client';
+import type { AgentSummary, SessionSummary } from '@agents-hub/client';
 import { pushToast, useAction } from '../actions';
 import { agentColor, hub, STATE_LABEL, formatDuration, formatTokens, formatUsd } from '../hub';
 import { deriveControls, interruptFeedback } from '../lib/sessionControls';
+import type { BudgetState } from '../useHubState';
 
 interface Props {
   session: SessionSummary | null;
-  budget: BudgetSummary | null;
+  /** Orçamento do fluxo com carregando/falha: falha não some calada. */
+  budgetState: BudgetState;
   agents?: AgentSummary[];
   onDelegate: () => void;
   onChanged: () => void;
@@ -15,8 +17,10 @@ interface Props {
 /**
  * Painel de custo, controles e memórias ao vivo.
  */
-export function SidePanel({ session, budget, agents = [], onDelegate, onChanged }: Props) {
+export function SidePanel({ session, budgetState, agents = [], onDelegate, onChanged }: Props) {
+  const budget = budgetState.budget;
   const action = useAction();
+  const [rodadaMemoria, setRodadaMemoria] = useState(0);
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [targetAgent, setTargetAgent] = useState('');
   const [handoffReason, setHandoffReason] = useState('');
@@ -69,7 +73,7 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
     return () => {
       cancelado = true;
     };
-  }, [session?.projectId]);
+  }, [session?.projectId, rodadaMemoria]);
 
   const act = (label: string, fn: () => Promise<unknown>, ok?: string): void => {
     void action.run(label, fn, ok).then((done) => {
@@ -119,6 +123,25 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
         )}
       </div>
       <div className="scroll">
+        {session && !budget && budgetState.loading && (
+          <div className="section budget-section" role="status">
+            <h3>Orçamento do fluxo</h3>
+            <span className="empty-hint">
+              <span className="spinner-small" aria-hidden="true" /> Carregando o orçamento…
+            </span>
+          </div>
+        )}
+        {session && !budget && !budgetState.loading && budgetState.error && (
+          <div className="section budget-section">
+            <h3>Orçamento do fluxo</h3>
+            <div className="notice danger" role="alert">
+              Não foi possível carregar o orçamento: {budgetState.error}{' '}
+              <button type="button" className="linkish" onClick={budgetState.retry}>
+                tentar de novo
+              </button>
+            </div>
+          </div>
+        )}
         {budget && (
           <div className="section budget-section">
             <div className="section-header-row">
@@ -208,7 +231,10 @@ export function SidePanel({ session, budget, agents = [], onDelegate, onChanged 
                 <div className="memory-body">
                   {projectContextFailed && (
                     <div className="notice warn" role="alert">
-                      ⚠️ Não foi possível buscar a memória do projeto — tente de novo mais tarde.
+                      ⚠️ Não foi possível buscar a memória do projeto — não é um projeto sem memória.
+                      <button type="button" className="linkish" onClick={() => setRodadaMemoria((n) => n + 1)}>
+                        tentar de novo
+                      </button>
                     </div>
                   )}
                   {!projectContextFailed && projectGuidelines && (

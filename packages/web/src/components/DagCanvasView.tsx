@@ -1,15 +1,37 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { SessionSummary } from '@agents-hub/client';
+import type { ProjectSummary, SessionSummary } from '@agents-hub/client';
 import type { FlowSummary } from '../useHubState';
-import { agentColor, STATE_LABEL, formatAgo } from '../hub';
+import { agentColor, STATE_LABEL, formatAgo, formatTokens, formatUsdShort } from '../hub';
+import { custoPorSessao } from '../lib/flowGraphs';
 import { buildFlowTree, treeKeyTarget, type EdgeKind, type TreeRow } from '../lib/flowTree';
+import type { Situacao } from '../lib/indexStatus';
+import { useFlowGraphs, type GrafosDosFluxos } from '../useFlowGraphs';
+import { EstadoDaTela } from './EstadoDaTela';
 
 interface Props {
+  /** Todos os fluxos; o filtro de projeto é aplicado aqui. */
   flows: FlowSummary[];
   selectedId: string | null;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  /** Filtro de projeto, compartilhado com a lista da Timeline. */
+  projects: ProjectSummary[];
+  projectId: string;
+  onProjectChange: (id: string) => void;
+  /** Revisão por fluxo: o custo só é relido quando o fluxo muda. */
+  revisionOf: (rootId: string) => number;
+  situacao: Situacao;
+  erro: string | null;
+  onRetry: () => void;
 }
+
+/** Fluxos com ao menos uma sessão do projeto (`all` = todos). */
+export function fluxosDoProjeto(flows: FlowSummary[], projectId: string): FlowSummary[] {
+  if (projectId === 'all') return flows;
+  return flows.filter((f) => f.sessions.some((s) => s.projectId === projectId));
+}
+
+type CustoDoNo = { estado: 'carregando' | 'erro' } | { estado: 'ok'; usd: number; tokens: number };
 
 const EDGE_LABEL: Record<EdgeKind, string> = {
   root: 'Raiz do fluxo',
@@ -31,36 +53,103 @@ export function DagCanvasView({
   selectedId,
   onSelectSession,
   onNewSession,
+  projects,
+  projectId,
+  onProjectChange,
+  revisionOf,
+  situacao,
+  erro,
+  onRetry,
 }: Props): React.JSX.Element {
-  if (flows.length === 0) {
+  const visiveis = useMemo(() => fluxosDoProjeto(flows, projectId), [flows, projectId]);
+  const rootIds = useMemo(() => visiveis.map((f) => f.rootId), [visiveis]);
+  // Custo por nó: só o `/graph` o expõe (uma busca por fluxo, relida só quando
+  // o fluxo muda).
+  const grafos = useFlowGraphs(situacao === 'ok' ? rootIds : [], revisionOf);
+  const nomeDoProjeto = projects.find((p) => p.id === projectId)?.name;
+
+  const cabecalho = (
+    <div className="dag-canvas-header">
+      <div>
+        <h2 className="dag-title">Grafo de Orquestração DAG</h2>
+        <p className="dag-subtitle">
+          Cada fluxo como árvore: quem delegou para quem, e onde houve transferência, com o custo de cada
+          sessão. Setas navegam; Enter abre a sessão.
+        </p>
+      </div>
+      <div className="filtro-da-aba">
+        <label>
+          Projeto
+          <select value={projectId} onChange={(e) => onProjectChange(e.target.value)}>
+            <option value="all">Todos os projetos ({projects.length})</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+
+  if (situacao === 'carregando' || situacao === 'erro') {
     return (
-      <div className="dag-empty-canvas">
-        <div className="dag-empty-icon" aria-hidden="true">🕸</div>
-        <h3>Nenhum Grafo DAG em Execução</h3>
-        <p>Inicie uma sessão para visualizar o grafo de tarefas e delegações entre agentes em tempo real.</p>
-        <button className="primary" onClick={onNewSession}>Criar Nova Sessão</button>
+      <div className="dag-canvas-container">
+        {cabecalho}
+        <EstadoDaTela situacao={situacao} oQue="as sessões" erro={erro} onTentar={onRetry} />
+      </div>
+    );
+  }
+
+  if (visiveis.length === 0) {
+    const filtrado = situacao === 'ok' && projectId !== 'all';
+    return (
+      <div className="dag-canvas-container">
+        {cabecalho}
+        <div className="dag-empty-canvas">
+          <div className="dag-empty-icon" aria-hidden="true">🕸</div>
+          <h3>{filtrado ? `Nenhum fluxo em “${nomeDoProjeto ?? projectId}”` : 'Nenhum fluxo no Hub ainda'}</h3>
+          <p>
+            {filtrado
+              ? 'Este projeto ainda não tem sessões. Veja todos os projetos ou inicie uma sessão nele.'
+              : 'Inicie uma sessão para visualizar o grafo de tarefas e delegações entre agentes.'}
+          </p>
+          <div className="estado-vazio-acoes">
+            {filtrado && (
+              <button type="button" onClick={() => onProjectChange('all')}>
+                Ver todos os projetos
+              </button>
+            )}
+            <button type="button" className="primary" onClick={onNewSession}>
+              Criar Nova Sessão
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="dag-canvas-container">
-      <div className="dag-canvas-header">
-        <div>
-          <h2 className="dag-title">Grafo de Orquestração DAG</h2>
-          <p className="dag-subtitle">
-            Cada fluxo como árvore: quem delegou para quem, e onde houve transferência. Setas navegam; Enter abre a sessão.
-          </p>
+      {cabecalho}
+      {grafos.resumo.falhas > 0 && (
+        <div className="notice warn" role="alert">
+          O custo de {grafos.resumo.falhas} fluxo(s) não carregou: {grafos.resumo.erro}{' '}
+          <button type="button" className="linkish" onClick={grafos.tentarDeNovo}>
+            tentar de novo
+          </button>
         </div>
-      </div>
+      )}
 
       <div className="dag-flows-list">
-        {flows.map((flow) => (
+        {visiveis.map((flow) => (
           <FlowGraph
             key={flow.rootId}
             flow={flow}
             selectedId={selectedId}
             onSelectSession={onSelectSession}
+            grafos={grafos}
           />
         ))}
       </div>
@@ -72,11 +161,24 @@ function FlowGraph({
   flow,
   selectedId,
   onSelectSession,
+  grafos,
 }: {
   flow: FlowSummary;
   selectedId: string | null;
   onSelectSession: (id: string) => void;
+  grafos: GrafosDosFluxos;
 }): React.JSX.Element {
+  const entrada = grafos.grafoDe(flow.rootId);
+  const custos = useMemo(() => (entrada?.nos ? custoPorSessao(entrada.nos) : null), [entrada]);
+  const custoDe = (sessionId: string): CustoDoNo => {
+    if (custos) {
+      const c = custos.get(sessionId);
+      // Sessão que o grafo ainda não conhece (acabou de nascer): sem custo ainda.
+      return c ? { estado: 'ok', ...c } : { estado: 'ok', usd: 0, tokens: 0 };
+    }
+    return { estado: entrada?.estado === 'erro' ? 'erro' : 'carregando' };
+  };
+  const total = custos ? [...custos.values()].reduce((s, c) => ({ usd: s.usd + c.usd, tokens: s.tokens + c.tokens }), { usd: 0, tokens: 0 }) : null;
   const rows = useMemo(() => buildFlowTree(flow.rootId, flow.sessions), [flow.rootId, flow.sessions]);
   const buttons = useRef<Array<HTMLButtonElement | null>>([]);
   const selectedIndex = rows.findIndex((r) => r.session.id === selectedId);
@@ -118,7 +220,10 @@ function FlowGraph({
               {ag}
             </span>
           ))}
-          <span className="dag-cost-badge">{flow.sessions.length} sessões</span>
+          <span className="dag-cost-badge">
+            {flow.sessions.length} {flow.sessions.length === 1 ? 'sessão' : 'sessões'}
+            {total && ` · ${formatUsdShort(total.usd)} · ${formatTokens(total.tokens)} tokens`}
+          </span>
         </div>
       </div>
 
@@ -136,6 +241,7 @@ function FlowGraph({
             onFocus={() => setFocusIndex(index)}
             onKeyDown={(e) => onKeyDown(e, index)}
             onSelect={() => onSelectSession(row.session.id)}
+            custo={custoDe(row.session.id)}
           />
         ))}
       </div>
@@ -151,7 +257,9 @@ function DagNode({
   onFocus,
   onKeyDown,
   onSelect,
+  custo,
 }: {
+  custo: CustoDoNo;
   row: TreeRow<SessionSummary>;
   index: number;
   selected: boolean;
@@ -206,7 +314,15 @@ function DagNode({
 
         <div className="dag-node-footer">
           <span>{formatAgo(session.updatedAt)}</span>
-          <span className="dag-node-cost">ID: {session.id.slice(0, 10)}</span>
+          {custo.estado === 'ok' ? (
+            <span className="dag-node-cost" title={session.id}>
+              {formatUsdShort(custo.usd)} · {formatTokens(custo.tokens)} tokens
+            </span>
+          ) : custo.estado === 'erro' ? (
+            <span className="dag-custo-falhou">custo indisponível</span>
+          ) : (
+            <span className="dag-custo-carregando">custo…</span>
+          )}
         </div>
       </button>
     </div>

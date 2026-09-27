@@ -109,10 +109,173 @@
   font: inherit;
   color: inherit;
   width: min(420px, 100%);
-  margin-left: 0;
 }
 
 .dag-tree .dag-node-card:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Carregando / falhou / vazio honestos (vistoria 03, "Estados vazios/erro").
+ * `.spinner`/`.spinner-small` estavam no JSX (botão Enviar, árvore do fluxo)
+ * sem regra nenhuma: o botão ficava em branco enquanto enviava.
+ * ------------------------------------------------------------------------- */
+.spinner,
+.spinner-small {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: girar 0.8s linear infinite;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.spinner-small {
+  width: 11px;
+  height: 11px;
+}
+
+@keyframes girar {
+  to {
+    rotate: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .spinner-small {
+    animation-duration: 2.4s;
+  }
+}
+
+.estado-tela {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.estado-tela-compacto {
+  padding: 16px 12px;
+  gap: 6px;
+}
+
+.estado-tela-compacto .empty-title {
+  font-size: 13px;
+}
+
+.estado-tela-erro {
+  border: 1px solid var(--danger);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--danger-glow);
+  margin: 12px;
+}
+
+.estado-tela-erro .empty-hint {
+  color: var(--danger-text);
+  overflow-wrap: anywhere;
+}
+
+.app-error-banner {
+  margin: 8px 16px 0;
+}
+
+.estado-vazio-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* Filtro de projeto (DAG e Telemetria), ao lado do título. */
+.filtro-da-aba {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+
+.filtro-da-aba label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  min-width: 0;
+}
+
+.filtro-da-aba select {
+  min-width: 160px;
+  max-width: 100%;
+}
+
+.dag-canvas-header,
+.telemetry-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px 20px;
+}
+
+.dag-custo-carregando {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.dag-custo-falhou {
+  color: var(--danger-text);
+  font-weight: 500;
+}
+
+/* Telemetria: custo por agente e no tempo. */
+.telemetria-aviso {
+  margin: 0 0 16px;
+}
+
+.telemetria-barras {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 120px;
+  padding: 8px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.telemetria-barra {
+  flex: 1 1 0;
+  min-width: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.85;
+}
+
+.telemetria-barra-vazia {
+  background: var(--border);
+  min-height: 1px;
+}
+
+.telemetria-eixo {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+
+.telemetria-nota {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: 6px 0 0;
 }

@@ -266,20 +266,17 @@ button {
   flex-shrink: 0;
 }
 
+/* Hover muda cor e borda, nunca a posição: um `translateY` global fazia
+   listas de botões "tremerem" e cada componente precisava anulá-lo com
+   `transform: none !important` (vistoria 2026-09-25, 03, BAIXO). */
 button:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-strong);
-  transform: translateY(-1px);
-}
-
-button:active:not(:disabled) {
-  transform: translateY(0);
 }
 
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  transform: none !important;
 }
 
 button.primary {
@@ -315,7 +312,6 @@ button.linkish {
   text-decoration: underline;
   text-underline-offset: 2px;
   box-shadow: none;
-  transform: none !important;
 }
 
 button.linkish:hover {
@@ -367,7 +363,6 @@ textarea {
   color: var(--text-dim);
   font-weight: 500;
   box-shadow: none;
-  transform: none !important;
 }
 
 .seg button:hover:not(:disabled) {
@@ -458,7 +453,6 @@ textarea {
   border: none;
   padding: 0;
   box-shadow: none;
-  transform: none !important;
 }
 
 .brand:hover:not(:disabled) {
@@ -528,7 +522,6 @@ textarea {
   border-radius: calc(var(--radius) - 3px);
   gap: 6px;
   box-shadow: none;
-  transform: none !important;
 }
 
 .nav-tab:hover {
@@ -708,7 +701,6 @@ textarea {
   padding: 8px 10px;
   font-size: 13px;
   color: var(--text);
-  transform: none !important;
 }
 
 .topbar-menu-item:hover:not(:disabled),
@@ -1079,7 +1071,6 @@ textarea {
   border-radius: 0;
   padding: 10px 12px;
   box-shadow: none;
-  transform: none !important;
   min-width: 0;
 }
 
@@ -1231,7 +1222,6 @@ textarea {
   background: var(--bg-card);
   border: 1px solid var(--border);
   box-shadow: none;
-  transform: none !important;
   min-width: 0;
 }
 
@@ -1769,7 +1759,6 @@ textarea {
 
 .jump-bottom:hover {
   background: var(--bg-raised);
-  transform: translateX(-50%) translateY(-2px);
 }
 
 /* Empty States */
@@ -2251,7 +2240,6 @@ textarea {
 .swarm-card:hover {
   background: var(--bg-panel);
   border-color: var(--border-strong);
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
 
@@ -2454,14 +2442,6 @@ textarea {
   color: var(--ok);
 }
 
-.dag-nodes-lane {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-}
-
 .dag-node-card {
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
@@ -2475,7 +2455,6 @@ textarea {
 .dag-node-card:hover {
   background: var(--bg-hover);
   border-color: var(--accent);
-  transform: translateY(-2px);
 }
 
 .dag-node-card.node-active {
@@ -2541,17 +2520,6 @@ textarea {
 .dag-node-cost {
   color: var(--text);
   font-weight: 700;
-}
-
-.dag-children-lane {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.dag-connector-arrow {
-  font-size: 18px;
-  color: var(--accent);
 }
 
 .dag-empty-canvas {
@@ -2857,7 +2825,6 @@ textarea {
   border: 1px solid transparent;
   border-radius: var(--radius);
   text-align: left;
-  transform: none !important;
 }
 
 .cmd-item {
@@ -3027,7 +2994,6 @@ textarea {
   padding: 2px 4px;
   line-height: 1;
   box-shadow: none;
-  transform: none !important;
 }
 
 .toast-close:hover {
@@ -3283,7 +3249,6 @@ textarea {
 .agent-card-select.indisponivel:hover {
   background: var(--bg-card);
   border-color: var(--border);
-  transform: none;
 }
 
 .agent-card-select:focus-visible {
@@ -3294,7 +3259,6 @@ textarea {
 .agent-card-select:hover {
   background: var(--bg-hover);
   border-color: var(--border-strong);
-  transform: translateY(-1px);
 }
 
 .agent-card-select.selected {
@@ -3366,7 +3330,6 @@ textarea {
   color: var(--text-dim);
   cursor: pointer;
   box-shadow: none;
-  transform: none !important;
 }
 
 .template-chip-btn:hover {
@@ -3387,20 +3350,6 @@ textarea {
   background: rgba(56, 189, 248, 0.04);
   border: 1px solid rgba(56, 189, 248, 0.15);
   border-radius: var(--radius);
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.checkbox-label input[type="checkbox"] {
-  width: auto;
 }
 
 /* SidePanel Memory Cards */
@@ -3494,7 +3443,6 @@ textarea {
   cursor: pointer;
   transition: all var(--transition-fast);
   box-shadow: none;
-  transform: none !important;
 }
 
 .settings-nav-btn:hover {
@@ -3613,7 +3561,6 @@ textarea {
   font-weight: 600;
   cursor: pointer;
   box-shadow: none;
-  transform: none !important;
 }
 
 .agent-chip.active {

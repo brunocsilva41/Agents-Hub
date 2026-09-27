@@ -45,6 +45,11 @@ interface Props {
    * troca desmonta esta tela e a edição sumia sem aviso (vistoria 03).
    */
   onSujoChange?: (sujo: boolean) => void;
+  /**
+   * `/projects` respondeu. Sem isto, uma falha ao carregar os projetos virava
+   * "Primeiros passos — registre um projeto" para quem já tem vários.
+   */
+  projetosCarregados?: boolean;
 }
 
 /** Endpoints locais comuns, para não obrigar a decorar a porta. */
@@ -62,7 +67,13 @@ const ENDPOINTS_SUGERIDOS = [
  */
 const PREFIXOS_ENV_PERMITIDOS = prefixosDeEnvPermitidos();
 
-export function SettingsView({ agents, projects, onNewProject, onSujoChange }: Props): React.JSX.Element {
+export function SettingsView({
+  agents,
+  projects,
+  onNewProject,
+  onSujoChange,
+  projetosCarregados = true,
+}: Props): React.JSX.Element {
   const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
   // Sem projeto, a única aba útil é a que não depende de projeto: é por ela
   // que a primeira execução começa (ver os agentes que a máquina já tem).
@@ -276,7 +287,7 @@ export function SettingsView({ agents, projects, onNewProject, onSujoChange }: P
         </div>
       )}
 
-      {semProjeto && (
+      {semProjeto && projetosCarregados && (
         <div className="settings-vazio settings-card">
           <h3 className="card-title">Primeiros passos</h3>
           <p className="card-desc">

@@ -357,9 +357,86 @@ async function estatico(res: ServerResponse, caminho: string): Promise<void> {
   res.end(corpo);
 }
 
+/* ------------------------------------------------ Cenários de falha/vazio */
+
+/**
+ * Cenário da vez (estados.spec.ts): quais leituras respondem 500 e se as
+ * listas do índice vêm vazias. Mutável de propósito — o teste liga, confere a
+ * tela, desliga e clica "Tentar de novo". `redefinirCenario()` no fim de cada
+ * teste, porque o módulo é compartilhado entre os arquivos de teste.
+ */
+export const CENARIO: {
+  /** GET cujo caminho casar responde 500. */
+  falhar: RegExp | null;
+  /** /sessions, /approvals, /projects e /agents devolvem listas vazias. */
+  vazio: boolean;
+  /** Pastas extras cujo caminho casar são recusadas (400) ao vincular. */
+  recusarPasta: RegExp | null;
+} = { falhar: null, vazio: false, recusarPasta: null };
+
+/** Projetos criados pelo modal durante o teste, e cada POST /projects recebido. */
+export const PROJETOS_CRIADOS: Array<{ id: string; name: string; path: string; defaultBranch: string; createdAt: string }> = [];
+export const PASTAS_VINCULADAS: Array<{ projectId: string; path: string }> = [];
+
+export function redefinirCenario(): void {
+  CENARIO.falhar = null;
+  CENARIO.vazio = false;
+  CENARIO.recusarPasta = null;
+  PROJETOS_CRIADOS.length = 0;
+  PASTAS_VINCULADAS.length = 0;
+}
+
+async function rotearCenario(req: IncomingMessage, res: ServerResponse, p: string): Promise<boolean> {
+  if (req.method === 'GET' && CENARIO.falhar?.test(p)) {
+    json(res, 500, { error: { code: 'INTERNAL', message: `falha simulada em ${p}` } });
+    return true;
+  }
+  if (req.method === 'GET' && CENARIO.vazio) {
+    const vazios: Record<string, string> = {
+      '/sessions': 'sessions',
+      '/approvals': 'approvals',
+      '/projects': 'projects',
+      '/agents': 'agents',
+    };
+    const chave = vazios[p];
+    if (chave) {
+      json(res, 200, { [chave]: [] });
+      return true;
+    }
+  }
+  if (req.method === 'POST' && p === '/projects') {
+    const b = ((await corpo(req)) ?? {}) as { path?: string; name?: string };
+    const projeto = {
+      id: `prj_novo${PROJETOS_CRIADOS.length + 1}`,
+      name: b.name ?? 'novo',
+      path: String(b.path),
+      defaultBranch: 'main',
+      createdAt: new Date().toISOString(),
+    };
+    PROJETOS_CRIADOS.push(projeto);
+    json(res, 201, { project: projeto });
+    return true;
+  }
+  const m = /^\/projects\/(prj_novo[0-9]+)\/folders$/.exec(p);
+  if (req.method === 'POST' && m) {
+    const b = ((await corpo(req)) ?? {}) as { path?: string };
+    const caminho = String(b.path);
+    if (CENARIO.recusarPasta?.test(caminho)) {
+      json(res, 400, { error: { code: 'FOLDER_OVERLAP', message: `a pasta ${caminho} sobrepõe outra já vinculada` } });
+      return true;
+    }
+    PASTAS_VINCULADAS.push({ projectId: m[1]!, path: caminho });
+    json(res, 201, { folder: { id: `pfd_x${PASTAS_VINCULADAS.length}`, projectId: m[1], path: caminho, label: null, isPrimary: false, createdAt: new Date().toISOString() } });
+    return true;
+  }
+  return false;
+}
+
 async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const p = url.pathname;
+
+  if (await rotearCenario(req, res, p)) return;
 
   // Aba Operação (item 6.12): rotas com resposta própria, inclusive as escritas.
   if (await rotearOperacao(req, res, p)) return;
@@ -403,9 +480,9 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (p === '/sessions') return json(res, 200, { sessions: SESSOES });
   if (p === '/agents') return json(res, 200, { agents: AGENTES });
   if (p === '/approvals') return json(res, 200, { approvals: APROVACOES });
-  if (p === '/projects') return json(res, 200, { projects: PROJETOS });
+  if (p === '/projects') return json(res, 200, { projects: [...PROJETOS, ...PROJETOS_CRIADOS] });
   if (p === '/health') return json(res, 200, { ok: true, version: '0.1.0', now: new Date().toISOString(), liveSessions: 3, subscribers: 1 });
-  if (p === '/discovery') return json(res, 200, { discoveries: [] });
+  if (p === '/discovery') return json(res, 200, { agents: [] });
 
   let m = /^\/sessions\/(ses_[a-z0-9]+)\/events$/i.exec(p);
   if (m) return json(res, 200, { events: eventosDe(m[1]!) });

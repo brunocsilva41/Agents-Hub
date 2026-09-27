@@ -22,7 +22,10 @@ import { AgentSwarmView } from './components/AgentSwarmView';
 import { DagCanvasView } from './components/DagCanvasView';
 import { TelemetryView } from './components/TelemetryView';
 import { OperationView } from './components/OperationView';
+import { EstadoDaTela } from './components/EstadoDaTela';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
+import { alternarFluxo, aoSelecionarFluxo, LISTA_INICIAL, type EstadoDaLista } from './lib/flowListState';
+import { falhaDosRecursos, situacaoDaTela, type Recurso } from './lib/indexStatus';
 import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES, timelineStatus } from './useHubState';
 
 type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'operation' | 'settings' | 'security';
@@ -32,7 +35,7 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scope, setScope] = useState<'session' | 'flow'>('session');
   const [verbose, setVerbose] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [listaDeFluxos, setListaDeFluxos] = useState<EstadoDaLista>(LISTA_INICIAL);
 
   const [modal, setModal] = useState<{ delegateFrom: { sessionId: string; agentId: string } | null; defaultAgentId?: string } | null>(null);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -117,18 +120,30 @@ export function App() {
   const budgetRoot = selected?.rootId ?? selected?.id ?? null;
   const budget = useBudget(budgetRoot, state.revisionOf(budgetRoot));
 
+  // O fluxo selecionado abre sozinho, mas pode ser recolhido (lib/flowListState).
+  const selectedRootId = selected?.rootId ?? null;
   const toggleFlow = (rootId: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(rootId)) next.delete(rootId);
-      else next.add(rootId);
-      return next;
-    });
+    setListaDeFluxos((prev) => alternarFluxo(prev, rootId, selectedRootId));
   };
 
   const selectSession = (id: string) => {
     setSelectedId(id);
     setFlowsOpen(false);
+    const root = state.sessions.find((s) => s.id === id)?.rootId ?? null;
+    setListaDeFluxos((prev) => aoSelecionarFluxo(prev, root));
+  };
+
+  // Situação do índice por tela: carregando/erro não pode virar "vazio".
+  const situacaoDe = (recursos: Recurso[], vazia: boolean) => situacaoDaTela(state.indice, recursos, vazia);
+  const erroDe = (recursos: Recurso[]) => falhaDosRecursos(state.indice, recursos);
+  const tentarDeNovo = () => void state.refresh();
+  const situacaoSessoes = situacaoDe(['sessions'], state.sessions.length === 0);
+  /** Aviso no topo das abas de formulário, que dependem de vários recursos. */
+  const avisoDoIndice = (recursos: Recurso[], oQue: string) => {
+    const s = situacaoDe(recursos, false);
+    return s === 'erro' ? (
+      <EstadoDaTela situacao={s} oQue={oQue} erro={erroDe(recursos)} onTentar={tentarDeNovo} compacto />
+    ) : null;
   };
 
   // Gavetas (colunas que viram painel deslizante em tela estreita).
@@ -384,7 +399,10 @@ export function App() {
           desatualizados sem aviso nenhum. */}
       {state.error && (
         <div className="error-banner app-error-banner" role="alert">
-          Falha ao atualizar dados do Hub: {state.error}
+          <span>Falha ao atualizar dados do Hub — {state.error}</span>
+          <button type="button" onClick={tentarDeNovo}>
+            Tentar de novo
+          </button>
         </div>
       )}
 
@@ -400,7 +418,7 @@ export function App() {
       />
 
       {/* Primeira execução, sem projeto: guia para registrar e ver agentes. */}
-      {precisaDeBoasVindas(state.ready, state.projects.length) &&
+      {precisaDeBoasVindas(state.indice.carregado.projects, state.projects.length) &&
         !boasVindasDispensadas &&
         activeTab !== 'settings' && (
           <Onboarding
@@ -413,15 +431,18 @@ export function App() {
       {/* 2. Main Body Content Area */}
       {activeTab === 'settings' ? (
         <main className="tab-view-container">
+          {avisoDoIndice(['projects', 'agents'], 'os projetos e agentes')}
           <SettingsView
             agents={state.agents}
             projects={state.projects}
             onNewProject={() => setProjectModalOpen(true)}
             onSujoChange={marcarSujoConfig}
+            projetosCarregados={state.indice.carregado.projects}
           />
         </main>
       ) : activeTab === 'security' ? (
         <main className="tab-view-container">
+          {avisoDoIndice(['projects', 'agents', 'sessions'], 'os projetos, agentes e sessões')}
           <SecurityView
             agents={state.agents}
             projects={state.projects}
@@ -438,6 +459,9 @@ export function App() {
           <AgentSwarmView
             agents={state.agents}
             onNewSession={(agentId) => setModal({ delegateFrom: null, defaultAgentId: agentId })}
+            situacao={situacaoDe(['agents'], state.agents.length === 0)}
+            erro={erroDe(['agents'])}
+            onRetry={tentarDeNovo}
           />
         </main>
       ) : activeTab === 'dag' ? (
@@ -450,10 +474,18 @@ export function App() {
               setActiveTab('timeline');
             }}
             onNewSession={() => setModal({ delegateFrom: null })}
+            projects={state.projects}
+            projectId={selectedProjectId}
+            onProjectChange={setSelectedProjectId}
+            revisionOf={state.revisionOf}
+            situacao={situacaoSessoes}
+            erro={erroDe(['sessions'])}
+            onRetry={tentarDeNovo}
           />
         </main>
       ) : activeTab === 'operation' ? (
         <main className="tab-view-container">
+          {avisoDoIndice(['sessions', 'projects', 'agents'], 'as sessões, projetos e agentes')}
           <OperationView
             sessions={state.sessions}
             agents={state.agents}
@@ -472,7 +504,13 @@ export function App() {
           <TelemetryView
             sessions={state.sessions}
             flows={state.flows}
-            agents={state.agents}
+            projects={state.projects}
+            projectId={selectedProjectId}
+            onProjectChange={setSelectedProjectId}
+            revisionOf={state.revisionOf}
+            situacao={situacaoSessoes}
+            erro={erroDe(['sessions'])}
+            onRetry={tentarDeNovo}
           />
         </main>
       ) : (
@@ -561,11 +599,20 @@ export function App() {
               <FlowList
                 flows={filteredFlows}
                 selectedId={selectedId}
-                selectedRootId={selected?.rootId ?? null}
-                expanded={expanded}
+                selectedRootId={selectedRootId}
+                listState={listaDeFluxos}
                 onToggle={toggleFlow}
                 onSelect={selectSession}
                 revisionOf={state.revisionOf}
+                situacao={situacaoSessoes}
+                erro={erroDe(['sessions'])}
+                onRetry={tentarDeNovo}
+                onShowAll={() => {
+                  setFlowFilter('all');
+                  setSearchQuery('');
+                  setSelectedProjectId('all');
+                }}
+                onNewSession={() => setModal({ delegateFrom: null })}
               />
             </div>
           </aside>
@@ -644,13 +691,17 @@ export function App() {
             </div>
 
             <div className="timeline-wrap">
+              {!selected && (situacaoSessoes === 'erro' || situacaoSessoes === 'carregando') ? (
+                <EstadoDaTela situacao={situacaoSessoes} oQue="as sessões" erro={erroDe(['sessions'])} onTentar={tentarDeNovo} />
+              ) : (
               <Timeline
                 events={events}
                 showVerbose={verbose}
                 showAgent={scope === 'flow'}
                 loading={!state.ready || (timeline?.loading ?? false)}
                 failed={eventsFailed}
-                unselected={state.ready && !selected}
+                unselected={(situacaoSessoes === 'ok' || situacaoSessoes === 'vazio') && !selected}
+                hubVazio={situacaoSessoes === 'vazio'}
                 resetKey={`${selected?.id ?? ''}:${scope}`}
                 hasMoreBefore={timeline?.hasMoreBefore ?? false}
                 loadingOlder={timeline?.loadingOlder ?? false}
@@ -659,6 +710,7 @@ export function App() {
                 retryAt={timeline?.retryAt ?? null}
                 onRetry={timeline?.retry}
               />
+              )}
 
               {selected && (
                 <Composer session={selected} encerrada={!isLiveState(selected.state)} />
@@ -676,7 +728,7 @@ export function App() {
           >
             <SidePanel
               session={selected}
-              budget={budget}
+              budgetState={budget}
               agents={state.agents}
               onDelegate={() => {
                 if (selected) {
@@ -716,6 +768,10 @@ export function App() {
           onClose={() => setProjectModalOpen(false)}
           onCreated={(projectId) => {
             setProjectModalOpen(false);
+            setSelectedProjectId(projectId);
+            void state.refresh();
+          }}
+          onProjectExists={(projectId) => {
             setSelectedProjectId(projectId);
             void state.refresh();
           }}

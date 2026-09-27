@@ -88,6 +88,9 @@ export function ApprovalHistory({ sessions, projectId, onSelectSession }: Props)
       {erro && (
         <div className="settings-erro" role="alert">
           Falha ao ler o histórico: {erro}
+          <button className="ghost" onClick={() => void buscar()} disabled={carregando}>
+            tentar de novo
+          </button>
         </div>
       )}
       {itens && itens.length === 0 && !erro && (

@@ -1,5 +1,4 @@
 import { HubClient } from '@agents-hub/client';
-import type { AgentDiscovery, ImportKind, ImportResult } from '@agents-hub/core';
 
 /**
  * A UI é servida pelo próprio daemon (ADR 05.3), então a API está na mesma
@@ -105,9 +104,7 @@ export function mostUrgentState(states: readonly string[]): string {
   return best;
 }
 
-export function isLiveState(state: string): boolean {
-  return state === 'running' || state === 'waiting_approval' || state === 'paused' || state === 'idle';
-}
+export { isLiveState } from './lib/sessionControls';
 
 /** Risco vem do daemon em inglês técnico; a fila de aprovações é lida sob pressão. */
 export const RISK_LABEL: Record<string, string> = {
@@ -117,39 +114,3 @@ export const RISK_LABEL: Record<string, string> = {
   high: 'alto',
   critical: 'crítico',
 };
-
-/* ------------------------------------------------------------------------ */
-/* Descoberta e importação do ambiente dos CLIs                             */
-/* ------------------------------------------------------------------------ */
-
-export interface ImportRequest {
-  agentId: string;
-  kinds: ImportKind[];
-  /** Padrão do daemon é `true`: prévia. Aplicar exige `false` explícito. */
-  dryRun: boolean;
-  targetAgents?: string[];
-  overwrite?: boolean;
-  includeEnv?: boolean;
-}
-
-/*
- * Estas três passavam por um `fetch` próprio, de quando as rotas ainda não
- * estavam no `HubClient`. Agora estão (`discovery`, `discoverAgent`,
- * `importFromAgent`, que também valida o id do projeto no caminho) — uma cópia
- * a menos do tratamento de erro para envelhecer (vistoria 2026-09-25, 03).
- */
-
-/** Lista o que cada CLI instalado já tem (leitura apenas, sem segredos). */
-export function fetchDiscovery(): Promise<{ agents: AgentDiscovery[] }> {
-  return hub.discovery();
-}
-
-/** Relê um agente do disco, ignorando o cache do daemon. */
-export function refreshDiscovery(agentId: string): Promise<AgentDiscovery> {
-  return hub.discoverAgent(agentId, true).then((r) => r.agent);
-}
-
-/** Prévia (`dryRun: true`) ou aplicação (`dryRun: false`) da importação. */
-export function importFromAgent(projectId: string, request: ImportRequest): Promise<ImportResult> {
-  return hub.importFromAgent(projectId, request);
-}
