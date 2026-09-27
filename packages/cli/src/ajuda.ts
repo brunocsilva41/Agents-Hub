@@ -64,12 +64,14 @@ ${bold('Sessões')}
       --mode <supervised|semi|autonomous>
       --isolation <worktree|none>
       --detach               não acompanha o stream
+      --from <sessionId>     continua uma sessão terminada: resumo, contexto e branch dela
+      --no-bell              sem bipe/título do terminal quando surge aprovação (vale para watch/send)
       --                     fim das flags: o resto é o objetivo, mesmo começando com "-"
       ${dim('saída: 0 concluída · 1 falhou/cancelada/erro · 2 parada esperando aprovação (vale para watch/send)')}
   hub sessions                                lista sessões
   hub watch <sessionId>                       acompanha uma sessão ao vivo
   hub watch --root <rootId>                   acompanha o fluxo inteiro, todos os agentes
-  hub send <sessionId> "texto"                fala com uma sessão
+  hub send <sessionId> "texto"                fala com uma sessão viva (terminada: hub start --from)
   hub interrupt <sessionId>                   para o turno atual; a sessão fica ociosa (retome com send)
   hub pause <sessionId>                       para o turno e pausa a sessão (retome com send)
   hub cancel <sessionId>                      encerra a sessão e seus filhos
@@ -85,7 +87,7 @@ ${bold('Delegação e custo')}
 ${bold('Aprovações e manutenção')}
   hub approvals                      o que está esperando sua decisão
   hub approve <id>                   libera e a sessão continua de onde parou
-  hub deny <id>                      nega e encerra a sessão
+  hub deny <id>                      nega (gate: só aquela chamada; orçamento: encerra a sessão)
   hub prune                          recolhe worktrees de sessões já expiradas
   ${dim('approve/deny/prune/stop e as edições abaixo exigem o token de <AGENTS_HUB_HOME>/operator-token (a CLI lê sozinha)')}
 

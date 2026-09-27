@@ -1,5 +1,26 @@
+import { useState } from 'react';
 import type { ApprovalSummary, SessionSummary } from '@agents-hub/client';
 import { useAction } from '../actions';
+import { depsDoNavegador, pedirPermissaoDeNotificacao } from '../lib/approvalNotice';
+
+/**
+ * Opt-in da notificação do SO para aprovações (R14-14). Só aparece enquanto
+ * o navegador ainda não perguntou: concedida ou negada, some.
+ */
+function AvisarNoSistema() {
+  const [permissao, setPermissao] = useState(() => depsDoNavegador().permissao());
+  if (permissao !== 'default') return null;
+  return (
+    <button
+      className="ghost"
+      style={{ marginLeft: 'auto' }}
+      title="Notificação do sistema quando surgir aprovação com o painel em segundo plano"
+      onClick={() => void pedirPermissaoDeNotificacao().then(setPermissao)}
+    >
+      Avisar no sistema
+    </button>
+  );
+}
 import { agentColor, formatAgo, hub, RISK_LABEL, timeOf } from '../hub';
 
 interface Props {
@@ -40,6 +61,7 @@ export function Approvals({ approvals, sessions, onResolved, onSelectSession }: 
         {approvals.length === 1
           ? 'sessão parada esperando sua decisão'
           : 'sessões paradas esperando sua decisão'}
+        <AvisarNoSistema />
       </div>
 
       {action.error && (

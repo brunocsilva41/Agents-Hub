@@ -14,6 +14,8 @@ export const BOOLEAN_FLAGS = new Set([
   'detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh',
   // Item 5.6 (init/logs/open/update/export/cost/merge/restore).
   'yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw',
+  // R14-14: desliga o alerta de aprovação (bipe + título do terminal).
+  'no-bell',
 ]);
 
 /**

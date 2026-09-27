@@ -75,6 +75,9 @@ detect:
   args: ["${script.replace(/\\/g, '\\\\')}", "--version"]
 capabilities:
   - code-edit
+caveats:
+  - "${'primeira limitação comprida '.repeat(12)}"
+  - "LIMITACAO-SEGUNDA-SO-NO-VERBOSE"
 session:
   strategy: replay
 stream:
@@ -96,7 +99,10 @@ defaults:
     hubClient = new HubClient(`http://${host}:${port}`);
     projectId = hub.sessions.registerProject(projetoPath, 'Projeto MCP').id;
 
-    const caller = new CallerIdentity(hubClient, 'agente-mcp', projetoPath, 'sessao-de-teste-fixa');
+    // Chamador real: as tools só alcançam o fluxo dele (vistoria 08, achado 14),
+    // então as sessões semeadas abaixo nascem como filhas desta raiz.
+    raizDoChamador = semear({ raiz: true });
+    const caller = new CallerIdentity(hubClient, 'agente-mcp', projetoPath, raizDoChamador.id);
     const server = buildMcpServer(hubClient, caller);
 
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
@@ -114,30 +120,42 @@ defaults:
     }
   });
 
-  function semearRodando(): Session {
+  let raizDoChamador: Session;
+
+  /**
+   * Semeia uma sessão. Por padrão, filha de `pai` (a raiz do chamador); com
+   * `raiz: true`, raiz de um fluxo novo — outro fluxo, do ponto de vista do
+   * chamador.
+   */
+  function semear(
+    o: { raiz?: boolean; pai?: Session; state?: Session['state']; title?: string } = {},
+  ): Session {
     const id = newId('ses');
+    const pai = o.raiz ? null : (o.pai ?? raizDoChamador);
     const session: Session = {
       id,
       projectId,
       agentId: 'agente-mcp',
-      parentId: null,
-      rootId: id,
-      depth: 0,
-      path: [`agente-mcp:${id}`],
-      state: 'running',
+      parentId: pai?.id ?? null,
+      rootId: pai?.rootId ?? id,
+      depth: pai ? pai.depth + 1 : 0,
+      path: [...(pai?.path ?? []), `agente-mcp:${id}`],
+      state: o.state ?? 'running',
       mode: 'semi',
       isolation: 'none',
       workdir: projetoPath,
       nativeSessionId: null,
-      title: 'sessão de teste do MCP',
+      title: o.title ?? 'sessão de teste do MCP',
       createdAt: nowIso(),
       updatedAt: nowIso(),
-      endedAt: null,
+      endedAt: o.state && o.state !== 'running' ? nowIso() : null,
       pid: null,
     };
     hub.store.sessions.create(session);
     return session;
   }
+
+  const semearRodando = (): Session => semear();
 
   test('hub_session_pause pausa uma sessão rodando', async () => {
     const session = semearRodando();
@@ -153,26 +171,7 @@ defaults:
   });
 
   test('hub_session_pause devolve erro descritivo para sessão já terminada', async () => {
-    const id = newId('ses');
-    hub.store.sessions.create({
-      id,
-      projectId,
-      agentId: 'agente-mcp',
-      parentId: null,
-      rootId: id,
-      depth: 0,
-      path: [`agente-mcp:${id}`],
-      state: 'completed',
-      mode: 'semi',
-      isolation: 'none',
-      workdir: projetoPath,
-      nativeSessionId: null,
-      title: 'sessão já concluída',
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      endedAt: nowIso(),
-      pid: null,
-    });
+    const { id } = semear({ state: 'completed', title: 'sessão já concluída' });
 
     const result = await client.callTool({
       name: 'hub_session_pause',
@@ -382,19 +381,158 @@ steps:
     assert.match(textOf(result), /\+depois/);
   });
 
-  test('hub_session_diff para sessão inexistente devolve mensagem clara, não erro genérico', async () => {
-    // A rota `/sessions/:id/diff` do daemon não checa se a sessão existe —
-    // ela só procura artefatos do tipo "diff" e não encontra nenhum, então o
-    // desfecho é indistinguível de "sessão real sem mudanças". Documentando
-    // este comportamento aqui em vez de fingir um SESSION_NOT_FOUND que a
-    // rota não produz.
+  test('hub_session_diff para sessão inexistente devolve SESSION_NOT_FOUND', async () => {
+    // A rota `/sessions/:id/diff` do daemon não checa se a sessão existe; o
+    // escopo por fluxo (achado 14) lê a sessão antes, e daí vem o erro claro
+    // em vez de "não alterou nenhum arquivo" sobre coisa nenhuma.
     const result = await client.callTool({
       name: 'hub_session_diff',
       arguments: { session_id: 'ses_naoexiste000' },
     });
 
-    assert.equal(result.isError, undefined, textOf(result));
-    assert.match(textOf(result), /não alterou nenhum arquivo/i);
+    assert.equal(result.isError, true, textOf(result));
+    assert.match(textOf(result), /SESSION_NOT_FOUND|não encontrada/i);
+  });
+
+  // ------------------------------------------------ escopo por fluxo (achado 14)
+
+  test('escopo: tools recusam sessão de OUTRO fluxo, sem efeito nela', async () => {
+    const outraRaiz = semear({ raiz: true, title: 'SEGREDO-DE-OUTRO-PROJETO' });
+    const outraFilha = semear({ pai: outraRaiz });
+
+    const chamadas: Array<[string, Record<string, unknown>]> = [
+      ['hub_agent_cancel', { session_id: outraFilha.id }],
+      ['hub_session_pause', { session_id: outraFilha.id }],
+      ['hub_session_interrupt', { session_id: outraFilha.id }],
+      ['hub_session_send', { session_id: outraFilha.id, text: 'oi' }],
+      ['hub_session_handoff', { session_id: outraFilha.id, target_agent: 'agente-mcp' }],
+      ['hub_agent_events', { session_id: outraFilha.id }],
+      ['hub_session_diff', { session_id: outraFilha.id }],
+      ['hub_graph', { root_id: outraRaiz.id }],
+      ['hub_budget', { root_id: outraRaiz.id }],
+      ['hub_context_fetch', { ref: `session:${outraFilha.id}` }],
+    ];
+    for (const [nome, args] of chamadas) {
+      const result = await client.callTool({ name: nome, arguments: args });
+      assert.equal(result.isError, true, `${nome} deveria recusar, veio: ${textOf(result)}`);
+      assert.match(textOf(result), /OUT_OF_FLOW/, nome);
+      assert.doesNotMatch(textOf(result), /SEGREDO/, nome);
+    }
+    assert.equal(hub.store.sessions.get(outraFilha.id)?.state, 'running');
+  });
+
+  test('escopo: hub_session_list mostra só o fluxo do chamador', async () => {
+    semear({ raiz: true, title: 'SEGREDO-LISTADO-DE-OUTRO-FLUXO' });
+    const minha = semear({ title: 'filha-visivel-do-chamador' });
+
+    const texto = textOf(await client.callTool({ name: 'hub_session_list', arguments: {} }));
+    assert.match(texto, new RegExp(minha.id));
+    assert.doesNotMatch(texto, /SEGREDO-LISTADO/);
+  });
+
+  test('escopo: hub_session_list avisa quando corta a lista', async () => {
+    const pai = semear({ title: 'pai-com-muitos-filhos' });
+    for (let i = 0; i < 45; i += 1) semear({ pai, state: 'completed' });
+
+    const texto = textOf(await client.callTool({ name: 'hub_session_list', arguments: {} }));
+    assert.match(texto, /mais \d+ sessões não mostradas/);
+  });
+
+  test('escopo: agente delegado controla só o que está ABAIXO dele, lê o fluxo todo', async () => {
+    const eu = semear({ title: 'agente delegado' });
+    const irmao = semear({ title: 'irmão' });
+    const neto = semear({ pai: semear({ pai: eu }) });
+
+    const callerFilho = new CallerIdentity(hubClient, 'agente-mcp', projetoPath, eu.id);
+    const [st, ct] = InMemoryTransport.createLinkedPair();
+    const clienteFilho = new Client({ name: 'teste-escopo-filho', version: '0.0.1' });
+    await Promise.all([buildMcpServer(hubClient, callerFilho).connect(st), clienteFilho.connect(ct)]);
+    try {
+      for (const alvo of [raizDoChamador, irmao, eu]) {
+        const r = await clienteFilho.callTool({ name: 'hub_agent_cancel', arguments: { session_id: alvo.id } });
+        assert.equal(r.isError, true, `cancelar ${alvo.title} deveria ser recusado: ${textOf(r)}`);
+        assert.match(textOf(r), /não está abaixo de você/);
+        assert.equal(hub.store.sessions.get(alvo.id)?.state, 'running');
+      }
+
+      // Ler o irmão (mesmo fluxo) continua permitido.
+      const leitura = await clienteFilho.callTool({ name: 'hub_agent_events', arguments: { session_id: irmao.id } });
+      assert.equal(leitura.isError, undefined, textOf(leitura));
+
+      // O neto foi delegado (indiretamente) por ele: pode pausar.
+      const pausa = await clienteFilho.callTool({ name: 'hub_session_pause', arguments: { session_id: neto.id } });
+      assert.equal(pausa.isError, undefined, textOf(pausa));
+      assert.equal(hub.store.sessions.get(neto.id)?.state, 'paused');
+    } finally {
+      await clienteFilho.close();
+    }
+  });
+
+  // --------------------------------------- hub_workflow_run (achado 15)
+
+  test('hub_workflow_run recusa path fora do projeto sem ler nem ecoar o arquivo', async () => {
+    const fora = path.join(raiz, 'segredo.yaml');
+    writeFileSync(fora, 'token: CONTEUDO-SECRETO-QUE-NAO-PODE-VOLTAR\n', 'utf8');
+    for (const p of [fora, '../segredo.yaml', path.join(raiz, 'manifests', 'agente-mcp.yaml')]) {
+      const result = await client.callTool({
+        name: 'hub_workflow_run',
+        arguments: { path: p, project: projetoPath },
+      });
+      assert.equal(result.isError, true, textOf(result));
+      assert.match(textOf(result), /dentro do projeto/);
+      assert.doesNotMatch(textOf(result), /CONTEUDO-SECRETO|agente-mcp\.yaml.*bin/);
+    }
+  });
+
+  test('hub_workflow_run: YAML quebrado diz a linha, sem ecoar o trecho', async () => {
+    const arquivo = path.join(projetoPath, 'quebrado.yaml');
+    writeFileSync(arquivo, 'name: x\nsteps: [TRECHO-ECOADO-bad: [unclosed\n', 'utf8');
+    const result = await client.callTool({
+      name: 'hub_workflow_run',
+      arguments: { path: 'quebrado.yaml', project: projetoPath },
+    });
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /YAML malformado na linha \d+/);
+    assert.doesNotMatch(textOf(result), /TRECHO-ECOADO|unclosed/);
+  });
+
+  test('hub_workflow_run: workflow fora do esquema diz QUAL campo falhou', async () => {
+    const result = await client.callTool({
+      name: 'hub_workflow_run',
+      arguments: { yaml: 'not: a workflow\n', project: projetoPath },
+    });
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /campos inválidos/);
+    assert.match(textOf(result), /- name:/);
+    assert.match(textOf(result), /- steps:/);
+  });
+
+  test('hub_workflow_run: quem rodou acompanha os passos (raízes próprias) pelas tools', { timeout: 30_000 }, async () => {
+    const yaml = `
+name: workflow-acompanhado
+steps:
+  - id: passo
+    agent: agente-mcp
+    objective: "Fazer a coisa do passo para o teste de escopo do workflow"
+    isolation: none
+`;
+    const texto = textOf(await client.callTool({ name: 'hub_workflow_run', arguments: { yaml, project: projetoPath } }));
+    const sessao = /\[sessão (ses_[a-z0-9]+)\]/i.exec(texto)?.[1];
+    assert.ok(sessao, texto);
+    const eventos = await client.callTool({ name: 'hub_agent_events', arguments: { session_id: sessao } });
+    assert.equal(eventos.isError, undefined, textOf(eventos));
+  });
+
+  // ------------------------------------------------ saídas enxutas (achado 16)
+
+  test('hub_agent_list resume limitações por padrão e mostra tudo com verbose', async () => {
+    // Os caveats vêm do manifesto de teste (ver `before`).
+    const curto = textOf(await client.callTool({ name: 'hub_agent_list', arguments: {} }));
+    assert.doesNotMatch(curto, /LIMITACAO-SEGUNDA/);
+    assert.match(curto, /\(\+1; verbose: true para ver\)/);
+    const longo = textOf(await client.callTool({ name: 'hub_agent_list', arguments: { verbose: true } }));
+    assert.match(longo, /LIMITACAO-SEGUNDA-SO-NO-VERBOSE/);
+    assert.ok(curto.length < longo.length);
   });
 });
 
@@ -409,6 +547,18 @@ describe('MCP: id malformado em argumento de tool', () => {
   let fake: HttpServer;
   let client: Client;
   const recebidos: string[] = [];
+  const chamador = newId('ses');
+  let modoDoSend = 'live';
+
+  /** Sessão falsa: a do chamador é raiz; qualquer outra é filha dela. */
+  const sessaoFalsa = (id: string): Record<string, unknown> => ({
+    id,
+    rootId: chamador,
+    parentId: id === chamador ? null : chamador,
+    agentId: 'agente-mcp',
+    state: 'running',
+    depth: id === chamador ? 0 : 1,
+  });
 
   before(async () => {
     fake = createHttpServer((req, res) => {
@@ -416,14 +566,22 @@ describe('MCP: id malformado em argumento de tool', () => {
       req.resume();
       req.on('end', () => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, interrupted: false, mode: 'live' }));
+        const url = new URL(req.url ?? '/', 'http://x');
+        const sessao = /^\/sessions\/(ses_[a-z0-9]+)$/i.exec(url.pathname);
+        if (req.method === 'GET' && sessao) {
+          res.end(JSON.stringify({ session: sessaoFalsa(sessao[1] as string), live: true }));
+        } else if (req.method === 'GET' && url.pathname === '/sessions') {
+          res.end(JSON.stringify({ sessions: [sessaoFalsa(chamador), sessaoFalsa('ses_abc123')] }));
+        } else {
+          res.end(JSON.stringify({ ok: true, interrupted: false, mode: modoDoSend }));
+        }
       });
     });
     await new Promise<void>((resolve) => fake.listen(0, '127.0.0.1', resolve));
     const endereco = fake.address();
     const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
     const hubClient = new HubClient(`http://127.0.0.1:${porta}`);
-    const caller = new CallerIdentity(hubClient, 'agente-mcp', os.tmpdir(), newId('ses'));
+    const caller = new CallerIdentity(hubClient, 'agente-mcp', os.tmpdir(), chamador);
     const server = buildMcpServer(hubClient, caller);
     const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'teste-traversal', version: '0.0.1' });
@@ -480,6 +638,23 @@ describe('MCP: id malformado em argumento de tool', () => {
     recebidos.length = 0;
     const result = await chamar('hub_agent_cancel', { session_id: 'ses_abc123' });
     assert.equal(result.isError, undefined, textOf(result));
-    assert.deepEqual(recebidos, ['POST /sessions/ses_abc123/cancel']);
+    // Antes do cancel, o escopo lê a sessão (e o fluxo) — só GETs.
+    assert.equal(recebidos.at(-1), 'POST /sessions/ses_abc123/cancel');
+    assert.ok(
+      recebidos.slice(0, -1).every((r) => r.startsWith('GET /sessions')),
+      recebidos.join(', '),
+    );
+  });
+
+  test('hub_session_send com modo desconhecido não responde "undefined" (achado 16)', async () => {
+    modoDoSend = 'modo-futuro';
+    try {
+      const result = await chamar('hub_session_send', { session_id: 'ses_abc123', text: 'oi' });
+      assert.equal(result.isError, undefined, textOf(result));
+      assert.doesNotMatch(textOf(result), /undefined/);
+      assert.match(textOf(result), /modo-futuro/);
+    } finally {
+      modoDoSend = 'live';
+    }
   });
 });

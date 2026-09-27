@@ -3,6 +3,7 @@ import { HubApiError, InvalidHubIdError, type HubClient, type SessionSummary, ty
 import { bold, dim, formatTokens, green, red, renderEvent, renderGraph, yellow } from './render.js';
 import type { GraphSummary } from './client.js';
 import type { EventEnvelope } from '@agents-hub/core';
+import { criarAlertaDeAprovacao } from './approval-alert.js';
 
 /**
  * Acompanhar sessões e fluxos ao vivo (`hub start`, `watch`, `send`) e as
@@ -86,6 +87,8 @@ export interface OpcoesDeAcompanhamento {
   /** Quanto tempo aceitar "sem processo vivo e task aberta" antes de desistir. */
   esperaMaximaMs?: number;
   log?: Log;
+  /** Chamado a cada evento do stream (alerta de aprovação, R14-14). */
+  alertar?: (event: EventEnvelope) => void;
 }
 
 type Avaliacao =
@@ -161,6 +164,7 @@ export async function acompanhar(client: HubClient, opts: OpcoesDeAcompanhamento
     try {
       for await (const event of client.stream(filtro, ac.signal) as AsyncGenerator<EventEnvelope>) {
         log(renderEvent(event, { showAgent: porRaiz }));
+        opts.alertar?.(event);
         if (!porRaiz && event.sessionId === alvo) since = event.seq;
         if (event.sessionId === alvo && FIM_DE_TURNO.has(event.type)) void checar();
       }
@@ -343,6 +347,13 @@ export interface OpcoesDeComando {
   log?: Log;
   logErro?: Log;
   pollMs?: number;
+  /** Alerta de aprovação; padrão: bipe + título no TTY, salvo `--no-bell`. */
+  alertar?: (event: EventEnvelope) => void;
+}
+
+/** Alerta de aprovação do comando (R14-14). */
+export function alertaDe(args: Args, o: { alertar?: (event: EventEnvelope) => void }): (event: EventEnvelope) => void {
+  return o.alertar ?? criarAlertaDeAprovacao({ desligado: args.flags['no-bell'] === true });
 }
 
 /**
@@ -397,11 +408,11 @@ export async function watchCommand(client: HubClient, args: Args, o: OpcoesDeCom
       const { graph } = await client.graph(rootId);
       for (const linha of renderGraph(graph)) log(linha);
     }
-    desfecho = await acompanhar(client, { rootId, log, pollMs: o.pollMs });
+    desfecho = await acompanhar(client, { rootId, log, pollMs: o.pollMs, alertar: alertaDe(args, o) });
   } else {
     const sessionId = required(args.positional[0], 'sessionId');
     await sessaoOuErro(client, sessionId);
-    desfecho = await acompanhar(client, { sessionId, log, pollMs: o.pollMs });
+    desfecho = await acompanhar(client, { sessionId, log, pollMs: o.pollMs, alertar: alertaDe(args, o) });
   }
   aplicarSaida(desfecho, o);
   return desfecho;
@@ -430,7 +441,7 @@ export async function sendCommand(client: HubClient, args: Args, o: OpcoesDeComa
     replay: 'turno novo (o agente não guarda sessão nativa)',
   };
   log(dim(`${explicacao[mode] ?? mode}${NEWLINE}`));
-  const desfecho = await acompanhar(client, { sessionId, since, log, pollMs: o.pollMs });
+  const desfecho = await acompanhar(client, { sessionId, since, log, pollMs: o.pollMs, alertar: alertaDe(args, o) });
   aplicarSaida(desfecho, o);
   return desfecho;
 }

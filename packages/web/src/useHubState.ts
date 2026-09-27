@@ -12,6 +12,7 @@ import { hub, isLiveState, mostUrgentState } from './hub';
 import { EventHistory } from './lib/eventHistory';
 import type { HistoryState } from './lib/eventMerge';
 import { isStructural, patchSessionsFromEvent } from './lib/hubEvents';
+import { criarNotificadorDeAprovacao, depsDoNavegador } from './lib/approvalNotice';
 import { createRefetchScheduler, type RefetchScheduler } from './lib/refetchScheduler';
 
 /**
@@ -175,6 +176,8 @@ export function useHubState(): HubState {
   useEffect(() => {
     const source = new EventSource(hub.streamUrl());
     let dropped = false;
+    // Aprovação com a aba em segundo plano vira notificação do SO (R14-14).
+    const notificarAprovacao = criarNotificadorDeAprovacao(depsDoNavegador());
 
     source.onopen = () => {
       setConnected(true);
@@ -200,6 +203,7 @@ export function useHubState(): HubState {
       }
 
       history.pushLive(event);
+      notificarAprovacao(event);
 
       if (isStructural(event)) {
         // O que o próprio evento afirma entra já; a verdade do daemon chega na

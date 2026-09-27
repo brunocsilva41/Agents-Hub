@@ -26,6 +26,11 @@ export function formatTaskStatus(status: TaskStatus): string {
     `objetivo: ${task.brief.objective}`,
   ];
 
+  // Failover em cascata sem aviso (vistoria 08, achado 11): o chamador via
+  // "delegado para claude" e nunca sabia que quem executou foi outro agente.
+  const troca = trocaDeAgente(status);
+  if (troca) lines.push(troca);
+
   const failures = task.attempts.filter((a) => a.outcome === 'error');
   if (failures.length > 0) {
     lines.push(
@@ -74,6 +79,27 @@ export function formatTaskStatus(status: TaskStatus): string {
 }
 
 /**
+ * Linha de aviso quando a task não está (mais) com o agente que recebeu a
+ * primeira tentativa — fallback do daemon ou handoff. `null` quando não houve
+ * troca.
+ */
+export function trocaDeAgente(status: TaskStatus): string | null {
+  const { task, session } = status;
+  const primeiro = task.attempts[0]?.agentId;
+  if (!primeiro) return null;
+  const cadeia: string[] = [];
+  for (const a of task.attempts) {
+    if (cadeia.at(-1) !== a.agentId) cadeia.push(a.agentId);
+  }
+  if (cadeia.at(-1) !== session.agentId) cadeia.push(session.agentId);
+  if (cadeia.length < 2) return null;
+  return (
+    `FALLBACK: a tarefa começou em ${primeiro} e quem executa agora é ${session.agentId} ` +
+    `(cadeia: ${cadeia.join(' → ')}; sessão atual ${session.id}) — o resultado abaixo é de ${session.agentId}`
+  );
+}
+
+/**
  * Eventos em uma linha cada. Filtra o que não ajuda o chamador a decidir:
  * `log`, `reasoning` e deltas são ruído caro dentro de outro agente.
  */
@@ -102,7 +128,7 @@ export function formatEvents(events: EventEnvelope[], includeVerbose = false): s
         case 'delegation.completed':
           return `[${time}] delegação a ${String(p['agentId'] ?? '')} terminou: ${String(p['state'] ?? '')}`;
         case 'error':
-          return `[${time}] ERRO: ${String(p['message'] ?? p['error'] ?? '')}`;
+          return `[${time}] ERRO: ${textoDeErro(p)}`;
         case 'turn.completed':
           return `[${time}] turno concluído`;
         case 'session.ended':
@@ -162,6 +188,21 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+/**
+ * Texto de um evento de erro. O mapper do Claude põe o motivo em `summary`
+ * ("Prompt is too long"), o desfecho do processo em `error`, o pump em
+ * `message` — lendo só `message ?? error`, o agente via `ERRO: ` vazio
+ * (vistoria 08, achado 16).
+ */
+function textoDeErro(p: Record<string, unknown>): string {
+  for (const chave of ['message', 'summary', 'error'] as const) {
+    const v = p[chave];
+    if (typeof v === 'string' && v.trim().length > 0) return truncate(v.trim(), 500);
+  }
+  const razao = p['reason'] ?? p['subtype'];
+  return razao === undefined || razao === null ? 'sem detalhe' : String(razao);
 }
 
 function truncate(text: string, max: number): string {

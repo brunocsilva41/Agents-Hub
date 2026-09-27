@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { parse as parseYamlText } from 'yaml';
@@ -18,6 +18,7 @@ import {
   type WorkflowRunDeps,
 } from '@agents-hub/core';
 import type { CallerIdentity } from './caller.js';
+import { FlowScope, FlowScopeError } from './scope.js';
 import {
   formatBudget,
   formatEvents,
@@ -53,6 +54,8 @@ const fail = (text: string): ToolResult => ({ content: [{ type: 'text', text }],
 const LIMITE_OBJETIVO = 20_000;
 const LIMITE_ITENS = 50;
 const LIMITE_ITEM = 2_000;
+/** Teto de linhas de `hub_session_list` (o resto vira aviso, não silêncio). */
+const LIMITE_LISTA = 40;
 const itemCurto = z.string().max(LIMITE_ITEM, `item acima de ${LIMITE_ITEM} caracteres`);
 /** Caminho de artefato: relativo ao projeto, sem subir de diretório. */
 const caminhoDoProjeto = itemCurto.refine(
@@ -81,6 +84,8 @@ const idArg = (prefixo: HubIdPrefix): z.ZodString =>
  * deles saiba da existência dos outros.
  */
 export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpServer {
+  // Toda tool que recebe id de sessão/task/raiz passa por aqui (achado 14).
+  const scope = new FlowScope(client, caller);
   const server = new McpServer(
     { name: 'agents-hub', version: '0.1.0' },
     {
@@ -118,10 +123,14 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           .string()
           .optional()
           .describe('filtra por capability, ex.: "test-writing", "refactor", "shell"'),
+        verbose: z
+          .boolean()
+          .optional()
+          .describe('inclui todas as limitações conhecidas de cada agente (bem mais longo)'),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ capability }): Promise<ToolResult> => {
+    async ({ capability, verbose }): Promise<ToolResult> => {
       try {
         const { agents } = await client.agents();
         const filtered = capability
@@ -136,8 +145,18 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           filtered
             .map((agent) => {
               const status = agent.probe?.installed === true ? 'disponível' : 'NÃO INSTALADO';
+              // Os caveats completos de todos os manifestos davam ~8.700
+              // caracteres a cada chamada (achado 16): por padrão só o
+              // primeiro, curto; o resto com `verbose`.
               const caveats =
-                agent.caveats.length > 0 ? `\n  limitações: ${agent.caveats.join('; ')}` : '';
+                agent.caveats.length === 0
+                  ? ''
+                  : verbose === true
+                    ? `\n  limitações: ${agent.caveats.join('; ')}`
+                    : `\n  limitações: ${resumir(agent.caveats[0] as string, 140)}` +
+                      (agent.caveats.length > 1
+                        ? ` (+${agent.caveats.length - 1}; verbose: true para ver)`
+                        : '');
               return `${agent.id} [${status}] — ${agent.name}\n  capabilities: ${agent.capabilities.join(', ')}${caveats}`;
             })
             .join('\n'),
@@ -250,9 +269,14 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           );
         }
 
+        const outroAgente =
+          !args.agent.startsWith('cap:') && result.agentId !== args.agent
+            ? [`ATENÇÃO: pedido "${args.agent}", mas quem recebeu foi ${result.agentId}`]
+            : [];
         return ok(
           [
             `delegado para ${result.agentId}`,
+            ...outroAgente,
             `task_id: ${result.taskId}`,
             `session_id: ${result.sessionId}`,
             `estado: ${result.state} (rodando em background)`,
@@ -260,6 +284,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
             '',
             'Siga com seu trabalho. Consulte com hub_agent_status(task_id) quando quiser,',
             'ou use hub_agent_wait(task_id) se precisar do resultado para continuar.',
+            'Se este agente falhar, o Hub pode repassar a tarefa a outro (fallback); o status diz quem executou.',
           ].join('\n'),
         );
       } catch (err) {
@@ -281,7 +306,9 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ task_id }): Promise<ToolResult> => {
       try {
-        return ok(formatTaskStatus(await client.task(task_id)));
+        const status = await client.task(task_id);
+        await scope.exigirLeituraDaTask(status);
+        return ok(formatTaskStatus(status));
       } catch (err) {
         return fail(describe(err));
       }
@@ -298,7 +325,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Use quando você REALMENTE precisa do resultado para continuar — se puder seguir ' +
         'trabalhando, prefira hub_agent_status, que não desperdiça tempo de parede. ' +
         'Ao estourar o timeout, a tarefa continua rodando: só a espera termina. ' +
-        'Defaults to 300 seconds if not specified. Use 0 for no timeout (wait indefinitely - use with caution).',
+        'Padrão: 300 s; 0 espera sem limite (use com cuidado).',
       inputSchema: {
         task_id: idArg('tsk'),
         timeout_seconds: z
@@ -309,6 +336,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
           .default(300)
           .describe('padrão 300s; use 0 para aguardar sem limite de tempo'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ task_id, timeout_seconds }, extra): Promise<ToolResult> => {
       // timeout_seconds=0 significa "sem limite"; Infinity garante que o
@@ -328,6 +356,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         for (;;) {
           if (signal.aborted) return fail('espera cancelada pelo cliente; a TAREFA CONTINUA RODANDO');
           const status = await client.task(task_id);
+          await scope.exigirLeituraDaTask(status);
           if (signal.aborted) return fail('espera cancelada pelo cliente; a TAREFA CONTINUA RODANDO');
           polls += 1;
           if (progressToken !== undefined) {
@@ -392,6 +421,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ session_id, since, verbose }): Promise<ToolResult> => {
       try {
+        await scope.exigirLeitura(session_id);
         const { events } = await client.events(session_id, { since, limit: 200 });
         const lastSeq = events.at(-1)?.seq;
         const body = formatEvents(events, verbose === true);
@@ -419,6 +449,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ session_id }): Promise<ToolResult> => {
       try {
+        await scope.exigirLeitura(session_id);
         const { diff, message } = await client.diff(session_id);
         if (!diff) {
           return ok(message ?? 'esta sessão não tem diff disponível');
@@ -447,6 +478,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ session_id, reason }): Promise<ToolResult> => {
       try {
+        await scope.exigirControle(session_id);
         await client.cancel(session_id, reason ?? 'cancelado pelo agente chamador');
         return ok(`sessão ${session_id} encerrada, junto com o que ela havia delegado`);
       } catch (err) {
@@ -472,6 +504,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ session_id }): Promise<ToolResult> => {
       try {
+        await scope.exigirControle(session_id);
         const { interrupted } = (await client.interrupt(session_id)) as {
           ok: boolean;
           interrupted: boolean;
@@ -503,6 +536,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ session_id }): Promise<ToolResult> => {
       try {
+        await scope.exigirControle(session_id);
         await client.pause(session_id);
         return ok(`sessão ${session_id} pausada — retome com hub_session_send`);
       } catch (err) {
@@ -520,16 +554,19 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'Manda uma mensagem para uma sessão delegada — corrigir o rumo, dar contexto novo ' +
         'ou responder uma dúvida — sem perder o trabalho já feito.',
       inputSchema: { session_id: idArg('ses'), text: z.string().min(1) },
+      annotations: { destructiveHint: false, openWorldHint: true },
     },
     async ({ session_id, text }): Promise<ToolResult> => {
       try {
+        await scope.exigirControle(session_id);
         const { mode } = await client.send(session_id, text);
-        const explanation = {
+        const explicacoes: Record<string, string> = {
           live: 'injetada na execução em andamento',
           resume: 'sessão nativa do agente retomada com a mensagem',
           replay: 'novo turno aberto (este agente não guarda sessão nativa)',
-        }[mode];
-        return ok(`mensagem entregue — ${explanation}`);
+        };
+        // Modo que este MCP não conhece (daemon mais novo) não vira "undefined".
+        return ok(`mensagem entregue — ${explicacoes[mode] ?? `modo ${String(mode)}`}`);
       } catch (err) {
         return fail(describe(err));
       }
@@ -549,9 +586,11 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         target_agent: z.string().describe('id ou capability do agente de destino (ex: "codex" ou "cap:refactor")'),
         reason: z.string().optional().describe('motivo da transferência para constar no contexto'),
       },
+      annotations: { destructiveHint: true, openWorldHint: true },
     },
     async ({ session_id, target_agent, reason }): Promise<ToolResult> => {
       try {
+        await scope.exigirControle(session_id);
         const { session } = await client.handoff(session_id, target_agent, reason);
         return ok(`controle da sessão ${session.id} transferido para o agente "${session.agentId}"`);
       } catch (err) {
@@ -566,8 +605,8 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     {
       title: 'Listar sessões',
       description:
-        'Sessões conhecidas pelo Hub, com agente, estado e profundidade. Útil para ' +
-        'reencontrar uma delegação cujo id você perdeu.',
+        'Sessões do SEU fluxo (e dos workflows que você rodou), com agente, estado e ' +
+        'profundidade. Útil para reencontrar uma delegação cujo id você perdeu.',
       inputSchema: {
         only_active: z.boolean().optional().describe('só as que ainda estão rodando'),
       },
@@ -575,23 +614,32 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ only_active }): Promise<ToolResult> => {
       try {
-        const { sessions } = await client.sessions();
+        // Só o fluxo de quem chama (achado 14): antes listava o hub inteiro.
+        const raizes = await scope.raizesVisiveis();
+        const sessions = (
+          await Promise.all(raizes.map((rootId) => client.sessions({ rootId })))
+        ).flatMap((r) => r.sessions);
         const filtered = only_active
           ? sessions.filter((s) => s.state === 'running' || s.state === 'waiting_approval')
           : sessions;
 
-        if (filtered.length === 0) return ok('nenhuma sessão');
+        if (filtered.length === 0) return ok('nenhuma sessão no seu fluxo');
 
-        return ok(
-          filtered
-            .slice(0, 40)
-            .map(
-              (s) =>
-                `${'  '.repeat(s.depth)}${s.id} · ${s.agentId} · ${s.state}` +
-                (s.title ? `\n${'  '.repeat(s.depth)}  ${s.title}` : ''),
-            )
-            .join('\n'),
-        );
+        const linhas = filtered
+          .slice(0, LIMITE_LISTA)
+          .map(
+            (s) =>
+              `${'  '.repeat(s.depth)}${s.id} · ${s.agentId} · ${s.state}` +
+              (s.title ? `\n${'  '.repeat(s.depth)}  ${s.title}` : ''),
+          );
+        // Cortar sem avisar fazia o agente concluir que a sessão procurada
+        // não existia.
+        if (filtered.length > LIMITE_LISTA) {
+          linhas.push(
+            `… mais ${filtered.length - LIMITE_LISTA} sessões não mostradas — filtre com only_active ou veja hub_graph`,
+          );
+        }
+        return ok(linhas.join('\n'));
       } catch (err) {
         return fail(describe(err));
       }
@@ -615,11 +663,8 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ root_id }): Promise<ToolResult> => {
       try {
-        let rootId = root_id;
-        if (!rootId) {
-          const sessionId = await caller.resolve();
-          rootId = (await client.session(sessionId)).session.rootId;
-        }
+        const rootId = root_id ?? (await scope.chamador()).rootId;
+        await scope.exigirRaiz(rootId);
 
         const [{ graph }, { budget }] = await Promise.all([
           client.graph(rootId),
@@ -652,6 +697,13 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ ref }): Promise<ToolResult> => {
       try {
+        // A referência aponta uma sessão: ela precisa ser do fluxo de quem
+        // chama, como em hub_agent_events (achado 14).
+        const alvo = /^session:(ses_[A-Za-z0-9]+)(?:#|$)/.exec(ref.trim());
+        if (!alvo) {
+          return fail('referência inválida: use "session:<id>" ou "session:<id>#event:<seq>"');
+        }
+        await scope.exigirLeitura(alvo[1] as string);
         const { events } = await client.context(ref);
         return ok(formatEvents(events, true));
       } catch (err) {
@@ -673,11 +725,8 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     },
     async ({ root_id }): Promise<ToolResult> => {
       try {
-        let rootId = root_id;
-        if (!rootId) {
-          const sessionId = await caller.resolve();
-          rootId = (await client.session(sessionId)).session.rootId;
-        }
+        const rootId = root_id ?? (await scope.chamador()).rootId;
+        await scope.exigirRaiz(rootId);
         const { budget } = await client.budget(rootId);
         return ok(
           `${formatBudget(budget)}\nrestante: US$ ${budget.remaining.usd.toFixed(4)} · ${formatTokens(
@@ -725,12 +774,33 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         return fail('informe `yaml` (conteúdo do workflow) ou `path` (arquivo .yaml no disco)');
       }
 
+      const projetoDir = path.resolve(project ?? process.cwd());
+      let texto: string;
+      if (yaml !== undefined) {
+        texto = yaml;
+      } else {
+        // Só arquivo de workflow DENTRO do projeto (achado 15): antes `path`
+        // lia qualquer arquivo do disco e o erro do parser devolvia um trecho
+        // dele ao modelo.
+        const arquivo = arquivoDeWorkflow(filePath as string, projetoDir);
+        if (typeof arquivo !== 'string') return fail(arquivo.erro);
+        try {
+          texto = readFileSync(arquivo, 'utf8');
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          return fail(
+            code === 'ENOENT'
+              ? `arquivo de workflow não encontrado: ${filePath}`
+              : `não foi possível ler o arquivo de workflow ${filePath} (${code ?? 'erro de leitura'})`,
+          );
+        }
+      }
+
       let parsed: ReturnType<typeof parseWorkflow>;
       let executionOrder: string[][];
       try {
-        const raw = parseYamlText(
-          yaml ?? readFileSync(path.resolve(filePath as string), 'utf8'),
-        ) as unknown;
+        // `prettyErrors: false`: o erro do parser não traz o trecho do texto.
+        const raw = parseYamlText(texto, { prettyErrors: false }) as unknown;
         parsed = parseWorkflow(raw);
         const validation = validateWorkflow(parsed);
         if (!validation.valid) {
@@ -738,12 +808,12 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         }
         executionOrder = validation.executionOrder;
       } catch (err) {
-        return fail(`não foi possível ler/validar o workflow: ${(err as Error).message}`);
+        return fail(explicarWorkflowInvalido(err, texto));
       }
 
       const workflow = parsed;
       try {
-        const { project: proj } = await client.addProject(project ?? process.cwd());
+        const { project: proj } = await client.addProject(projetoDir);
 
         const deps: WorkflowRunDeps = {
           start: async ({ step, upstream, capUsd, baseSessionIds }) => {
@@ -767,6 +837,9 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
               // `upstream` — sem isto o passo em worktree nascia do HEAD.
               ...(baseSessionIds.length > 0 ? { baseSessionIds } : {}),
             });
+            // Cada passo nasce como raiz própria; quem rodou o workflow
+            // precisa conseguir acompanhá-lo pelas outras tools.
+            scope.registrarRaiz(res.session.rootId);
             return { sessionId: res.session.id, taskId: res.task.id };
           },
           settle: ({ sessionId }) => settlarPassoDoWorkflow(client, sessionId),
@@ -899,7 +972,54 @@ function explainDelegationFailure(err: unknown): string {
   }
 }
 
+/**
+ * Caminho de workflow aceito por `hub_workflow_run`: arquivo `.yaml`/`.yml`
+ * dentro do diretório do projeto (link simbólico resolvido, para não escapar
+ * por ele). Qualquer outro caminho é recusado SEM ler o arquivo.
+ */
+function arquivoDeWorkflow(filePath: string, projetoDir: string): string | { erro: string } {
+  const recusa = {
+    erro:
+      `path precisa ser um arquivo .yaml/.yml dentro do projeto (${projetoDir}); ` +
+      'para workflow de outro lugar, passe o conteúdo em `yaml`',
+  };
+  if (!/\.ya?ml$/i.test(filePath)) return recusa;
+  const dentro = (base: string, alvo: string): boolean => {
+    const rel = path.relative(base, alvo);
+    return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  const resolvido = path.resolve(projetoDir, filePath);
+  if (!dentro(projetoDir, resolvido)) return recusa;
+  try {
+    if (!dentro(realpathSync(projetoDir), realpathSync(resolvido))) return recusa;
+  } catch {
+    // Não existe (ou não dá para resolver): a leitura logo depois diz qual.
+  }
+  return resolvido;
+}
+
+/**
+ * Erro de leitura/validação do workflow com o MOTIVO (achado 15): antes só
+ * "Workflow inválido", sem os `issues` que o parser guarda em `details`. Erro
+ * de sintaxe YAML vira linha/coluna e o código do parser — nunca o trecho do
+ * arquivo.
+ */
+function explicarWorkflowInvalido(err: unknown, texto: string): string {
+  const e = err as { name?: string; code?: unknown; pos?: unknown; details?: unknown; message?: string };
+  if (e?.name === 'YAMLParseError' || e?.name === 'YAMLError') {
+    const codigo = typeof e.code === 'string' ? ` (${e.code})` : '';
+    const inicio = Array.isArray(e.pos) && typeof e.pos[0] === 'number' ? e.pos[0] : null;
+    const onde =
+      inicio === null ? '' : ` na linha ${texto.slice(0, inicio).split(NEWLINE).length}`;
+    return `YAML malformado${onde}${codigo}: corrija a sintaxe e tente de novo`;
+  }
+  const issues = formatIssues(e?.details);
+  if (issues) return `workflow inválido:${issues}`;
+  return `não foi possível validar o workflow: ${e?.message ?? String(err)}`;
+}
+
 function describe(err: unknown): string {
+  if (err instanceof FlowScopeError) return `${err.code}: ${err.message}`;
   if (err instanceof HubApiError) {
     return `${err.code}: ${err.message}${formatIssues(err.details)}`;
   }
@@ -934,6 +1054,11 @@ function formatIssues(details: unknown): string {
 
   if (linhas.length === 0) return '';
   return `${NEWLINE}campos inválidos:${NEWLINE}${linhas.map((l) => `- ${l}`).join(NEWLINE)}`;
+}
+
+function resumir(texto: string, max: number): string {
+  const umaLinha = texto.replace(/\s+/g, ' ').trim();
+  return umaLinha.length > max ? `${umaLinha.slice(0, max - 1)}…` : umaLinha;
 }
 
 /** Espera `ms`; resolve ANTES se `signal` abortar (quem chama confere `aborted`). */

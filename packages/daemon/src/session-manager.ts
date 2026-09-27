@@ -71,6 +71,8 @@ import type {
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { cliHookEntrypoint } from './config.js';
+import { juntarErroDoAgente, textoDoErroDoAgente } from './agent-error-text.js';
+import { recusaDeSessaoTerminada } from './session-continuation.js';
 import {
   montarConfigDoGate,
   modoExigeGate,
@@ -1372,13 +1374,10 @@ export class SessionManager {
     }
 
     // Falar com sessão encerrada lançaria um processo novo numa sessão morta,
-    // e o trabalho ficaria pendurado num lugar que ninguém mais observa.
+    // e o trabalho ficaria pendurado num lugar que ninguém mais observa. A
+    // recusa ensina a continuar numa sessão nova (ver session-continuation).
     if (session.state === 'killed' || session.state === 'failed' || session.state === 'completed') {
-      throw new HubError(
-        'ILLEGAL_STATE',
-        `A sessão ${sessionId} já terminou (${session.state}). Abra uma sessão nova ou delegue a partir de outra.`,
-        { sessionId, state: session.state },
-      );
+      throw recusaDeSessaoTerminada(session);
     }
 
     // Processo já saiu e o Hub está validando o resultado ou esperando o
@@ -2283,6 +2282,9 @@ export class SessionManager {
     // outra aprovação de orçamento para a mesma parada.
     let estourou = false;
     let turnoConcluidoNoEstouro = false;
+    // O motivo que o agente deu (ex.: "Prompt is too long"), para a tentativa
+    // não ficar só com "processo terminou com código 1" (achado 11 da 08).
+    let erroDoAgente: string | null = null;
     // Orçamento em SEGUNDOS: só era somado em `settle`, depois que a run
     // acabava — um teto de 3 s com um agente de 9 s terminava `completed` com
     // "300% do orçamento". O relógio aqui é o teto de tempo de parede desta
@@ -2297,6 +2299,7 @@ export class SessionManager {
       for await (const bruto of handle.events) {
         const mapped = this.#priceEvent(session, bruto);
         this.#persistMapped(session, task, mapped);
+        if (mapped.type === 'error') erroDoAgente = textoDoErroDoAgente(mapped.payload) ?? erroDoAgente;
 
         // Vigilância: classifica o que o agente ACABOU de fazer. Não previne a
         // ação que já ocorreu — impede a próxima, parando a sessão.
@@ -2354,7 +2357,7 @@ export class SessionManager {
     const outcome: RunOutcome =
       turnoConcluidoNoEstouro && desfechoBruto.reason === 'canceled'
         ? { ...desfechoBruto, reason: 'exit', exitCode: 0, signal: null, error: null }
-        : desfechoBruto;
+        : { ...desfechoBruto, error: juntarErroDoAgente(desfechoBruto.error, erroDoAgente) };
     const live = this.#runs.get(session.id);
     // Se a run ativa na sessão já foi substituída (ex: por handoff),
     // encerramos silenciosamente sem interferir na nova execução.
