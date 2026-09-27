@@ -1,5 +1,6 @@
 import type { EventEnvelope } from '@agents-hub/core';
 import type { GraphSummary } from './client.js';
+import { horaLocal } from './hora.js';
 
 const supportsColor =
   process.stdout.isTTY === true && process.env['NO_COLOR'] === undefined;
@@ -25,7 +26,8 @@ export const cyan = (t: string): string => paint('36', t);
  * mais do que a formatação bonita — por isso o id do agente vem antes do texto.
  */
 export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } = {}): string {
-  const time = dim(event.ts.slice(11, 19));
+  // Hora LOCAL (R07-18): era o recorte da string UTC, sem rótulo.
+  const time = dim(horaLocal(event.ts));
   const who = opts.showAgent === false ? '' : `${cyan(event.agentId.padEnd(12))} `;
   const p = event.payload;
 

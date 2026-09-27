@@ -1,3 +1,4 @@
+import { dataHoraLocal, rotuloDoFuso } from './hora.js';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { EventEnvelope } from '@agents-hub/core';
@@ -142,10 +143,13 @@ export function renderExportMarkdown(dados: SessionExport): string {
   if (dados.events.length === 0) {
     l.push('_(nenhum evento)_', '');
   } else {
+    // A linha do evento traz a hora LOCAL (R07-18): a data também, e o fuso
+    // fica dito uma vez, porque o arquivo pode ser lido em outra máquina.
+    l.push(`_horários na hora local de quem exportou (${rotuloDoFuso(new Date(dados.events[0]!.ts).getTimezoneOffset())})_`, '');
     l.push('```text');
     for (const e of dados.events) {
       // Data completa na frente: a linha do terminal só traz a hora.
-      l.push(`${e.ts.slice(0, 10)} ${semCor(renderEvent({ ...e, raw: null } as EventEnvelope))}`);
+      l.push(`${dataHoraLocal(e.ts).slice(0, 10)} ${semCor(renderEvent({ ...e, raw: null } as EventEnvelope))}`);
     }
     l.push('```', '');
   }

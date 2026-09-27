@@ -5,7 +5,7 @@
  * dispara `main()` como efeito colateral do import.
  */
 
-import { red } from './render.js';
+import { erroDeUso, mostrarErro } from './erro-cli.js';
 
 export interface Args {
   command: string;
@@ -15,9 +15,14 @@ export interface Args {
 
 export const NEWLINE = String.fromCharCode(10);
 
+/**
+ * Argumento obrigatório. Lança `ErroDeUso`: a borda de erro (`mostrarErro`)
+ * imprime junto a linha de uso do comando — antes era só "argumento
+ * obrigatório ausente: sessionId", sem dizer como chamar.
+ */
 export function required(value: string | undefined, name: string): string {
   if (value === undefined || value.length === 0) {
-    throw new Error(`argumento obrigatório ausente: ${name}`);
+    throw erroDeUso(`argumento obrigatório ausente: ${name}`);
   }
   return value;
 }
@@ -49,10 +54,7 @@ export async function comErro(fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
   } catch (err) {
-    const e = err as Error & { code?: unknown };
-    const codigo = typeof e.code === 'string' && /^[A-Z_]+$/.test(e.code) ? `[${e.code}] ` : '';
-    console.error(red(`${codigo}${e.message ?? String(err)}`));
-    process.exitCode = 1;
+    mostrarErro(err);
   }
 }
 

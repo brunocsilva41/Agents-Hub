@@ -233,7 +233,7 @@ export class WorktreeManager {
       );
     }
 
-    const dir = path.join(this.root, sanitize(params.projectName), params.sessionId);
+    const dir = path.join(this.root, nomeDaPastaDoProjeto(params.projectName), params.sessionId);
     const branch = `hub/${params.sessionId}`;
     let baseWarning: string | null = null;
     let base = params.baseRef;
@@ -601,6 +601,29 @@ export class WorktreeManager {
   }
 }
 
-function sanitize(name: string): string {
-  return name.replace(/[^\w.-]+/g, '-').slice(0, 60) || 'projeto';
+/** Nomes de dispositivo que o Windows recusa como nome de pasta (com ou sem extensão). */
+const RESERVADOS_WINDOWS = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+
+/**
+ * Nome da pasta do projeto dentro de `worktrees/` (vistoria 07, R07-24).
+ *
+ * Era `name.replace(/[^\w.-]+/g, '-')`, e `\w` sem a flag `u` é só ASCII:
+ * "proj com espaço" virava `proj-com-espa-o`. Agora os acentos são
+ * TRANSLITERADOS (NFD e tira as marcas: "ç" -> "c", "ã" -> "a") em vez de
+ * virar hífen; o que sobra fora de `[A-Za-z0-9_.-]` ainda vira hífen. ASCII
+ * de propósito: o caminho vai para o git, para shells e para os CLIs dos
+ * agentes, e nem todos lidam bem com Unicode no Windows (página de código do
+ * console). Limites de caminho do Windows mantidos: no máximo 60 caracteres,
+ * sem ponto/hífen nas pontas (o Windows descarta ponto final; `..` nunca
+ * pode sair daqui) e sem nome de dispositivo reservado (`CON`, `NUL`...).
+ */
+export function nomeDaPastaDoProjeto(name: string): string {
+  const limpo = name
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
+    .replace(/[^\w.-]+/g, '-')
+    .slice(0, 60)
+    .replace(/^[.-]+|[.-]+$/g, '');
+  if (limpo === '') return 'projeto';
+  return RESERVADOS_WINDOWS.test(limpo) ? `${limpo}-projeto` : limpo;
 }

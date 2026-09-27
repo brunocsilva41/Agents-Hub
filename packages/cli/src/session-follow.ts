@@ -1,3 +1,4 @@
+import { required } from './cmd-util.js';
 import { HubApiError, InvalidHubIdError, type HubClient, type SessionSummary, type TaskSummary } from './client.js';
 import { bold, dim, formatTokens, green, red, renderEvent, renderGraph, yellow } from './render.js';
 import type { GraphSummary } from './client.js';
@@ -465,9 +466,3 @@ export async function budgetCommand(client: HubClient, args: Args, o: OpcoesDeCo
   if (budget.exhausted) log(red(`${NEWLINE}orçamento esgotado — tasks entram em espera por você`));
 }
 
-function required(value: string | undefined, name: string): string {
-  if (value === undefined || value.length === 0) {
-    throw new Error(`argumento obrigatório ausente: ${name}`);
-  }
-  return value;
-}
