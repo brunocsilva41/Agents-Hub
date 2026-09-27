@@ -220,7 +220,14 @@ export class ProcessAgentAdapter implements AgentAdapter {
     modeloDaRun(this.manifest, ctx);
     const promptFile = wantsPromptFile ? await writePromptFile(ctx.sessionId, prompt) : '';
 
-    const { args } = montarInvocacao(this.manifest, ctx, argsTemplate, prompt, nativeSessionId, promptFile);
+    const { args } = montarInvocacao(
+      this.manifest,
+      ctx,
+      argsTemplate,
+      prompt,
+      nativeSessionId,
+      promptFile,
+    );
 
     // Monta o spawn sem `shell: true`: shim npm vira `node script`/`.exe` real,
     // e só um `.cmd` desconhecido passa pelo `cmd.exe`, com escape próprio.

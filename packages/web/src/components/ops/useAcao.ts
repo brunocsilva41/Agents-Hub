@@ -12,13 +12,21 @@ export function useAcao(): {
   erro: string | null;
   ok: string | null;
   limpar: () => void;
-  executar: <T>(rotulo: string, fn: () => Promise<T>, ok: string | ((r: T) => string)) => Promise<T | undefined>;
+  executar: <T>(
+    rotulo: string,
+    fn: () => Promise<T>,
+    ok: string | ((r: T) => string),
+  ) => Promise<T | undefined>;
 } {
   const acao = useAction();
   const [ok, setOk] = useState<string | null>(null);
 
   const executar = useCallback(
-    async <T,>(rotulo: string, fn: () => Promise<T>, msg: string | ((r: T) => string)): Promise<T | undefined> => {
+    async <T>(
+      rotulo: string,
+      fn: () => Promise<T>,
+      msg: string | ((r: T) => string),
+    ): Promise<T | undefined> => {
       setOk(null);
       let resultado: T | undefined;
       const feito = await acao.run(rotulo, async () => {

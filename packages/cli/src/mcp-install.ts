@@ -122,7 +122,11 @@ export type EstadoDoRegistro =
  * (comando = este Node + o nosso entrypoint do MCP, env com a URL do daemon).
  * Registrado com outro caminho/porta vira "desatualizado", não "registrado".
  */
-export function estadoDoRegistro(target: McpTarget, configPath: string, spec: ServerSpec): EstadoDoRegistro {
+export function estadoDoRegistro(
+  target: McpTarget,
+  configPath: string,
+  spec: ServerSpec,
+): EstadoDoRegistro {
   try {
     if (!existingServerNames(target, configPath).has(HUB_SERVER_NAME)) return { estado: 'ausente' };
     return planUpsertMcpServer(target, configPath, portable(spec)).next === null

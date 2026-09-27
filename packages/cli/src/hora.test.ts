@@ -44,7 +44,10 @@ describe('hora local nos comandos', () => {
       type: 'session.started',
       payload: {},
     } as unknown as EventEnvelope;
-    const linha = renderEvent(evento).replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), '');
+    const linha = renderEvent(evento).replace(
+      new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'),
+      '',
+    );
     assert.ok(linha.startsWith(horaLocal(ISO)), linha);
   });
 });

@@ -1,5 +1,11 @@
 import path from 'node:path';
-import { HubError, validarNovaPasta, type Project, type ProjectFolder, type UnitOfWork } from '@agents-hub/core';
+import {
+  HubError,
+  validarNovaPasta,
+  type Project,
+  type ProjectFolder,
+  type UnitOfWork,
+} from '@agents-hub/core';
 import { canonicalizarCaminho, mesmoCaminho } from './project-path.js';
 import { loadProjectContext, projectConfigPath, type ProjectContext } from './project-config.js';
 import {

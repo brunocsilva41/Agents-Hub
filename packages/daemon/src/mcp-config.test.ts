@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -36,7 +44,10 @@ describe('addMcpServers — merge sem duplicar nem apagar', () => {
       { name: 'b', transport: 'stdio', command: 'b', args: ['1'] },
       { name: 'b', transport: 'stdio', command: 'b2' },
     ]);
-    const doc = JSON.parse(readFileSync(f, 'utf8')) as { x: number; mcpServers: Record<string, { command: string }> };
+    const doc = JSON.parse(readFileSync(f, 'utf8')) as {
+      x: number;
+      mcpServers: Record<string, { command: string }>;
+    };
     assert.equal(doc.x, 1);
     assert.equal(doc.mcpServers['a']?.command, 'ORIGINAL');
     assert.equal(doc.mcpServers['b']?.command, 'b');
@@ -63,7 +74,9 @@ describe('addMcpServers — merge sem duplicar nem apagar', () => {
     const out = addMcpServers(cursor, f, [{ name: 'a', transport: 'http', url: 'https://x/mcp' }]);
     assert.equal(out.action, 'created');
     assert.equal(out.backup, null);
-    assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), { mcpServers: { a: { url: 'https://x/mcp' } } });
+    assert.deepEqual(JSON.parse(readFileSync(f, 'utf8')), {
+      mcpServers: { a: { url: 'https://x/mcp' } },
+    });
   });
 
   test('OpenCode usa a chave "mcp" e o formato local/remote', () => {
@@ -81,7 +94,8 @@ describe('addMcpServers — merge sem duplicar nem apagar', () => {
   });
 
   test('TOML: detecta nomes (nu, entre aspas e subtabela) e não duplica', () => {
-    const texto = '[mcp_servers.a]\ncommand="x"\n\n[mcp_servers."b.c"]\ncommand="y"\n\n[mcp_servers.d.env]\nK="v"\n';
+    const texto =
+      '[mcp_servers.a]\ncommand="x"\n\n[mcp_servers."b.c"]\ncommand="y"\n\n[mcp_servers.d.env]\nK="v"\n';
     assert.deepEqual([...tomlServerNames(texto)].sort(), ['a', 'b.c', 'd']);
 
     const f = path.join(dir, 'e', 'config.toml');
@@ -104,7 +118,10 @@ describe('addMcpServers — merge sem duplicar nem apagar', () => {
     const f = path.join(dir, 'f', 'mcp.json');
     mkdirSync(path.dirname(f), { recursive: true });
     writeFileSync(f, '{oops');
-    assert.throws(() => addMcpServers(cursor, f, [{ name: 'a', transport: 'stdio', command: 'x' }]), /JSON válido/);
+    assert.throws(
+      () => addMcpServers(cursor, f, [{ name: 'a', transport: 'stdio', command: 'x' }]),
+      /JSON válido/,
+    );
     assert.equal(readFileSync(f, 'utf8'), '{oops');
     assert.deepEqual(backupsDe(f), []);
   });
@@ -149,7 +166,11 @@ describe('upsertMcpServer — OpenCode (schema estrito do opencode.json)', () =>
         theme: 'tokyonight',
         mcp: {
           context7: { type: 'remote', url: 'https://mcp.context7.com/mcp', enabled: true },
-          fs: { type: 'local', command: ['npx', '-y', '@modelcontextprotocol/server-filesystem'], enabled: false },
+          fs: {
+            type: 'local',
+            command: ['npx', '-y', '@modelcontextprotocol/server-filesystem'],
+            enabled: false,
+          },
         },
       },
       null,
@@ -210,7 +231,10 @@ describe('upsertMcpServer — OpenCode (schema estrito do opencode.json)', () =>
   test('JSONC (comentário e vírgula final) é aceito; lixo no fim é recusado sem gravar', () => {
     const f = path.join(dir, 'c', 'opencode.json');
     mkdirSync(path.dirname(f), { recursive: true });
-    writeFileSync(f, '{\n  // meu tema\n  "theme": "x",\n  "mcp": { "fs": { "type": "remote", "url": "https://a", }, },\n}\n');
+    writeFileSync(
+      f,
+      '{\n  // meu tema\n  "theme": "x",\n  "mcp": { "fs": { "type": "remote", "url": "https://a", }, },\n}\n',
+    );
     const out = upsertMcpServer(opencode, f, HUB());
     assert.equal(out.avisos.length, 1);
     const doc = JSON.parse(readFileSync(f, 'utf8')) as { theme: string; mcp: Record<string, unknown> };
@@ -280,10 +304,17 @@ describe('upsertMcpServer — Codex (config.toml com servidor de `codex mcp add`
     });
     assert.equal(doc.model, 'gpt-5-codex');
     assert.equal(doc.approval_policy, 'on-request');
-    assert.deepEqual(doc.mcp_servers['outro'], { command: 'npx', args: ['-y', 'outro'], env: { TOKEN_NAME: 'abc' } });
+    assert.deepEqual(doc.mcp_servers['outro'], {
+      command: 'npx',
+      args: ['-y', 'outro'],
+      env: { TOKEN_NAME: 'abc' },
+    });
     assert.deepEqual(doc.profiles, { rapido: { model: 'gpt-5-mini' } });
     assert.ok(!texto.includes('[mcp_servers.agents-hub.env]'), 'sub-tabela antiga removida');
-    assert.ok(texto.startsWith('# config do usuário\nmodel = "gpt-5-codex"'), 'comentários e ordem preservados');
+    assert.ok(
+      texto.startsWith('# config do usuário\nmodel = "gpt-5-codex"'),
+      'comentários e ordem preservados',
+    );
     assert.equal(readFileSync(out.backup!, 'utf8'), FIXTURE);
 
     // Idempotente.

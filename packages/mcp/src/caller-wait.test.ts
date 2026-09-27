@@ -123,25 +123,37 @@ describe('MCP: wait cancelável e limites do hub_agent_call', () => {
     await new Promise<void>((resolve) => fake.close(() => resolve()));
   });
 
-  test('hub_agent_wait para de consultar o daemon quando o cliente cancela', { timeout: 20_000 }, async () => {
-    recebidos.length = 0;
-    const controle = new AbortController();
-    const chamada = client
-      .callTool({ name: 'hub_agent_wait', arguments: { task_id: 'tsk_abc123', timeout_seconds: 0 } }, undefined, {
-        signal: controle.signal,
-      })
-      .catch((err: unknown) => err);
+  test(
+    'hub_agent_wait para de consultar o daemon quando o cliente cancela',
+    { timeout: 20_000 },
+    async () => {
+      recebidos.length = 0;
+      const controle = new AbortController();
+      const chamada = client
+        .callTool(
+          { name: 'hub_agent_wait', arguments: { task_id: 'tsk_abc123', timeout_seconds: 0 } },
+          undefined,
+          {
+            signal: controle.signal,
+          },
+        )
+        .catch((err: unknown) => err);
 
-    await new Promise((r) => setTimeout(r, 300));
-    controle.abort();
-    await chamada;
-    const noCancelamento = recebidos.length;
-    assert.ok(noCancelamento >= 1, 'a espera deveria ter consultado ao menos uma vez');
+      await new Promise((r) => setTimeout(r, 300));
+      controle.abort();
+      await chamada;
+      const noCancelamento = recebidos.length;
+      assert.ok(noCancelamento >= 1, 'a espera deveria ter consultado ao menos uma vez');
 
-    // Sem a correção, o laço segue consultando (1,5 s, 2,1 s, ...) para sempre.
-    await new Promise((r) => setTimeout(r, 4000));
-    assert.equal(recebidos.length, noCancelamento, `consultas depois do cancelamento: ${recebidos.join(', ')}`);
-  });
+      // Sem a correção, o laço segue consultando (1,5 s, 2,1 s, ...) para sempre.
+      await new Promise((r) => setTimeout(r, 4000));
+      assert.equal(
+        recebidos.length,
+        noCancelamento,
+        `consultas depois do cancelamento: ${recebidos.join(', ')}`,
+      );
+    },
+  );
 
   test('hub_agent_call recusa objetivo gigante sem chegar ao daemon', async () => {
     recebidos.length = 0;
@@ -150,7 +162,10 @@ describe('MCP: wait cancelável e limites do hub_agent_call', () => {
         name: 'hub_agent_call',
         arguments: { agent: 'codex', objective: 'x'.repeat(2_000_000) },
       })
-      .catch((err: unknown) => ({ content: [{ type: 'text', text: String(err) }], isError: true }))) as ToolTextResult;
+      .catch((err: unknown) => ({
+        content: [{ type: 'text', text: String(err) }],
+        isError: true,
+      }))) as ToolTextResult;
     assert.equal(resultado.isError, true);
     assert.match(textOf(resultado), /objetivo acima de|too_big|20000/i);
     assert.deepEqual(recebidos, []);
@@ -169,7 +184,10 @@ describe('MCP: wait cancelável e limites do hub_agent_call', () => {
           name: 'hub_agent_call',
           arguments: { agent: 'codex', objective: 'objetivo curto e válido', ...args },
         })
-        .catch((err: unknown) => ({ content: [{ type: 'text', text: String(err) }], isError: true }))) as ToolTextResult;
+        .catch((err: unknown) => ({
+          content: [{ type: 'text', text: String(err) }],
+          isError: true,
+        }))) as ToolTextResult;
       assert.equal(resultado.isError, true, `deveria recusar ${JSON.stringify(args).slice(0, 80)}`);
     }
     assert.deepEqual(recebidos, []);

@@ -57,7 +57,10 @@ describe('promessas soltas do daemon', () => {
         },
       },
     } as unknown as Pick<UnitOfWork, 'events'>;
-    const compactador = new EventRetentionCompactor(store, { rawEventDays: 7, sweepIntervalMinutes: 60 });
+    const compactador = new EventRetentionCompactor(store, {
+      rawEventDays: 7,
+      sweepIntervalMinutes: 60,
+    });
 
     let soltas: unknown[] = [];
     const erros = await errosNoConsole(async () => {
@@ -80,10 +83,14 @@ describe('promessas soltas do daemon', () => {
         },
       },
     } as unknown as UnitOfWork;
-    const reaper = new WorktreeReaper(store, {} as WorktreeManager, {
-      worktreeDays: 3,
-      sweepIntervalMinutes: 60,
-    } as RetentionPolicy);
+    const reaper = new WorktreeReaper(
+      store,
+      {} as WorktreeManager,
+      {
+        worktreeDays: 3,
+        sweepIntervalMinutes: 60,
+      } as RetentionPolicy,
+    );
 
     let soltas: unknown[] = [];
     const erros = await errosNoConsole(async () => {
@@ -129,7 +136,10 @@ describe('promessas soltas do daemon', () => {
 
       assert.deepEqual(soltas, []);
       assert.deepEqual(saidas, [1]);
-      assert.ok(erros.some((l) => l.includes('database is not open')), JSON.stringify(erros));
+      assert.ok(
+        erros.some((l) => l.includes('database is not open')),
+        JSON.stringify(erros),
+      );
     });
 
     test('sucesso sai com 0; segundo sinal durante o desligamento não desliga de novo', async () => {

@@ -9,9 +9,11 @@ import { instanteDoFiltro } from './operator-routes.js';
 import { PROJECT_CONFIG_RELATIVE } from './project-config.js';
 import type { PolicyView, ProjectPolicyView } from './policy-service.js';
 
-
 class HttpError extends Error {
-  constructor(readonly status: number, body: string) {
+  constructor(
+    readonly status: number,
+    body: string,
+  ) {
     super(`HTTP ${status}: ${body}`);
   }
 }
@@ -21,7 +23,10 @@ class HttpError extends Error {
  * daemon não depende do pacote do cliente; o cliente tem os próprios testes).
  */
 class Api {
-  constructor(private readonly base: string, private readonly token?: () => string) {}
+  constructor(
+    private readonly base: string,
+    private readonly token?: () => string,
+  ) {}
 
   async #call<T>(method: string, caminho: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = {};
@@ -143,7 +148,10 @@ defaults:
   test('GET /policy devolve camada global vazia e a efetiva (padrão)', async () => {
     const { policy } = await anonimo.policy();
     assert.deepEqual(policy.global.layer, {});
-    assert.equal((policy.global.effective['defaultBudget'] as { usd: number }).usd, DEFAULT_POLICY.defaultBudget.usd);
+    assert.equal(
+      (policy.global.effective['defaultBudget'] as { usd: number }).usd,
+      DEFAULT_POLICY.defaultBudget.usd,
+    );
     assert.equal(policy.project, null);
   });
 
@@ -202,8 +210,16 @@ defaults:
     assert.equal(ef.risk.exec, 'approve');
     assert.equal(ef.risk.irreversible, 'approve');
     assert.equal(ef.validation.command, null);
-    for (const campo of ['defaultBudget.usd', 'commands.allow', 'risk.irreversible', 'validation.command']) {
-      assert.ok(res.clamped.includes(campo), `${campo} deveria constar em clamped: ${res.clamped.join(',')}`);
+    for (const campo of [
+      'defaultBudget.usd',
+      'commands.allow',
+      'risk.irreversible',
+      'validation.command',
+    ]) {
+      assert.ok(
+        res.clamped.includes(campo),
+        `${campo} deveria constar em clamped: ${res.clamped.join(',')}`,
+      );
     }
     assert.ok(!res.clamped.includes('maxDepth'));
     assert.deepEqual(res.ignoredExecFields, ['validation.command']);
@@ -287,7 +303,8 @@ defaults:
       cost: null,
       raw: null,
     });
-    const pedido = (await anonimo.audit({ sessionId: sessao.id, kind: 'approval.requested' })).entries[0];
+    const pedido = (await anonimo.audit({ sessionId: sessao.id, kind: 'approval.requested' }))
+      .entries[0];
     assert.equal(pedido?.actor, 'gate');
     assert.equal(pedido?.approvalId, 'apv_teste');
     assert.equal(pedido?.risk, 'irreversible');

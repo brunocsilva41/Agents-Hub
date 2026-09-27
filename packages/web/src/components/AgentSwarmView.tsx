@@ -13,7 +13,13 @@ interface Props {
   onRetry: () => void;
 }
 
-export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }: Props): React.JSX.Element {
+export function AgentSwarmView({
+  agents,
+  onNewSession,
+  situacao,
+  erro,
+  onRetry,
+}: Props): React.JSX.Element {
   if (situacao === 'carregando' || situacao === 'erro') {
     return (
       <div className="swarm-container">
@@ -33,7 +39,8 @@ export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }
         <div className="empty estado-tela">
           <div className="empty-title">Nenhum agente registrado no Hub</div>
           <span className="empty-hint">
-            O daemon não tem manifesto de agente carregado. Rode <code>hub doctor</code> para ver o motivo.
+            O daemon não tem manifesto de agente carregado. Rode <code>hub doctor</code> para ver o
+            motivo.
           </span>
           <div className="estado-vazio-acoes">
             <button type="button" onClick={onRetry}>
@@ -55,7 +62,8 @@ export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }
         <div>
           <h2 className="swarm-title">Swarm de Agentes Conectados</h2>
           <p className="swarm-subtitle">
-            {instalados} de {agents.length} agentes de IA integrados e prontos para orquestração autônoma e colaborativa pelo Agents-Hub.
+            {instalados} de {agents.length} agentes de IA integrados e prontos para orquestração autônoma
+            e colaborativa pelo Agents-Hub.
           </p>
         </div>
       </div>
@@ -73,20 +81,22 @@ export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }
             >
               <div className="swarm-card-top">
                 <div className="swarm-avatar-wrap">
-                  <div
-                    className="swarm-avatar"
-                    style={{ background: color }}
-                  >
+                  <div className="swarm-avatar" style={{ background: color }}>
                     {agent.id.slice(0, 2).toUpperCase()}
                   </div>
                   <div>
                     <h3 className="swarm-agent-name">{agent.name}</h3>
-                    <span className="swarm-vendor">{agent.vendor} · <code className="swarm-id">{agent.id}</code></span>
+                    <span className="swarm-vendor">
+                      {agent.vendor} · <code className="swarm-id">{agent.id}</code>
+                    </span>
                   </div>
                 </div>
 
                 <span className={`swarm-status-pill ${isInstalled ? 'pill-online' : 'pill-offline'}`}>
-                  <span className="dot-radar" style={{ background: isInstalled ? 'var(--ok)' : 'var(--text-faint)' }} />
+                  <span
+                    className="dot-radar"
+                    style={{ background: isInstalled ? 'var(--ok)' : 'var(--text-faint)' }}
+                  />
                   {isInstalled ? `v${agent.probe?.version ?? 'detectado'}` : 'Não Instalado'}
                 </span>
               </div>
@@ -97,7 +107,9 @@ export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }
                 <span className="swarm-cap-title">Capacidades:</span>
                 <div className="swarm-caps-list">
                   {agent.capabilities.map((cap) => (
-                    <span key={cap} className="cap-badge">{cap}</span>
+                    <span key={cap} className="cap-badge">
+                      {cap}
+                    </span>
                   ))}
                   <span className="cap-badge format-badge">stream: {agent.streamFormat}</span>
                   <span className="cap-badge strategy-badge">strategy: {agent.sessionStrategy}</span>
@@ -107,7 +119,9 @@ export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }
               {agent.caveats && agent.caveats.length > 0 && (
                 <div className="swarm-caveats">
                   {agent.caveats.map((c, i) => (
-                    <div key={i} className="caveat-item">⚠ {c}</div>
+                    <div key={i} className="caveat-item">
+                      ⚠ {c}
+                    </div>
                   ))}
                 </div>
               )}
@@ -118,7 +132,14 @@ export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }
                   disabled={!isInstalled}
                   onClick={() => onNewSession(agent.id)}
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                  >
                     <line x1="12" y1="5" x2="12" y2="19"></line>
                     <line x1="5" y1="12" x2="19" y2="12"></line>
                   </svg>

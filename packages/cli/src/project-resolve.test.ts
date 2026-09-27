@@ -30,14 +30,21 @@ describe('resolverProjeto (CLI)', () => {
     assert.equal((await h.client.projects()).projects.length, 1);
   });
 
-  test('outra caixa (Windows) resolve para o mesmo projeto', { skip: process.platform !== 'win32' }, async () => {
-    const p = await resolverProjeto(h.client, h.projeto.toUpperCase());
-    assert.equal(p.id, projectId);
-    assert.equal((await h.client.projects()).projects.length, 1);
-  });
+  test(
+    'outra caixa (Windows) resolve para o mesmo projeto',
+    { skip: process.platform !== 'win32' },
+    async () => {
+      const p = await resolverProjeto(h.client, h.projeto.toUpperCase());
+      assert.equal(p.id, projectId);
+      assert.equal((await h.client.projects()).projects.length, 1);
+    },
+  );
 
   test('id prj_ desconhecido é erro "não encontrado" — nunca registra pasta com esse nome', async () => {
-    await assert.rejects(resolverProjeto(h.client, 'prj_doesnotexist'), /projeto "prj_doesnotexist" não encontrado.*hub projects/);
+    await assert.rejects(
+      resolverProjeto(h.client, 'prj_doesnotexist'),
+      /projeto "prj_doesnotexist" não encontrado.*hub projects/,
+    );
     assert.equal((await h.client.projects()).projects.length, 1);
   });
 

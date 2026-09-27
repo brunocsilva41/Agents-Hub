@@ -26,7 +26,7 @@
   tab-size: 2;
 }
 
-.sec-editor[aria-invalid='true'] {
+.sec-editor[aria-invalid="true"] {
   border-color: var(--danger);
 }
 
@@ -149,7 +149,7 @@
   min-width: 0;
 }
 
-.sec-filtro input[aria-invalid='true'] {
+.sec-filtro input[aria-invalid="true"] {
   border-color: var(--danger);
 }
 

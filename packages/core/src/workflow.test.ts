@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import {
-  parseWorkflow,
-  runWorkflow,
-  validateWorkflow,
-  type WorkflowRunDeps,
-} from './workflow.js';
+import { parseWorkflow, runWorkflow, validateWorkflow, type WorkflowRunDeps } from './workflow.js';
 import type { UpstreamResult } from './brief.js';
 import { HubError } from './errors.js';
 
@@ -122,7 +117,10 @@ describe('execução do workflow', () => {
    * fan-in. É o suficiente para provar as garantias do executor sem daemon.
    */
   function fabrica(
-    desfechos: Record<string, { state?: 'completed' | 'failed' | 'blocked'; usd?: number; summary?: string }> = {},
+    desfechos: Record<
+      string,
+      { state?: 'completed' | 'failed' | 'blocked'; usd?: number; summary?: string }
+    > = {},
   ) {
     const linhaDoTempo: string[] = [];
     const recebido = new Map<string, UpstreamResult[]>();
@@ -435,7 +433,11 @@ describe('execução do workflow', () => {
 
     const res = await runWorkflow(wf, validateWorkflow(wf).executionOrder, deps, { budgetUsd: 10 });
 
-    assert.equal(res.steps[1]!.state, 'completed', 'o irmão não pode ser pulado sem nada ter sido gasto');
+    assert.equal(
+      res.steps[1]!.state,
+      'completed',
+      'o irmão não pode ser pulado sem nada ter sido gasto',
+    );
     const g = tetos.get('guloso')!;
     const i = tetos.get('irmao')!;
     assert.ok(i > 0);

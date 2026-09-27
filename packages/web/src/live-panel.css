@@ -74,7 +74,7 @@
 
 /* Traço vertical que liga o nó ao nível do pai. */
 .dag-tree-row:not(.dag-edge-root)::before {
-  content: '';
+  content: "";
   position: absolute;
   left: calc((var(--dag-depth, 1) - 1) * var(--dag-indent) + 10px);
   top: -10px;

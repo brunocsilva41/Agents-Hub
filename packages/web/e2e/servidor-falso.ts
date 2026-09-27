@@ -23,8 +23,20 @@ const agora = Date.now();
 const ha = (min: number): string => new Date(agora - min * 60_000).toISOString();
 
 const PROJETOS = [
-  { id: 'prj_alfa', name: 'alfa', path: 'C:\\projetos\\alfa', defaultBranch: 'main', createdAt: ha(600) },
-  { id: 'prj_beta', name: 'beta-monorepo', path: 'C:\\projetos\\beta', defaultBranch: 'main', createdAt: ha(500) },
+  {
+    id: 'prj_alfa',
+    name: 'alfa',
+    path: 'C:\\projetos\\alfa',
+    defaultBranch: 'main',
+    createdAt: ha(600),
+  },
+  {
+    id: 'prj_beta',
+    name: 'beta-monorepo',
+    path: 'C:\\projetos\\beta',
+    defaultBranch: 'main',
+    createdAt: ha(500),
+  },
 ];
 
 function agente(id: string, name: string, vendor: string, installed = true, modelo = true) {
@@ -64,7 +76,14 @@ function sessao(
   agentId: string,
   state: string,
   title: string,
-  extra: { rootId?: string; parentId?: string | null; depth?: number; projectId?: string; min?: number; adopted?: boolean } = {},
+  extra: {
+    rootId?: string;
+    parentId?: string | null;
+    depth?: number;
+    projectId?: string;
+    min?: number;
+    adopted?: boolean;
+  } = {},
 ) {
   return {
     id,
@@ -128,10 +147,38 @@ function eventosDe(sessionId: string) {
   if (!s) return [];
   const base = { sessionId, taskId: null, agentId: s.agentId, cost: null, raw: null };
   return [
-    { ...base, id: `evt_${sessionId}_1`, seq: 1, ts: ha(9), type: 'session.started', payload: { objective: s.title } },
-    { ...base, id: `evt_${sessionId}_2`, seq: 2, ts: ha(8), type: 'message', payload: { text: 'Vou começar lendo a estrutura do projeto.' } },
-    { ...base, id: `evt_${sessionId}_3`, seq: 3, ts: ha(7), type: 'tool.call', payload: { name: 'bash', input: { command: 'ls -la' } } },
-    { ...base, id: `evt_${sessionId}_4`, seq: 4, ts: ha(6), type: 'message', payload: { text: 'Encontrei o módulo; próximos passos: testes e refatoração.' } },
+    {
+      ...base,
+      id: `evt_${sessionId}_1`,
+      seq: 1,
+      ts: ha(9),
+      type: 'session.started',
+      payload: { objective: s.title },
+    },
+    {
+      ...base,
+      id: `evt_${sessionId}_2`,
+      seq: 2,
+      ts: ha(8),
+      type: 'message',
+      payload: { text: 'Vou começar lendo a estrutura do projeto.' },
+    },
+    {
+      ...base,
+      id: `evt_${sessionId}_3`,
+      seq: 3,
+      ts: ha(7),
+      type: 'tool.call',
+      payload: { name: 'bash', input: { command: 'ls -la' } },
+    },
+    {
+      ...base,
+      id: `evt_${sessionId}_4`,
+      seq: 4,
+      ts: ha(6),
+      type: 'message',
+      payload: { text: 'Encontrei o módulo; próximos passos: testes e refatoração.' },
+    },
   ];
 }
 
@@ -237,11 +284,19 @@ function integracoes() {
     comando: 'hub mcp install codex --write',
   });
   return {
-    entrypoints: { cli: 'C:\\hub\\cli\\main.js', mcp: 'C:\\hub\\mcp\\main.js', cliExiste: true, mcpExiste: true },
+    entrypoints: {
+      cli: 'C:\\hub\\cli\\main.js',
+      mcp: 'C:\\hub\\mcp\\main.js',
+      cliExiste: true,
+      mcpExiste: true,
+    },
     integrations: [
       {
         agentId: 'claude',
-        hook: hook(true, 'hook do gate instalado com timeout 10 s (precisa de 120 s): ação que pede aprovação roda sem ela'),
+        hook: hook(
+          true,
+          'hook do gate instalado com timeout 10 s (precisa de 120 s): ação que pede aprovação roda sem ela',
+        ),
         mcp: mcp(false, false),
       },
       {
@@ -286,8 +341,16 @@ const PLANO = {
   diff: [
     { tipo: '@', texto: '… 12 linha(s) iguais' },
     { tipo: ' ', texto: '        "hooks": [' },
-    { tipo: '-', texto: '          { "type": "command", "command": "\\"node\\" \\"C:/hub/cli/main.js\\" hook", "timeout": 10 }' },
-    { tipo: '+', texto: '          { "type": "command", "command": "\\"node\\" \\"C:/hub/cli/main.js\\" hook", "timeout": 120 }' },
+    {
+      tipo: '-',
+      texto:
+        '          { "type": "command", "command": "\\"node\\" \\"C:/hub/cli/main.js\\" hook", "timeout": 10 }',
+    },
+    {
+      tipo: '+',
+      texto:
+        '          { "type": "command", "command": "\\"node\\" \\"C:/hub/cli/main.js\\" hook", "timeout": 120 }',
+    },
     { tipo: ' ', texto: '        ]' },
   ],
 };
@@ -301,7 +364,8 @@ function auditoria(kind: string | null) {
     sessionId: 'ses_filho1',
     projectId: 'prj_alfa',
     approvalId: null,
-    action: 'Bash: npm run migrate -- --env=producao --force --com-um-argumento-bem-comprido-para-quebrar',
+    action:
+      'Bash: npm run migrate -- --env=producao --force --com-um-argumento-bem-comprido-para-quebrar',
     decision: 'approve',
     risk: 'high',
     reason: 'comando irreversível fora da lista de permitidos',
@@ -309,10 +373,26 @@ function auditoria(kind: string | null) {
     ...p,
   });
   const todas = [
-    e({ kind: 'approval.resolved', actor: 'web', approvalId: 'apv_velha', decision: 'denied', ts: ha(3), risk: null }),
+    e({
+      kind: 'approval.resolved',
+      actor: 'web',
+      approvalId: 'apv_velha',
+      decision: 'denied',
+      ts: ha(3),
+      risk: null,
+    }),
     e({ kind: 'approval.requested', approvalId: 'apv_velha', ts: ha(4) }),
     e({}),
-    e({ kind: 'policy.updated', actor: 'cli:bruno', sessionId: null, action: 'PUT /policy (camada global)', decision: 'loosened', reason: 'afrouxa: risk.irreversible', risk: null, detail: {} }),
+    e({
+      kind: 'policy.updated',
+      actor: 'cli:bruno',
+      sessionId: null,
+      action: 'PUT /policy (camada global)',
+      decision: 'loosened',
+      reason: 'afrouxa: risk.irreversible',
+      risk: null,
+      detail: {},
+    }),
   ];
   return kind ? todas.filter((x) => x.kind === kind) : todas;
 }
@@ -341,7 +421,10 @@ const TIPOS: Record<string, string> = {
 };
 
 function json(res: ServerResponse, status: number, corpo: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  });
   res.end(JSON.stringify(corpo));
 }
 
@@ -375,7 +458,13 @@ export const CENARIO: {
 } = { falhar: null, vazio: false, recusarPasta: null };
 
 /** Projetos criados pelo modal durante o teste, e cada POST /projects recebido. */
-export const PROJETOS_CRIADOS: Array<{ id: string; name: string; path: string; defaultBranch: string; createdAt: string }> = [];
+export const PROJETOS_CRIADOS: Array<{
+  id: string;
+  name: string;
+  path: string;
+  defaultBranch: string;
+  createdAt: string;
+}> = [];
 export const PASTAS_VINCULADAS: Array<{ projectId: string; path: string }> = [];
 
 export function redefinirCenario(): void {
@@ -422,11 +511,22 @@ async function rotearCenario(req: IncomingMessage, res: ServerResponse, p: strin
     const b = ((await corpo(req)) ?? {}) as { path?: string };
     const caminho = String(b.path);
     if (CENARIO.recusarPasta?.test(caminho)) {
-      json(res, 400, { error: { code: 'FOLDER_OVERLAP', message: `a pasta ${caminho} sobrepõe outra já vinculada` } });
+      json(res, 400, {
+        error: { code: 'FOLDER_OVERLAP', message: `a pasta ${caminho} sobrepõe outra já vinculada` },
+      });
       return true;
     }
     PASTAS_VINCULADAS.push({ projectId: m[1]!, path: caminho });
-    json(res, 201, { folder: { id: `pfd_x${PASTAS_VINCULADAS.length}`, projectId: m[1], path: caminho, label: null, isPrimary: false, createdAt: new Date().toISOString() } });
+    json(res, 201, {
+      folder: {
+        id: `pfd_x${PASTAS_VINCULADAS.length}`,
+        projectId: m[1],
+        path: caminho,
+        label: null,
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+      },
+    });
     return true;
   }
   return false;
@@ -446,20 +546,49 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
     ESCRITAS.push({ method: req.method, path: p + url.search, body });
     const dryRun = url.searchParams.get('dryRun') === '1';
     if (req.method === 'PUT' && p === '/policy') {
-      return json(res, 200, dryRun
-        ? { dryRun: true, loosened: ['risk.irreversible'], effective: POLITICA_EFETIVA }
-        : { policy: politica(null), loosened: ['risk.irreversible'], backup: 'C:\\Users\\teste\\.agents-hub\\config.json.bak-20260926-101010' });
+      return json(
+        res,
+        200,
+        dryRun
+          ? { dryRun: true, loosened: ['risk.irreversible'], effective: POLITICA_EFETIVA }
+          : {
+              policy: politica(null),
+              loosened: ['risk.irreversible'],
+              backup: 'C:\\Users\\teste\\.agents-hub\\config.json.bak-20260926-101010',
+            },
+      );
     }
     if (req.method === 'PUT' && /^\/projects\/prj_[a-z0-9]+\/policy$/i.test(p)) {
-      return json(res, 200, dryRun
-        ? { dryRun: true, clamped: ['risk.irreversible'], ignoredExecFields: [], effective: POLITICA_EFETIVA }
-        : { project: politica('prj_alfa').project, clamped: ['risk.irreversible'], ignoredExecFields: [] });
+      return json(
+        res,
+        200,
+        dryRun
+          ? {
+              dryRun: true,
+              clamped: ['risk.irreversible'],
+              ignoredExecFields: [],
+              effective: POLITICA_EFETIVA,
+            }
+          : {
+              project: politica('prj_alfa').project,
+              clamped: ['risk.irreversible'],
+              ignoredExecFields: [],
+            },
+      );
     }
     if (/^\/integrations\/[a-z0-9-]+\/(hook|mcp)$/i.test(p)) {
       const b = (body ?? {}) as { dryRun?: boolean };
-      return json(res, 200, b.dryRun === false
-        ? { dryRun: false, plan: PLANO, backup: 'C:\\Users\\teste\\.claude\\settings.json.bak-20260926-101010' }
-        : { dryRun: true, plan: PLANO });
+      return json(
+        res,
+        200,
+        b.dryRun === false
+          ? {
+              dryRun: false,
+              plan: PLANO,
+              backup: 'C:\\Users\\teste\\.claude\\settings.json.bak-20260926-101010',
+            }
+          : { dryRun: true, plan: PLANO },
+      );
     }
     // O resto não é exercido pelo teste; responder algo plausível evita
     // toasts de erro que mudariam o layout medido.
@@ -481,7 +610,14 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (p === '/agents') return json(res, 200, { agents: AGENTES });
   if (p === '/approvals') return json(res, 200, { approvals: APROVACOES });
   if (p === '/projects') return json(res, 200, { projects: [...PROJETOS, ...PROJETOS_CRIADOS] });
-  if (p === '/health') return json(res, 200, { ok: true, version: '0.1.0', now: new Date().toISOString(), liveSessions: 3, subscribers: 1 });
+  if (p === '/health')
+    return json(res, 200, {
+      ok: true,
+      version: '0.1.0',
+      now: new Date().toISOString(),
+      liveSessions: 3,
+      subscribers: 1,
+    });
   if (p === '/discovery') return json(res, 200, { agents: [] });
 
   let m = /^\/sessions\/(ses_[a-z0-9]+)\/events$/i.exec(p);
@@ -489,7 +625,9 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
   m = /^\/sessions\/(ses_[a-z0-9]+)$/i.exec(p);
   if (m) {
     const s = SESSOES.find((x) => x.id === m![1]);
-    return s ? json(res, 200, { session: s, live: true }) : json(res, 404, { error: { code: 'NOT_FOUND' } });
+    return s
+      ? json(res, 200, { session: s, live: true })
+      : json(res, 404, { error: { code: 'NOT_FOUND' } });
   }
   m = /^\/graph\/(ses_[a-z0-9]+)$/i.exec(p);
   if (m) return json(res, 200, { graph: grafoDe(m[1]!) });

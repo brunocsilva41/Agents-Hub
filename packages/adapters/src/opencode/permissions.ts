@@ -135,8 +135,7 @@ export function configDosAgentesDoHub(): Record<string, unknown> {
     agent: {
       [OPENCODE_AGENTE_DO_MODO.supervised]: {
         mode: 'primary',
-        description:
-          'Agents Hub — supervised: só leitura. Edição, shell, rede e subagentes negados.',
+        description: 'Agents Hub — supervised: só leitura. Edição, shell, rede e subagentes negados.',
         permission: {
           // Nega por padrão: ferramenta desconhecida (MCP incluído) pode escrever.
           '*': 'deny',
@@ -163,8 +162,7 @@ export function configDosAgentesDoHub(): Record<string, unknown> {
       },
       [OPENCODE_AGENTE_DO_MODO.autonomous]: {
         mode: 'primary',
-        description:
-          'Agents Hub — autonomous: como semi, mas pode delegar a subagentes do OpenCode.',
+        description: 'Agents Hub — autonomous: como semi, mas pode delegar a subagentes do OpenCode.',
         permission: { '*': 'allow', ...BASE, edit: EDICAO_SEMI, bash: bashSemi(), task: 'allow' },
       },
     },

@@ -48,8 +48,7 @@ export function actionsOfToolCall(call: ToolCall, workdir: string): GuardedActio
   }
 
   if (nome === 'write' || nome === 'edit' || nome === 'notebookedit' || nome === 'multiedit') {
-    const alvo =
-      texto(input['file_path']) ?? texto(input['path']) ?? texto(input['notebook_path']);
+    const alvo = texto(input['file_path']) ?? texto(input['path']) ?? texto(input['notebook_path']);
     return alvo ? [{ kind: 'file.write', path: path.resolve(workdir, alvo) }] : [];
   }
 
@@ -95,9 +94,7 @@ export function resumoDaChamada(
 
   if (nome === 'write' || nome === 'edit' || nome === 'notebookedit' || nome === 'multiedit') {
     const alvo =
-      texto(toolInput['file_path']) ??
-      texto(toolInput['path']) ??
-      texto(toolInput['notebook_path']);
+      texto(toolInput['file_path']) ?? texto(toolInput['path']) ?? texto(toolInput['notebook_path']);
     return cortar(alvo ?? '(caminho não informado)', limite);
   }
 
@@ -136,9 +133,7 @@ export function combineVerdicts(
   }
 
   const ordem: Record<Decision, number> = { allow: 0, approve: 1, deny: 2 };
-  return partes.reduce((pior, atual) =>
-    ordem[atual.decision] > ordem[pior.decision] ? atual : pior,
-  );
+  return partes.reduce((pior, atual) => (ordem[atual.decision] > ordem[pior.decision] ? atual : pior));
 }
 
 /**

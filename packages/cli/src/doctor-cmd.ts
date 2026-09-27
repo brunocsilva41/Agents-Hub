@@ -123,7 +123,9 @@ export function avaliarAgentes(
   }
 
   const ordem: Record<EstadoDoAgente, number> = { pronto: 0, atencao: 1, quebrado: 2, ausente: 3 };
-  return resultado.sort((a, b) => ordem[a.estado] - ordem[b.estado] || a.agentId.localeCompare(b.agentId));
+  return resultado.sort(
+    (a, b) => ordem[a.estado] - ordem[b.estado] || a.agentId.localeCompare(b.agentId),
+  );
 }
 
 function icone(estado: EstadoDoAgente): string {
@@ -156,7 +158,11 @@ export interface OpcoesDeDoctor {
   smoke?: { pollMs?: number; timeoutMs?: number };
 }
 
-export async function doctorCommand(client: HubClient, args: Args, o: OpcoesDeDoctor): Promise<SaudeDoAgente[]> {
+export async function doctorCommand(
+  client: HubClient,
+  args: Args,
+  o: OpcoesDeDoctor,
+): Promise<SaudeDoAgente[]> {
   const log = o.log ?? ((l: string) => console.log(l));
   log(dim(`checando agentes…${NEWLINE}`));
   const [{ probes }, { agents }, descobertas] = await Promise.all([
@@ -172,7 +178,9 @@ export async function doctorCommand(client: HubClient, args: Args, o: OpcoesDeDo
       if (s.dica) log(`   ${dim(s.dica)}`);
       continue;
     }
-    log(`${icone(s.estado)} ${bold(s.agentId.padEnd(13))} ${dim(s.versao ?? 'versão desconhecida')}  ${rotuloAuth(s.auth)}`);
+    log(
+      `${icone(s.estado)} ${bold(s.agentId.padEnd(13))} ${dim(s.versao ?? 'versão desconhecida')}  ${rotuloAuth(s.auth)}`,
+    );
     if (s.binPath) log(`   ${dim(s.binPath)}`);
     for (const motivo of s.motivos) log(`   ${s.estado === 'quebrado' ? red(motivo) : yellow(motivo)}`);
     if (s.estado === 'quebrado' && s.dica) log(`   ${dim(s.dica)}`);
@@ -191,7 +199,9 @@ export async function doctorCommand(client: HubClient, args: Args, o: OpcoesDeDo
   for (const alvo of HOOK_TARGETS) {
     const aviso = avisoDeTimeoutDoHook(lerConfig(alvo.configUsuario));
     if (aviso) {
-      log(`${NEWLINE}${yellow(`⚠ ${alvo.id}: ${aviso}`)}${NEWLINE}   ${dim('corrija com:')} ${bold(`hub hooks install ${alvo.id} --write`)}`);
+      log(
+        `${NEWLINE}${yellow(`⚠ ${alvo.id}: ${aviso}`)}${NEWLINE}   ${dim('corrija com:')} ${bold(`hub hooks install ${alvo.id} --write`)}`,
+      );
     }
   }
 
@@ -220,7 +230,16 @@ export function prepararProjetoDeSmoke(home: string): string {
       'utf8',
     );
     git('add', '-A');
-    git('-c', 'user.name=agents-hub', '-c', 'user.email=smoke@agents-hub.invalid', 'commit', '-q', '-m', 'smoke: commit inicial');
+    git(
+      '-c',
+      'user.name=agents-hub',
+      '-c',
+      'user.email=smoke@agents-hub.invalid',
+      'commit',
+      '-q',
+      '-m',
+      'smoke: commit inicial',
+    );
   }
   return dir;
 }
@@ -240,19 +259,28 @@ async function confirmarNoTerminal(pergunta: string): Promise<boolean> {
  * teto de US$ 0,10 cada, num projeto descartável. Gasta tokens/créditos:
  * pede confirmação (ou `--yes`) e nunca roda sem terminal para perguntar.
  */
-async function doctorSmoke(client: HubClient, args: Args, saude: SaudeDoAgente[], o: OpcoesDeDoctor): Promise<void> {
+async function doctorSmoke(
+  client: HubClient,
+  args: Args,
+  saude: SaudeDoAgente[],
+  o: OpcoesDeDoctor,
+): Promise<void> {
   const log = o.log ?? ((l: string) => console.log(l));
   const filtro = typeof args.flags['agent'] === 'string' ? args.flags['agent'] : undefined;
   const ids = saude
     .filter((s) => s.estado !== 'ausente' && (filtro === undefined || s.agentId === filtro))
     .map((s) => s.agentId);
   if (ids.length === 0) {
-    log(`${NEWLINE}${dim(filtro ? `agente "${filtro}" não está instalado — nada para testar.` : 'nenhum agente instalado — nada para testar com --smoke.')}`);
+    log(
+      `${NEWLINE}${dim(filtro ? `agente "${filtro}" não está instalado — nada para testar.` : 'nenhum agente instalado — nada para testar com --smoke.')}`,
+    );
     return;
   }
 
   const teto = SMOKE_ORCAMENTO_USD;
-  log(`${NEWLINE}${bold(yellow('⚠ --smoke abre sessões REAIS'))} com ${ids.length} agente(s), um por vez: ${ids.join(', ')}.`);
+  log(
+    `${NEWLINE}${bold(yellow('⚠ --smoke abre sessões REAIS'))} com ${ids.length} agente(s), um por vez: ${ids.join(', ')}.`,
+  );
   log(
     dim(
       `Cada uma pede "responda OK" com teto de US$ ${teto.toFixed(2)} (até ~US$ ${(teto * ids.length).toFixed(2)} no total). ` +
@@ -305,7 +333,11 @@ export function renderSmokeOutcome(outcome: SmokeOutcome): string {
 }
 
 /** Uma tela com tudo que importa saber antes de começar a trabalhar. */
-export async function statusCommand(client: HubClient, home: string, o: { log?: Log } = {}): Promise<SaudeDoAgente[]> {
+export async function statusCommand(
+  client: HubClient,
+  home: string,
+  o: { log?: Log } = {},
+): Promise<SaudeDoAgente[]> {
   const log = o.log ?? ((l: string) => console.log(l));
   const [saudeDaemon, { agents }, { sessions }, { approvals }, descobertas] = await Promise.all([
     client.health(),
@@ -325,7 +357,9 @@ export async function statusCommand(client: HubClient, home: string, o: { log?: 
   // `home` vem do config local da CLI: o `/health` deixou de expor o caminho
   // do usuário.
   log(`${green('●')} daemon no ar ${dim(`v${saudeDaemon.version} · ${home}`)}`);
-  log(`${dim('agentes:  ')} ${utilizaveis.length}/${saude.length} disponíveis ${dim(utilizaveis.map((a) => a.agentId).join(', '))}`);
+  log(
+    `${dim('agentes:  ')} ${utilizaveis.length}/${saude.length} disponíveis ${dim(utilizaveis.map((a) => a.agentId).join(', '))}`,
+  );
   for (const q of quebrados) {
     log(`   ${red('✗')} ${bold(q.agentId)} ${dim(q.motivos[0] ?? 'quebrado')}`);
   }
@@ -333,11 +367,15 @@ export async function statusCommand(client: HubClient, home: string, o: { log?: 
   log(`${dim('sessões:  ')} ${vivas.length} ativa(s) de ${sessions.length} no histórico`);
 
   for (const sessao of vivas.slice(0, 8)) {
-    log(`   ${stateBadge(sessao.state)} ${bold(sessao.id)} ${cyan(sessao.agentId)} ${dim(sessao.title ?? '')}`);
+    log(
+      `   ${stateBadge(sessao.state)} ${bold(sessao.id)} ${cyan(sessao.agentId)} ${dim(sessao.title ?? '')}`,
+    );
   }
 
   if (approvals.length > 0) {
-    log(`${NEWLINE}${yellow(`⏸ ${approvals.length} aprovação(ões) esperando você`)} ${dim('— hub approvals')}`);
+    log(
+      `${NEWLINE}${yellow(`⏸ ${approvals.length} aprovação(ões) esperando você`)} ${dim('— hub approvals')}`,
+    );
   }
   return saude;
 }

@@ -54,7 +54,9 @@ export class WorktreeReaper {
     // — rejeição sem dono, que caía no `unhandledRejection` genérico.
     const passada = (): void => {
       this.sweep().catch((err: unknown) => {
-        console.error(`[reaper] varredura de worktrees falhou: ${(err as Error)?.message ?? String(err)}`);
+        console.error(
+          `[reaper] varredura de worktrees falhou: ${(err as Error)?.message ?? String(err)}`,
+        );
       });
     };
     // Uma passada na largada: o daemon pode ter ficado dias desligado.
@@ -110,9 +112,7 @@ export class WorktreeReaper {
         // de verdade — vale log explícito, não só um número que não distingue
         // os dois casos.
         result.failed.push({ path: session.workdir, reason: outcome.reason });
-        console.error(
-          `[reaper] falha ao remover worktree ${session.workdir}: ${outcome.reason}`,
-        );
+        console.error(`[reaper] falha ao remover worktree ${session.workdir}: ${outcome.reason}`);
       }
       await this.worktrees.prune(project.path);
     }

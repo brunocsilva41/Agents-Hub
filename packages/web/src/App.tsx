@@ -24,9 +24,20 @@ import { TelemetryView } from './components/TelemetryView';
 import { OperationView } from './components/OperationView';
 import { EstadoDaTela } from './components/EstadoDaTela';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from './hub';
-import { alternarFluxo, aoSelecionarFluxo, LISTA_INICIAL, type EstadoDaLista } from './lib/flowListState';
+import {
+  alternarFluxo,
+  aoSelecionarFluxo,
+  LISTA_INICIAL,
+  type EstadoDaLista,
+} from './lib/flowListState';
 import { falhaDosRecursos, situacaoDaTela, type Recurso } from './lib/indexStatus';
-import { useHubState, useBudget, mergeFlowEvents, MAX_FLOW_HISTORIES, timelineStatus } from './useHubState';
+import {
+  useHubState,
+  useBudget,
+  mergeFlowEvents,
+  MAX_FLOW_HISTORIES,
+  timelineStatus,
+} from './useHubState';
 
 type ActiveTab = 'timeline' | 'dag' | 'swarm' | 'telemetry' | 'operation' | 'settings' | 'security';
 
@@ -37,7 +48,10 @@ export function App() {
   const [verbose, setVerbose] = useState(false);
   const [listaDeFluxos, setListaDeFluxos] = useState<EstadoDaLista>(LISTA_INICIAL);
 
-  const [modal, setModal] = useState<{ delegateFrom: { sessionId: string; agentId: string } | null; defaultAgentId?: string } | null>(null);
+  const [modal, setModal] = useState<{
+    delegateFrom: { sessionId: string; agentId: string } | null;
+    defaultAgentId?: string;
+  } | null>(null);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -72,7 +86,7 @@ export function App() {
   const [boasVindasDispensadas, setBoasVindasDispensadas] = useState(false);
 
   const selected: SessionSummary | null = useMemo(
-    () => (selectedId ? state.sessions.find((s) => s.id === selectedId) ?? null : null),
+    () => (selectedId ? (state.sessions.find((s) => s.id === selectedId) ?? null) : null),
     [selectedId, state.sessions],
   );
 
@@ -83,9 +97,7 @@ export function App() {
     // Teto de sessões-irmãs buscadas de uma vez: sem isto, um fluxo com 30+
     // sub-sessões dispara uma requisição HTTP simultânea por sessão-irmã ao
     // abrir "Fluxo inteiro". Ficam as mais recentes, que é o que se está lendo.
-    return [...all]
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, MAX_FLOW_HISTORIES);
+    return [...all].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, MAX_FLOW_HISTORIES);
   }, [selected, scope, state.sessions]);
 
   const events = useMemo(() => {
@@ -134,7 +146,8 @@ export function App() {
   };
 
   // Situação do índice por tela: carregando/erro não pode virar "vazio".
-  const situacaoDe = (recursos: Recurso[], vazia: boolean) => situacaoDaTela(state.indice, recursos, vazia);
+  const situacaoDe = (recursos: Recurso[], vazia: boolean) =>
+    situacaoDaTela(state.indice, recursos, vazia);
   const erroDe = (recursos: Recurso[]) => falhaDosRecursos(state.indice, recursos);
   const tentarDeNovo = () => void state.refresh();
   const situacaoSessoes = situacaoDe(['sessions'], state.sessions.length === 0);
@@ -231,7 +244,9 @@ export function App() {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesAgent = flow.agents.some((a) => a.toLowerCase().includes(q));
-        const matchesTitle = flow.sessions.some((s) => (s.title ?? '').toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
+        const matchesTitle = flow.sessions.some(
+          (s) => (s.title ?? '').toLowerCase().includes(q) || s.id.toLowerCase().includes(q),
+        );
         if (!matchesAgent && !matchesTitle) return false;
       }
       return true;
@@ -269,7 +284,15 @@ export function App() {
             aria-controls="coluna-fluxos"
             onClick={alternarFluxos}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <line x1="3" y1="12" x2="21" y2="12"></line>
               <line x1="3" y1="6" x2="21" y2="6"></line>
               <line x1="3" y1="18" x2="21" y2="18"></line>
@@ -282,12 +305,16 @@ export function App() {
             aria-label="Agents-Hub — ir para a Timeline"
             onClick={() => setActiveTab('timeline')}
           >
-            <span className="brand-logo-icon" aria-hidden="true">⚡</span>
+            <span className="brand-logo-icon" aria-hidden="true">
+              ⚡
+            </span>
             <span className="brand-text" aria-hidden="true">
               <span className="brand-badge">AGENTS</span>
               <span className="brand-hub">HUB</span>
             </span>
-            <span className="brand-version" aria-hidden="true">v0.1</span>
+            <span className="brand-version" aria-hidden="true">
+              v0.1
+            </span>
           </button>
 
           <nav className="nav-tabs" aria-label="Seções">
@@ -300,7 +327,9 @@ export function App() {
                 title={aba.rotulo}
                 onClick={() => setActiveTab(aba.id)}
               >
-                <span className="tab-icon" aria-hidden="true">{aba.icone}</span>
+                <span className="tab-icon" aria-hidden="true">
+                  {aba.icone}
+                </span>
                 <span className="tab-label rotulo-compacto">{aba.rotulo}</span>
               </button>
             ))}
@@ -316,12 +345,24 @@ export function App() {
             title={`Buscar (${atalhoPaleta})`}
             onClick={() => setCmdOpen(true)}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
-            <span className="spotlight-text" aria-hidden="true">Buscar sessões, agentes, comandos…</span>
-            <kbd className="kbd-shortcut" aria-hidden="true">{atalhoPaleta}</kbd>
+            <span className="spotlight-text" aria-hidden="true">
+              Buscar sessões, agentes, comandos…
+            </span>
+            <kbd className="kbd-shortcut" aria-hidden="true">
+              {atalhoPaleta}
+            </kbd>
           </button>
         </div>
 
@@ -364,7 +405,15 @@ export function App() {
             aria-controls="coluna-painel"
             onClick={alternarPainel}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
               <rect x="3" y="4" width="18" height="16" rx="2"></rect>
               <line x1="15" y1="4" x2="15" y2="20"></line>
             </svg>
@@ -376,7 +425,15 @@ export function App() {
             className="primary btn-hero-new"
             onClick={() => setModal({ delegateFrom: null })}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              aria-hidden="true"
+            >
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
@@ -562,7 +619,10 @@ export function App() {
                   className={flowFilter === 'active' ? 'on' : ''}
                   onClick={() => setFlowFilter('active')}
                 >
-                  Ativos <span className="seg-count">{filteredFlows.filter((f) => f.sessions.some((s) => isLiveState(s.state))).length}</span>
+                  Ativos{' '}
+                  <span className="seg-count">
+                    {filteredFlows.filter((f) => f.sessions.some((s) => isLiveState(s.state))).length}
+                  </span>
                 </button>
                 <button
                   className={flowFilter === 'all' ? 'on' : ''}
@@ -630,7 +690,10 @@ export function App() {
                   </div>
                   <div className="session-meta-stack">
                     <div className="session-title-line">
-                      <span className="session-agent-pill" style={{ color: agentColor(selected.agentId) }}>
+                      <span
+                        className="session-agent-pill"
+                        style={{ color: agentColor(selected.agentId) }}
+                      >
                         {selected.agentId}
                       </span>
                       <span className={`session-state-pill state-${selected.state}`}>
@@ -692,29 +755,32 @@ export function App() {
 
             <div className="timeline-wrap">
               {!selected && (situacaoSessoes === 'erro' || situacaoSessoes === 'carregando') ? (
-                <EstadoDaTela situacao={situacaoSessoes} oQue="as sessões" erro={erroDe(['sessions'])} onTentar={tentarDeNovo} />
+                <EstadoDaTela
+                  situacao={situacaoSessoes}
+                  oQue="as sessões"
+                  erro={erroDe(['sessions'])}
+                  onTentar={tentarDeNovo}
+                />
               ) : (
-              <Timeline
-                events={events}
-                showVerbose={verbose}
-                showAgent={scope === 'flow'}
-                loading={!state.ready || (timeline?.loading ?? false)}
-                failed={eventsFailed}
-                unselected={(situacaoSessoes === 'ok' || situacaoSessoes === 'vazio') && !selected}
-                hubVazio={situacaoSessoes === 'vazio'}
-                resetKey={`${selected?.id ?? ''}:${scope}`}
-                hasMoreBefore={timeline?.hasMoreBefore ?? false}
-                loadingOlder={timeline?.loadingOlder ?? false}
-                olderFailed={timeline?.olderFailed ?? false}
-                onLoadOlder={timeline?.loadOlder}
-                retryAt={timeline?.retryAt ?? null}
-                onRetry={timeline?.retry}
-              />
+                <Timeline
+                  events={events}
+                  showVerbose={verbose}
+                  showAgent={scope === 'flow'}
+                  loading={!state.ready || (timeline?.loading ?? false)}
+                  failed={eventsFailed}
+                  unselected={(situacaoSessoes === 'ok' || situacaoSessoes === 'vazio') && !selected}
+                  hubVazio={situacaoSessoes === 'vazio'}
+                  resetKey={`${selected?.id ?? ''}:${scope}`}
+                  hasMoreBefore={timeline?.hasMoreBefore ?? false}
+                  loadingOlder={timeline?.loadingOlder ?? false}
+                  olderFailed={timeline?.olderFailed ?? false}
+                  onLoadOlder={timeline?.loadOlder}
+                  retryAt={timeline?.retryAt ?? null}
+                  onRetry={timeline?.retry}
+                />
               )}
 
-              {selected && (
-                <Composer session={selected} encerrada={!isLiveState(selected.state)} />
-              )}
+              {selected && <Composer session={selected} encerrada={!isLiveState(selected.state)} />}
             </div>
           </main>
 

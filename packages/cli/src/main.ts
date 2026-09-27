@@ -18,15 +18,7 @@ import {
   lerConfigParaGravar,
   mergeHooks,
 } from './hooks-install.js';
-import {
-  bold,
-  cyan,
-  dim,
-  green,
-  red,
-  stateBadge,
-  yellow,
-} from './render.js';
+import { bold, cyan, dim, green, red, stateBadge, yellow } from './render.js';
 import {
   MCP_TARGETS,
   estadoDoRegistro,
@@ -166,7 +158,11 @@ async function main(): Promise<void> {
         );
         const reason = typeof args.flags['reason'] === 'string' ? args.flags['reason'] : undefined;
         const res = await client.handoff(sessionId, targetAgent, reason);
-        console.log(green(`\n✓ Controle da sessão ${res.session.id} transferido para o agente "${res.session.agentId}".`));
+        console.log(
+          green(
+            `\n✓ Controle da sessão ${res.session.id} transferido para o agente "${res.session.agentId}".`,
+          ),
+        );
       });
     case 'approvals':
       return withDaemon(() => listApprovals(client));
@@ -246,7 +242,9 @@ function mostrarAjuda(args: Args): void {
   try {
     loadConfig();
   } catch (err) {
-    console.error(yellow('aviso: a configuração não carrega — os outros comandos vão falhar até corrigir:'));
+    console.error(
+      yellow('aviso: a configuração não carrega — os outros comandos vão falhar até corrigir:'),
+    );
     console.error(yellow(`  ${(err as Error).message}`));
   }
   const alvo = COMANDOS_DE_AJUDA.has(args.command.toLowerCase()) ? args.positional[0] : args.command;
@@ -298,7 +296,9 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
       console.log(`   ${dim(alvo.nota)}`);
       const aviso = avisoDeTimeoutDoHook(alvoConfig);
       if (aviso) {
-        console.log(`   ${yellow(`⚠ ${aviso}`)} ${dim('— reinstale:')} ${bold(`hub hooks install ${alvo.id} --write`)}`);
+        console.log(
+          `   ${yellow(`⚠ ${aviso}`)} ${dim('— reinstale:')} ${bold(`hub hooks install ${alvo.id} --write`)}`,
+        );
       }
     }
     const codexLigado = config.codexGate.bypassHookTrust;
@@ -316,7 +316,9 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
       `${NEWLINE}${dim('instale com:')} ${bold('hub hooks install claude --write')} ${dim('ou')} ${bold('hub hooks install codex --write')}`,
     );
     console.log(
-      dim(`o gate cobre ${MATCHER_DE_RISCO.split('|').length} ferramentas de risco; leitura passa direto`),
+      dim(
+        `o gate cobre ${MATCHER_DE_RISCO.split('|').length} ferramentas de risco; leitura passa direto`,
+      ),
     );
     return;
   }
@@ -360,9 +362,7 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
   console.log(`${green('gate instalado')} em ${bold(destino)}`);
   if (gravacao.backup) console.log(dim(`backup: ${gravacao.backup}`));
   console.log(
-    dim(
-      'a partir da próxima sessão, Bash/Write/Edit passam pela política do Hub antes de rodar.',
-    ),
+    dim('a partir da próxima sessão, Bash/Write/Edit passam pela política do Hub antes de rodar.'),
   );
 }
 
@@ -392,7 +392,9 @@ async function installCodexGate(args: Args, config: ReturnType<typeof loadConfig
   // como a pessoa escreveu (sem congelar defaults), com backup versionado.
   const gravacao = ligarBypassDoGateCodex(config.home);
   if (gravacao.action === 'unchanged') {
-    console.log(`${green('gate do Codex já estava ligado')} em ${bold(destino)} ${dim('(nada gravado)')}`);
+    console.log(
+      `${green('gate do Codex já estava ligado')} em ${bold(destino)} ${dim('(nada gravado)')}`,
+    );
     return;
   }
   console.log(`${green('gate do Codex ligado')} — gravado em ${bold(destino)}`);
@@ -522,22 +524,32 @@ async function projectTrust(
       console.log(dim('passam a valer (conteúdo de agora do .agents-hub/config.yaml):'));
       for (const campo of campos) console.log(`  ${campo}`);
     }
-    console.log(dim('se o repositório mudar esses campos, a confiança fica suspensa até você rodar isto de novo.'));
+    console.log(
+      dim('se o repositório mudar esses campos, a confiança fica suspensa até você rodar isto de novo.'),
+    );
   } else {
     console.log(`${yellow('não confiável')} ${bold(project.name)} ${dim(project.id)}`);
     console.log(
-      dim('validation.command, revisão, env, prompts e memory do .agents-hub/config.yaml deste projeto serão ignorados.'),
+      dim(
+        'validation.command, revisão, env, prompts e memory do .agents-hub/config.yaml deste projeto serão ignorados.',
+      ),
     );
   }
 }
 
 /** `hub project prompt` — mostra, grava ou apaga a instrução de um agente. */
-async function projectPrompt(client: HubClient, args: Args, projectRef: string | undefined): Promise<void> {
+async function projectPrompt(
+  client: HubClient,
+  args: Args,
+  projectRef: string | undefined,
+): Promise<void> {
   const projectId = await resolveProjectId(client, projectRef);
   const agentId = typeof args.flags['agent'] === 'string' ? args.flags['agent'] : undefined;
-  if (agentId === undefined) throw erroDeUso('--agent é obrigatório: hub project prompt [projeto] --agent <id>');
+  if (agentId === undefined)
+    throw erroDeUso('--agent é obrigatório: hub project prompt [projeto] --agent <id>');
 
-  if (args.flags['set'] === true) throw erroDeUso('--set precisa do texto: --set "instrução para o agente"');
+  if (args.flags['set'] === true)
+    throw erroDeUso('--set precisa do texto: --set "instrução para o agente"');
   const setFlag = typeof args.flags['set'] === 'string' ? args.flags['set'] : undefined;
   const clearFlag = args.flags['clear'] === true;
   if (setFlag !== undefined && clearFlag) throw erroDeUso('use --set OU --clear, não os dois');
@@ -556,7 +568,10 @@ async function projectPrompt(client: HubClient, args: Args, projectRef: string |
 
   const { context: salvo } = await client.saveProjectContext(projectId, { ...context, prompts });
   if (clearFlag) console.log(`${green('removida')} instrução de ${bold(agentId)}`);
-  else console.log(`${green('gravada')} instrução de ${bold(agentId)}: ${dim(salvo.prompts?.[agentId] ?? '')}`);
+  else
+    console.log(
+      `${green('gravada')} instrução de ${bold(agentId)}: ${dim(salvo.prompts?.[agentId] ?? '')}`,
+    );
 }
 
 /**
@@ -575,7 +590,8 @@ async function projectFolders(client: HubClient, rest: string[]): Promise<void> 
     const projectRef = argumentos.length >= 2 ? argumentos[0] : undefined;
     const folderId = argumentos.length >= 2 ? argumentos[1] : argumentos[0];
 
-    if (folderId === undefined || folderId.length === 0) throw erroDeUso('faltou o folderId: hub project folders remove [projeto] <folderId>');
+    if (folderId === undefined || folderId.length === 0)
+      throw erroDeUso('faltou o folderId: hub project folders remove [projeto] <folderId>');
 
     const projectId = await resolveProjectId(client, projectRef);
     await client.removeFolder(projectId, folderId);
@@ -622,8 +638,10 @@ async function delegate(client: HubClient, args: Args): Promise<void> {
   const objective = args.positional.slice(1).join(' ').trim();
   const agent = args.flags['agent'];
 
-  if (typeof agent !== 'string') throw erroDeUso('--agent é obrigatório: hub delegate <sessionId> --agent <id|cap:x> "objetivo"');
-  if (objective.length === 0) throw erroDeUso('faltou o objetivo: hub delegate <sessionId> --agent <id|cap:x> "objetivo"');
+  if (typeof agent !== 'string')
+    throw erroDeUso('--agent é obrigatório: hub delegate <sessionId> --agent <id|cap:x> "objetivo"');
+  if (objective.length === 0)
+    throw erroDeUso('faltou o objetivo: hub delegate <sessionId> --agent <id|cap:x> "objetivo"');
 
   const budgetUsd = lerBudgetUsd(args.flags['budget-usd']);
   if (budgetUsd instanceof Error) throw erroDeUso(budgetUsd.message);
@@ -632,9 +650,7 @@ async function delegate(client: HubClient, args: Args): Promise<void> {
   if (budgetUsd !== undefined) brief.budget = { usd: budgetUsd };
 
   const result = await client.delegate(sessionId, brief);
-  console.log(
-    `${green('delegado')} para ${bold(result.agentId)} ${dim(`sessão ${result.sessionId}`)}`,
-  );
+  console.log(`${green('delegado')} para ${bold(result.agentId)} ${dim(`sessão ${result.sessionId}`)}`);
   console.log(dim(`acompanhe com: hub watch ${result.sessionId}`));
 }
 
@@ -715,14 +731,12 @@ async function listApprovals(client: HubClient): Promise<void> {
     console.log(`   ${dim(`sessão ${approval.sessionId} · ${dataHoraLocal(approval.requestedAt)}`)}`);
   }
 
-  console.log(`${NEWLINE}${dim('libere com:')} ${bold('hub approve <id>')}  ${dim('ou')}  ${bold('hub deny <id>')}`);
+  console.log(
+    `${NEWLINE}${dim('libere com:')} ${bold('hub approve <id>')}  ${dim('ou')}  ${bold('hub deny <id>')}`,
+  );
 }
 
-async function decide(
-  client: HubClient,
-  args: Args,
-  decision: 'approved' | 'denied',
-): Promise<void> {
+async function decide(client: HubClient, args: Args, decision: 'approved' | 'denied'): Promise<void> {
   const id = required(args.positional[0], 'approvalId');
   const { approval } = await client.resolveApproval(id, decision);
   const verb = decision === 'approved' ? green('aprovada') : red('negada');
@@ -759,14 +773,17 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
   );
 
   if (sub === undefined) return mcpStatus(hubUrl, projectPath);
-  if (sub !== 'show' && sub !== 'install') throw erroDeUso(`subcomando desconhecido: "${sub}" (use show ou install)`);
+  if (sub !== 'show' && sub !== 'install')
+    throw erroDeUso(`subcomando desconhecido: "${sub}" (use show ou install)`);
   if (agentId === undefined || agentId === '') {
     throw erroDeUso(`faltou o agente (disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')})`);
   }
 
   const target = MCP_TARGETS.find((t) => t.agentId === agentId);
   if (!target) {
-    throw erroDeUso(`agente "${agentId}" desconhecido (disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')})`);
+    throw erroDeUso(
+      `agente "${agentId}" desconhecido (disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')})`,
+    );
   }
 
   const spec = serverSpec(target.agentId, hubUrl);
@@ -776,7 +793,9 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
     console.log(`${bold(target.label)}\n${dim(configPath)}\n`);
     console.log(renderSnippet(target, spec));
     if (!target.verified) {
-      console.log(`\n${yellow('⚠')} ${dim('caminho/formato não confirmado — verifique na doc do agente')}`);
+      console.log(
+        `\n${yellow('⚠')} ${dim('caminho/formato não confirmado — verifique na doc do agente')}`,
+      );
     }
     return;
   }
@@ -787,9 +806,7 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
     console.log(`${bold(target.label)}\n${dim(configPath)}\n`);
     console.log(renderSnippet(target, spec));
     console.log(
-      `\n${dim('nada foi gravado. para aplicar:')} ${bold(
-        `hub mcp install ${target.agentId} --write`,
-      )}`,
+      `\n${dim('nada foi gravado. para aplicar:')} ${bold(`hub mcp install ${target.agentId} --write`)}`,
     );
     return;
   }

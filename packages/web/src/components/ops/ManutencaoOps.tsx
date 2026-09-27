@@ -19,9 +19,12 @@ export function ManutencaoOps(): React.JSX.Element {
   const varrer = (): void => {
     setConfirmar(false);
     void acao
-      .executar('sweep', () => hub.sweep(), (r) =>
-        `${r.sweep.examined} sessão(ões) encerrada(s) examinada(s) · ${r.sweep.removed.length} worktree(s) recolhido(s) · ${r.sweep.retained} ainda no prazo` +
-        (r.sweep.failed.length > 0 ? ` · ${r.sweep.failed.length} falharam` : ''),
+      .executar(
+        'sweep',
+        () => hub.sweep(),
+        (r) =>
+          `${r.sweep.examined} sessão(ões) encerrada(s) examinada(s) · ${r.sweep.removed.length} worktree(s) recolhido(s) · ${r.sweep.retained} ainda no prazo` +
+          (r.sweep.failed.length > 0 ? ` · ${r.sweep.failed.length} falharam` : ''),
       )
       .then((r) => setResultado(r?.sweep ?? null));
   };
@@ -34,13 +37,23 @@ export function ManutencaoOps(): React.JSX.Element {
         descricao="Remove o checkout (git worktree) de sessões com isolamento em worktree que terminaram há mais tempo que a retenção configurada. Os branches hub/<sessão> ficam intactos. Exige o token de operador (o painel servido pelo Hub já o tem)."
       >
         {!confirmar ? (
-          <button type="button" className="danger" onClick={() => setConfirmar(true)} disabled={acao.ocupado !== null}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => setConfirmar(true)}
+            disabled={acao.ocupado !== null}
+          >
             {acao.ocupado === 'sweep' ? 'Recolhendo…' : 'Recolher worktrees…'}
           </button>
         ) : (
-          <div className="subform ops-confirm" role="alertdialog" aria-label="Confirmar recolher worktrees">
+          <div
+            className="subform ops-confirm"
+            role="alertdialog"
+            aria-label="Confirmar recolher worktrees"
+          >
             <span>
-              Apagar do disco os worktrees expirados? Quem ainda estiver dentro da janela de retenção não é tocado.
+              Apagar do disco os worktrees expirados? Quem ainda estiver dentro da janela de retenção não
+              é tocado.
             </span>
             <div className="subform-actions">
               <button type="button" className="danger" autoFocus onClick={varrer}>

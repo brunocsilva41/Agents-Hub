@@ -69,9 +69,15 @@ describe('operator-token é segredo para o gate (item 1.6)', () => {
   test('ler o token não passa direto em modo algum', () => {
     const engine = new PolicyEngine(DEFAULT_POLICY);
     for (const mode of ['supervised', 'semi', 'autonomous'] as const) {
-      const leitura = engine.decide({ kind: 'file.read', path: arquivo }, { workdir: os.tmpdir(), mode });
+      const leitura = engine.decide(
+        { kind: 'file.read', path: arquivo },
+        { workdir: os.tmpdir(), mode },
+      );
       assert.notEqual(leitura.decision, 'allow', `file.read em ${mode}`);
-      const cat = engine.decide({ kind: 'command', command: `cat ${arquivo}` }, { workdir: os.tmpdir(), mode });
+      const cat = engine.decide(
+        { kind: 'command', command: `cat ${arquivo}` },
+        { workdir: os.tmpdir(), mode },
+      );
       assert.notEqual(cat.decision, 'allow', `cat em ${mode}`);
     }
   });

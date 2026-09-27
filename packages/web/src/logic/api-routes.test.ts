@@ -30,9 +30,7 @@ describe('proxy do Vite em desenvolvimento', () => {
     // Pega a rota nova que alguém adicionar ao cliente sem lembrar do Vite —
     // foi exatamente assim que `/discovery` ficou de fora.
     const fonte = readFileSync(path.join(pacotes, 'client', 'src', 'index.ts'), 'utf8');
-    const segmentos = new Set(
-      [...fonte.matchAll(/\(\s*[`'"](\/[a-z-]+)/g)].map((m) => m[1] as string),
-    );
+    const segmentos = new Set([...fonte.matchAll(/\(\s*[`'"](\/[a-z-]+)/g)].map((m) => m[1] as string));
     assert.ok(segmentos.size > 5, 'o varredor achou as rotas do cliente');
     for (const s of segmentos) {
       assert.ok(

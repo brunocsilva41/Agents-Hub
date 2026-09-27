@@ -74,7 +74,10 @@ describe('timeline: mescla e paginação (6.3)', () => {
     await h.loadOlder('ses_a');
     await h.loadOlder('ses_a');
     const seqs = h.events('ses_a').map((e) => e.seq);
-    assert.deepEqual(seqs, d.all.map((e) => e.seq));
+    assert.deepEqual(
+      seqs,
+      d.all.map((e) => e.seq),
+    );
     assert.equal(h.history('ses_a').hasMoreBefore, false);
     // Sem mais nada, não pede de novo.
     const antes = d.calls.length;
@@ -172,13 +175,19 @@ describe('mescla por seq', () => {
   test('teto corta o começo e avisa', () => {
     const base = [ev(1), ev(2), ev(3)];
     const r = appendLive(base, ev(4), 3);
-    assert.deepEqual(r.events.map((e) => e.seq), [2, 3, 4]);
+    assert.deepEqual(
+      r.events.map((e) => e.seq),
+      [2, 3, 4],
+    );
     assert.equal(r.trimmed, true);
   });
 
   test('intercalado sai ordenado e sem repetição', () => {
     const merged = mergeBySeq([ev(1), ev(3), ev(5)], [ev(4), ev(2), ev(3)]);
-    assert.deepEqual(merged.map((e) => e.seq), [1, 2, 3, 4, 5]);
+    assert.deepEqual(
+      merged.map((e) => e.seq),
+      [1, 2, 3, 4, 5],
+    );
   });
 
   test('espera entre tentativas: 1 s, 2 s, 4 s… e nula após o limite', () => {

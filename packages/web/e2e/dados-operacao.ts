@@ -11,7 +11,10 @@ const agora = Date.now();
 const ha = (min: number): string => new Date(agora - min * 60_000).toISOString();
 
 function json(res: ServerResponse, status: number, corpo: unknown): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  });
   res.end(JSON.stringify(corpo));
 }
 
@@ -57,7 +60,14 @@ let orcamento = {
 };
 
 let pastas = [
-  { id: 'pfd_prj_alfa', projectId: 'prj_alfa', path: 'C:\\projetos\\alfa', label: null, isPrimary: true, createdAt: ha(600) },
+  {
+    id: 'pfd_prj_alfa',
+    projectId: 'prj_alfa',
+    path: 'C:\\projetos\\alfa',
+    label: null,
+    isPrimary: true,
+    createdAt: ha(600),
+  },
   {
     id: 'pfd_docs1',
     projectId: 'prj_alfa',
@@ -78,8 +88,30 @@ const RUN_ANTIGA = {
   batches: [['plano'], ['execucao']],
   currentBatch: null,
   steps: [
-    { stepId: 'plano', agent: 'claude', dependsOn: [], state: 'completed', sessionId: 'ses_raiz1', taskId: 'tsk_a', summary: 'Plano escrito em PLANO.md', detail: null, usd: 0.42, capUsd: 1.5 },
-    { stepId: 'execucao', agent: 'codex', dependsOn: ['plano'], state: 'blocked', sessionId: 'ses_filho1', taskId: 'tsk_b', summary: null, detail: 'esperando aprovação: executar: npm run migrate -- --env=producao --force', usd: 0.1, capUsd: 1.08 },
+    {
+      stepId: 'plano',
+      agent: 'claude',
+      dependsOn: [],
+      state: 'completed',
+      sessionId: 'ses_raiz1',
+      taskId: 'tsk_a',
+      summary: 'Plano escrito em PLANO.md',
+      detail: null,
+      usd: 0.42,
+      capUsd: 1.5,
+    },
+    {
+      stepId: 'execucao',
+      agent: 'codex',
+      dependsOn: ['plano'],
+      state: 'blocked',
+      sessionId: 'ses_filho1',
+      taskId: 'tsk_b',
+      summary: null,
+      detail: 'esperando aprovação: executar: npm run migrate -- --env=producao --force',
+      usd: 0.1,
+      capUsd: 1.08,
+    },
   ],
   totalUsd: 0.52,
   startedAt: ha(30),
@@ -89,7 +121,11 @@ const RUN_ANTIGA = {
 const execucoes: Array<Record<string, unknown>> = [RUN_ANTIGA];
 
 /** Responde às rotas da aba Operação. `true` = respondeu. */
-export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, p: string): Promise<boolean> {
+export async function rotearOperacao(
+  req: IncomingMessage,
+  res: ServerResponse,
+  p: string,
+): Promise<boolean> {
   const m = req.method ?? 'GET';
   let r: RegExpExecArray | null;
 
@@ -103,7 +139,8 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
           state: 'failed',
           brief: {
             agent: 'claude',
-            objective: 'Refatorar o módulo de autenticação inteiro para suportar SSO com provedores externos e rotação de chaves',
+            objective:
+              'Refatorar o módulo de autenticação inteiro para suportar SSO com provedores externos e rotação de chaves',
             acceptanceCriteria: ['testes passam'],
           },
           attempts: [
@@ -114,7 +151,10 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
             summary: 'Refatoração feita; a validação reprovou um teste de integração.',
             artifacts: [],
             usage: { usd: 0.4231, tokens: 48213, seconds: 312 },
-            validation: { passed: false, checks: [{ name: 'npm test', passed: false, detail: '3 testes falharam em auth.spec.ts' }] },
+            validation: {
+              passed: false,
+              checks: [{ name: 'npm test', passed: false, detail: '3 testes falharam em auth.spec.ts' }],
+            },
           },
           createdAt: ha(9),
           updatedAt: ha(2),
@@ -126,19 +166,39 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
   if (m === 'GET' && (r = /^\/sessions\/(ses_[a-z0-9]+)\/artifacts$/i.exec(p))) {
     json(res, 200, {
       artifacts: [
-        { id: 'art_1', sessionId: r[1], taskId: 'tsk_a', kind: 'diff', path: 'C:\\Users\\alguem\\.agents-hub\\artifacts\\ses_raiz1\\alteracoes-da-sessao-completas.patch', createdAt: ha(3) },
-        { id: 'art_2', sessionId: r[1], taskId: 'tsk_a', kind: 'log', path: 'C:\\Users\\alguem\\.agents-hub\\artifacts\\ses_raiz1\\validacao.log', createdAt: ha(2) },
+        {
+          id: 'art_1',
+          sessionId: r[1],
+          taskId: 'tsk_a',
+          kind: 'diff',
+          path: 'C:\\Users\\alguem\\.agents-hub\\artifacts\\ses_raiz1\\alteracoes-da-sessao-completas.patch',
+          createdAt: ha(3),
+        },
+        {
+          id: 'art_2',
+          sessionId: r[1],
+          taskId: 'tsk_a',
+          kind: 'log',
+          path: 'C:\\Users\\alguem\\.agents-hub\\artifacts\\ses_raiz1\\validacao.log',
+          createdAt: ha(2),
+        },
       ],
     });
     return true;
   }
   if (m === 'GET' && /^\/sessions\/ses_[a-z0-9]+\/diff$/i.test(p)) {
-    json(res, 200, { diff: PATCH, path: 'C:\\Users\\alguem\\.agents-hub\\artifacts\\ses_raiz1\\alteracoes-da-sessao-completas.patch' });
+    json(res, 200, {
+      diff: PATCH,
+      path: 'C:\\Users\\alguem\\.agents-hub\\artifacts\\ses_raiz1\\alteracoes-da-sessao-completas.patch',
+    });
     return true;
   }
   if (m === 'PUT' && /^\/budget\/ses_[a-z0-9]+$/i.test(p)) {
     const { limits } = await corpoDe(req);
-    orcamento = { ...orcamento, limits: { ...orcamento.limits, ...((limits ?? {}) as Partial<typeof orcamento.limits>) } };
+    orcamento = {
+      ...orcamento,
+      limits: { ...orcamento.limits, ...((limits ?? {}) as Partial<typeof orcamento.limits>) },
+    };
     json(res, 200, { budget: orcamento });
     return true;
   }
@@ -151,12 +211,24 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
     const { yaml } = await corpoDe(req);
     const texto = typeof yaml === 'string' ? yaml : '';
     if (texto.includes('dependsOn: [inexistente]')) {
-      json(res, 200, { valid: false, errors: ['Step "b" depende de step inexistente: "inexistente"'], workflow: null, executionOrder: [] });
+      json(res, 200, {
+        valid: false,
+        errors: ['Step "b" depende de step inexistente: "inexistente"'],
+        workflow: null,
+        executionOrder: [],
+      });
     } else {
       json(res, 200, {
         valid: true,
         errors: [],
-        workflow: { name: 'plano-e-execucao', description: null, steps: [{ id: 'plano', agent: 'claude', dependsOn: [] }, { id: 'execucao', agent: 'codex', dependsOn: ['plano'] }] },
+        workflow: {
+          name: 'plano-e-execucao',
+          description: null,
+          steps: [
+            { id: 'plano', agent: 'claude', dependsOn: [] },
+            { id: 'execucao', agent: 'codex', dependsOn: ['plano'] },
+          ],
+        },
         executionOrder: [['plano'], ['execucao']],
       });
     }
@@ -171,7 +243,14 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
       state: 'running',
       budgetUsd: body['budgetUsd'] ?? null,
       currentBatch: 0,
-      steps: RUN_ANTIGA.steps.map((s, i) => ({ ...s, state: i === 0 ? 'running' : 'pending', summary: null, detail: null, usd: 0, sessionId: i === 0 ? 'ses_raiz1' : null })),
+      steps: RUN_ANTIGA.steps.map((s, i) => ({
+        ...s,
+        state: i === 0 ? 'running' : 'pending',
+        summary: null,
+        detail: null,
+        usd: 0,
+        sessionId: i === 0 ? 'ses_raiz1' : null,
+      })),
       totalUsd: 0,
       startedAt: new Date().toISOString(),
       endedAt: null,
@@ -201,9 +280,16 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
     json(res, 200, {
       sweep: {
         examined: 4,
-        removed: ['C:\\projetos\\alfa\\.agents-hub\\worktrees\\ses_velha1-um-caminho-de-worktree-bem-comprido'],
+        removed: [
+          'C:\\projetos\\alfa\\.agents-hub\\worktrees\\ses_velha1-um-caminho-de-worktree-bem-comprido',
+        ],
         retained: 2,
-        failed: [{ path: 'C:\\projetos\\beta\\.agents-hub\\worktrees\\ses_travada', reason: 'arquivo em uso por outro processo' }],
+        failed: [
+          {
+            path: 'C:\\projetos\\beta\\.agents-hub\\worktrees\\ses_travada',
+            reason: 'arquivo em uso por outro processo',
+          },
+        ],
       },
     });
     return true;
@@ -215,7 +301,14 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
     }
     if (m === 'POST') {
       const body = await corpoDe(req);
-      const folder = { id: `pfd_nova${pastas.length}`, projectId: r[1]!, path: String(body['path']), label: typeof body['label'] === 'string' ? body['label'] : null, isPrimary: false, createdAt: new Date().toISOString() };
+      const folder = {
+        id: `pfd_nova${pastas.length}`,
+        projectId: r[1]!,
+        path: String(body['path']),
+        label: typeof body['label'] === 'string' ? body['label'] : null,
+        isPrimary: false,
+        createdAt: new Date().toISOString(),
+      };
       pastas = [...pastas, folder];
       json(res, 201, { folder });
       return true;
@@ -228,7 +321,15 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
   }
   if (m === 'POST' && p === '/sessions/adopt') {
     const body = await corpoDe(req);
-    json(res, 201, { session: { id: 'ses_adotada9', agentId: body['agentId'], projectId: body['projectId'], adopted: true, state: 'running' } });
+    json(res, 201, {
+      session: {
+        id: 'ses_adotada9',
+        agentId: body['agentId'],
+        projectId: body['projectId'],
+        adopted: true,
+        state: 'running',
+      },
+    });
     return true;
   }
   return false;

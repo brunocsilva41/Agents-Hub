@@ -241,7 +241,10 @@ describe('events.list: cauda da sessão', () => {
     assert.equal(cauda.length, 400);
     assert.equal(cauda[0]?.seq, 601);
     assert.equal(cauda.at(-1)?.seq, 1000);
-    assert.ok(cauda.every((e, i) => i === 0 || e.seq > (cauda[i - 1]?.seq ?? 0)), 'ordem crescente');
+    assert.ok(
+      cauda.every((e, i) => i === 0 || e.seq > (cauda[i - 1]?.seq ?? 0)),
+      'ordem crescente',
+    );
 
     // Sem `tail` o comportamento de paginação (sinceSeq + limit) não muda.
     const inicio = store.events.list({ sessionId, limit: 400 });

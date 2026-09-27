@@ -49,7 +49,9 @@ export class EventRetentionCompactor {
     // culpa "a sessão de origem" por um erro do compactador.
     const passada = (): void => {
       this.compact().catch((err: unknown) => {
-        console.error(`[retenção] compactação de eventos falhou: ${(err as Error)?.message ?? String(err)}`);
+        console.error(
+          `[retenção] compactação de eventos falhou: ${(err as Error)?.message ?? String(err)}`,
+        );
       });
     };
     passada();

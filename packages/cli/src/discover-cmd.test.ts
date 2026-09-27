@@ -22,7 +22,11 @@ interface Args {
   positional: string[];
   flags: Record<string, string | boolean>;
 }
-const args = (positional: string[], flags: Args['flags'] = {}): Args => ({ command: 'import', positional, flags });
+const args = (positional: string[], flags: Args['flags'] = {}): Args => ({
+  command: 'import',
+  positional,
+  flags,
+});
 
 function d(id: string, over: Partial<AgentDiscovery> = {}): AgentDiscovery {
   return {
@@ -91,7 +95,9 @@ describe('hub import — parsing de argumentos', () => {
   });
 
   test('includeEnv/overwrite só vão quando pedidos; agentId é obrigatório', () => {
-    const r = buildImportRequest(args(['claude'], { 'include-env': true, overwrite: true, to: 'codex' }));
+    const r = buildImportRequest(
+      args(['claude'], { 'include-env': true, overwrite: true, to: 'codex' }),
+    );
     assert.ok(!(r instanceof Error));
     assert.equal(r.includeEnv, true);
     assert.equal(r.overwrite, true);
@@ -106,10 +112,18 @@ describe('hub discover / import — renderização', () => {
   test('tabela mostra instalado, versão, auth, modelo, nº de MCP (sem o Hub) e instruções', () => {
     const texto = renderDiscoveryTable([
       d('claude'),
-      d('codex', { installed: false, version: null, auth: { state: 'absent', evidence: [] }, defaults: {}, instructionFiles: [], warnings: ['leitor parcial'] }),
+      d('codex', {
+        installed: false,
+        version: null,
+        auth: { state: 'absent', evidence: [] },
+        defaults: {},
+        instructionFiles: [],
+        warnings: ['leitor parcial'],
+      }),
     ]);
     const [cab, l1, l2] = texto.split('\n');
-    for (const col of ['AGENTE', 'INSTALADO', 'VERSÃO', 'AUTH', 'MODELO PADRÃO', 'MCP', 'INSTRUÇÕES']) assert.ok(cab?.includes(col), col);
+    for (const col of ['AGENTE', 'INSTALADO', 'VERSÃO', 'AUTH', 'MODELO PADRÃO', 'MCP', 'INSTRUÇÕES'])
+      assert.ok(cab?.includes(col), col);
     assert.match(l1 ?? '', /claude\s+sim\s+2\.0\.1\s+presente\s+modelo-x\s+1\s+1 arquivo\(s\)/);
     assert.match(l2 ?? '', /codex\s+não\s+-\s+ausente\s+-\s+1\s+-|codex\s+não\s+-\s+ausente\s+-\s+1/);
     assert.ok(texto.includes('leitor parcial'));
@@ -120,7 +134,14 @@ describe('hub discover / import — renderização', () => {
       {
         agentId: 'claude',
         dryRun: true,
-        items: [{ kind: 'mcp', description: 'adicionar 1 servidor(es) MCP: fs', target: '/h/.cursor/mcp.json', applied: false }],
+        items: [
+          {
+            kind: 'mcp',
+            description: 'adicionar 1 servidor(es) MCP: fs',
+            target: '/h/.cursor/mcp.json',
+            applied: false,
+          },
+        ],
         skipped: [{ what: 'mcp:web → cursor', reason: 'já existe no destino; mantido como está' }],
       },
       'hub import claude --write',
@@ -134,7 +155,15 @@ describe('hub discover / import — renderização', () => {
   });
 
   test('resultado gravado não promete "nada foi gravado"', () => {
-    const texto = renderImportResult({ agentId: 'claude', dryRun: false, items: [{ kind: 'env', description: 'X=1', target: 'project-env', applied: true }], skipped: [] }, 'x');
+    const texto = renderImportResult(
+      {
+        agentId: 'claude',
+        dryRun: false,
+        items: [{ kind: 'env', description: 'X=1', target: 'project-env', applied: true }],
+        skipped: [],
+      },
+      'x',
+    );
     assert.ok(!texto.includes('nada foi gravado'));
     assert.ok(texto.includes('✓'));
   });
@@ -148,7 +177,6 @@ describe('hub discover / import — contra o daemon', () => {
   let home: string;
   const SEGREDO = 'SEGREDO-CLI-0123456789abcdef';
 
-
   before(async () => {
     raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-cli-abs-'));
     home = path.join(raiz, 'home');
@@ -158,7 +186,10 @@ describe('hub discover / import — contra o daemon', () => {
     mkdirSync(projeto, { recursive: true });
     mkdirSync(home, { recursive: true });
     const script = path.join(raiz, 'a.cjs').replace(/\\/g, '\\\\');
-    writeFileSync(path.join(raiz, 'a.cjs'), "if (process.argv.includes('--version')) process.stdout.write('1\\n');\n");
+    writeFileSync(
+      path.join(raiz, 'a.cjs'),
+      "if (process.argv.includes('--version')) process.stdout.write('1\\n');\n",
+    );
     for (const id of ['claude', 'cursor']) {
       writeFileSync(
         path.join(manifestos, `${id}.yaml`),
@@ -171,7 +202,16 @@ describe('hub discover / import — contra o daemon', () => {
         homeDir: home,
         discoverAgent: async (id) =>
           d(id, {
-            mcpServers: [{ name: 'fs', transport: 'stdio', command: 'npx', env: { K: SEGREDO }, source: '/x', isHub: false }],
+            mcpServers: [
+              {
+                name: 'fs',
+                transport: 'stdio',
+                command: 'npx',
+                env: { K: SEGREDO },
+                source: '/x',
+                isHub: false,
+              },
+            ],
             instructionFiles: [],
           }),
       },
@@ -198,7 +238,9 @@ describe('hub discover / import — contra o daemon', () => {
   }
 
   test('hub discover --json não contém o segredo e lista os agentes', async () => {
-    const saida = await capturar(() => discoverCommand(client, { command: 'discover', positional: [], flags: { json: true } }));
+    const saida = await capturar(() =>
+      discoverCommand(client, { command: 'discover', positional: [], flags: { json: true } }),
+    );
     assert.ok(!saida.includes(SEGREDO));
     const lista = JSON.parse(saida) as AgentDiscovery[];
     assert.equal(lista.length, 2);

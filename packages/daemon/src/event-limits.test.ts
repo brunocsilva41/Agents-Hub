@@ -41,7 +41,11 @@ describe('event-limits', () => {
     let gravados = 0;
     let descartados = 0;
     for (let i = 0; i < 50; i += 1) {
-      const { evento, aviso } = teto.admitir('ses_1', { type: 'log', payload: { text: 'x'.repeat(100) }, raw: null });
+      const { evento, aviso } = teto.admitir('ses_1', {
+        type: 'log',
+        payload: { text: 'x'.repeat(100) },
+        raw: null,
+      });
       if (aviso) avisos.push(aviso);
       if (evento) gravados += 1;
       else descartados += 1;

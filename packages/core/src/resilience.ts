@@ -15,13 +15,7 @@ import type { TaskAttempt } from './domain.js';
  * com o mesmo agente só queima tempo. `rate_limited`: limite de TAXA (429,
  * "rate limit") — passa sozinho, vale nova tentativa com backoff.
  */
-export type OutcomeClass =
-  | 'success'
-  | 'transient'
-  | 'rate_limited'
-  | 'quota'
-  | 'permanent'
-  | 'canceled';
+export type OutcomeClass = 'success' | 'transient' | 'rate_limited' | 'quota' | 'permanent' | 'canceled';
 
 export interface RunOutcomeLike {
   /**
@@ -215,8 +209,7 @@ export function failureContext(attempts: TaskAttempt[]): string {
 
 /** Portões de validação aplicados ao resultado antes de aceitá-lo. */
 export type ValidationCheck =
-  | { name: string; kind: 'command'; command: string }
-  | { name: string; kind: 'review'; agent: string };
+  { name: string; kind: 'command'; command: string } | { name: string; kind: 'review'; agent: string };
 
 export interface ValidationOutcome {
   passed: boolean;

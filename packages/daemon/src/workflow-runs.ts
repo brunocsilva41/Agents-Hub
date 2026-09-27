@@ -185,9 +185,13 @@ export class WorkflowRunner {
   get(id: string): WorkflowRunView {
     const run = this.#runs.get(id);
     if (!run) {
-      throw new HubError('TASK_NOT_FOUND', `Execução de workflow ${id} não encontrada (o registro é em memória e some quando o daemon reinicia)`, {
-        runId: id,
-      });
+      throw new HubError(
+        'TASK_NOT_FOUND',
+        `Execução de workflow ${id} não encontrada (o registro é em memória e some quando o daemon reinicia)`,
+        {
+          runId: id,
+        },
+      );
     }
     return structuredClone(run);
   }
@@ -252,7 +256,11 @@ export class WorkflowRunner {
     this.#timers.clear();
   }
 
-  async #executar(run: WorkflowRunView, workflow: Workflow, budgetUsd: number | undefined): Promise<void> {
+  async #executar(
+    run: WorkflowRunView,
+    workflow: Workflow,
+    budgetUsd: number | undefined,
+  ): Promise<void> {
     const passo = (id: string): WorkflowRunStepView => run.steps.find((s) => s.stepId === id)!;
     try {
       const resultado = await runWorkflow(
@@ -344,7 +352,12 @@ export class WorkflowRunner {
 
     while (Date.now() < limite) {
       if (this.#fechado) {
-        return { state: 'timeout', summary: null, detail: `acompanhamento interrompido: o daemon encerrou — a sessão ${sessionId} não é mais seguida por este workflow`, usd: gasto() };
+        return {
+          state: 'timeout',
+          summary: null,
+          detail: `acompanhamento interrompido: o daemon encerrou — a sessão ${sessionId} não é mais seguida por este workflow`,
+          usd: gasto(),
+        };
       }
       const task = this.host.listTasks(sessionId)[0];
       if (!task) return { state: 'failed', summary: null, detail: 'a sessão não tem tarefa', usd: 0 };

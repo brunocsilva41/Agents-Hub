@@ -47,8 +47,12 @@ describe('hub cost', () => {
     limpar(t.raiz);
   });
 
-  async function relatorio(flags: Record<string, string | boolean>): Promise<{ r: CostReport; out: string[] }> {
-    const { out, valor } = await capturar(() => costCommand(t.client, { command: 'cost', positional: [], flags }));
+  async function relatorio(
+    flags: Record<string, string | boolean>,
+  ): Promise<{ r: CostReport; out: string[] }> {
+    const { out, valor } = await capturar(() =>
+      costCommand(t.client, { command: 'cost', positional: [], flags }),
+    );
     return { r: valor, out };
   }
 

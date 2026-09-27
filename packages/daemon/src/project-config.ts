@@ -300,10 +300,7 @@ interface LoadedProjectContext {
   error: string | null;
 }
 
-const contextCache = new Map<
-  string,
-  { mtimeMs: number; size: number; ctx: ProjectContext } | null
->();
+const contextCache = new Map<string, { mtimeMs: number; size: number; ctx: ProjectContext } | null>();
 
 /**
  * Lê memória e prompts do projeto, com o mesmo cache por mtime+size da política

@@ -19,7 +19,15 @@ import { capturar, montarHubDeTeste, type HubDeTeste } from './hub-de-teste.js';
  */
 
 function probe(agentId: string, over: Partial<ProbeSummary> = {}): ProbeSummary {
-  return { agentId, installed: true, version: '1.2.10', binPath: `/bin/${agentId}`, error: null, checkedAt: '', ...over };
+  return {
+    agentId,
+    installed: true,
+    version: '1.2.10',
+    binPath: `/bin/${agentId}`,
+    error: null,
+    checkedAt: '',
+    ...over,
+  };
 }
 
 function agente(id: string, versaoConferida: string | null = '1.2.10'): AgentSummary {
@@ -74,7 +82,11 @@ describe('avaliarAgentes (veredito do doctor/status)', () => {
 
   test('erro no probe = quebrado; binário ausente = ausente; tudo certo = pronto', () => {
     const r = avaliarAgentes(
-      [probe('a', { error: '--version saiu com código 1' }), probe('b', { installed: false }), probe('c', { version: '1.2.99' })],
+      [
+        probe('a', { error: '--version saiu com código 1' }),
+        probe('b', { installed: false }),
+        probe('c', { version: '1.2.99' }),
+      ],
       [agente('a'), agente('b'), agente('c')],
       [descoberta('a', 'present'), descoberta('c', 'present')],
     );
@@ -125,7 +137,11 @@ describe('hub status / hub doctor com daemon HTTP falso', () => {
 
   test('doctor marca o agente sem auth como quebrado e mostra a auth de cada um', async () => {
     const c = capturar();
-    const saude = await doctorCommand(client, { command: 'doctor', positional: [], flags: {} }, { home: '/x', log: c.log });
+    const saude = await doctorCommand(
+      client,
+      { command: 'doctor', positional: [], flags: {} },
+      { home: '/x', log: c.log },
+    );
     assert.equal(saude.find((s) => s.agentId === 'antigravity')?.estado, 'quebrado');
     assert.match(c.texto(), /auth presente/);
     assert.match(c.texto(), /sem auth/);
@@ -198,7 +214,10 @@ describe('hub doctor --smoke (daemon real, agentes FALSOS)', () => {
     // Em série: a segunda só começa depois de a primeira terminar.
     const ordenadas = [...sessoes].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     assert.ok(ordenadas[0]?.endedAt, 'a primeira terminou');
-    assert.ok((ordenadas[0]?.endedAt ?? '') <= (ordenadas[1]?.createdAt ?? ''), 'sessões não podem se sobrepor');
+    assert.ok(
+      (ordenadas[0]?.endedAt ?? '') <= (ordenadas[1]?.createdAt ?? ''),
+      'sessões não podem se sobrepor',
+    );
 
     for (const s of sessoes) {
       const task = h.hub.store.tasks.list({ sessionId: s.id })[0];

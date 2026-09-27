@@ -113,7 +113,10 @@ export function removerSemSeguirLinks(
   try {
     unlinkSync(alvo);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EPERM' && (err as NodeJS.ErrnoException).code !== 'EACCES') {
+    if (
+      (err as NodeJS.ErrnoException).code !== 'EPERM' &&
+      (err as NodeJS.ErrnoException).code !== 'EACCES'
+    ) {
       throw err;
     }
     chmodSync(alvo, 0o666);
@@ -350,10 +353,7 @@ export class WorktreeManager {
         return this.#apagarOrfao(params.projectPath, params.worktreePath);
       }
 
-      const falha = await this.#preservarTrabalho(
-        params.worktreePath,
-        params.preserveWork.sessionId,
-      );
+      const falha = await this.#preservarTrabalho(params.worktreePath, params.preserveWork.sessionId);
       if (falha !== null) {
         if (!(await this.#reconhecidoPeloGit(params.worktreePath))) {
           // Registrado, mas meio-apagado (sem `.git`/admin dir): o git não
@@ -362,9 +362,7 @@ export class WorktreeManager {
         }
         await this.#ligarDependencias(params.projectPath, params.worktreePath);
         // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
-        console.error(
-          `[worktree] trabalho de ${params.worktreePath} não pôde ser commitado: ${falha}`,
-        );
+        console.error(`[worktree] trabalho de ${params.worktreePath} não pôde ser commitado: ${falha}`);
         return { removed: false, reason: `trabalho não commitado, worktree mantido: ${falha}` };
       }
       // Trabalho já está no branch: o que sobrar no diretório é ignorado pelo git.
@@ -555,9 +553,7 @@ export class WorktreeManager {
       // real assim que alguém religasse a função. Loga para não repetir aqui o
       // mesmo buraco que `currentRef` tinha.
       // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
-      console.error(
-        `[worktree] falha ao listar worktrees de ${projectPath}: ${(err as Error).message}`,
-      );
+      console.error(`[worktree] falha ao listar worktrees de ${projectPath}: ${(err as Error).message}`);
       return [];
     }
   }

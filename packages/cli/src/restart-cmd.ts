@@ -48,7 +48,9 @@ export async function restartCommand(client: HubClient, args: Args, deps: Restar
     const limite = Date.now() + (deps.timeoutMs ?? 20_000);
     while ((await responde(client)) !== null) {
       if (Date.now() > limite) {
-        throw new Error('o daemon aceitou o encerramento mas continua respondendo; tente de novo em instantes.');
+        throw new Error(
+          'o daemon aceitou o encerramento mas continua respondendo; tente de novo em instantes.',
+        );
       }
       await new Promise((r) => setTimeout(r, deps.pollMs ?? 200));
     }

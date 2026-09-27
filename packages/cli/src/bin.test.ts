@@ -59,7 +59,9 @@ describe('bin.js — entrada do hub', () => {
   });
 
   test('`hub --version` imprime a versão do pacote, sem carregar o resto', () => {
-    const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')) as {
+    const pkg = JSON.parse(
+      readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+    ) as {
       version: string;
     };
     const r = hub(['--version']);

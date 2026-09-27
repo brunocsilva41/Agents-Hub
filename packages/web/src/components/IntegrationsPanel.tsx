@@ -89,9 +89,11 @@ export function IntegrationsPanel({ agents, projectId, projectName }: Props): Re
       <h3 className="card-title">Gate e MCP por agente</h3>
       <p className="card-desc">
         <strong>Gate ativo</strong>: o Hub decide antes de Bash/Write/Edit rodar.{' '}
-        <strong>Só vigilância</strong>: o Hub vê o evento depois. O MCP é o que deixa o agente
-        chamar o Hub (delegar, consultar).
-        {projectName ? ` MCP por projeto em "${projectName}".` : ' Escolha um projeto para ver o MCP por projeto.'}
+        <strong>Só vigilância</strong>: o Hub vê o evento depois. O MCP é o que deixa o agente chamar o
+        Hub (delegar, consultar).
+        {projectName
+          ? ` MCP por projeto em "${projectName}".`
+          : ' Escolha um projeto para ver o MCP por projeto.'}
       </p>
 
       {pontos && (!pontos.cliExiste || !pontos.mcpExiste) && (
@@ -126,13 +128,26 @@ export function IntegrationsPanel({ agents, projectId, projectName }: Props): Re
             const hook = estadoDoHook(i.hook);
             const mcp = i.mcp ? estadoDoMcp(i.mcp) : null;
             const podeHook =
-              i.hook.instalavelPeloPainel && (!i.hook.instalado || i.hook.avisoTimeout !== null) && !i.hook.erro;
+              i.hook.instalavelPeloPainel &&
+              (!i.hook.instalado || i.hook.avisoTimeout !== null) &&
+              !i.hook.erro;
             const podeMcp =
-              i.mcp !== null && !i.mcp.precisaDeProjeto && !i.mcp.erro && (!i.mcp.registrado || !i.mcp.atualizado);
+              i.mcp !== null &&
+              !i.mcp.precisaDeProjeto &&
+              !i.mcp.erro &&
+              (!i.mcp.registrado || !i.mcp.atualizado);
             return (
-              <li key={i.agentId} className="sec-item sec-integ" style={{ '--disc-color': agentColor(i.agentId) } as React.CSSProperties}>
+              <li
+                key={i.agentId}
+                className="sec-item sec-integ"
+                style={{ '--disc-color': agentColor(i.agentId) } as React.CSSProperties}
+              >
                 <div className="sec-item-cab">
-                  <span className="chip-dot" style={{ background: agentColor(i.agentId) }} aria-hidden="true" />
+                  <span
+                    className="chip-dot"
+                    style={{ background: agentColor(i.agentId) }}
+                    aria-hidden="true"
+                  />
                   <strong>{nomeDoAgente(i.agentId)}</strong>
                 </div>
                 <div className="sec-integ-linha">
@@ -166,7 +181,9 @@ export function IntegrationsPanel({ agents, projectId, projectName }: Props): Re
                     <div className="sec-integ-linha">
                       <span className="sec-integ-rotulo">MCP</span>
                       <Estado estado={mcp} />
-                      {!i.mcp.verificado && <span className="sec-badge tom-pede">formato não confirmado</span>}
+                      {!i.mcp.verificado && (
+                        <span className="sec-badge tom-pede">formato não confirmado</span>
+                      )}
                       <span className="sec-espaco" />
                       {podeMcp && (
                         <button
@@ -213,7 +230,10 @@ export function IntegrationsPanel({ agents, projectId, projectName }: Props): Re
           {plano.diff.length > 0 && (
             <pre className="sec-diff" aria-label={`Diff de ${plano.arquivo}`}>
               {plano.diff.map((l, n) => (
-                <span key={n} className={`sec-diff-l sec-diff-${l.tipo === '+' ? 'mais' : l.tipo === '-' ? 'menos' : l.tipo === '@' ? 'salto' : 'ctx'}`}>
+                <span
+                  key={n}
+                  className={`sec-diff-l sec-diff-${l.tipo === '+' ? 'mais' : l.tipo === '-' ? 'menos' : l.tipo === '@' ? 'salto' : 'ctx'}`}
+                >
                   {l.tipo === '@' ? '' : `${l.tipo} `}
                   {l.texto}
                   {'\n'}

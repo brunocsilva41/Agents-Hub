@@ -172,9 +172,13 @@ export function SessionModal({
       >
         <div className="modal-body">
           <div className="modal-header-banner">
-            <div className="modal-icon-badge" aria-hidden="true">{delegateFrom ? '🔄' : '⚡'}</div>
+            <div className="modal-icon-badge" aria-hidden="true">
+              {delegateFrom ? '🔄' : '⚡'}
+            </div>
             <div>
-              <h2 id={tituloId}>{delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}</h2>
+              <h2 id={tituloId}>
+                {delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}
+              </h2>
               <p className="hint" id={descricaoId}>
                 {delegateFrom
                   ? 'Transfere uma sub-tarefa para outro agente especialista.'
@@ -271,9 +275,7 @@ export function SessionModal({
                     </div>
                     <div className="agent-card-meta">
                       <div className="agent-card-name">{a.name}</div>
-                      <div className="agent-card-vendor">
-                        {disponivel ? a.vendor : 'não instalado'}
-                      </div>
+                      <div className="agent-card-vendor">{disponivel ? a.vendor : 'não instalado'}</div>
                     </div>
                   </button>
                 );

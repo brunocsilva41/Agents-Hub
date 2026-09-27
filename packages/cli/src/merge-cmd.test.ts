@@ -4,7 +4,15 @@ import path from 'node:path';
 import { after, afterEach, before, describe, test } from 'node:test';
 import type { Session } from '@agents-hub/core';
 import { mergeCommand } from './merge-cmd.js';
-import { capturar, limpar, montarHub, repoGit, semearDiff, semearSessao, type HubDeTeste } from './test-kit.js';
+import {
+  capturar,
+  limpar,
+  montarHub,
+  repoGit,
+  semearDiff,
+  semearSessao,
+  type HubDeTeste,
+} from './test-kit.js';
 
 /**
  * Não havia `hub merge/apply`: `hub diff` mostrava o trabalho, mas levá-lo ao
@@ -124,7 +132,15 @@ describe('hub merge / hub apply', () => {
     semearDiff(
       t.hub,
       s,
-      ['diff --git a/g.txt b/g.txt', 'new file mode 100644', '--- /dev/null', '+++ b/g.txt', '@@ -0,0 +1 @@', '+deixado sem commit', ''].join('\n'),
+      [
+        'diff --git a/g.txt b/g.txt',
+        'new file mode 100644',
+        '--- /dev/null',
+        '+++ b/g.txt',
+        '@@ -0,0 +1 @@',
+        '+deixado sem commit',
+        '',
+      ].join('\n'),
     );
     const antes = cabeca();
     const { valor } = await rodar('apply', s.id, { write: true });
@@ -142,7 +158,15 @@ describe('hub merge / hub apply', () => {
     semearDiff(
       t.hub,
       s,
-      ['diff --git a/h.txt b/h.txt', '--- a/h.txt', '+++ b/h.txt', '@@ -1 +1 @@', '-h', '+h editada pelo agente', ''].join('\n'),
+      [
+        'diff --git a/h.txt b/h.txt',
+        '--- a/h.txt',
+        '+++ b/h.txt',
+        '@@ -1 +1 @@',
+        '-h',
+        '+h editada pelo agente',
+        '',
+      ].join('\n'),
     );
     const { valor } = await rodar('merge', s.id);
     assert.ok(valor.warnings.some((w) => w.includes('não existe')));

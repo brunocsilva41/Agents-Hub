@@ -40,10 +40,7 @@ export const DISCOVERABLE_AGENTS = Object.keys(READERS);
  * Descoberta SOMENTE LEITURA do ambiente que o CLI já tem. Nunca lança:
  * qualquer falha vira warning. Nunca carrega valores de credencial.
  */
-export async function discoverAgent(
-  agentId: string,
-  opts: DiscoverOptions,
-): Promise<AgentDiscovery> {
+export async function discoverAgent(agentId: string, opts: DiscoverOptions): Promise<AgentDiscovery> {
   const ctx = new Ctx(opts.home ?? os.homedir(), opts.projectDir, opts.env ?? process.env);
   const reader = READERS[agentId];
   if (!reader) {
@@ -54,7 +51,9 @@ export async function discoverAgent(
       reader(ctx);
     } catch (e) {
       ctx.authCanBeAbsent = false;
-      ctx.warn(`falha inesperada ao descobrir '${agentId}': ${e instanceof Error ? e.message : String(e)}`);
+      ctx.warn(
+        `falha inesperada ao descobrir '${agentId}': ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
   return ctx.build(agentId, opts.installed);

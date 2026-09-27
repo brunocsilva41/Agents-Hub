@@ -159,10 +159,7 @@ export function segmentoDeComando(caminho: string): string {
  * escolha explícita do usuário — não um padrão herdado. Sem ele, hoje, não há
  * gate; com ele, o Codex executa o script do Hub sem revisão humana.
  */
-export function montarConfigDoGate(
-  alvo: AlvoDoGate,
-  permitirBypassDeConfianca: boolean,
-): ConfigDoGate {
+export function montarConfigDoGate(alvo: AlvoDoGate, permitirBypassDeConfianca: boolean): ConfigDoGate {
   const comando = alvo.comando.trim();
   if (comando.length === 0) {
     return {

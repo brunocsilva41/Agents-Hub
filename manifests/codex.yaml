@@ -50,9 +50,9 @@ invoke:
   # binário: com `read-only`, o agente é impedido de escrever e relata o
   # "Acesso negado".
   modeArgs:
-    supervised: ["-c", "sandbox_mode=\"read-only\""]
-    semi: ["-c", "sandbox_mode=\"workspace-write\""]
-    autonomous: ["-c", "sandbox_mode=\"workspace-write\""]
+    supervised: ["-c", 'sandbox_mode="read-only"']
+    semi: ["-c", 'sandbox_mode="workspace-write"']
+    autonomous: ["-c", 'sandbox_mode="workspace-write"']
 
 # Verificado contra `codex exec --help` E `codex exec resume --help` (0.155.0):
 # `-m, --model <MODEL>` existe nos dois subcomandos (diferente de `--sandbox`,

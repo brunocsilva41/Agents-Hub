@@ -162,7 +162,12 @@ describe('delegação em profundidade (agentes falsos)', () => {
     return session;
   }
 
-  function delegar(pai: string, agent: string, objective: string, supervision?: 'semi' | 'supervised' | 'autonomous') {
+  function delegar(
+    pai: string,
+    agent: string,
+    objective: string,
+    supervision?: 'semi' | 'supervised' | 'autonomous',
+  ) {
     return amb.hub.sessions.start({
       projectId: amb.projetoId,
       agentId: '',
@@ -256,7 +261,11 @@ describe('delegação em profundidade (agentes falsos)', () => {
       assert.ok(r.approval, 'delegação de sessão supervisionada exige aprovação');
       assert.equal(r.session.state, 'waiting_approval');
       assert.equal(r.session.mode, 'supervised', 'o filho retido também é supervisionado');
-      assert.equal(amb.hub.sessions.isLive(r.session.id), false, 'nenhum processo subiu antes da aprovação');
+      assert.equal(
+        amb.hub.sessions.isLive(r.session.id),
+        false,
+        'nenhum processo subiu antes da aprovação',
+      );
     } finally {
       await encerrar(a.id);
     }

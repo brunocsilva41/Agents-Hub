@@ -12,7 +12,10 @@ import type { TaskAttempt } from './domain.js';
 const falha = (error: string) => ({ reason: 'exit' as const, exitCode: 1, error });
 
 test('classificação: cota, créditos e limite de taxa', () => {
-  assert.equal(classifyOutcome(falha("processo terminou com código 1: You've hit your usage limit")), 'quota');
+  assert.equal(
+    classifyOutcome(falha("processo terminou com código 1: You've hit your usage limit")),
+    'quota',
+  );
   assert.equal(classifyOutcome(falha('insufficient credits')), 'quota');
   assert.equal(classifyOutcome(falha('Error: insufficient_quota')), 'quota');
   assert.equal(classifyOutcome(falha('API error 429: rate limit exceeded')), 'rate_limited');

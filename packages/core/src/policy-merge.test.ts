@@ -105,8 +105,14 @@ describe('mergePolicyLayer com clampToBase — tabela campo a campo', () => {
   });
 
   test('paths: allowWriteOutsideWorkdir só desliga; denyFragments só cresce', () => {
-    assert.equal(clamp({ paths: { allowWriteOutsideWorkdir: true } }).paths.allowWriteOutsideWorkdir, false);
-    const liberada = { ...DEFAULT_POLICY, paths: { ...DEFAULT_POLICY.paths, allowWriteOutsideWorkdir: true } };
+    assert.equal(
+      clamp({ paths: { allowWriteOutsideWorkdir: true } }).paths.allowWriteOutsideWorkdir,
+      false,
+    );
+    const liberada = {
+      ...DEFAULT_POLICY,
+      paths: { ...DEFAULT_POLICY.paths, allowWriteOutsideWorkdir: true },
+    };
     assert.equal(
       mergePolicyLayer(liberada, { paths: { allowWriteOutsideWorkdir: false } }, { clampToBase: true })
         .paths.allowWriteOutsideWorkdir,
@@ -156,7 +162,10 @@ describe('campos que viram processo — só com confiança explícita', () => {
   });
 
   test('sem confiança, a camada também não troca o comando que a base já tem', () => {
-    const base = { ...DEFAULT_POLICY, validation: { ...DEFAULT_POLICY.validation, command: 'npm test' } };
+    const base = {
+      ...DEFAULT_POLICY,
+      validation: { ...DEFAULT_POLICY.validation, command: 'npm test' },
+    };
     const merged = mergePolicyLayer(base, comExec, { clampToBase: true });
     assert.equal(merged.validation.command, 'npm test');
   });
@@ -169,7 +178,11 @@ describe('campos que viram processo — só com confiança explícita', () => {
 
     const base = {
       ...DEFAULT_POLICY,
-      validation: { ...DEFAULT_POLICY.validation, command: 'npm test', review: { enabled: true, agent: null } },
+      validation: {
+        ...DEFAULT_POLICY.validation,
+        command: 'npm test',
+        review: { enabled: true, agent: null },
+      },
     };
     const desliga = mergePolicyLayer(
       base,

@@ -41,7 +41,10 @@ export function avisoDeGate(agentId: string, integracao: IntegrationSummary | un
 export async function avisoDeGateDoAgente(client: HubClient, agentId: string): Promise<string[]> {
   try {
     const { integrations } = await client.integrations();
-    return avisoDeGate(agentId, integrations.find((i) => i.agentId === agentId));
+    return avisoDeGate(
+      agentId,
+      integrations.find((i) => i.agentId === agentId),
+    );
   } catch {
     return [];
   }

@@ -96,7 +96,9 @@ export function DiscoveryPanel({
     setAtualizando('*');
     setErro(null);
     try {
-      const encontrados = await Promise.all((lista ?? []).map((d) => hub.discoverAgent(d.agentId, true).then((r) => r.agent)));
+      const encontrados = await Promise.all(
+        (lista ?? []).map((d) => hub.discoverAgent(d.agentId, true).then((r) => r.agent)),
+      );
       setLista(encontrados);
     } catch (err) {
       const { title, detail } = describeError(err);
@@ -112,8 +114,8 @@ export function DiscoveryPanel({
         <div>
           <h3 className="card-title">Agentes detectados</h3>
           <p className="card-desc">
-            O que cada CLI já tem instalado e configurado nesta máquina. É só leitura: nenhum valor
-            de credencial ou de variável de ambiente é lido ou exibido aqui — só a presença.
+            O que cada CLI já tem instalado e configurado nesta máquina. É só leitura: nenhum valor de
+            credencial ou de variável de ambiente é lido ou exibido aqui — só a presença.
           </p>
         </div>
         <button
@@ -128,8 +130,8 @@ export function DiscoveryPanel({
 
       {projectId === '' && (
         <div className="help" role="note">
-          Ver o que cada CLI tem não depende de projeto. Para <strong>importar</strong>{' '}
-          instruções, ambiente ou MCP, registre antes a pasta do repositório como projeto.
+          Ver o que cada CLI tem não depende de projeto. Para <strong>importar</strong> instruções,
+          ambiente ou MCP, registre antes a pasta do repositório como projeto.
           {onNewProject && (
             <>
               {' '}
@@ -154,8 +156,8 @@ export function DiscoveryPanel({
 
       {!carregando && lista !== null && lista.length === 0 && (
         <div className="settings-vazio">
-          Nenhum agente detectado. O daemon não encontrou nenhum CLI conhecido — instale um (por
-          exemplo <code>claude</code> ou <code>codex</code>) e use "Atualizar todos".
+          Nenhum agente detectado. O daemon não encontrou nenhum CLI conhecido — instale um (por exemplo{' '}
+          <code>claude</code> ou <code>codex</code>) e use "Atualizar todos".
         </div>
       )}
 
@@ -485,18 +487,14 @@ function ImportFlow(props: {
         <div className="disc-confirm" role="alertdialog" aria-label="Confirmar aplicação">
           <p>
             Isto <strong>grava</strong> {previa.items.length} alteração(ões) em{' '}
-            <strong>{props.projectName}</strong> e nos destinos listados acima. A prévia não
-            escreveu nada; aplicar escreve.
+            <strong>{props.projectName}</strong> e nos destinos listados acima. A prévia não escreveu
+            nada; aplicar escreve.
           </p>
           <div className="disc-import-actions">
             <button onClick={() => setConfirmando(false)} disabled={action.busy !== null}>
               Cancelar
             </button>
-            <button
-              className="danger"
-              onClick={() => void aplicar()}
-              disabled={action.busy !== null}
-            >
+            <button className="danger" onClick={() => void aplicar()} disabled={action.busy !== null}>
               {action.busy === 'aplicar' ? 'aplicando…' : 'Confirmar e aplicar'}
             </button>
           </div>
@@ -509,9 +507,7 @@ function ImportFlow(props: {
 function ResultadoImport({ r }: { r: ImportResult }): React.JSX.Element {
   return (
     <div className="disc-resultado" aria-live="polite">
-      <div className="disc-resultado-title">
-        {r.dryRun ? 'Prévia — nada foi gravado' : 'Aplicado'}
-      </div>
+      <div className="disc-resultado-title">{r.dryRun ? 'Prévia — nada foi gravado' : 'Aplicado'}</div>
       {r.items.length === 0 && <div className="dim">Nenhum item a importar.</div>}
       {r.items.length > 0 && (
         <ul className="disc-itens">

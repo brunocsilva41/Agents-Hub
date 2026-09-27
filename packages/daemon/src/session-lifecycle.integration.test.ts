@@ -91,7 +91,9 @@ function manifesto(id: string, script: string, o: OpcoesDoManifesto = {}): strin
     `  args: ["${esc(script)}", "--version"]`,
     'invoke:',
     `  oneShot: ["${esc(script)}"]`,
-    ...(o.strategy === 'native' ? [`  resume: ["${esc(script)}", "--resume", "{{nativeSessionId}}"]`] : []),
+    ...(o.strategy === 'native'
+      ? [`  resume: ["${esc(script)}", "--resume", "{{nativeSessionId}}"]`]
+      : []),
     '  stdinPrompt: true',
     '  env:',
     `    FAKE_MODE: "${o.modo ?? 'ok'}"`,
@@ -123,11 +125,7 @@ function portaLivre(): Promise<number> {
   });
 }
 
-async function esperar(
-  descricao: string,
-  condicao: () => boolean,
-  timeoutMs = 15_000,
-): Promise<void> {
+async function esperar(descricao: string, condicao: () => boolean, timeoutMs = 15_000): Promise<void> {
   const limite = Date.now() + timeoutMs;
   while (!condicao()) {
     if (Date.now() > limite) throw new Error(`tempo esgotado esperando: ${descricao}`);
@@ -219,7 +217,9 @@ async function montar(
       watch: { pauseOn: [], flagOn: [] },
       validation: {
         ...DEFAULT_POLICY.validation,
-        command: opcoes.validacao ? `node "${valida}" "${pidValidacao}" ${opcoes.validacaoMs ?? 4000}` : null,
+        command: opcoes.validacao
+          ? `node "${valida}" "${pidValidacao}" ${opcoes.validacaoMs ?? 4000}`
+          : null,
       },
     },
   });
@@ -261,7 +261,13 @@ function eventos(hub: Hub, sessionId: string): EventEnvelope[] {
 async function iniciar(
   amb: Ambiente,
   agent: string,
-  extra: { requesterSessionId?: string; budgetUsd?: number; isolation?: 'none' | 'worktree'; projectId?: string; supervision?: 'supervised' | 'semi' | 'autonomous' } = {},
+  extra: {
+    requesterSessionId?: string;
+    budgetUsd?: number;
+    isolation?: 'none' | 'worktree';
+    projectId?: string;
+    supervision?: 'supervised' | 'semi' | 'autonomous';
+  } = {},
 ): Promise<{ session: Session; taskId: string }> {
   const r = await amb.hub.sessions.start({
     projectId: extra.projectId ?? amb.projectId,
@@ -300,7 +306,9 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
       // Varia o instante do cancelamento: logo depois do spawn, e depois de
       // o agente já ter falado (a janela em que o pump já está no laço).
       if (i % 2 === 1) {
-        await esperar('primeiro evento', () => eventos(amb.hub, session.id).some((e) => e.type === 'message'));
+        await esperar('primeiro evento', () =>
+          eventos(amb.hub, session.id).some((e) => e.type === 'message'),
+        );
       } else {
         await pausa(i * 5);
       }
@@ -327,7 +335,9 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
   test('pai recebe delegation.completed com state canceled, não failed', async () => {
     const pai = await iniciar(amb, 'lento');
     const filho = await iniciar(amb, 'lento', { requesterSessionId: pai.session.id });
-    await esperar('filho falou', () => eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'));
+    await esperar('filho falou', () =>
+      eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'),
+    );
 
     await amb.hub.sessions.cancel(filho.session.id);
     await pausa(150);
@@ -346,7 +356,9 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
   test('cancel em cascata alcança filho pausado (e fecha todos como canceled)', async () => {
     const pai = await iniciar(amb, 'lento');
     const filho = await iniciar(amb, 'lento', { requesterSessionId: pai.session.id });
-    await esperar('filho falou', () => eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'));
+    await esperar('filho falou', () =>
+      eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'),
+    );
     await amb.hub.sessions.pause(filho.session.id);
     assert.equal(amb.hub.store.sessions.get(filho.session.id)?.state, 'paused');
 
@@ -360,7 +372,9 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
     writeFileSync(amb.logRate, '');
     const { session, taskId } = await iniciar(amb, 'rate');
     await esperar('aviso de nova tentativa', () =>
-      eventos(amb.hub, session.id).some((e) => e.type === 'log' && /nova tentativa/.test(String(e.payload['text']))),
+      eventos(amb.hub, session.id).some(
+        (e) => e.type === 'log' && /nova tentativa/.test(String(e.payload['text'])),
+      ),
     );
 
     const t0 = Date.now();
@@ -378,7 +392,9 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
 
   test('eventos do fechamento chegam a quem assina a raiz (nada depois de #finish)', async () => {
     const { session } = await iniciar(amb, 'lento');
-    await esperar('primeiro evento', () => eventos(amb.hub, session.id).some((e) => e.type === 'message'));
+    await esperar('primeiro evento', () =>
+      eventos(amb.hub, session.id).some((e) => e.type === 'message'),
+    );
 
     const recebidos = new Set<number>();
     const desassinar = amb.hub.bus.subscribe({ rootId: session.rootId }, (e) => {
@@ -393,7 +409,10 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
     }
 
     const depois = eventos(amb.hub, session.id).filter((e) => e.seq > ultimoAntes);
-    assert.ok(depois.some((e) => e.type === 'session.ended'), 'o fim precisa estar na timeline');
+    assert.ok(
+      depois.some((e) => e.type === 'session.ended'),
+      'o fim precisa estar na timeline',
+    );
     const perdidos = depois.filter((e) => !recebidos.has(e.seq)).map((e) => `${e.seq}:${e.type}`);
     assert.deepEqual(perdidos, [], 'todo evento do fechamento precisa chegar pelo filtro de raiz');
   });
@@ -410,7 +429,10 @@ describe('2.1 — cancelar durante a validação', () => {
   test('cancelado no meio da validação não ressuscita como completed, e o comando morre', async () => {
     rmSync(amb.pidValidacao, { force: true });
     const { session, taskId } = await iniciar(amb, 'rapido');
-    await esperar('validação começou', () => existsSync(amb.pidValidacao) && readFileSync(amb.pidValidacao, 'utf8').length > 0);
+    await esperar(
+      'validação começou',
+      () => existsSync(amb.pidValidacao) && readFileSync(amb.pidValidacao, 'utf8').length > 0,
+    );
     const pid = Number(readFileSync(amb.pidValidacao, 'utf8'));
     assert.ok(vivo(pid), 'a validação deveria estar rodando');
 
@@ -434,7 +456,10 @@ describe('2.1 — desligar durante a validação', () => {
     try {
       rmSync(amb.pidValidacao, { force: true });
       await iniciar(amb, 'rapido');
-      await esperar('validação começou', () => existsSync(amb.pidValidacao) && readFileSync(amb.pidValidacao, 'utf8').length > 0);
+      await esperar(
+        'validação começou',
+        () => existsSync(amb.pidValidacao) && readFileSync(amb.pidValidacao, 'utf8').length > 0,
+      );
       const pid = Number(readFileSync(amb.pidValidacao, 'utf8'));
       assert.ok(vivo(pid));
 
@@ -462,7 +487,10 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
   });
   after(() => desmontar(amb));
 
-  async function post(rota: string, corpo: unknown = {}): Promise<{ status: number; body: Record<string, unknown> }> {
+  async function post(
+    rota: string,
+    corpo: unknown = {},
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
     const res = await fetch(`${amb.baseUrl}${rota}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -474,7 +502,10 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
   test('interrupt via HTTP: sessão idle (não failed), task input_required, send retoma com resume nativo', async () => {
     writeFileSync(amb.logNativo, '');
     const { session, taskId } = await iniciar(amb, 'nativo');
-    await esperar('id nativo conhecido', () => amb.hub.store.sessions.get(session.id)?.nativeSessionId === 'nat_falso_1');
+    await esperar(
+      'id nativo conhecido',
+      () => amb.hub.store.sessions.get(session.id)?.nativeSessionId === 'nat_falso_1',
+    );
     const pid = amb.hub.store.sessions.get(session.id)?.pid;
     assert.ok(pid);
 
@@ -498,17 +529,26 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
     const envio = await post(`/sessions/${session.id}/send`, { text: 'continue de onde parou' });
     assert.equal(envio.status, 200);
     assert.equal(envio.body['mode'], 'resume');
-    await esperar('retomada concluída', () => amb.hub.store.sessions.get(session.id)?.state === 'completed');
+    await esperar(
+      'retomada concluída',
+      () => amb.hub.store.sessions.get(session.id)?.state === 'completed',
+    );
     assert.equal(amb.hub.store.tasks.get(taskId)?.state, 'completed');
 
-    const execucoes = readFileSync(amb.logNativo, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { argv: string[] });
+    const execucoes = readFileSync(amb.logNativo, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { argv: string[] });
     assert.equal(execucoes.length, 2);
     assert.deepEqual(execucoes[1]?.argv.slice(-2), ['--resume', 'nat_falso_1']);
   });
 
   test('pause via HTTP: sessão paused, task input_required, send retoma', async () => {
     const { session, taskId } = await iniciar(amb, 'nativo');
-    await esperar('id nativo conhecido', () => amb.hub.store.sessions.get(session.id)?.nativeSessionId === 'nat_falso_1');
+    await esperar(
+      'id nativo conhecido',
+      () => amb.hub.store.sessions.get(session.id)?.nativeSessionId === 'nat_falso_1',
+    );
 
     const r = await post(`/sessions/${session.id}/pause`);
     assert.equal(r.status, 200);
@@ -518,7 +558,10 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
 
     const envio = await post(`/sessions/${session.id}/send`, { text: 'pode seguir' });
     assert.equal(envio.body['mode'], 'resume');
-    await esperar('retomada concluída', () => amb.hub.store.sessions.get(session.id)?.state === 'completed');
+    await esperar(
+      'retomada concluída',
+      () => amb.hub.store.sessions.get(session.id)?.state === 'completed',
+    );
     assert.equal(amb.hub.store.tasks.get(taskId)?.state, 'completed');
   });
 
@@ -576,7 +619,10 @@ describe('2.3 — falha ao subir o agente não deixa fantasma', () => {
   }
 
   function ultimaSessao(agentId: string): Session {
-    const s = amb.hub.store.sessions.list().filter((x) => x.agentId === agentId).at(-1);
+    const s = amb.hub.store.sessions
+      .list()
+      .filter((x) => x.agentId === agentId)
+      .at(-1);
     assert.ok(s, `nenhuma sessão de ${agentId}`);
     return s;
   }
@@ -659,7 +705,10 @@ describe('2.3 — falha ao subir o agente não deixa fantasma', () => {
       assert.equal(orcamento.reserved.usd, 0, 'reserva presa');
       assert.equal(orcamento.remaining.usd, 10);
 
-      const legitima = await iniciar(amb, 'rapido', { requesterSessionId: pai.session.id, budgetUsd: 5 });
+      const legitima = await iniciar(amb, 'rapido', {
+        requesterSessionId: pai.session.id,
+        budgetUsd: 5,
+      });
       assert.ok(legitima.session.id);
       semFantasma();
     } finally {

@@ -2,12 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import type { EventEnvelope } from '@agents-hub/core';
 import { viewOf } from '../lib/eventView';
 import { agentColor, timeOf } from '../hub';
-import {
-  olderAction,
-  sliceWindow,
-  TIMELINE_WINDOW,
-  TIMELINE_WINDOW_STEP,
-} from '../lib/timelineWindow';
+import { olderAction, sliceWindow, TIMELINE_WINDOW, TIMELINE_WINDOW_STEP } from '../lib/timelineWindow';
 
 interface Props {
   events: EventEnvelope[];
@@ -123,7 +118,9 @@ export function Timeline({
     return (
       <div className="empty timeline-empty-state timeline-unselected-state">
         <div className="empty-icon">🧭</div>
-        <div className="empty-title">{hubVazio ? 'Nenhuma sessão no Hub ainda' : 'Nenhuma sessão selecionada'}</div>
+        <div className="empty-title">
+          {hubVazio ? 'Nenhuma sessão no Hub ainda' : 'Nenhuma sessão selecionada'}
+        </div>
         <span className="empty-hint">
           {hubVazio
             ? 'Inicie uma em “Nova Sessão” para acompanhar a timeline aqui.'
@@ -156,7 +153,8 @@ export function Timeline({
         <div className="empty-icon">⚠️</div>
         <div className="empty-title">Falha ao carregar os eventos desta sessão</div>
         <span className="empty-hint">
-          Não é uma sessão sem eventos — a busca falhou (rede instável ou daemon reiniciando). {retryText}
+          Não é uma sessão sem eventos — a busca falhou (rede instável ou daemon reiniciando).{' '}
+          {retryText}
         </span>
         {onRetry && (
           <button className="btn-load-more" onClick={onRetry}>
@@ -174,7 +172,8 @@ export function Timeline({
         <div className="empty-title">Nenhum evento {showVerbose ? '' : 'visível '}nesta sessão</div>
         {!showVerbose && (
           <span className="empty-hint">
-            Raciocínio, deltas e logs internos estão ocultos — ative a opção <strong>“detalhado”</strong> no topo.
+            Raciocínio, deltas e logs internos estão ocultos — ative a opção <strong>“detalhado”</strong>{' '}
+            no topo.
           </span>
         )}
       </div>
@@ -206,7 +205,11 @@ export function Timeline({
         >
           {canLoadMore && (
             <div className="timeline-more">
-              <button className="btn-load-more" onClick={showOlder} disabled={hidden === 0 && loadingOlder}>
+              <button
+                className="btn-load-more"
+                onClick={showOlder}
+                disabled={hidden === 0 && loadingOlder}
+              >
                 {hidden > 0
                   ? `↑ Mostrar ${Math.min(hidden, TIMELINE_WINDOW_STEP)} eventos anteriores`
                   : loadingOlder
@@ -234,7 +237,14 @@ export function Timeline({
             setPinned(true);
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          >
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <polyline points="19 12 12 19 5 12"></polyline>
           </svg>
@@ -273,10 +283,14 @@ const EventRow = memo(function EventRow({
             }
           }}
         >
-          <span className="ev-reasoning-icon" aria-hidden="true">🧠</span>
+          <span className="ev-reasoning-icon" aria-hidden="true">
+            🧠
+          </span>
           <span className="ev-reasoning-title">Raciocínio Interno ({event.agentId})</span>
           <span className="ev-time">{timeOf(event.ts)}</span>
-          <span className={`ev-chevron ${expandedCoT ? 'rotated' : ''}`} aria-hidden="true">▸</span>
+          <span className={`ev-chevron ${expandedCoT ? 'rotated' : ''}`} aria-hidden="true">
+            ▸
+          </span>
         </div>
         {expandedCoT && (
           <div className="ev-reasoning-body">
@@ -297,7 +311,9 @@ const EventRow = memo(function EventRow({
               {view.kind === 'command' ? 'TERMINAL' : view.kind === 'file' ? 'FILE_OP' : 'TOOL_CALL'}
             </span>
             {showAgent && (
-              <span className="ev-agent-pill" style={{ color }}>{event.agentId}</span>
+              <span className="ev-agent-pill" style={{ color }}>
+                {event.agentId}
+              </span>
             )}
           </div>
           <span className="ev-time">{timeOf(event.ts)}</span>
@@ -313,7 +329,9 @@ const EventRow = memo(function EventRow({
   if (view.kind === 'handoff') {
     return (
       <div className="ev-bubble ev-handoff-banner">
-        <div className="ev-handoff-icon" aria-hidden="true">🔄</div>
+        <div className="ev-handoff-icon" aria-hidden="true">
+          🔄
+        </div>
         <div className="ev-handoff-content">
           <div className="ev-handoff-title">Transferência de Controle (Handoff)</div>
           <div className="ev-text">{view.text}</div>
@@ -329,9 +347,7 @@ const EventRow = memo(function EventRow({
       <div className="ev-bubble ev-message-bubble from-user">
         <div className="ev-bubble-main">
           <div className="ev-bubble-header">
-            <span className="ev-bubble-author">
-              você{showAgent ? ` → ${event.agentId}` : ''}
-            </span>
+            <span className="ev-bubble-author">você{showAgent ? ` → ${event.agentId}` : ''}</span>
             <span className="ev-time">{timeOf(event.ts)}</span>
           </div>
           <div className="ev-bubble-content">
@@ -346,17 +362,16 @@ const EventRow = memo(function EventRow({
   return (
     <div className="ev-bubble ev-message-bubble from-agent">
       <div className="ev-bubble-avatar-col">
-        <div
-          className="ev-avatar"
-          style={{ background: color }}
-        >
+        <div className="ev-avatar" style={{ background: color }}>
           {event.agentId.slice(0, 2).toUpperCase()}
         </div>
       </div>
 
       <div className="ev-bubble-main">
         <div className="ev-bubble-header">
-          <span className="ev-bubble-author" style={{ color }}>{event.agentId}</span>
+          <span className="ev-bubble-author" style={{ color }}>
+            {event.agentId}
+          </span>
           <span className="ev-time">{timeOf(event.ts)}</span>
         </div>
         <div className="ev-bubble-content">

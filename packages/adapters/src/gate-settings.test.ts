@@ -37,8 +37,17 @@ for (const id of ['claude', 'openclaude']) {
   }
 
   test(`${id}: sem arquivo de settings, a flag não aparece sozinha`, () => {
-    const { args } = montarInvocacao(manifest, { mode: 'semi', workdir: 'C:\\p' }, manifest.invoke.oneShot, 'p', null);
+    const { args } = montarInvocacao(
+      manifest,
+      { mode: 'semi', workdir: 'C:\\p' },
+      manifest.invoke.oneShot,
+      'p',
+      null,
+    );
     assert.equal(args.includes('--settings'), false);
-    assert.ok(args.every((a) => !a.includes('{{')), `placeholder vazou: ${args.join(' ')}`);
+    assert.ok(
+      args.every((a) => !a.includes('{{')),
+      `placeholder vazou: ${args.join(' ')}`,
+    );
   });
 }

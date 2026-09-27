@@ -96,7 +96,9 @@ function reexecutarComFlag(argv: string[]): Promise<void> {
     process.on('SIGINT', ignorar);
     process.on('SIGTERM', ignorar);
     filho.on('error', (err) => {
-      process.stderr.write(`hub: não foi possível reexecutar o Node com ${FLAG_SQLITE}: ${err.message}\n`);
+      process.stderr.write(
+        `hub: não foi possível reexecutar o Node com ${FLAG_SQLITE}: ${err.message}\n`,
+      );
       process.exitCode = 1;
       resolve();
     });

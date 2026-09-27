@@ -255,7 +255,12 @@ export class OpenCodeAdapter implements AgentAdapter {
 
   // ------------------------------------------------------------------- run
 
-  #run(ctx: RunContext, nativeSessionId: string, prompt: string, aviso: string | null = null): RunHandle {
+  #run(
+    ctx: RunContext,
+    nativeSessionId: string,
+    prompt: string,
+    aviso: string | null = null,
+  ): RunHandle {
     const queue = new AsyncQueue<MappedEvent>({
       highWaterMark: QUEUE_HIGH_WATER_MARK,
       lowWaterMark: QUEUE_LOW_WATER_MARK,
@@ -644,20 +649,16 @@ export class OpenCodeAdapter implements AgentAdapter {
     // `montarSpawn` desembrulha o shim npm (`opencode.cmd` → o `opencode.exe`
     // real) e só cai no `cmd.exe`, com escape próprio, para `.cmd` desconhecido.
     const comando = montarSpawn(resolved, args);
-    const child = spawn(
-      comando.file,
-      comando.args,
-      {
-        env: spawnEnv,
-        shell: false,
-        windowsVerbatimArguments: comando.windowsVerbatimArguments,
-        windowsHide: true,
-        stdio: ['ignore', 'ignore', 'pipe'],
-        // POSIX: grupo próprio, para `killServerTree` matar a árvore (R06-13).
-        ...opcoesDeGrupo(),
-        detached: false,
-      },
-    );
+    const child = spawn(comando.file, comando.args, {
+      env: spawnEnv,
+      shell: false,
+      windowsVerbatimArguments: comando.windowsVerbatimArguments,
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      // POSIX: grupo próprio, para `killServerTree` matar a árvore (R06-13).
+      ...opcoesDeGrupo(),
+      detached: false,
+    });
 
     this.#ownServer = child;
     this.#bootEnv = { ...env };

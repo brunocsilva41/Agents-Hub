@@ -128,9 +128,7 @@ function origemPermitida(origin: string, port: number): boolean {
     // tratá-lo como mesma origem entregava o Hub a um XSS nele.
     const efetiva = url.port !== '' ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
     if (efetiva !== port) return false;
-    return (
-      url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]'
-    );
+    return url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
   } catch {
     return false;
   }

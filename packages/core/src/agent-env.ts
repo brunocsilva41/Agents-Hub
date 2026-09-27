@@ -94,8 +94,7 @@ export function filtrarEnvDeProjeto(bruto: Record<string, unknown>): EnvFiltrado
 
     const chave = nome.trim();
     const permitida =
-      NOMES_PERMITIDOS.has(chave) ||
-      PREFIXOS_PERMITIDOS.some((prefixo) => chave.startsWith(prefixo));
+      NOMES_PERMITIDOS.has(chave) || PREFIXOS_PERMITIDOS.some((prefixo) => chave.startsWith(prefixo));
 
     if (permitida) aceitas[chave] = valor;
     else recusadas.push(chave);

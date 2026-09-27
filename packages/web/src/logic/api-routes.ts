@@ -37,5 +37,7 @@ export const ROTAS_FORA_DO_PROXY: readonly string[] = ['/shutdown', '/maintenanc
 
 /** A rota (caminho de requisição) seria repassada pelo proxy do Vite? */
 export function passaPeloProxy(caminho: string): boolean {
-  return API_ROUTES.some((r) => caminho === r || caminho.startsWith(`${r}/`) || caminho.startsWith(`${r}?`));
+  return API_ROUTES.some(
+    (r) => caminho === r || caminho.startsWith(`${r}/`) || caminho.startsWith(`${r}?`),
+  );
 }

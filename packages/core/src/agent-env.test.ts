@@ -11,7 +11,17 @@ describe('variáveis que cada agente lê de fato', () => {
   });
 
   test('nenhum agente anuncia a variável genérica MODEL (sem consumidor em adapter nenhum)', () => {
-    for (const id of ['claude', 'openclaude', 'antigravity', 'codex', 'opencode', 'kimi', 'copilot', 'cursor', 'mimo']) {
+    for (const id of [
+      'claude',
+      'openclaude',
+      'antigravity',
+      'codex',
+      'opencode',
+      'kimi',
+      'copilot',
+      'cursor',
+      'mimo',
+    ]) {
       assert.ok(!variaveisLidasPeloAgente(id).some((v) => v.nome === 'MODEL'), id);
     }
   });

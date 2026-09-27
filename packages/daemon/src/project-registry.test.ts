@@ -71,8 +71,14 @@ describe('ProjectRegistry', () => {
   });
 
   test('register: vazio ou relativo é PROJECT_FOLDER_CONFLICT (antes do path.resolve)', () => {
-    assert.equal(codigoDe(() => reg.register('   ')), 'PROJECT_FOLDER_CONFLICT');
-    assert.equal(codigoDe(() => reg.register('./relativo')), 'PROJECT_FOLDER_CONFLICT');
+    assert.equal(
+      codigoDe(() => reg.register('   ')),
+      'PROJECT_FOLDER_CONFLICT',
+    );
+    assert.equal(
+      codigoDe(() => reg.register('./relativo')),
+      'PROJECT_FOLDER_CONFLICT',
+    );
     assert.equal(reg.list().length, 0);
   });
 
@@ -81,19 +87,46 @@ describe('ProjectRegistry', () => {
     reg.register(dir);
     const dentro = path.join(dir, 'sub');
     mkdirSync(dentro);
-    assert.equal(codigoDe(() => reg.register(dentro)), 'PROJECT_FOLDER_CONFLICT');
+    assert.equal(
+      codigoDe(() => reg.register(dentro)),
+      'PROJECT_FOLDER_CONFLICT',
+    );
   });
 
   test('id inexistente é PROJECT_NOT_FOUND em todas as operações, nunca null seguindo adiante', () => {
     const id = 'prj_naoexiste';
-    assert.equal(codigoDe(() => reg.get(id)), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.setTrusted(id, true)), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.getContext(id)), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.setContext(id, {})), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.repoStatus(id)), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.listFolders(id)), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.addFolder(id, pasta())), 'PROJECT_NOT_FOUND');
-    assert.equal(codigoDe(() => reg.removeFolder(id, 'pfd_x')), 'PROJECT_NOT_FOUND');
+    assert.equal(
+      codigoDe(() => reg.get(id)),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.setTrusted(id, true)),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.getContext(id)),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.setContext(id, {})),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.repoStatus(id)),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.listFolders(id)),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.addFolder(id, pasta())),
+      'PROJECT_NOT_FOUND',
+    );
+    assert.equal(
+      codigoDe(() => reg.removeFolder(id, 'pfd_x')),
+      'PROJECT_NOT_FOUND',
+    );
   });
 
   test('addFolder: label padrão é o basename; removeFolder recusa a principal e a desconhecida', () => {
@@ -105,12 +138,21 @@ describe('ProjectRegistry', () => {
     assert.equal(reg.addFolder(p.id, pasta('docs'), 'Documentação').label, 'Documentação');
 
     const principal = reg.listFolders(p.id).find((f) => f.isPrimary)!;
-    assert.equal(codigoDe(() => reg.removeFolder(p.id, principal.id)), 'FOLDER_IS_PRIMARY');
-    assert.equal(codigoDe(() => reg.removeFolder(p.id, 'pfd_desconhecida')), 'FOLDER_NOT_FOUND');
+    assert.equal(
+      codigoDe(() => reg.removeFolder(p.id, principal.id)),
+      'FOLDER_IS_PRIMARY',
+    );
+    assert.equal(
+      codigoDe(() => reg.removeFolder(p.id, 'pfd_desconhecida')),
+      'FOLDER_NOT_FOUND',
+    );
 
     reg.removeFolder(p.id, extra.id);
     assert.ok(!reg.listFolders(p.id).some((f) => f.id === extra.id));
-    assert.equal(codigoDe(() => reg.addFolder(p.id, 'relativa')), 'PROJECT_FOLDER_CONFLICT');
+    assert.equal(
+      codigoDe(() => reg.addFolder(p.id, 'relativa')),
+      'PROJECT_FOLDER_CONFLICT',
+    );
   });
 
   test('setContext saneia: memória em branco some, env fora da lista de permissão é descartado', () => {

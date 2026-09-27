@@ -347,14 +347,14 @@ function relatorio(steps: WorkflowStepResult[], totalUsd: number, orcamento?: nu
 
   for (const s of steps) {
     if (s.state === 'completed') continue;
-    console.log(`  ${s.state === 'blocked' ? yellow('⏸') : red('✗')} ${s.stepId}: ${s.detail ?? s.state}`);
+    console.log(
+      `  ${s.state === 'blocked' ? yellow('⏸') : red('✗')} ${s.stepId}: ${s.detail ?? s.state}`,
+    );
   }
 
   const vivos = steps.filter((s) => s.state === 'blocked' || s.state === 'timeout');
   if (vivos.length > 0) {
-    console.log(
-      dim(`\nSessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`),
-    );
+    console.log(dim(`\nSessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`));
   }
   console.log('');
 }

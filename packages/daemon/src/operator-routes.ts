@@ -184,11 +184,7 @@ export function registerOperatorRoutes(
     if (projectId) filter.projectId = validar(ProjectIdSchema, projectId, 'projectId');
     const kind = q.get('kind');
     if (kind) {
-      filter.kind = validar(
-        z.enum(AUDIT_KINDS as [AuditKind, ...AuditKind[]]),
-        kind,
-        'kind',
-      );
+      filter.kind = validar(z.enum(AUDIT_KINDS as [AuditKind, ...AuditKind[]]), kind, 'kind');
     }
     const since = q.get('since');
     if (since) filter.since = instanteDoFiltro(since);

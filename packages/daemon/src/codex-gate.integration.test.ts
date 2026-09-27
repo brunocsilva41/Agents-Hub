@@ -90,7 +90,8 @@ async function esperarTerminal(hub: Hub, taskId: string, timeoutMs = 5000): Prom
   for (;;) {
     const task = hub.store.tasks.get(taskId);
     if (task && terminais.has(task.state)) return;
-    if (Date.now() > limite) throw new Error(`task ${taskId} não chegou a estado terminal em ${timeoutMs}ms`);
+    if (Date.now() > limite)
+      throw new Error(`task ${taskId} não chegou a estado terminal em ${timeoutMs}ms`);
     await new Promise((r) => setTimeout(r, 25));
   }
 }

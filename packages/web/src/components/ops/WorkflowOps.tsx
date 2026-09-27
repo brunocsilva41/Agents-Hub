@@ -42,7 +42,9 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
   const [yaml, setYaml] = useState('');
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
   const [orcamento, setOrcamento] = useState('');
-  const [validacao, setValidacao] = useState<{ texto: string; r: WorkflowValidationSummary } | null>(null);
+  const [validacao, setValidacao] = useState<{ texto: string; r: WorkflowValidationSummary } | null>(
+    null,
+  );
   const [erroForm, setErroForm] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -70,7 +72,9 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
   const abrirArquivo = (arquivo: File | undefined): void => {
     if (!arquivo) return;
     if (arquivo.size > MAX_BYTES) {
-      setErroForm(`O arquivo tem ${Math.round(arquivo.size / 1000)} kB; o limite é ${MAX_BYTES / 1000} kB.`);
+      setErroForm(
+        `O arquivo tem ${Math.round(arquivo.size / 1000)} kB; o limite é ${MAX_BYTES / 1000} kB.`,
+      );
       return;
     }
     void arquivo.text().then(
@@ -85,11 +89,18 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
   const validar = (): void => {
     setErroForm(null);
     const texto = yaml;
-    void acao.executar('validar', () => hub.validateWorkflow(texto), (r) =>
-      r.valid ? `Válido: ${r.workflow.steps.length} passos em ${r.executionOrder.length} lote(s).` : 'O workflow tem erros — veja abaixo.',
-    ).then((r) => {
-      if (r) setValidacao({ texto, r });
-    });
+    void acao
+      .executar(
+        'validar',
+        () => hub.validateWorkflow(texto),
+        (r) =>
+          r.valid
+            ? `Válido: ${r.workflow.steps.length} passos em ${r.executionOrder.length} lote(s).`
+            : 'O workflow tem erros — veja abaixo.',
+      )
+      .then((r) => {
+        if (r) setValidacao({ texto, r });
+      });
   };
 
   const executar = (): void => {
@@ -106,7 +117,12 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
     void acao
       .executar(
         'executar',
-        () => hub.startWorkflow({ yaml, projectId, ...(orc.usd === undefined ? {} : { budgetUsd: orc.usd }) }),
+        () =>
+          hub.startWorkflow({
+            yaml,
+            projectId,
+            ...(orc.usd === undefined ? {} : { budgetUsd: orc.usd }),
+          }),
         (r) => `Workflow "${r.run.name}" disparado no Hub.`,
       )
       .then((r) => {
@@ -137,7 +153,11 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
         <div className="ops-form-grid">
           <label className="ops-field">
             <span>Projeto</span>
-            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={projects.length === 0}>
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              disabled={projects.length === 0}
+            >
               {projects.length === 0 && <option value="">nenhum projeto registrado</option>}
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -183,7 +203,12 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
             type="button"
             className="primary"
             onClick={executar}
-            disabled={yaml.trim() === '' || projectId === '' || acao.ocupado !== null || validacaoAtual?.valid === false}
+            disabled={
+              yaml.trim() === '' ||
+              projectId === '' ||
+              acao.ocupado !== null ||
+              validacaoAtual?.valid === false
+            }
             title={validacaoAtual?.valid === false ? 'Corrija os erros de validação antes' : undefined}
           >
             {acao.ocupado === 'executar' ? 'Disparando…' : 'Executar'}
@@ -219,7 +244,11 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
         titulo="Execuções"
         descricao="Disparadas por aqui ou pela API. O registro vive na memória do Hub: reiniciar o daemon o apaga (as sessões dos passos continuam)."
         acoes={
-          <button type="button" onClick={() => setTick((n) => n + 1)} disabled={runs.estado === 'carregando' && !runs.dados}>
+          <button
+            type="button"
+            onClick={() => setTick((n) => n + 1)}
+            disabled={runs.estado === 'carregando' && !runs.dados}
+          >
             Atualizar
           </button>
         }
@@ -244,7 +273,9 @@ export function WorkflowOps({ projects, onAbrirSessao }: Props): React.JSX.Eleme
                 ))}
               </select>
             </label>
-            {selecionada && <DetalheExecucao run={selecionada} projects={projects} onAbrirSessao={onAbrirSessao} />}
+            {selecionada && (
+              <DetalheExecucao run={selecionada} projects={projects} onAbrirSessao={onAbrirSessao} />
+            )}
           </div>
         )}
       </Cartao>
@@ -265,8 +296,8 @@ function DetalheExecucao({
   return (
     <div className="ops-run" aria-live="polite">
       <p className="ops-muted">
-        <span className={`ops-pill run-${run.state}`}>{ROTULO_EXECUCAO[run.state]}</span> {resumoDaExecucao(run)} ·{' '}
-        {formatUsd(run.totalUsd)}
+        <span className={`ops-pill run-${run.state}`}>{ROTULO_EXECUCAO[run.state]}</span>{' '}
+        {resumoDaExecucao(run)} · {formatUsd(run.totalUsd)}
         {run.budgetUsd !== null && ` de ${formatUsd(run.budgetUsd)}`} · {projeto?.name ?? run.projectId}
         {run.currentBatch !== null && ` · lote ${run.currentBatch + 1}/${run.batches.length}`}
       </p>

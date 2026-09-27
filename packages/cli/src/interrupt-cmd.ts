@@ -36,4 +36,3 @@ function rotulo(state: string): string {
   if (state === 'paused') return 'pausada, retomável';
   return `no estado ${state}`;
 }
-

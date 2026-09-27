@@ -67,10 +67,7 @@ function linksDePrimeiroNivel(worktreePath: string): string[] {
  *
  * Devolve o sha do commit, ou `null` quando não havia nada para commitar.
  */
-export async function commitarTrabalho(
-  worktreePath: string,
-  mensagem: string,
-): Promise<string | null> {
+export async function commitarTrabalho(worktreePath: string, mensagem: string): Promise<string | null> {
   const excluidos = linksDePrimeiroNivel(worktreePath).map((nome) => `:(exclude)${nome}`);
   await git(worktreePath, ['add', '-A', '--', '.', ...excluidos]);
 

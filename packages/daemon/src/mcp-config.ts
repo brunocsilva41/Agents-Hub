@@ -227,13 +227,15 @@ export function existingServerNames(target: McpTarget, configPath: string): Set<
   if (raw.trim().length === 0) return new Set();
   const doc = lerJsonDeConfig(configPath).doc;
   const servers = doc[JSON_KEY(target)];
-  return new Set(
-    servers !== null && typeof servers === 'object' ? Object.keys(servers) : [],
-  );
+  return new Set(servers !== null && typeof servers === 'object' ? Object.keys(servers) : []);
 }
 
 /** Bucket de servidores (`mcp`/`mcpServers`) de um doc JSON, recusando tipo estranho. */
-function jsonBucket(configPath: string, doc: Record<string, unknown>, key: string): Record<string, unknown> {
+function jsonBucket(
+  configPath: string,
+  doc: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
   const atual = doc[key];
   if (atual === undefined || atual === null) return {};
   if (typeof atual !== 'object' || Array.isArray(atual)) {
@@ -283,7 +285,9 @@ function semServidor(doc: Record<string, unknown>, name: string): Record<string,
 /** Valor que `tomlSection(s)` produz depois de parseado. */
 function tomlEntry(s: PortableMcpServer): Record<string, unknown> {
   return {
-    ...(s.transport === 'stdio' ? { command: s.command ?? '', args: s.args ?? [] } : { url: s.url ?? '' }),
+    ...(s.transport === 'stdio'
+      ? { command: s.command ?? '', args: s.args ?? [] }
+      : { url: s.url ?? '' }),
     ...(s.env && Object.keys(s.env).length > 0 ? { env: s.env } : {}),
   };
 }
@@ -447,8 +451,12 @@ export function planUpsertMcpServer(
   }
   bucket[server.name] = entrada;
   doc[key] = bucket;
-  return { ...base, next: `${JSON.stringify(doc, null, 2)}
-`, avisos: lido.avisos };
+  return {
+    ...base,
+    next: `${JSON.stringify(doc, null, 2)}
+`,
+    avisos: lido.avisos,
+  };
 }
 
 /**

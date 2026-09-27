@@ -82,9 +82,7 @@ export function kimiMapper(line: unknown): MappedEvent[] {
       return [meta(obj, content, line)];
 
     case 'error':
-      return [
-        { type: 'error', payload: { message: content ?? 'erro do Kimi' }, raw: line },
-      ];
+      return [{ type: 'error', payload: { message: content ?? 'erro do Kimi' }, raw: line }];
 
     default: {
       if (firstString(obj['type']) === 'goal.summary') {
@@ -118,7 +116,11 @@ function meta(obj: Record<string, unknown>, content: string | undefined, line: u
     const versao = firstString(obj['version']);
     event = {
       type: 'log',
-      payload: { kimiType: tipo, version: versao ?? null, text: `Kimi ${versao ?? '(versão desconhecida)'}` },
+      payload: {
+        kimiType: tipo,
+        version: versao ?? null,
+        text: `Kimi ${versao ?? '(versão desconhecida)'}`,
+      },
       raw: line,
     };
   } else {

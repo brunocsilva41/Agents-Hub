@@ -146,7 +146,13 @@ export async function montarHubDeTeste(
 }
 
 /** Captura `log`/`logErro` dos comandos e o `process.exitCode` que eles deixam. */
-export function capturar(): { linhas: string[]; erros: string[]; log: (l: string) => void; logErro: (l: string) => void; texto(): string } {
+export function capturar(): {
+  linhas: string[];
+  erros: string[];
+  log: (l: string) => void;
+  logErro: (l: string) => void;
+  texto(): string;
+} {
   const linhas: string[] = [];
   const erros: string[] = [];
   return {
@@ -159,7 +165,11 @@ export function capturar(): { linhas: string[]; erros: string[]; log: (l: string
 }
 
 /** Espera uma condição (poll curto) ou falha com a mensagem. */
-export async function esperar(cond: () => boolean | Promise<boolean>, msg: string, timeoutMs = 20_000): Promise<void> {
+export async function esperar(
+  cond: () => boolean | Promise<boolean>,
+  msg: string,
+  timeoutMs = 20_000,
+): Promise<void> {
   const limite = Date.now() + timeoutMs;
   while (!(await cond())) {
     if (Date.now() > limite) throw new Error(`timeout: ${msg}`);

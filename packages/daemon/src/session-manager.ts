@@ -388,9 +388,7 @@ export class SessionManager {
       });
     }
 
-    const parent = input.requesterSessionId
-      ? this.store.sessions.get(input.requesterSessionId)
-      : null;
+    const parent = input.requesterSessionId ? this.store.sessions.get(input.requesterSessionId) : null;
     if (input.requesterSessionId && !parent) {
       throw new HubError('SESSION_NOT_FOUND', `Sessão ${input.requesterSessionId} não encontrada`, {
         sessionId: input.requesterSessionId,
@@ -446,195 +444,194 @@ export class SessionManager {
 
       const rootId = parent ? parent.rootId : sessionId;
 
-    // --- orçamento ----------------------------------------------------------
-    // Na raiz, o budget do Brief DEFINE o teto do fluxo inteiro.
-    // Num filho, ele RESERVA uma fatia do que a raiz ainda tem.
-    const taskId = newId('tsk');
-    const ledger = parent
-      ? this.#ledger(rootId)
-      : this.#ledger(rootId, {
-          usd: brief.budget.usd ?? politicaDoProjeto.defaultBudget.usd,
-          tokens: brief.budget.tokens ?? politicaDoProjeto.defaultBudget.tokens,
-          seconds: brief.budget.seconds ?? politicaDoProjeto.defaultBudget.seconds,
+      // --- orçamento ----------------------------------------------------------
+      // Na raiz, o budget do Brief DEFINE o teto do fluxo inteiro.
+      // Num filho, ele RESERVA uma fatia do que a raiz ainda tem.
+      const taskId = newId('tsk');
+      const ledger = parent
+        ? this.#ledger(rootId)
+        : this.#ledger(rootId, {
+            usd: brief.budget.usd ?? politicaDoProjeto.defaultBudget.usd,
+            tokens: brief.budget.tokens ?? politicaDoProjeto.defaultBudget.tokens,
+            seconds: brief.budget.seconds ?? politicaDoProjeto.defaultBudget.seconds,
+          });
+
+      if (parent) {
+        ledger.reserve(taskId, {
+          usd: brief.budget.usd ?? undefined,
+          tokens: brief.budget.tokens ?? undefined,
+          seconds: brief.budget.seconds ?? undefined,
         });
+        feito.reserva = { ledger, taskId };
+      }
+      this.#persistLedger(ledger);
 
-    if (parent) {
-      ledger.reserve(taskId, {
-        usd: brief.budget.usd ?? undefined,
-        tokens: brief.budget.tokens ?? undefined,
-        seconds: brief.budget.seconds ?? undefined,
+      // --- isolamento ---------------------------------------------------------
+      const isolation: IsolationMode = brief.isolation ?? manifest.defaults.isolation;
+      const bases = await resolverBases(this.store, project, isolation, input.baseSessionIds ?? []);
+      const worktree = await this.worktrees.create({
+        projectPath: project.path,
+        projectName: project.name,
+        sessionId,
+        isolation,
+        ...(bases.refs[0] !== undefined ? { baseRef: bases.refs[0] } : {}),
       });
-      feito.reserva = { ledger, taskId };
-    }
-    this.#persistLedger(ledger);
+      if (worktree.isolated) feito.worktree = { projectPath: project.path, path: worktree.path };
+      if (worktree.isolated && bases.refs.length > 1) {
+        try {
+          await juntarBranches(worktree.path, bases.refs.slice(1));
+        } catch (err) {
+          await this.worktrees
+            .release({ projectPath: project.path, worktreePath: worktree.path, force: true })
+            .catch(() => undefined);
+          throw new HubError(
+            'ILLEGAL_STATE',
+            `Não foi possível juntar o trabalho das sessões anteriores: ${(err as Error).message}`,
+            { baseSessionIds: input.baseSessionIds },
+          );
+        }
+      }
 
-    // --- isolamento ---------------------------------------------------------
-    const isolation: IsolationMode = brief.isolation ?? manifest.defaults.isolation;
-    const bases = await resolverBases(this.store, project, isolation, input.baseSessionIds ?? []);
-    const worktree = await this.worktrees.create({
-      projectPath: project.path,
-      projectName: project.name,
-      sessionId,
-      isolation,
-      ...(bases.refs[0] !== undefined ? { baseRef: bases.refs[0] } : {}),
-    });
-    if (worktree.isolated) feito.worktree = { projectPath: project.path, path: worktree.path };
-    if (worktree.isolated && bases.refs.length > 1) {
-      try {
-        await juntarBranches(worktree.path, bases.refs.slice(1));
-      } catch (err) {
-        await this.worktrees
-          .release({ projectPath: project.path, worktreePath: worktree.path, force: true })
-          .catch(() => undefined);
-        throw new HubError(
-          'ILLEGAL_STATE',
-          `Não foi possível juntar o trabalho das sessões anteriores: ${(err as Error).message}`,
-          { baseSessionIds: input.baseSessionIds },
+      const session: Session = {
+        id: sessionId,
+        projectId: project.id,
+        agentId,
+        nativeSessionId: null,
+        rootId,
+        parentId: parent?.id ?? null,
+        depth: graph.depth,
+        path: graph.path,
+        state: 'running',
+        mode,
+        isolation: worktree.isolated ? isolation : 'none',
+        workdir: worktree.path,
+        title: input.title ?? brief.objective.slice(0, 120),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        endedAt: null,
+        // Preenchido em `#launch`, assim que o adapter devolver o handle real.
+        pid: null,
+      };
+
+      const task: Task = {
+        id: taskId,
+        sessionId,
+        requesterSessionId: parent?.id ?? null,
+        brief,
+        state: 'working',
+        attempts: [{ n: 1, agentId, startedAt: nowIso(), endedAt: null, outcome: null, error: null }],
+        result: null,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+
+      this.store.transaction(() => {
+        this.store.sessions.create(session);
+        this.store.tasks.create(task);
+      });
+      feito.sessao = { session, task };
+      this.bus.registerSession(sessionId, rootId);
+
+      this.#avisarConfigDoProjetoQuebrada(session, taskId, project);
+      this.#avisarDependenciasNaoLigadas(session, taskId, worktree.dependencyWarnings);
+      for (const aviso of bases.avisos) this.#avisar(session, taskId, aviso);
+      if (bases.refs.length > 0 && worktree.isolated) {
+        this.#avisar(
+          session,
+          taskId,
+          `worktree criado a partir do trabalho de ${bases.refs.join(' + ')}`,
+          'info',
         );
       }
-    }
-
-    const session: Session = {
-      id: sessionId,
-      projectId: project.id,
-      agentId,
-      nativeSessionId: null,
-      rootId,
-      parentId: parent?.id ?? null,
-      depth: graph.depth,
-      path: graph.path,
-      state: 'running',
-      mode,
-      isolation: worktree.isolated ? isolation : 'none',
-      workdir: worktree.path,
-      title: input.title ?? brief.objective.slice(0, 120),
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-      endedAt: null,
-      // Preenchido em `#launch`, assim que o adapter devolver o handle real.
-      pid: null,
-    };
-
-    const task: Task = {
-      id: taskId,
-      sessionId,
-      requesterSessionId: parent?.id ?? null,
-      brief,
-      state: 'working',
-      attempts: [
-        { n: 1, agentId, startedAt: nowIso(), endedAt: null, outcome: null, error: null },
-      ],
-      result: null,
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-
-    this.store.transaction(() => {
-      this.store.sessions.create(session);
-      this.store.tasks.create(task);
-    });
-    feito.sessao = { session, task };
-    this.bus.registerSession(sessionId, rootId);
-
-    this.#avisarConfigDoProjetoQuebrada(session, taskId, project);
-    this.#avisarDependenciasNaoLigadas(session, taskId, worktree.dependencyWarnings);
-    for (const aviso of bases.avisos) this.#avisar(session, taskId, aviso);
-    if (bases.refs.length > 0 && worktree.isolated) {
-      this.#avisar(
-        session,
-        taskId,
-        `worktree criado a partir do trabalho de ${bases.refs.join(' + ')}`,
-        'info',
-      );
-    }
-    // `--mode autonomous` pedido numa raiz cujo manifesto é `semi` vira `semi`
-    // (o modo nunca passa do padrão do agente). Reduzir é o lado seguro, mas
-    // em silêncio o usuário achava que o agente rodaria sem pausas.
-    if (brief.supervision !== undefined && mode !== brief.supervision) {
-      this.#avisar(
-        session,
-        taskId,
-        `modo "${brief.supervision}" pedido, mas a sessão roda em "${mode}" — ` +
-          (parent
-            ? `o filho nunca tem mais autonomia que o pai (${parent.mode})`
-            : `o padrão do agente ${agentId} é "${manifest.defaults.supervision}" e o modo nunca passa dele`),
-      );
-    }
-
-    // Fotografa o que já estava pendente ANTES de o agente começar.
-    //
-    // Sem isto, `isolation: none` credita ao agente tudo que estivesse sujo na
-    // árvore. Foi medido numa sessão real em somente-leitura: o Hub anunciou
-    // "2 arquivo(s), +510 −0" para um agente que não tocou em nada.
-    await saveBaseline(
-      this.config.artifactRoot,
-      sessionId,
-      await captureBaseline(session.workdir),
-    );
-
-    if (parent) {
-      this.#emit({
-        sessionId: parent.id,
-        taskId,
-        agentId: parent.agentId,
-        type: 'delegation.requested',
-        payload: {
-          childSessionId: sessionId,
-          targetAgent: agentId,
-          objective: brief.objective,
-          depth: graph.depth,
-        },
-      });
-    }
-
-    // --- portão de delegação: o único gate REALMENTE preventivo ------------
-    // A chamada agente→agente passa por dentro do Hub, então dá para segurá-la
-    // antes de qualquer processo subir. Comando de shell e escrita em arquivo
-    // não têm esse luxo: chegam como evento, depois de acontecer.
-    if (parent) {
-      const verdict = this.policyFor(parent).decide(
-        { kind: 'delegation', agent: agentId },
-        { workdir: parent.workdir, mode: parent.mode },
-      );
-
-      if (verdict.decision === 'deny') {
-        this.store.tasks.update(task.id, { state: 'rejected' });
-        this.store.sessions.update(session.id, { state: 'failed', endedAt: nowIso() });
-        ledger.release(task.id);
-        throw new HubError('POLICY_DENIED', `Delegação negada pela política: ${verdict.reason}`, {
-          agentId,
-          risk: verdict.risk,
-        });
+      // `--mode autonomous` pedido numa raiz cujo manifesto é `semi` vira `semi`
+      // (o modo nunca passa do padrão do agente). Reduzir é o lado seguro, mas
+      // em silêncio o usuário achava que o agente rodaria sem pausas.
+      if (brief.supervision !== undefined && mode !== brief.supervision) {
+        this.#avisar(
+          session,
+          taskId,
+          `modo "${brief.supervision}" pedido, mas a sessão roda em "${mode}" — ` +
+            (parent
+              ? `o filho nunca tem mais autonomia que o pai (${parent.mode})`
+              : `o padrão do agente ${agentId} é "${manifest.defaults.supervision}" e o modo nunca passa dele`),
+        );
       }
 
-      if (verdict.decision === 'approve') {
-        const approval = this.#requestApproval({
-          session,
-          taskId: task.id,
-          risk: verdict.risk,
-          action: `${parent.agentId} quer delegar para ${agentId}`,
-          detail: {
-            kind: 'delegation',
+      // Fotografa o que já estava pendente ANTES de o agente começar.
+      //
+      // Sem isto, `isolation: none` credita ao agente tudo que estivesse sujo na
+      // árvore. Foi medido numa sessão real em somente-leitura: o Hub anunciou
+      // "2 arquivo(s), +510 −0" para um agente que não tocou em nada.
+      await saveBaseline(this.config.artifactRoot, sessionId, await captureBaseline(session.workdir));
+
+      if (parent) {
+        this.#emit({
+          sessionId: parent.id,
+          taskId,
+          agentId: parent.agentId,
+          type: 'delegation.requested',
+          payload: {
+            childSessionId: sessionId,
+            targetAgent: agentId,
             objective: brief.objective,
-            requester: parent.id,
-            reason: verdict.reason,
+            depth: graph.depth,
           },
         });
-
-        // Relê do banco: `#requestApproval` moveu a task para `input_required`
-        // e a sessão para `waiting_approval`. Devolver os objetos em memória
-        // diria "working" para quem chamou, e um agente em polling esperaria
-        // para sempre por algo que nem começou.
-        return {
-          session: this.store.sessions.get(session.id) ?? session,
-          task: this.store.tasks.get(task.id) ?? task,
-          budget: ledger.snapshot(),
-          approval,
-        };
       }
-    }
 
-      await this.#launch(session, task, renderBriefAsPrompt(brief, this.#contextoDoProjeto(session)), null);
+      // --- portão de delegação: o único gate REALMENTE preventivo ------------
+      // A chamada agente→agente passa por dentro do Hub, então dá para segurá-la
+      // antes de qualquer processo subir. Comando de shell e escrita em arquivo
+      // não têm esse luxo: chegam como evento, depois de acontecer.
+      if (parent) {
+        const verdict = this.policyFor(parent).decide(
+          { kind: 'delegation', agent: agentId },
+          { workdir: parent.workdir, mode: parent.mode },
+        );
+
+        if (verdict.decision === 'deny') {
+          this.store.tasks.update(task.id, { state: 'rejected' });
+          this.store.sessions.update(session.id, { state: 'failed', endedAt: nowIso() });
+          ledger.release(task.id);
+          throw new HubError('POLICY_DENIED', `Delegação negada pela política: ${verdict.reason}`, {
+            agentId,
+            risk: verdict.risk,
+          });
+        }
+
+        if (verdict.decision === 'approve') {
+          const approval = this.#requestApproval({
+            session,
+            taskId: task.id,
+            risk: verdict.risk,
+            action: `${parent.agentId} quer delegar para ${agentId}`,
+            detail: {
+              kind: 'delegation',
+              objective: brief.objective,
+              requester: parent.id,
+              reason: verdict.reason,
+            },
+          });
+
+          // Relê do banco: `#requestApproval` moveu a task para `input_required`
+          // e a sessão para `waiting_approval`. Devolver os objetos em memória
+          // diria "working" para quem chamou, e um agente em polling esperaria
+          // para sempre por algo que nem começou.
+          return {
+            session: this.store.sessions.get(session.id) ?? session,
+            task: this.store.tasks.get(task.id) ?? task,
+            budget: ledger.snapshot(),
+            approval,
+          };
+        }
+      }
+
+      await this.#launch(
+        session,
+        task,
+        renderBriefAsPrompt(brief, this.#contextoDoProjeto(session)),
+        null,
+      );
 
       return { session, task, budget: ledger.snapshot() };
     } catch (err) {
@@ -664,9 +661,7 @@ export class SessionManager {
    * dependem de processo nenhum, dependem de você.
    */
   async reconcileOnStartup(): Promise<{ revividas: number; encerradas: number }> {
-    const pendentes = new Set(
-      this.store.approvals.listPending().map((a) => a.sessionId),
-    );
+    const pendentes = new Set(this.store.approvals.listPending().map((a) => a.sessionId));
 
     let encerradas = 0;
     let revividas = 0;
@@ -1114,11 +1109,7 @@ export class SessionManager {
    * liberado — o agente precisa saber que houve uma decisão humana, senão
    * repete a mesma ação achando que falhou.
    */
-  async resolveApproval(
-    id: string,
-    decision: 'approved' | 'denied',
-    by = 'você',
-  ): Promise<Approval> {
+  async resolveApproval(id: string, decision: 'approved' | 'denied', by = 'você'): Promise<Approval> {
     const approval = this.getApproval(id);
     if (approval.state !== 'pending') {
       throw new HubError('ILLEGAL_STATE', `Aprovação ${id} já foi ${approval.state}`, { id });
@@ -1202,8 +1193,7 @@ export class SessionManager {
     // que nunca sai do lugar.
     if (approval.detail['kind'] === 'budget') {
       const incremento = approval.detail['increment'] as
-        | { usd?: number; tokens?: number; seconds?: number }
-        | undefined;
+        { usd?: number; tokens?: number; seconds?: number } | undefined;
 
       const ledger = this.#ledger(session.rootId);
       const snapshot = ledger.raiseLimits(incremento ?? {});
@@ -1249,7 +1239,12 @@ export class SessionManager {
           elapsedSeconds: 0,
         };
         const atual = this.store.sessions.get(session.id) ?? viva;
-        await this.#settle(atual, this.store.tasks.get(task.id) ?? task, desfecho.outcome, desfecho.elapsedSeconds);
+        await this.#settle(
+          atual,
+          this.store.tasks.get(task.id) ?? task,
+          desfecho.outcome,
+          desfecho.elapsedSeconds,
+        );
         return resolved;
       }
     }
@@ -1257,7 +1252,12 @@ export class SessionManager {
     if (isDelegation && task) {
       // A sessão nem chegou a subir: agora sobe.
       this.store.tasks.update(task.id, { state: 'working' });
-      await this.#launch(session, task, renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(session)), null);
+      await this.#launch(
+        session,
+        task,
+        renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(session)),
+        null,
+      );
       return resolved;
     }
 
@@ -1345,8 +1345,7 @@ export class SessionManager {
     const sessao = this.store.sessions.get(approval.sessionId);
     if (!sessao || isTerminalSessionState(sessao.state)) return;
 
-    const outrasPendentes =
-      this.store.approvals.listPending({ sessionId: sessao.id }).length > 0;
+    const outrasPendentes = this.store.approvals.listPending({ sessionId: sessao.id }).length > 0;
     if (outrasPendentes) return;
 
     this.store.transaction(() => {
@@ -1498,8 +1497,7 @@ export class SessionManager {
     }
 
     const task = this.#latestTask(sessionId);
-    const canResume =
-      adapter.manifest.session.strategy === 'native' && session.nativeSessionId !== null;
+    const canResume = adapter.manifest.session.strategy === 'native' && session.nativeSessionId !== null;
 
     // Sem sessão nativa, o processo novo nasce com contexto ZERO. Mandar só a
     // mensagem entregaria ao agente um "faça também X" sem ele saber qual era a
@@ -1522,7 +1520,8 @@ export class SessionManager {
     // (`input_required`) e volta a trabalhar. Se o agente não subir, a sessão
     // e a task voltam ao que eram — continuam retomáveis, nada é encerrado
     // por uma falha de spawn num turno de continuação.
-    const retomando = task.state === 'input_required' && (session.state === 'idle' || session.state === 'paused');
+    const retomando =
+      task.state === 'input_required' && (session.state === 'idle' || session.state === 'paused');
     if (retomando) this.store.tasks.update(task.id, { state: 'working' });
     try {
       await this.#launch(session, task, prompt, canResume ? session.nativeSessionId : null, {
@@ -1623,7 +1622,11 @@ export class SessionManager {
    * revisão e backoff de retry são abortados (o comando/revisor morre), em vez
    * de o cancelado voltar como `completed` ao fim da validação.
    */
-  async cancel(sessionId: string, reason = 'cancelado pelo usuário', visited = new Set<string>()): Promise<void> {
+  async cancel(
+    sessionId: string,
+    reason = 'cancelado pelo usuário',
+    visited = new Set<string>(),
+  ): Promise<void> {
     if (visited.has(sessionId)) return;
     visited.add(sessionId);
 
@@ -2237,7 +2240,9 @@ export class SessionManager {
     // só aparecia como `unhandledRejection` genérico, sem dizer de quem.
     const drenando = this.#pump(session, task, handle)
       .catch((err: unknown) => {
-        console.error(`[sessões] pump da sessão ${session.id} falhou: ${(err as Error)?.message ?? String(err)}`);
+        console.error(
+          `[sessões] pump da sessão ${session.id} falhou: ${(err as Error)?.message ?? String(err)}`,
+        );
       })
       .finally(() => {
         this.#pumps.delete(drenando);
@@ -2317,9 +2322,7 @@ export class SessionManager {
     } catch (limpeza) {
       // O erro original é o que importa para quem chamou; a limpeza falhar
       // vira log, não troca a mensagem.
-      console.error(
-        `[agents-hub] falha ao desfazer o início da sessão: ${(limpeza as Error).message}`,
-      );
+      console.error(`[agents-hub] falha ao desfazer o início da sessão: ${(limpeza as Error).message}`);
     }
   }
 
@@ -2817,7 +2820,11 @@ export class SessionManager {
         return;
       }
 
-      const detail = validation?.checks.map((c) => c.detail).filter(Boolean).join(' | ') ?? '';
+      const detail =
+        validation?.checks
+          .map((c) => c.detail)
+          .filter(Boolean)
+          .join(' | ') ?? '';
       this.#emit({
         sessionId: session.id,
         taskId: task.id,
@@ -2948,7 +2955,9 @@ export class SessionManager {
       await this.#launch(
         fresh,
         updated,
-        canResume ? feedback : `${renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(fresh))}\n\n${feedback}`,
+        canResume
+          ? feedback
+          : `${renderBriefAsPrompt(task.brief, this.#contextoDoProjeto(fresh))}\n\n${feedback}`,
         canResume ? fresh.nativeSessionId : null,
       );
     } catch {
@@ -2966,12 +2975,7 @@ export class SessionManager {
    * chamado pelo que falhou, ele o está substituindo — e ver os dois lado a
    * lado é o que deixa claro que houve uma troca.
    */
-  async #fallback(
-    session: Session,
-    task: Task,
-    agentId: string,
-    reason: string,
-  ): Promise<void> {
+  async #fallback(session: Session, task: Task, agentId: string, reason: string): Promise<void> {
     this.#emit({
       sessionId: session.id,
       taskId: task.id,
@@ -3082,7 +3086,10 @@ export class SessionManager {
   }
 
   /** Cadeia de fallback do agente, já filtrando quem não está instalado. */
-  #fallbackChain(agentId: string, fallback: PolicyDocument['fallback'] = this.config.policy.fallback): string[] {
+  #fallbackChain(
+    agentId: string,
+    fallback: PolicyDocument['fallback'] = this.config.policy.fallback,
+  ): string[] {
     return this.registry
       .fallbackFor(agentId, fallback)
       .filter((id) => this.registry.cachedProbe(id)?.installed !== false);
@@ -3107,7 +3114,12 @@ export class SessionManager {
 ${task.brief.objective.slice(0, 500)}`,
       );
       if (sha) {
-        this.#avisar(session, task.id, `trabalho commitado em hub/${session.id} (${sha.slice(0, 10)})`, 'info');
+        this.#avisar(
+          session,
+          task.id,
+          `trabalho commitado em hub/${session.id} (${sha.slice(0, 10)})`,
+          'info',
+        );
       }
     } catch (err) {
       this.#avisar(
@@ -3378,10 +3390,7 @@ ${task.brief.objective.slice(0, 500)}`,
     type: EventEnvelope['type'];
     payload: Record<string, unknown>;
   }): void {
-    const event = makeEvent(
-      { ...draft, cost: null, raw: null },
-      this.#nextSeq(draft.sessionId),
-    );
+    const event = makeEvent({ ...draft, cost: null, raw: null }, this.#nextSeq(draft.sessionId));
     this.store.events.append(event);
     this.bus.publish(event);
   }
@@ -3587,7 +3596,11 @@ ${task.brief.objective.slice(0, 500)}`,
       return {
         passed: true,
         checks: [
-          { name: 'revisão', passed: true, detail: 'nenhum agente de revisão disponível — portão ignorado' },
+          {
+            name: 'revisão',
+            passed: true,
+            detail: 'nenhum agente de revisão disponível — portão ignorado',
+          },
         ],
       };
     }
@@ -3603,7 +3616,11 @@ ${task.brief.objective.slice(0, 500)}`,
         return {
           passed: true,
           checks: [
-            { name: 'revisão', passed: true, detail: 'só há um agente disponível; sem revisor independente' },
+            {
+              name: 'revisão',
+              passed: true,
+              detail: 'só há um agente disponível; sem revisor independente',
+            },
           ],
         };
       }
@@ -3655,9 +3672,7 @@ ${task.brief.objective.slice(0, 500)}`,
       ...(diff && !diff.empty
         ? [
             `${diff.filesChanged} arquivo(s) alterado(s), +${diff.insertions} −${diff.deletions}`,
-            ...(diff.untracked.length > 0
-              ? [`Arquivos novos: ${diff.untracked.join(', ')}`]
-              : []),
+            ...(diff.untracked.length > 0 ? [`Arquivos novos: ${diff.untracked.join(', ')}`] : []),
             '',
             '```diff',
             diff.patch.slice(0, 60_000),
@@ -3813,7 +3828,7 @@ ${task.brief.objective.slice(0, 500)}`,
     });
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const payload = messages[i]?.payload ?? {};
-      const text = (payload['summary'] ?? payload['text']);
+      const text = payload['summary'] ?? payload['text'];
       if (typeof text === 'string' && text.trim().length > 0) return text.slice(0, 4000);
     }
     return 'sessão concluída sem resumo textual';
@@ -3881,7 +3896,8 @@ ${task.brief.objective.slice(0, 500)}`,
     // conta contra si mesma.
     for (const [id, run] of this.#runs) {
       if (id === sessionId) continue;
-      if (this.store.sessions.get(run.sessionId)?.projectId === projectId) ocupadas.push(run.ctx.agentId);
+      if (this.store.sessions.get(run.sessionId)?.projectId === projectId)
+        ocupadas.push(run.ctx.agentId);
     }
     for (const [id, reserva] of this.#reserved) {
       if (id === sessionId) continue;
@@ -3926,10 +3942,7 @@ ${task.brief.objective.slice(0, 500)}`,
     const cached = this.#ledgers.get(rootId);
     if (cached) return cached;
 
-    const record = this.store.budgets.ensure(
-      rootId,
-      initialLimits ?? this.config.policy.defaultBudget,
-    );
+    const record = this.store.budgets.ensure(rootId, initialLimits ?? this.config.policy.defaultBudget);
     const ledger = new BudgetLedger(rootId, record.limits, record.consumed, ZERO_USAGE);
     this.#ledgers.set(rootId, ledger);
     return ledger;

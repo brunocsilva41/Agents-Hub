@@ -191,11 +191,7 @@ export function candidatosNoPath(bin: string, deps: LookupDeps = defaultLookupDe
   return achados;
 }
 
-function lookupFallback(
-  bin: string,
-  isWindows: boolean,
-  deps: LookupDeps,
-): ResolvedBin | null {
+function lookupFallback(bin: string, isWindows: boolean, deps: LookupDeps): ResolvedBin | null {
   if (!isWindows) return null;
   const fallbacks = [
     path.join(process.env['LOCALAPPDATA'] ?? '', 'agy', 'bin', `${bin}.exe`),
@@ -310,9 +306,7 @@ export function resolverShimNpm(
   // repassa `%*`; o alvo é o último antes do `%*` (o primeiro pode ser o
   // `node.exe` local).
   const antesDoRepasse = linha.slice(0, linha.indexOf('%*'));
-  const relativos = [...antesDoRepasse.matchAll(/"%~?dp0%?\\?([^"%]+)"/gi)].map(
-    (m) => m[1] as string,
-  );
+  const relativos = [...antesDoRepasse.matchAll(/"%~?dp0%?\\?([^"%]+)"/gi)].map((m) => m[1] as string);
   const relativo = relativos.at(-1);
   if (!relativo) return null;
 

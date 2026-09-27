@@ -108,7 +108,7 @@ export function validarNovaPasta(
  */
 export function resolverPastaDaSessao(
   pastas: readonly ProjectFolder[],
-  escolhidaId?: string  ,
+  escolhidaId?: string,
 ): ProjectFolder | null {
   if (escolhidaId !== undefined) {
     return pastas.find((f) => f.id === escolhidaId) ?? null;

@@ -49,7 +49,12 @@ test('padrão esconde delta, texto vazio, log técnico e JSON cru; --verbose mos
 
 test('aviso de fallback aparece destacado, com o agente substituto', () => {
   const linha = renderEvent(
-    ev('log', { kind: 'fallback', level: 'warn', toAgentId: 'claude', text: 'fallback: codex → claude — cota esgotada' }),
+    ev('log', {
+      kind: 'fallback',
+      level: 'warn',
+      toAgentId: 'claude',
+      text: 'fallback: codex → claude — cota esgotada',
+    }),
   );
   assert.match(linha, /⚠ fallback: codex → claude/);
 });

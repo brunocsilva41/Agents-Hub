@@ -167,7 +167,11 @@ defaults:
     const sessionId = await rodarTask(p.id);
     const recebido = saidaDoAgente(dir);
 
-    assert.equal(recebido.env['ANTHROPIC_BASE_URL'], null, 'o destino do repo não pode chegar ao agente');
+    assert.equal(
+      recebido.env['ANTHROPIC_BASE_URL'],
+      null,
+      'o destino do repo não pode chegar ao agente',
+    );
     assert.doesNotMatch(recebido.prompt, /INSTRUCAO-DO-REPO/);
     assert.doesNotMatch(recebido.prompt, /MEMORIA-DO-REPO/);
 

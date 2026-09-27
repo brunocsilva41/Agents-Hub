@@ -403,8 +403,8 @@ export function mergePolicyLayer(
     retries: { ...base.retries, ...(layer.retries ?? {}) },
     fallback: { ...base.fallback, ...(layer.fallback ?? {}) },
     watch: {
-      pauseOn: (layer.watch?.pauseOn ?? base.watch.pauseOn),
-      flagOn: (layer.watch?.flagOn ?? base.watch.flagOn),
+      pauseOn: layer.watch?.pauseOn ?? base.watch.pauseOn,
+      flagOn: layer.watch?.flagOn ?? base.watch.flagOn,
     },
     validation: {
       command:
@@ -457,9 +457,7 @@ function clampLayer(
   const reviewEnabled =
     base.validation.review.enabled || (trustExecFields && v?.review?.enabled === true);
   const reviewAgent =
-    trustExecFields && v?.review?.agent !== undefined
-      ? v.review.agent
-      : base.validation.review.agent;
+    trustExecFields && v?.review?.agent !== undefined ? v.review.agent : base.validation.review.agent;
 
   return {
     ...base,
@@ -468,10 +466,7 @@ function clampLayer(
     maxConcurrencyPerAgent: menorOuBase(base.maxConcurrencyPerAgent, layer.maxConcurrencyPerAgent),
     taskTimeoutSeconds: menorOuBase(base.taskTimeoutSeconds, layer.taskTimeoutSeconds),
     sessionTimeoutSeconds: menorOuBase(base.sessionTimeoutSeconds, layer.sessionTimeoutSeconds),
-    heartbeatTimeoutSeconds: menorOuBase(
-      base.heartbeatTimeoutSeconds,
-      layer.heartbeatTimeoutSeconds,
-    ),
+    heartbeatTimeoutSeconds: menorOuBase(base.heartbeatTimeoutSeconds, layer.heartbeatTimeoutSeconds),
     defaultBudget: {
       usd: menorOuBase(base.defaultBudget.usd, layer.defaultBudget?.usd),
       tokens: menorOuBase(base.defaultBudget.tokens, layer.defaultBudget?.tokens),
@@ -647,7 +642,16 @@ export const DEFAULT_POLICY: PolicyDocument = {
     // Somam-se aos caminhos sensíveis embutidos (`sensitive-paths.ts`: `.ssh`,
     // `.env*`, `*.pem`, credenciais de CLI, `.git/hooks`, `.github/workflows`,
     // settings de agentes...), que valem sempre e não se removem por config.
-    denyFragments: ['.git/config', '.git/hooks', '.github/workflows', '.ssh', '.aws', '.env', 'id_rsa', 'credentials'],
+    denyFragments: [
+      '.git/config',
+      '.git/hooks',
+      '.github/workflows',
+      '.ssh',
+      '.aws',
+      '.env',
+      'id_rsa',
+      'credentials',
+    ],
   },
   network: {
     allowDomains: [],
@@ -773,9 +777,7 @@ export class PolicyEngine {
       case 'network': {
         const host = safeHost(action.url);
         if (host === null) return { risk: 'escalate', reason: 'URL não reconhecida' };
-        const ok = this.policy.network.allowDomains.some(
-          (d) => host === d || host.endsWith(`.${d}`),
-        );
+        const ok = this.policy.network.allowDomains.some((d) => host === d || host.endsWith(`.${d}`));
         return ok
           ? { risk: 'read', reason: `domínio liberado (${host})` }
           : { risk: 'escalate', reason: `domínio não liberado (${host})` };
@@ -860,16 +862,10 @@ export class PolicyEngine {
       ...child,
       maxDepth: Math.min(parent.maxDepth, child.maxDepth),
       maxConcurrency: Math.min(parent.maxConcurrency, child.maxConcurrency),
-      maxConcurrencyPerAgent: Math.min(
-        parent.maxConcurrencyPerAgent,
-        child.maxConcurrencyPerAgent,
-      ),
+      maxConcurrencyPerAgent: Math.min(parent.maxConcurrencyPerAgent, child.maxConcurrencyPerAgent),
       taskTimeoutSeconds: Math.min(parent.taskTimeoutSeconds, child.taskTimeoutSeconds),
       sessionTimeoutSeconds: Math.min(parent.sessionTimeoutSeconds, child.sessionTimeoutSeconds),
-      heartbeatTimeoutSeconds: Math.min(
-        parent.heartbeatTimeoutSeconds,
-        child.heartbeatTimeoutSeconds,
-      ),
+      heartbeatTimeoutSeconds: Math.min(parent.heartbeatTimeoutSeconds, child.heartbeatTimeoutSeconds),
       risk,
       commands: {
         // O filho só pode usar comandos que o pai também permitiria.
@@ -879,14 +875,10 @@ export class PolicyEngine {
       paths: {
         allowWriteOutsideWorkdir:
           parent.paths.allowWriteOutsideWorkdir && child.paths.allowWriteOutsideWorkdir,
-        denyFragments: [
-          ...new Set([...parent.paths.denyFragments, ...child.paths.denyFragments]),
-        ],
+        denyFragments: [...new Set([...parent.paths.denyFragments, ...child.paths.denyFragments])],
       },
       network: {
-        allowDomains: child.network.allowDomains.filter((d) =>
-          parent.network.allowDomains.includes(d),
-        ),
+        allowDomains: child.network.allowDomains.filter((d) => parent.network.allowDomains.includes(d)),
       },
       watch: {
         // Vigilância é união, não interseção: o filho para em tudo que o pai

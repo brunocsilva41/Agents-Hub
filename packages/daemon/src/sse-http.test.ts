@@ -6,7 +6,6 @@ import { after, before, describe, test } from 'node:test';
 import { makeEvent, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
-
 /**
  * Endurecimento do SSE (Fase 5), exercitado contra o daemon HTTP de verdade —
  * não só a função `startSseChannel` isolada. `since=abc` e o teto de conexões
@@ -126,7 +125,11 @@ defaults:
 
     const primeira = new AbortController();
     const resPrimeira = await fetch(`${baseUrl}/events`, { signal: primeira.signal });
-    assert.equal(resPrimeira.status, 200, 'a 1ª conexão deve caber dentro do teto (maxSseConnections=1)');
+    assert.equal(
+      resPrimeira.status,
+      200,
+      'a 1ª conexão deve caber dentro do teto (maxSseConnections=1)',
+    );
 
     try {
       const resSegunda = await fetch(`${baseUrl}/events`);
@@ -147,7 +150,11 @@ defaults:
   });
 
   test('sessão com histórico maior que o teto de replay recebe o sinal de truncamento', async () => {
-    const session = hub.sessions.adoptExternal({ agentId: 'agente-sse', projectId, title: 'sessão SSE' });
+    const session = hub.sessions.adoptExternal({
+      agentId: 'agente-sse',
+      projectId,
+      title: 'sessão SSE',
+    });
 
     // Mais eventos que o teto de replay (500) — semeados direto no banco, sem
     // rodar processo nenhum: o que este teste cobre é o sinal de truncamento,

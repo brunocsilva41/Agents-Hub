@@ -5,7 +5,11 @@ import { criarAlertaDeAprovacao, sinalDeAprovacao } from './approval-alert.js';
 import { capturar, comTeto, montarHubDeTeste, type HubDeTeste } from './hub-de-teste.js';
 import { startCommand } from './start-cmd.js';
 
-const args = (positional: string[], flags: Record<string, string | boolean>) => ({ command: 'start', positional, flags });
+const args = (positional: string[], flags: Record<string, string | boolean>) => ({
+  command: 'start',
+  positional,
+  flags,
+});
 
 /**
  * R11-05: `send` numa sessão concluída é recusado e a recusa aponta
@@ -31,7 +35,15 @@ describe('hub start --from (continuar sessão terminada)', () => {
   test('a sessão nova leva resumo, contexto e base da anterior', async () => {
     const c1 = capturar();
     const primeira = await comTeto(
-      startCommand(h.client, args(['primeira tarefa do teste de continuação'], { agent: 'ok', project: h.projeto, isolation: 'none' }), { log: c1.log, logErro: c1.logErro, pollMs: 100 }),
+      startCommand(
+        h.client,
+        args(['primeira tarefa do teste de continuação'], {
+          agent: 'ok',
+          project: h.projeto,
+          isolation: 'none',
+        }),
+        { log: c1.log, logErro: c1.logErro, pollMs: 100 },
+      ),
       30_000,
       'primeira sessão',
     );
@@ -40,7 +52,11 @@ describe('hub start --from (continuar sessão terminada)', () => {
 
     const c2 = capturar();
     const segunda = await comTeto(
-      startCommand(h.client, args(['continue a partir do que foi feito'], { agent: 'ok', from: anterior, isolation: 'none' }), { log: c2.log, logErro: c2.logErro, pollMs: 100 }),
+      startCommand(
+        h.client,
+        args(['continue a partir do que foi feito'], { agent: 'ok', from: anterior, isolation: 'none' }),
+        { log: c2.log, logErro: c2.logErro, pollMs: 100 },
+      ),
       30_000,
       'sessão de continuação',
     );
@@ -58,7 +74,10 @@ describe('hub start --from (continuar sessão terminada)', () => {
   test('--from sem valor é recusado antes de abrir sessão', async () => {
     const antes = h.hub.store.sessions.list().length;
     const c = capturar();
-    await startCommand(h.client, args(['objetivo descritivo o bastante'], { agent: 'ok', from: true }), { log: c.log, logErro: c.logErro });
+    await startCommand(h.client, args(['objetivo descritivo o bastante'], { agent: 'ok', from: true }), {
+      log: c.log,
+      logErro: c.logErro,
+    });
     assert.match(c.erros.join('\n'), /--from precisa do id/);
     assert.equal(h.hub.store.sessions.list().length, antes);
   });
@@ -67,12 +86,20 @@ describe('hub start --from (continuar sessão terminada)', () => {
     const vistos: string[] = [];
     const c = capturar();
     await comTeto(
-      startCommand(h.client, args(['tarefa para ver o alerta ligado'], { agent: 'ok', project: h.projeto, isolation: 'none' }), {
-        log: c.log,
-        logErro: c.logErro,
-        pollMs: 100,
-        alertar: (e) => vistos.push(e.type),
-      }),
+      startCommand(
+        h.client,
+        args(['tarefa para ver o alerta ligado'], {
+          agent: 'ok',
+          project: h.projeto,
+          isolation: 'none',
+        }),
+        {
+          log: c.log,
+          logErro: c.logErro,
+          pollMs: 100,
+          alertar: (e) => vistos.push(e.type),
+        },
+      ),
       30_000,
       'start com alerta',
     );
@@ -82,7 +109,10 @@ describe('hub start --from (continuar sessão terminada)', () => {
 
 /** R14-14: bipe + título do terminal quando surge aprovação. */
 describe('alerta de aprovação no terminal', () => {
-  const aprovacao = { type: 'approval.requested', payload: { approvalId: 'apv_abc123' } } as unknown as EventEnvelope;
+  const aprovacao = {
+    type: 'approval.requested',
+    payload: { approvalId: 'apv_abc123' },
+  } as unknown as EventEnvelope;
   const outro = { type: 'message', payload: { text: 'oi' } } as unknown as EventEnvelope;
 
   test('em TTY: BEL e título com o id', () => {
@@ -103,12 +133,18 @@ describe('alerta de aprovação no terminal', () => {
     const alertar = criarAlertaDeAprovacao({ tty: true, escrever: (s) => escritos.push(s) });
     alertar(aprovacao);
     alertar(aprovacao);
-    alertar({ type: 'approval.requested', payload: { approvalId: 'apv_outra' } } as unknown as EventEnvelope);
+    alertar({
+      type: 'approval.requested',
+      payload: { approvalId: 'apv_outra' },
+    } as unknown as EventEnvelope);
     assert.equal(escritos.length, 2);
   });
 
   test('id com caracteres de controle não injeta sequência no título', () => {
-    const malicioso = { type: 'approval.requested', payload: { approvalId: 'apv_x\u001b]0;pwned\u0007' } } as unknown as EventEnvelope;
+    const malicioso = {
+      type: 'approval.requested',
+      payload: { approvalId: 'apv_x\u001b]0;pwned\u0007' },
+    } as unknown as EventEnvelope;
     const s = String(sinalDeAprovacao(malicioso, { tty: true, desligado: false }));
     // eslint-disable-next-line no-control-regex -- conta os ESC: é o que mede a injeção
     assert.equal((s.match(/\u001b/g) ?? []).length, 1);

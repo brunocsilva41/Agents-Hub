@@ -16,10 +16,7 @@ export const CUSTO_FECHADO = 'custo.turno.fechado';
  * base é zero — o turno sai cobrado pelo acumulado inteiro, para MAIS, que é
  * o lado seguro para um teto de gasto.
  */
-export function baseDoAcumulado(
-  store: UnitOfWork,
-  session: Session,
-): { usd: number; credits: number } {
+export function baseDoAcumulado(store: UnitOfWork, session: Session): { usd: number; credits: number } {
   if (!session.nativeSessionId) return { usd: 0, credits: 0 };
   const recentes = store.events.list({
     sessionId: session.id,

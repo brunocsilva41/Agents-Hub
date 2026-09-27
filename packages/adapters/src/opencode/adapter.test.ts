@@ -239,9 +239,9 @@ test(
         'prompt de teste',
       );
 
-      const resposta = (await fetch(`${envAdapter.baseUrl}/__env_de_teste`).then((r) =>
-        r.json(),
-      )) as { valor: string | null };
+      const resposta = (await fetch(`${envAdapter.baseUrl}/__env_de_teste`).then((r) => r.json())) as {
+        valor: string | null;
+      };
       assert.equal(
         resposta.valor,
         'valor-do-projeto',

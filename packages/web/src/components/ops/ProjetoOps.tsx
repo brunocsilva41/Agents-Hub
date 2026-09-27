@@ -19,14 +19,22 @@ interface Props {
  * Projeto depois de criado: as pastas que o compõem (adicionar/remover) e os
  * agentes externos adotados nele (adotar/desanexar).
  */
-export function ProjetoOps({ projects, agents, sessions, onAbrirSessao, onChanged }: Props): React.JSX.Element {
+export function ProjetoOps({
+  projects,
+  agents,
+  sessions,
+  onAbrirSessao,
+  onChanged,
+}: Props): React.JSX.Element {
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
   useEffect(() => {
     if (projectId === '' && projects[0]) setProjectId(projects[0].id);
   }, [projects, projectId]);
 
   if (projects.length === 0) {
-    return <p className="ops-muted">Nenhum projeto registrado ainda — use "+ Nova Pasta" na Timeline.</p>;
+    return (
+      <p className="ops-muted">Nenhum projeto registrado ainda — use "+ Nova Pasta" na Timeline.</p>
+    );
   }
   const projeto = projects.find((p) => p.id === projectId) ?? null;
 
@@ -78,7 +86,11 @@ function Pastas({ projectId }: { projectId: string }): React.JSX.Element {
     const p = caminho.trim();
     if (!p) return;
     void acao
-      .executar('adicionar', () => hub.addFolder(projectId, p, rotulo.trim() || undefined), (r) => `Pasta adicionada: ${r.folder.path}`)
+      .executar(
+        'adicionar',
+        () => hub.addFolder(projectId, p, rotulo.trim() || undefined),
+        (r) => `Pasta adicionada: ${r.folder.path}`,
+      )
       .then((r) => {
         if (!r) return;
         setCaminho('');
@@ -89,7 +101,11 @@ function Pastas({ projectId }: { projectId: string }): React.JSX.Element {
 
   const confirmarRemocao = (folderId: string): void => {
     void acao
-      .executar('remover', () => hub.removeFolder(projectId, folderId), 'Pasta removida do projeto (nada foi apagado do disco).')
+      .executar(
+        'remover',
+        () => hub.removeFolder(projectId, folderId),
+        'Pasta removida do projeto (nada foi apagado do disco).',
+      )
       .then((r) => {
         setRemover(null);
         if (r) carga.recarregar();
@@ -103,7 +119,13 @@ function Pastas({ projectId }: { projectId: string }): React.JSX.Element {
       titulo="Pastas do projeto"
       descricao="Uma sessão roda em UMA destas pastas — é o que confina onde o agente age. Adicionar e remover exigem o token de operador."
     >
-      <EstadoDaCarga estado={carga.estado} erro={carga.erro} temDados={carga.dados !== null} oQue="as pastas" onTentar={carga.recarregar} />
+      <EstadoDaCarga
+        estado={carga.estado}
+        erro={carga.erro}
+        temDados={carga.dados !== null}
+        oQue="as pastas"
+        onTentar={carga.recarregar}
+      />
       {pastas.length > 0 && (
         <ul className="ops-list">
           {pastas.map((f) => (
@@ -127,10 +149,20 @@ function Pastas({ projectId }: { projectId: string }): React.JSX.Element {
                 )}
               </div>
               {remover === f.id && (
-                <div className="subform ops-confirm" role="alertdialog" aria-label="Confirmar remover pasta">
+                <div
+                  className="subform ops-confirm"
+                  role="alertdialog"
+                  aria-label="Confirmar remover pasta"
+                >
                   <span>Tirar esta pasta do projeto? Os arquivos no disco não são tocados.</span>
                   <div className="subform-actions">
-                    <button type="button" className="danger" autoFocus onClick={() => confirmarRemocao(f.id)} disabled={acao.ocupado !== null}>
+                    <button
+                      type="button"
+                      className="danger"
+                      autoFocus
+                      onClick={() => confirmarRemocao(f.id)}
+                      disabled={acao.ocupado !== null}
+                    >
                       {acao.ocupado === 'remover' ? 'Removendo…' : 'Remover pasta'}
                     </button>
                     <button type="button" onClick={() => setRemover(null)}>
@@ -152,14 +184,23 @@ function Pastas({ projectId }: { projectId: string }): React.JSX.Element {
       >
         <label className="ops-field">
           <span>Caminho absoluto da pasta</span>
-          <input type="text" value={caminho} onChange={(e) => setCaminho(e.target.value)} placeholder="C:\projetos\outra-pasta" />
+          <input
+            type="text"
+            value={caminho}
+            onChange={(e) => setCaminho(e.target.value)}
+            placeholder="C:\projetos\outra-pasta"
+          />
         </label>
         <label className="ops-field">
           <span>Rótulo (opcional)</span>
           <input type="text" value={rotulo} onChange={(e) => setRotulo(e.target.value)} />
         </label>
         <div className="ops-form-actions">
-          <button type="submit" className="primary" disabled={caminho.trim() === '' || acao.ocupado !== null}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={caminho.trim() === '' || acao.ocupado !== null}
+          >
             {acao.ocupado === 'adicionar' ? 'Adicionando…' : 'Adicionar pasta'}
           </button>
         </div>
@@ -202,7 +243,12 @@ function Adocao({
     void acao
       .executar(
         'adotar',
-        () => hub.adopt({ agentId, projectId: projeto.id, ...(titulo.trim() ? { title: titulo.trim() } : {}) }),
+        () =>
+          hub.adopt({
+            agentId,
+            projectId: projeto.id,
+            ...(titulo.trim() ? { title: titulo.trim() } : {}),
+          }),
         (r) => `Sessão ${r.session.id} registrada para ${agentId}.`,
       )
       .then((r) => {
@@ -227,7 +273,11 @@ function Adocao({
       >
         <label className="ops-field">
           <span>Agente</span>
-          <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={agents.length === 0}>
+          <select
+            value={agentId}
+            onChange={(e) => setAgentId(e.target.value)}
+            disabled={agents.length === 0}
+          >
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} ({a.id})
@@ -248,9 +298,13 @@ function Adocao({
       <ResultadoDaAcao ok={acao.ok} erro={acao.erro} />
 
       {!daemonInforma && sessions.length > 0 && (
-        <p className="ops-muted">Este daemon não informa quais sessões são adotadas; atualize-o para desanexar por aqui.</p>
+        <p className="ops-muted">
+          Este daemon não informa quais sessões são adotadas; atualize-o para desanexar por aqui.
+        </p>
       )}
-      {daemonInforma && adotadas.length === 0 && <p className="ops-muted">Nenhuma sessão adotada neste projeto.</p>}
+      {daemonInforma && adotadas.length === 0 && (
+        <p className="ops-muted">Nenhuma sessão adotada neste projeto.</p>
+      )}
       {adotadas.length > 0 && (
         <ul className="ops-list" aria-label="Sessões adotadas">
           {adotadas.map((s) => (
@@ -263,7 +317,12 @@ function Adocao({
                   Ver sessão
                 </button>
                 {podeDesanexar(s) && desanexar !== s.id && (
-                  <button type="button" className="danger" onClick={() => setDesanexar(s.id)} disabled={acao.ocupado !== null}>
+                  <button
+                    type="button"
+                    className="danger"
+                    onClick={() => setDesanexar(s.id)}
+                    disabled={acao.ocupado !== null}
+                  >
                     Desanexar
                   </button>
                 )}
@@ -278,10 +337,12 @@ function Adocao({
                       autoFocus
                       disabled={acao.ocupado !== null}
                       onClick={() =>
-                        void acao.executar('detach', () => hub.detach(s.id), 'Sessão desanexada.').then((r) => {
-                          setDesanexar(null);
-                          if (r) onChanged();
-                        })
+                        void acao
+                          .executar('detach', () => hub.detach(s.id), 'Sessão desanexada.')
+                          .then((r) => {
+                            setDesanexar(null);
+                            if (r) onChanged();
+                          })
                       }
                     >
                       {acao.ocupado === 'detach' ? 'Desanexando…' : 'Desanexar'}

@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,12 +52,27 @@ test('contrato: todo manifesto entrega o prompt (argv, stdin ou arquivo) no oneS
     if (m.invoke.resume) templates.push(['resume', m.invoke.resume]);
 
     for (const [nome, template] of templates) {
-      const inv = montarInvocacao(m, CTX_BASE, template, PROMPT_MARCADOR, 'sess-nativa-1', 'C:\\tmp\\p.md');
-      assert.notEqual(inv.entrega, 'nenhuma', `${m.id}.${nome}: o prompt não chega ao CLI por caminho nenhum`);
+      const inv = montarInvocacao(
+        m,
+        CTX_BASE,
+        template,
+        PROMPT_MARCADOR,
+        'sess-nativa-1',
+        'C:\\tmp\\p.md',
+      );
+      assert.notEqual(
+        inv.entrega,
+        'nenhuma',
+        `${m.id}.${nome}: o prompt não chega ao CLI por caminho nenhum`,
+      );
 
       if (inv.entrega === 'argv') {
         const comPrompt = inv.args.filter((a) => a.includes(PROMPT_MARCADOR));
-        assert.equal(comPrompt.length, 1, `${m.id}.${nome}: prompt deveria aparecer em exatamente 1 argumento`);
+        assert.equal(
+          comPrompt.length,
+          1,
+          `${m.id}.${nome}: prompt deveria aparecer em exatamente 1 argumento`,
+        );
       } else {
         // stdin/arquivo: o texto do prompt NÃO pode vazar para o argv.
         assert.ok(
@@ -174,14 +197,16 @@ test('resolverShimNpm reconhece os shims do npm', { skip: process.platform !== '
         '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe"   %*\r\n',
       [exe]: '',
     });
-    assert.deepEqual(resolverShimNpm(path.join(dir, 'opencode.cmd'), deps), { file: exe, prefixArgs: [] });
+    assert.deepEqual(resolverShimNpm(path.join(dir, 'opencode.cmd'), deps), {
+      file: exe,
+      prefixArgs: [],
+    });
   });
 
   await t.test('interpretador que não é node, ou alvo inexistente, não desembrulha', () => {
-    const shimSh = SHIM_PROG('x.sh').replace('SET "_prog=node"', 'SET "_prog=sh"').replace(
-      '%dp0%\\node.exe"\r\n)',
-      '%dp0%\\sh.exe"\r\n)',
-    );
+    const shimSh = SHIM_PROG('x.sh')
+      .replace('SET "_prog=node"', 'SET "_prog=sh"')
+      .replace('%dp0%\\node.exe"\r\n)', '%dp0%\\sh.exe"\r\n)');
     const deps = depsDeArquivos({ [path.join(dir, 's.cmd')]: shimSh, [path.join(dir, 'x.sh')]: '' });
     assert.equal(resolverShimNpm(path.join(dir, 's.cmd'), deps), null);
     const semAlvo = depsDeArquivos({ [path.join(dir, 'y.cmd')]: SHIM_PROG('sumiu.js') });
@@ -190,14 +215,28 @@ test('resolverShimNpm reconhece os shims do npm', { skip: process.platform !== '
 });
 
 test('montarSpawn nunca usa shell:true e recusa o que o cmd.exe truncaria', () => {
-  const direto = montarSpawn({ path: 'C:\\a\\x.cmd', needsShell: false, file: 'node', prefixArgs: ['s.js'] }, ['-p', 'a\nb']);
-  assert.deepEqual(direto, { file: 'node', args: ['s.js', '-p', 'a\nb'], shell: false, windowsVerbatimArguments: false });
+  const direto = montarSpawn(
+    { path: 'C:\\a\\x.cmd', needsShell: false, file: 'node', prefixArgs: ['s.js'] },
+    ['-p', 'a\nb'],
+  );
+  assert.deepEqual(direto, {
+    file: 'node',
+    args: ['s.js', '-p', 'a\nb'],
+    shell: false,
+    windowsVerbatimArguments: false,
+  });
 
   const viaCmd = montarSpawn({ path: 'C:\\a b\\x.cmd', needsShell: true }, ['-p', 'a & b']);
   assert.equal(viaCmd.shell, false);
   assert.equal(viaCmd.windowsVerbatimArguments, true);
-  assert.throws(() => montarSpawn({ path: 'C:\\x.cmd', needsShell: true }, ['linha1\nlinha2']), /quebra de linha/);
-  assert.throws(() => montarSpawn({ path: 'C:\\x.cmd', needsShell: true }, ['a'.repeat(9000)]), /excede o limite/);
+  assert.throws(
+    () => montarSpawn({ path: 'C:\\x.cmd', needsShell: true }, ['linha1\nlinha2']),
+    /quebra de linha/,
+  );
+  assert.throws(
+    () => montarSpawn({ path: 'C:\\x.cmd', needsShell: true }, ['a'.repeat(9000)]),
+    /excede o limite/,
+  );
 });
 
 // --- Agente falso `.cmd` de verdade, via ProcessAgentAdapter -----------------
@@ -285,7 +324,11 @@ function nenhumArquivoInjetado(): void {
   }
 }
 
-async function rodar(bin: string, prompt: string, stdinPrompt = false): Promise<{ argv: string[]; stdin: string }> {
+async function rodar(
+  bin: string,
+  prompt: string,
+  stdinPrompt = false,
+): Promise<{ argv: string[]; stdin: string }> {
   const agentId = `a${Math.random().toString(36).slice(2, 8)}`;
   const adapter = new ProcessAgentAdapter(
     AgentManifestSchema.parse({
@@ -302,42 +345,59 @@ async function rodar(bin: string, prompt: string, stdinPrompt = false): Promise<
   return JSON.parse(readFileSync(out, 'utf8')) as { argv: string[]; stdin: string };
 }
 
-test('shim .cmd do npm: prompt hostil chega íntegro em argv, sem executar nada', { skip: process.platform !== 'win32' }, async (t) => {
-  for (const prompt of [...HOSTIS_LINHA_UNICA, ...HOSTIS_SO_SEM_CMD]) {
-    await t.test(JSON.stringify(prompt.slice(0, 40)), async () => {
-      const r = await rodar(BIN_SHIM, prompt);
-      assert.deepEqual(r.argv, ['-p', prompt]);
-      nenhumArquivoInjetado();
-    });
-  }
-});
+test(
+  'shim .cmd do npm: prompt hostil chega íntegro em argv, sem executar nada',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    for (const prompt of [...HOSTIS_LINHA_UNICA, ...HOSTIS_SO_SEM_CMD]) {
+      await t.test(JSON.stringify(prompt.slice(0, 40)), async () => {
+        const r = await rodar(BIN_SHIM, prompt);
+        assert.deepEqual(r.argv, ['-p', prompt]);
+        nenhumArquivoInjetado();
+      });
+    }
+  },
+);
 
-test('shim .cmd do npm: prompt por stdin chega íntegro', { skip: process.platform !== 'win32' }, async () => {
-  const prompt = `${PROMPT_MARCADOR}\n& echo PWN>x\n${'z'.repeat(20000)}`;
-  const r = await rodar(BIN_SHIM, prompt, true);
-  assert.deepEqual(r.argv, ['run']);
-  assert.equal(r.stdin, prompt);
-  nenhumArquivoInjetado();
-});
+test(
+  'shim .cmd do npm: prompt por stdin chega íntegro',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const prompt = `${PROMPT_MARCADOR}\n& echo PWN>x\n${'z'.repeat(20000)}`;
+    const r = await rodar(BIN_SHIM, prompt, true);
+    assert.deepEqual(r.argv, ['run']);
+    assert.equal(r.stdin, prompt);
+    nenhumArquivoInjetado();
+  },
+);
 
-test('.cmd desconhecido (via cmd.exe escapado): sem injeção e sem expansão', { skip: process.platform !== 'win32' }, async (t) => {
-  for (const prompt of HOSTIS_LINHA_UNICA) {
-    await t.test(JSON.stringify(prompt), async () => {
-      const r = await rodar(BIN_BAT, prompt);
-      assert.deepEqual(r.argv, ['-p', prompt]);
-      nenhumArquivoInjetado();
-    });
-  }
-});
+test(
+  '.cmd desconhecido (via cmd.exe escapado): sem injeção e sem expansão',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    for (const prompt of HOSTIS_LINHA_UNICA) {
+      await t.test(JSON.stringify(prompt), async () => {
+        const r = await rodar(BIN_BAT, prompt);
+        assert.deepEqual(r.argv, ['-p', prompt]);
+        nenhumArquivoInjetado();
+      });
+    }
+  },
+);
 
-test('.cmd desconhecido: multilinha/longo demais é recusado, não truncado', { skip: process.platform !== 'win32' }, async (t) => {
-  for (const prompt of HOSTIS_SO_SEM_CMD) {
-    await t.test(JSON.stringify(prompt.slice(0, 20)), async () => {
-      await assert.rejects(
-        rodar(BIN_BAT, prompt),
-        (err: Error & { code?: string }) => err.code === 'ADAPTER_FAILURE' && /com segurança/.test(err.message),
-      );
-      nenhumArquivoInjetado();
-    });
-  }
-});
+test(
+  '.cmd desconhecido: multilinha/longo demais é recusado, não truncado',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    for (const prompt of HOSTIS_SO_SEM_CMD) {
+      await t.test(JSON.stringify(prompt.slice(0, 20)), async () => {
+        await assert.rejects(
+          rodar(BIN_BAT, prompt),
+          (err: Error & { code?: string }) =>
+            err.code === 'ADAPTER_FAILURE' && /com segurança/.test(err.message),
+        );
+        nenhumArquivoInjetado();
+      });
+    }
+  },
+);

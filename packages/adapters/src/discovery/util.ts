@@ -1,10 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import type {
-  AgentDiscovery,
-  DiscoveredConfigFile,
-  DiscoveredMcpServer,
-} from '@agents-hub/core';
+import type { AgentDiscovery, DiscoveredConfigFile, DiscoveredMcpServer } from '@agents-hub/core';
 import { parseToml } from './toml.js';
 
 export type Obj = Record<string, unknown>;
@@ -302,7 +298,12 @@ export class Ctx {
     let transport: DiscoveredMcpServer['transport'] = 'unknown';
     if (type === 'stdio' || type === 'local') transport = 'stdio';
     else if (type === 'sse') transport = 'sse';
-    else if (type === 'http' || type === 'streamable-http' || type === 'streamable_http' || type === 'remote')
+    else if (
+      type === 'http' ||
+      type === 'streamable-http' ||
+      type === 'streamable_http' ||
+      type === 'remote'
+    )
       transport = 'http';
     else if (command) transport = 'stdio';
     else if (url) transport = /\/sse\/?$/.test(url) ? 'sse' : 'http';
@@ -346,7 +347,10 @@ export class Ctx {
 }
 
 /** Copia só campos string não vazios e seguros para `defaults`. */
-export function setDefaults(ctx: Ctx, d: { model?: unknown; provider?: unknown; baseUrl?: unknown }): void {
+export function setDefaults(
+  ctx: Ctx,
+  d: { model?: unknown; provider?: unknown; baseUrl?: unknown },
+): void {
   const m = str(d.model);
   const p = str(d.provider);
   const b = str(d.baseUrl);
@@ -357,5 +361,7 @@ export function setDefaults(ctx: Ctx, d: { model?: unknown; provider?: unknown; 
 
 export function hasSecretKey(o: unknown): boolean {
   if (!isObj(o)) return false;
-  return Object.entries(o).some(([k, v]) => SECRET_NAME.test(k) && typeof v === 'string' && v.length > 0);
+  return Object.entries(o).some(
+    ([k, v]) => SECRET_NAME.test(k) && typeof v === 'string' && v.length > 0,
+  );
 }

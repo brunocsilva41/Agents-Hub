@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { request } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -58,7 +66,11 @@ function http(
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () =>
-        resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }),
+        resolve({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+        }),
       );
       res.on('error', reject);
     });
@@ -233,7 +245,10 @@ defaults:
     assert.equal(negado.status, 401, negado.body);
     assert.equal(hub.store.approvals.get(apv.id)?.state, 'pending', 'sem token nada muda');
 
-    const ok = await http('POST', `/approvals/${apv.id}`, { json: corpo, headers: bearer(hub.operatorToken) });
+    const ok = await http('POST', `/approvals/${apv.id}`, {
+      json: corpo,
+      headers: bearer(hub.operatorToken),
+    });
     assert.equal(ok.status, 200, ok.body);
     const resolvida = (JSON.parse(ok.body) as { approval: Approval }).approval;
     assert.equal(resolvida.state, 'denied');
@@ -270,11 +285,16 @@ defaults:
     // `curl` / `fetch` sem cabeçalhos de navegação não ganham o cookie.
     assert.equal((await http('GET', '/')).headers['set-cookie'], undefined);
     assert.equal(
-      (await http('GET', '/', { headers: { ...navegador, 'sec-fetch-site': 'cross-site' } })).headers['set-cookie'],
+      (await http('GET', '/', { headers: { ...navegador, 'sec-fetch-site': 'cross-site' } })).headers[
+        'set-cookie'
+      ],
       undefined,
     );
     // Rota de API nunca devolve o cookie.
-    assert.equal((await http('GET', '/health', { headers: navegador })).headers['set-cookie'], undefined);
+    assert.equal(
+      (await http('GET', '/health', { headers: navegador })).headers['set-cookie'],
+      undefined,
+    );
 
     const apv = aprovacaoPendente();
     const ok = await http('POST', `/approvals/${apv.id}`, {

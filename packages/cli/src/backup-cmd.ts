@@ -44,7 +44,11 @@ export async function backupCommand(client: HubClient, onde: Onde, args: Args): 
         (viaDaemon ? 'feito pelo daemon no ar' : 'daemon parado, feito localmente'),
     ),
   );
-  console.log(dim('restaure com:'), bold(`hub restore "${backup.path}" --write`), dim('(com o daemon parado)'));
+  console.log(
+    dim('restaure com:'),
+    bold(`hub restore "${backup.path}" --write`),
+    dim('(com o daemon parado)'),
+  );
 }
 
 /**
@@ -56,7 +60,9 @@ export async function backupCommand(client: HubClient, onde: Onde, args: Args): 
 export async function restoreCommand(client: HubClient, onde: Onde, args: Args): Promise<void> {
   const arquivo = path.resolve(required(args.positional[0], 'arquivo de backup'));
   if (await daemonNoAr(client)) {
-    throw new Error('o daemon está rodando — pare antes com `hub stop` (restaurar com o banco aberto o corromperia)');
+    throw new Error(
+      'o daemon está rodando — pare antes com `hub stop` (restaurar com o banco aberto o corromperia)',
+    );
   }
   if (!existsSync(arquivo)) throw new Error(`arquivo não encontrado: ${arquivo}`);
 
@@ -65,10 +71,15 @@ export async function restoreCommand(client: HubClient, onde: Onde, args: Args):
   const atualExiste = existsSync(onde.dbFile);
 
   if (!flagOn(args, 'write') || flagOn(args, 'dry-run')) {
-    console.log(`${bold(arquivo)} ${dim(`(${(statSync(arquivo).size / 1024).toFixed(1)} KB, schema ${schemaVersion}, integrity_check ok)`)}`);
+    console.log(
+      `${bold(arquivo)} ${dim(`(${(statSync(arquivo).size / 1024).toFixed(1)} KB, schema ${schemaVersion}, integrity_check ok)`)}`,
+    );
     console.log(`substituiria ${bold(onde.dbFile)}`);
-    if (atualExiste) console.log(dim(`o banco atual seria guardado antes em ${onde.dbFile}.pre-restore-<data>`));
-    console.log(`\n${dim('prévia — nada foi alterado. para restaurar:')} ${bold(`hub restore "${arquivo}" --write`)}`);
+    if (atualExiste)
+      console.log(dim(`o banco atual seria guardado antes em ${onde.dbFile}.pre-restore-<data>`));
+    console.log(
+      `\n${dim('prévia — nada foi alterado. para restaurar:')} ${bold(`hub restore "${arquivo}" --write`)}`,
+    );
     return;
   }
 
@@ -79,5 +90,9 @@ export async function restoreCommand(client: HubClient, onde: Onde, args: Args):
   }
   console.log(`${green('banco restaurado')} ${bold(r.restored)} ${dim(`(schema ${r.schemaVersion})`)}`);
   if (r.safetyCopy) console.log(dim(`o banco anterior ficou em ${r.safetyCopy}`));
-  console.log(yellow('worktrees e artefatos em disco não fazem parte do banco: sessões restauradas podem apontar para pastas que já não existem.'));
+  console.log(
+    yellow(
+      'worktrees e artefatos em disco não fazem parte do banco: sessões restauradas podem apontar para pastas que já não existem.',
+    ),
+  );
 }

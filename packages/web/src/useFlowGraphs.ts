@@ -71,7 +71,12 @@ export function useFlowGraphs(
       } catch (err) {
         if (cache.get(rootId)?.revisao !== revisao) return;
         const { title, detail } = describeError(err);
-        cache.set(rootId, { revisao, estado: 'erro', nos: null, erro: detail ? `${title} (${detail})` : title });
+        cache.set(rootId, {
+          revisao,
+          estado: 'erro',
+          nos: null,
+          erro: detail ? `${title} (${detail})` : title,
+        });
       }
       if (montado.current) setVersao((v) => v + 1);
     };

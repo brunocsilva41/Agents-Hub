@@ -33,7 +33,9 @@ const BudgetEditSchema = z
       .object({
         usd: LimiteSchema.max(1_000_000).optional(),
         tokens: LimiteSchema.int().max(1_000_000_000).optional(),
-        seconds: LimiteSchema.int().max(30 * 24 * 3600).optional(),
+        seconds: LimiteSchema.int()
+          .max(30 * 24 * 3600)
+          .optional(),
       })
       .strict()
       .refine((l) => l.usd !== undefined || l.tokens !== undefined || l.seconds !== undefined, {

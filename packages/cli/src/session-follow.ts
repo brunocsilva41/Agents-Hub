@@ -1,6 +1,22 @@
 import { required } from './cmd-util.js';
-import { HubApiError, InvalidHubIdError, type HubClient, type SessionSummary, type TaskSummary } from './client.js';
-import { bold, deveExibir, dim, formatTokens, green, red, renderEvent, renderGraph, yellow } from './render.js';
+import {
+  HubApiError,
+  InvalidHubIdError,
+  type HubClient,
+  type SessionSummary,
+  type TaskSummary,
+} from './client.js';
+import {
+  bold,
+  deveExibir,
+  dim,
+  formatTokens,
+  green,
+  red,
+  renderEvent,
+  renderGraph,
+  yellow,
+} from './render.js';
 import type { GraphSummary } from './client.js';
 import type { EventEnvelope } from '@agents-hub/core';
 import { criarAlertaDeAprovacao } from './approval-alert.js';
@@ -165,12 +181,14 @@ export async function acompanhar(client: HubClient, opts: OpcoesDeAcompanhamento
     const timer = setInterval(() => void checar(), pollMs);
     try {
       for await (const event of client.stream(filtro, ac.signal)) {
-        if (deveExibir(event, { verbose: opts.verbose === true })) log(renderEvent(event, { showAgent: porRaiz }));
+        if (deveExibir(event, { verbose: opts.verbose === true }))
+          log(renderEvent(event, { showAgent: porRaiz }));
         opts.alertar?.(event);
         if (!porRaiz && event.sessionId === alvo) since = event.seq;
         if (
           event.sessionId === alvo &&
-          (FIM_DE_TURNO.has(event.type) || (event.type === 'log' && event.payload['fimDoProcesso'] === true))
+          (FIM_DE_TURNO.has(event.type) ||
+            (event.type === 'log' && event.payload['fimDoProcesso'] === true))
         ) {
           void checar();
         }
@@ -231,7 +249,10 @@ async function avaliar(
     ({ session, live } = await client.session(alvo));
   }
 
-  const fim = (estado: EstadoFinal): Avaliacao => ({ tipo: 'fim', desfecho: { estado, sessionId: alvo } });
+  const fim = (estado: EstadoFinal): Avaliacao => ({
+    tipo: 'fim',
+    desfecho: { estado, sessionId: alvo },
+  });
 
   if (task?.state === 'input_required' || (!live && session.state === 'waiting_approval')) {
     await relatarBloqueio(client, alvo, log);
@@ -246,7 +267,9 @@ async function avaliar(
 
   if (!task && SESSAO_TERMINAIS.has(session.state) && !live) {
     await relatarCusto(client, session.rootId, log);
-    return fim(session.state === 'completed' ? 'completed' : session.state === 'killed' ? 'canceled' : 'failed');
+    return fim(
+      session.state === 'completed' ? 'completed' : session.state === 'killed' ? 'canceled' : 'failed',
+    );
   }
 
   if (live) {
@@ -271,7 +294,11 @@ async function avaliar(
   const agora = Date.now();
   vigia.paradoDesde ??= agora;
   if (agora - vigia.paradoDesde >= esperaMaximaMs) {
-    log(yellow(`a tarefa continua em "${task.state}" sem processo vivo — acompanhe com: hub watch ${alvo}`));
+    log(
+      yellow(
+        `a tarefa continua em "${task.state}" sem processo vivo — acompanhe com: hub watch ${alvo}`,
+      ),
+    );
     return fim('unknown');
   }
   return { tipo: 'continuar' };
@@ -288,7 +315,10 @@ async function taskDaSessao(client: HubClient, sessionId: string): Promise<TaskS
     const { session } = await client.session(sessionId);
     const { sessions } = await client.sessions({ rootId: session.rootId });
     const substitutas = sessions
-      .filter((s) => s.id !== session.id && s.parentId === session.parentId && s.createdAt >= session.createdAt)
+      .filter(
+        (s) =>
+          s.id !== session.id && s.parentId === session.parentId && s.createdAt >= session.createdAt,
+      )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     for (const s of substitutas) {
       const { tasks: dela } = await client.tasks(s.id).catch(() => ({ tasks: [] as TaskSummary[] }));
@@ -307,7 +337,9 @@ async function relatarBloqueio(client: HubClient, sessionId: string, log: Log): 
   log(`${NEWLINE}${yellow('⏸ bloqueado, esperando você')}`);
   if (pendente) {
     log(`   ${pendente.action} ${dim(`[${pendente.risk}]`)}`);
-    log(`${NEWLINE}   ${bold(`hub approve ${pendente.id}`)}   ${dim('ou')}   ${bold(`hub deny ${pendente.id}`)}`);
+    log(
+      `${NEWLINE}   ${bold(`hub approve ${pendente.id}`)}   ${dim('ou')}   ${bold(`hub deny ${pendente.id}`)}`,
+    );
   } else {
     log(dim('   nenhuma aprovação registrada — veja `hub approvals`'));
   }
@@ -317,7 +349,9 @@ function relatarValidacao(task: TaskSummary, log: Log): void {
   const validacao = task.result?.validation;
   if (!validacao) return;
   for (const check of validacao.checks) {
-    log(`${check.passed ? green('✓') : red('✗')} validação: ${check.name}${check.detail ? dim(` — ${check.detail}`) : ''}`);
+    log(
+      `${check.passed ? green('✓') : red('✗')} validação: ${check.name}${check.detail ? dim(` — ${check.detail}`) : ''}`,
+    );
   }
 }
 
@@ -362,7 +396,10 @@ export interface OpcoesDeComando {
 }
 
 /** Alerta de aprovação do comando (R14-14). */
-export function alertaDe(args: Args, o: { alertar?: (event: EventEnvelope) => void }): (event: EventEnvelope) => void {
+export function alertaDe(
+  args: Args,
+  o: { alertar?: (event: EventEnvelope) => void },
+): (event: EventEnvelope) => void {
   return o.alertar ?? criarAlertaDeAprovacao({ desligado: args.flags['no-bell'] === true });
 }
 
@@ -371,7 +408,10 @@ export function alertaDe(args: Args, o: { alertar?: (event: EventEnvelope) => vo
  * mensagem com a dica de onde achar os ids — antes, `watch` pendurava e
  * `budget`/`graph` respondiam zeros.
  */
-export async function sessaoOuErro(client: HubClient, id: string): Promise<{ session: SessionSummary; live: boolean }> {
+export async function sessaoOuErro(
+  client: HubClient,
+  id: string,
+): Promise<{ session: SessionSummary; live: boolean }> {
   try {
     return await client.session(id);
   } catch (err) {
@@ -403,7 +443,11 @@ function aplicarSaida(d: Desfecho, o: OpcoesDeComando): void {
   if (codigo !== 0) process.exitCode = codigo;
 }
 
-export async function watchCommand(client: HubClient, args: Args, o: OpcoesDeComando = {}): Promise<Desfecho> {
+export async function watchCommand(
+  client: HubClient,
+  args: Args,
+  o: OpcoesDeComando = {},
+): Promise<Desfecho> {
   const log = o.log ?? ((l: string) => console.log(l));
   const rootFlag = args.flags['root'];
   if (rootFlag === true) throw new Error('--root precisa do id: hub watch --root <rootId>');
@@ -418,17 +462,33 @@ export async function watchCommand(client: HubClient, args: Args, o: OpcoesDeCom
       const { graph } = await client.graph(rootId);
       for (const linha of renderGraph(graph)) log(linha);
     }
-    desfecho = await acompanhar(client, { rootId, log, pollMs: o.pollMs, alertar: alertaDe(args, o), verbose: args.flags['verbose'] === true });
+    desfecho = await acompanhar(client, {
+      rootId,
+      log,
+      pollMs: o.pollMs,
+      alertar: alertaDe(args, o),
+      verbose: args.flags['verbose'] === true,
+    });
   } else {
     const sessionId = required(args.positional[0], 'sessionId');
     await sessaoOuErro(client, sessionId);
-    desfecho = await acompanhar(client, { sessionId, log, pollMs: o.pollMs, alertar: alertaDe(args, o), verbose: args.flags['verbose'] === true });
+    desfecho = await acompanhar(client, {
+      sessionId,
+      log,
+      pollMs: o.pollMs,
+      alertar: alertaDe(args, o),
+      verbose: args.flags['verbose'] === true,
+    });
   }
   aplicarSaida(desfecho, o);
   return desfecho;
 }
 
-export async function sendCommand(client: HubClient, args: Args, o: OpcoesDeComando = {}): Promise<Desfecho | null> {
+export async function sendCommand(
+  client: HubClient,
+  args: Args,
+  o: OpcoesDeComando = {},
+): Promise<Desfecho | null> {
   const log = o.log ?? ((l: string) => console.log(l));
   const sessionId = required(args.positional[0], 'sessionId');
   const text = args.positional.slice(1).join(' ');
@@ -451,12 +511,23 @@ export async function sendCommand(client: HubClient, args: Args, o: OpcoesDeComa
     replay: 'turno novo (o agente não guarda sessão nativa)',
   };
   log(dim(`${explicacao[mode] ?? mode}${NEWLINE}`));
-  const desfecho = await acompanhar(client, { sessionId, since, log, pollMs: o.pollMs, alertar: alertaDe(args, o), verbose: args.flags['verbose'] === true });
+  const desfecho = await acompanhar(client, {
+    sessionId,
+    since,
+    log,
+    pollMs: o.pollMs,
+    alertar: alertaDe(args, o),
+    verbose: args.flags['verbose'] === true,
+  });
   aplicarSaida(desfecho, o);
   return desfecho;
 }
 
-export async function graphCommand(client: HubClient, args: Args, o: OpcoesDeComando = {}): Promise<void> {
+export async function graphCommand(
+  client: HubClient,
+  args: Args,
+  o: OpcoesDeComando = {},
+): Promise<void> {
   const log = o.log ?? ((l: string) => console.log(l));
   const rootId = await raizDoFluxo(client, required(args.positional[0], 'rootId'), log);
   const { graph } = await client.graph(rootId);
@@ -472,7 +543,11 @@ function totalUsd(nodes: GraphSummary[]): number {
   return nodes.reduce((sum, node) => sum + node.usd + totalUsd(node.children), 0);
 }
 
-export async function budgetCommand(client: HubClient, args: Args, o: OpcoesDeComando = {}): Promise<void> {
+export async function budgetCommand(
+  client: HubClient,
+  args: Args,
+  o: OpcoesDeComando = {},
+): Promise<void> {
   const log = o.log ?? ((l: string) => console.log(l));
   const rootId = await raizDoFluxo(client, required(args.positional[0], 'rootId'), log);
   const { budget } = await client.budget(rootId);
@@ -482,8 +557,9 @@ export async function budgetCommand(client: HubClient, args: Args, o: OpcoesDeCo
 
   log(`${color(bar)} ${pct}%`);
   log(`${dim('custo:  ')} US$ ${budget.consumed.usd.toFixed(4)} / ${budget.limits.usd.toFixed(2)}`);
-  log(`${dim('tokens: ')} ${formatTokens(budget.consumed.tokens)} / ${formatTokens(budget.limits.tokens)}`);
+  log(
+    `${dim('tokens: ')} ${formatTokens(budget.consumed.tokens)} / ${formatTokens(budget.limits.tokens)}`,
+  );
   log(`${dim('tempo:  ')} ${budget.consumed.seconds}s / ${budget.limits.seconds}s`);
   if (budget.exhausted) log(red(`${NEWLINE}orçamento esgotado — tasks entram em espera por você`));
 }
-

@@ -75,7 +75,9 @@ export function CommandPalette({
         executar: () => onNewSession(),
         conteudo: (
           <>
-            <span className="cmd-icon-action" aria-hidden="true">+</span>
+            <span className="cmd-icon-action" aria-hidden="true">
+              +
+            </span>
             <span className="cmd-item-label">Criar nova sessão</span>
           </>
         ),
@@ -93,7 +95,11 @@ export function CommandPalette({
         executar: () => onNewSession(agent.id),
         conteudo: (
           <>
-            <span className="cmd-agent-dot" style={{ background: agentColor(agent.id) }} aria-hidden="true" />
+            <span
+              className="cmd-agent-dot"
+              style={{ background: agentColor(agent.id) }}
+              aria-hidden="true"
+            />
             <span className="cmd-item-label">{agent.name}</span>
             <span className="cmd-item-meta">
               {agent.vendor} · {agent.id}
@@ -166,7 +172,10 @@ export function CommandPalette({
   };
 
   const grupos = (['acoes', 'agentes', 'sessoes'] as const)
-    .map((g) => ({ grupo: g, itens: itens.map((item, i) => ({ item, i })).filter((x) => x.item.grupo === g) }))
+    .map((g) => ({
+      grupo: g,
+      itens: itens.map((item, i) => ({ item, i })).filter((x) => x.item.grupo === g),
+    }))
     .filter((g) => g.itens.length > 0);
 
   return (
@@ -182,7 +191,16 @@ export function CommandPalette({
           Paleta de comandos
         </h2>
         <div className="cmd-input-wrap">
-          <svg className="cmd-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <svg
+            className="cmd-search-icon"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
@@ -236,9 +254,16 @@ export function CommandPalette({
           )}
         </div>
         <div className="cmd-footer" aria-hidden="true">
-          <span><kbd>↑</kbd><kbd>↓</kbd> navegar</span>
-          <span><kbd>Enter</kbd> abrir</span>
-          <span><kbd>Esc</kbd> fechar</span>
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> navegar
+          </span>
+          <span>
+            <kbd>Enter</kbd> abrir
+          </span>
+          <span>
+            <kbd>Esc</kbd> fechar
+          </span>
         </div>
       </div>
     </div>

@@ -71,7 +71,10 @@ describe('silenciarAvisoDoSqlite', () => {
   test('engole o ExperimentalWarning do SQLite (as duas formas de chamada)', () => {
     const proc = falso();
     silenciarAvisoDoSqlite(proc);
-    proc.emitWarning('SQLite is an experimental feature and might change at any time', 'ExperimentalWarning');
+    proc.emitWarning(
+      'SQLite is an experimental feature and might change at any time',
+      'ExperimentalWarning',
+    );
     proc.emitWarning('SQLite is an experimental feature', { type: 'ExperimentalWarning' });
     assert.equal(proc.vistos.length, 0);
   });
@@ -88,7 +91,9 @@ describe('silenciarAvisoDoSqlite', () => {
 
 describe('textoDeErroFatal', () => {
   test('erro com código: só mensagem e código, sem stack', () => {
-    const err = Object.assign(new Error('C:/h/config.json:3:3: não é JSON válido'), { code: 'HUB_CONFIG_INVALID' });
+    const err = Object.assign(new Error('C:/h/config.json:3:3: não é JSON válido'), {
+      code: 'HUB_CONFIG_INVALID',
+    });
     const texto = textoDeErroFatal(err);
     assert.equal(texto, '[HUB_CONFIG_INVALID] C:/h/config.json:3:3: não é JSON válido');
     assert.doesNotMatch(texto, /\n\s+at /);

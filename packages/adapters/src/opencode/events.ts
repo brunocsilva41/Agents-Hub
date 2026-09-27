@@ -102,7 +102,12 @@ export function openCodePendingRequest(raw: unknown): OpenCodePendingRequest | n
 
   switch (type) {
     case 'permission.v2.asked':
-      return { kind: 'permission', id, sessionId, what: describePermission(text(data, 'action'), data['resources']) };
+      return {
+        kind: 'permission',
+        id,
+        sessionId,
+        what: describePermission(text(data, 'action'), data['resources']),
+      };
     case 'permission.asked':
       return {
         kind: 'permission-v1',
@@ -203,7 +208,10 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
       const detail = record(error?.['data']);
       return [
         emit('error', {
-          message: (detail ? text(detail, 'message') : null) ?? text(error ?? {}, 'name') ?? 'erro desconhecido do OpenCode',
+          message:
+            (detail ? text(detail, 'message') : null) ??
+            text(error ?? {}, 'name') ??
+            'erro desconhecido do OpenCode',
           name: error ? text(error, 'name') : null,
         }),
       ];
@@ -324,7 +332,9 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
       ];
 
     case 'session.next.shell.ended':
-      return [emit('tool.result', { callId: text(data, 'callID'), ok: true, output: text(data, 'output') })];
+      return [
+        emit('tool.result', { callId: text(data, 'callID'), ok: true, output: text(data, 'output') }),
+      ];
 
     case 'command.executed':
       return [

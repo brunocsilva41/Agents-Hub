@@ -73,9 +73,7 @@ export interface GraphNode {
 }
 
 /** Monta a árvore a partir de uma lista plana — o que a UI consome. */
-export function buildGraph(
-  rows: Array<Omit<GraphNode, 'children'>>,
-): GraphNode[] {
+export function buildGraph(rows: Array<Omit<GraphNode, 'children'>>): GraphNode[] {
   const byId = new Map<string, GraphNode>();
   for (const row of rows) byId.set(row.sessionId, { ...row, children: [] });
 

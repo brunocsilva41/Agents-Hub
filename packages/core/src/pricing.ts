@@ -1130,7 +1130,10 @@ export function normalizeModelId(raw: string | null | undefined): string | null 
   // Prefixos de região e vendor vêm empilhados no Bedrock
   // (`us.anthropic.claude-...`), então o laço roda até não sobrar nenhum.
   for (;;) {
-    const match = /^(us|eu|apac|global|anthropic|openai|google|xiaomi|moonshotai|moonshot|azure|bedrock|vertex)\./.exec(id);
+    const match =
+      /^(us|eu|apac|global|anthropic|openai|google|xiaomi|moonshotai|moonshot|azure|bedrock|vertex)\./.exec(
+        id,
+      );
     if (!match) break;
     id = id.slice(match[0].length);
   }
@@ -1147,8 +1150,8 @@ export function normalizeModelId(raw: string | null | undefined): string | null 
 
 // Alias mais longo primeiro: `gpt-5-3-codex` tem que ganhar de `gpt-5`, e
 // `composer-2-5-fast` de `composer-2-5`, senão o preço sai do irmão errado.
-const ALIAS_INDEX: ReadonlyArray<{ alias: string; price: ModelPrice }> = MODEL_PRICES.flatMap(
-  (price) => price.aliases.map((alias) => ({ alias, price })),
+const ALIAS_INDEX: ReadonlyArray<{ alias: string; price: ModelPrice }> = MODEL_PRICES.flatMap((price) =>
+  price.aliases.map((alias) => ({ alias, price })),
 ).sort((a, b) => b.alias.length - a.alias.length);
 
 /**
@@ -1168,9 +1171,7 @@ export function findModelPrice(raw: string | null | undefined): ModelPrice | nul
 const SUFIXO_NEUTRO = /^(?:-(?:\d{2,8}|v\d+|latest|preview|exp))+$/;
 
 /** Casa o modelo e diz se foi exato (alias ou alias + sufixo neutro) ou por família. */
-function matchModelPrice(
-  raw: string | null | undefined,
-): { price: ModelPrice; exact: boolean } | null {
+function matchModelPrice(raw: string | null | undefined): { price: ModelPrice; exact: boolean } | null {
   const id = normalizeModelId(raw);
   if (id === null) return null;
   for (const entry of ALIAS_INDEX) {
@@ -1297,11 +1298,7 @@ export function combineCostEstimates(parts: readonly CostEstimate[]): CostEstima
   const pior = (['agent-default', 'family', 'model'] as const).find((c) =>
     known.some((p) => p.confidence === c),
   );
-  const confidence: CostConfidence = hasUnknown
-    ? 'partial'
-    : allReported
-      ? 'exact'
-      : (pior ?? 'model');
+  const confidence: CostConfidence = hasUnknown ? 'partial' : allReported ? 'exact' : (pior ?? 'model');
 
   return {
     usd,

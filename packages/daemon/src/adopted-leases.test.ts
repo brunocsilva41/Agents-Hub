@@ -104,7 +104,11 @@ describe('prazo das raízes adotadas', () => {
 
   test('POST /sessions/:id/heartbeat: 200 para raiz adotada viva, erro para sessão comum', async () => {
     const id = await adotarPorHttp();
-    const ok = await fetch(`${baseUrl}/sessions/${id}/heartbeat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const ok = await fetch(`${baseUrl}/sessions/${id}/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
     assert.equal(ok.status, 200, await ok.clone().text());
 
     const comum = newId('ses');
@@ -127,7 +131,11 @@ describe('prazo das raízes adotadas', () => {
       endedAt: null,
       pid: null,
     });
-    const recusa = await fetch(`${baseUrl}/sessions/${comum}/heartbeat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const recusa = await fetch(`${baseUrl}/sessions/${comum}/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
     assert.notEqual(recusa.status, 200);
     const corpo = (await recusa.json()) as { error: { code: string } };
     assert.equal(corpo.error.code, 'ILLEGAL_STATE');

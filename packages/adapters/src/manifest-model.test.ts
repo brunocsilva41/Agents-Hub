@@ -28,10 +28,16 @@ test('contrato: todo manifesto que declara suporte a modelo leva o modelo ao arg
   assert.ok(MANIFESTOS.length >= 9);
   const comSuporte = MANIFESTOS.filter((m) => m.model.supported);
   // Os 8 CLIs instalados e conferidos no --help; só o Cursor (ausente) fica fora.
-  assert.deepEqual(
-    comSuporte.map((m) => m.id).sort(),
-    ['antigravity', 'claude', 'codex', 'copilot', 'kimi', 'mimo', 'openclaude', 'opencode'],
-  );
+  assert.deepEqual(comSuporte.map((m) => m.id).sort(), [
+    'antigravity',
+    'claude',
+    'codex',
+    'copilot',
+    'kimi',
+    'mimo',
+    'openclaude',
+    'opencode',
+  ]);
 
   for (const m of comSuporte) {
     for (const [nome, template] of templates(m)) {
@@ -65,7 +71,10 @@ test('contrato: sem modelo, nenhuma flag de modelo solta no argv', () => {
         'sess-1',
       );
       for (const flag of m.model.args.filter((a) => !a.includes('{{model}}'))) {
-        assert.ok(!semModelo.args.includes(flag), `${m.id}.${nome}: "${flag}" sem valor engoliria o próximo argumento`);
+        assert.ok(
+          !semModelo.args.includes(flag),
+          `${m.id}.${nome}: "${flag}" sem valor engoliria o próximo argumento`,
+        );
       }
     }
   }
@@ -89,11 +98,17 @@ test('MODEL do env do projeto (campo "Modelo" das Configurações) vale quando a
   const claude = MANIFESTOS.find((m) => m.id === 'claude');
   assert.ok(claude);
   const base = { mode: 'semi' as const, workdir: 'C:\\p', extraArgs: [] };
-  const peloEnv = montarInvocacao(claude, { ...base, env: { MODEL: 'sonnet' } }, claude.invoke.oneShot, 'x', null);
-  assert.deepEqual(peloEnv.args.slice(peloEnv.args.indexOf('--model'), peloEnv.args.indexOf('--model') + 2), [
-    '--model',
-    'sonnet',
-  ]);
+  const peloEnv = montarInvocacao(
+    claude,
+    { ...base, env: { MODEL: 'sonnet' } },
+    claude.invoke.oneShot,
+    'x',
+    null,
+  );
+  assert.deepEqual(
+    peloEnv.args.slice(peloEnv.args.indexOf('--model'), peloEnv.args.indexOf('--model') + 2),
+    ['--model', 'sonnet'],
+  );
   // `ctx.model` explícito ganha do env.
   const explicito = montarInvocacao(
     claude,
@@ -128,8 +143,15 @@ test('schema: model.supported exige {{model}} em model.args, e args sem suporte 
   const base = { id: 'x', name: 'X', bin: 'x', invoke: { oneShot: ['-p'] } };
   assert.equal(AgentManifestSchema.parse(base).model.supported, false);
   assert.equal(AgentManifestSchema.parse(base).verified.status, 'unverified');
-  assert.equal(AgentManifestSchema.safeParse({ ...base, model: { supported: true, args: ['--model'] } }).success, false);
-  assert.equal(AgentManifestSchema.safeParse({ ...base, model: { supported: false, args: ['-m', '{{model}}'] } }).success, false);
+  assert.equal(
+    AgentManifestSchema.safeParse({ ...base, model: { supported: true, args: ['--model'] } }).success,
+    false,
+  );
+  assert.equal(
+    AgentManifestSchema.safeParse({ ...base, model: { supported: false, args: ['-m', '{{model}}'] } })
+      .success,
+    false,
+  );
 });
 
 test('verified: todo manifesto declara status/versão; Cursor explicitamente não verificado', () => {

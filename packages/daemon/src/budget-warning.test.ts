@@ -21,7 +21,12 @@ describe('projeção viva e budget.warning (Fase 3)', () => {
   let hub: Hub;
   let projetoPath: string;
 
-  function escreverManifest(manifestos: string, id: string, scriptPath: string, mapper: 'generic-text' | 'claude'): void {
+  function escreverManifest(
+    manifestos: string,
+    id: string,
+    scriptPath: string,
+    mapper: 'generic-text' | 'claude',
+  ): void {
     writeFileSync(
       path.join(manifestos, `${id}.yaml`),
       `

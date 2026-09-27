@@ -110,8 +110,7 @@ export function alvoAtual(env: NodeJS.ProcessEnv = process.env): AlvoDoAutostart
 }
 
 export type EstadoDoAutostart =
-  | { suportado: false }
-  | { suportado: true; ativo: boolean; arquivo: string; conteudo?: string };
+  { suportado: false } | { suportado: true; ativo: boolean; arquivo: string; conteudo?: string };
 
 export function estadoDoAutostart(pasta: string | undefined): EstadoDoAutostart {
   if (pasta === undefined) return { suportado: false };
@@ -168,7 +167,9 @@ export async function autostartCommand(
     }
     console.error(
       red('autostart no login: só implementado no Windows.'),
-      dim('em outro sistema, registre `hub autostart run` no gerenciador de sessão (systemd --user, launchd).'),
+      dim(
+        'em outro sistema, registre `hub autostart run` no gerenciador de sessão (systemd --user, launchd).',
+      ),
     );
     process.exitCode = 1;
     return;
@@ -184,7 +185,11 @@ export async function autostartCommand(
 
   if (sub === 'disable') {
     const { arquivo, removido } = desabilitarAutostart(pasta);
-    console.log(removido ? `${green('✓')} autostart no login desligado` : dim('autostart no login já estava desligado'));
+    console.log(
+      removido
+        ? `${green('✓')} autostart no login desligado`
+        : dim('autostart no login já estava desligado'),
+    );
     console.log(`   ${dim(arquivo)}`);
     return;
   }

@@ -198,10 +198,7 @@ export function sanitizeHubContext(ctx: ProjectHubContext): ProjectHubContext {
  * Memória: as duas, repositório primeiro. Instrução por agente: a do Hub
  * vence. Env: variável a variável, a do Hub vence.
  */
-export function mergeContexts(
-  repo: ProjectContext | null,
-  hub: ProjectHubContext,
-): ProjectContext {
+export function mergeContexts(repo: ProjectContext | null, hub: ProjectHubContext): ProjectContext {
   const base = repo ?? {};
   const efetivo: ProjectContext = {};
 

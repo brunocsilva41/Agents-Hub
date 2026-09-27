@@ -76,25 +76,22 @@ export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): Re
       .filter((l) => l.length > 0);
 
     let resultado: ResultadoDoRegistro | null = null;
-    const ok = await action.run(
-      'create-project',
-      async () => {
-        try {
-          resultado = await registrarProjeto(
-            { caminho: folderPath.trim(), nome: projectName, extras, diretrizes: guidelines },
-            progressoRef.current,
-            {
-              criarProjeto: (caminho, nome) => hub.addProject(caminho, nome).then((r) => r.project),
-              vincularPasta: (id, pasta) => hub.addFolder(id, pasta),
-              gravarDiretrizes: (id, texto) => hub.saveProjectContext(id, { memory: texto }),
-            },
-          );
-        } catch (err) {
-          setErroCaminho(erroDeCaminhoDoDaemon(err));
-          throw err;
-        }
-      },
-    );
+    const ok = await action.run('create-project', async () => {
+      try {
+        resultado = await registrarProjeto(
+          { caminho: folderPath.trim(), nome: projectName, extras, diretrizes: guidelines },
+          progressoRef.current,
+          {
+            criarProjeto: (caminho, nome) => hub.addProject(caminho, nome).then((r) => r.project),
+            vincularPasta: (id, pasta) => hub.addFolder(id, pasta),
+            gravarDiretrizes: (id, texto) => hub.saveProjectContext(id, { memory: texto }),
+          },
+        );
+      } catch (err) {
+        setErroCaminho(erroDeCaminhoDoDaemon(err));
+        throw err;
+      }
+    });
     const r = resultado as ResultadoDoRegistro | null;
     if (!ok || !r) return;
     const novo = progressoRef.current.projectId === null;
@@ -110,7 +107,11 @@ export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): Re
     setProjetoCriado(true);
     setAvisoParcial(avisoDeRegistroParcial(r));
     if (novo) onProjectExists?.(projectId);
-    pushToast({ kind: 'warn', title: 'Projeto criado com pendências', detail: avisoDeRegistroParcial(r) });
+    pushToast({
+      kind: 'warn',
+      title: 'Projeto criado com pendências',
+      detail: avisoDeRegistroParcial(r),
+    });
   };
 
   const sujo = [folderPath, name, extraFolders, guidelines].some((v) => v.trim() !== '');
@@ -129,7 +130,9 @@ export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): Re
       >
         <div className="modal-body">
           <div className="modal-header-banner">
-            <div className="modal-icon-badge" aria-hidden="true">📁</div>
+            <div className="modal-icon-badge" aria-hidden="true">
+              📁
+            </div>
             <div>
               <h2 id={tituloId}>Registrar Novo Projeto</h2>
               <p className="hint" id={descricaoId}>
@@ -214,7 +217,8 @@ export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): Re
               onChange={(e) => setGuidelines(e.target.value)}
             />
             <div className="help">
-              Estas instruções serão injetadas automaticamente no contexto de todas as sessões deste projeto.
+              Estas instruções serão injetadas automaticamente no contexto de todas as sessões deste
+              projeto.
             </div>
           </div>
         </div>
@@ -229,7 +233,11 @@ export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): Re
             onClick={() => void handleCreate()}
             disabled={!folderPath.trim() || action.busy !== null}
           >
-            {action.busy !== null ? 'Registrando…' : projetoCriado ? 'Concluir' : 'Criar & Vincular Projeto'}
+            {action.busy !== null
+              ? 'Registrando…'
+              : projetoCriado
+                ? 'Concluir'
+                : 'Criar & Vincular Projeto'}
           </button>
         </div>
       </div>

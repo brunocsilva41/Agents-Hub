@@ -197,4 +197,3 @@ describe('BudgetLedger', () => {
     assert.equal(proj.projectedTokens, 100_000);
   });
 });
-

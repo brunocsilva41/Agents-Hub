@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import {
-  SseDecoder,
-  openCodeIdleSignal,
-  openCodeSessionId,
-  translateOpenCodeEvent,
-} from './events.js';
+import { SseDecoder, openCodeIdleSignal, openCodeSessionId, translateOpenCodeEvent } from './events.js';
 
 const SESSAO = 'ses_abc123';
 
@@ -48,9 +43,7 @@ describe('translateOpenCodeEvent', () => {
   });
 
   test('texto do agente vira mensagem', () => {
-    const [mapped] = translateOpenCodeEvent(
-      evento('session.next.text.ended', { text: 'terminei' }),
-    );
+    const [mapped] = translateOpenCodeEvent(evento('session.next.text.ended', { text: 'terminei' }));
     assert.equal(mapped?.type, 'message');
     assert.equal(mapped?.payload['text'], 'terminei');
   });
@@ -128,7 +121,11 @@ describe('translateOpenCodeEvent', () => {
 
   test('o prompt do usuário ecoado pelo servidor não vira evento (vistoria 11: brief impresso 2x)', () => {
     for (const tipo of ['session.next.prompt.admitted', 'session.next.prompted']) {
-      assert.deepEqual(translateOpenCodeEvent(evento(tipo, { prompt: { text: '# Tarefa ...' } })), [], tipo);
+      assert.deepEqual(
+        translateOpenCodeEvent(evento(tipo, { prompt: { text: '# Tarefa ...' } })),
+        [],
+        tipo,
+      );
     }
   });
 
@@ -155,7 +152,10 @@ describe('translateOpenCodeEvent', () => {
     const mapped = translateOpenCodeEvent(
       evento('permission.v2.asked', { id: 'per_1', action: 'bash', resources: ['git push'] }),
     );
-    assert.deepEqual(mapped.map((m) => m.type), ['log']);
+    assert.deepEqual(
+      mapped.map((m) => m.type),
+      ['log'],
+    );
     assert.match(String(mapped[0]?.payload['text']), /bash git push — recusado pelo Hub/);
   });
 
@@ -172,17 +172,11 @@ describe('fim de turno', () => {
   });
 
   test('session.status com status idle também', () => {
-    assert.equal(
-      openCodeIdleSignal(evento('session.status', { status: { type: 'idle' } })),
-      true,
-    );
+    assert.equal(openCodeIdleSignal(evento('session.status', { status: { type: 'idle' } })), true);
   });
 
   test('status de retry não encerra o turno', () => {
-    assert.equal(
-      openCodeIdleSignal(evento('session.status', { status: { type: 'retry' } })),
-      false,
-    );
+    assert.equal(openCodeIdleSignal(evento('session.status', { status: { type: 'retry' } })), false);
   });
 });
 

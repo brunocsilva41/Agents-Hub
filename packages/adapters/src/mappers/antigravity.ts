@@ -44,9 +44,10 @@ export function antigravityMapper(line: unknown): MappedEvent[] {
       }
 
       if (stepType === 'agent_response') {
-        const text = firstString(step['text_delta']) ?? firstString(step['text']) ?? firstString(step['response']);
+        const text =
+          firstString(step['text_delta']) ?? firstString(step['text']) ?? firstString(step['response']);
         const usage = step['usage'] as Record<string, unknown> | undefined;
-        
+
         if (!text && !usage) return [];
 
         const events: MappedEvent[] = [];
@@ -82,7 +83,11 @@ export function antigravityMapper(line: unknown): MappedEvent[] {
       }
 
       if (stepType === 'error_message' || step['state'] === 'ERROR') {
-        const msg = firstString(step['error']) ?? firstString(step['message']) ?? firstString(step['error_message']) ?? 'erro na etapa';
+        const msg =
+          firstString(step['error']) ??
+          firstString(step['message']) ??
+          firstString(step['error_message']) ??
+          'erro na etapa';
         const mapped: MappedEvent = {
           type: 'error',
           payload: { message: msg, stepIndex: numberOf(step['step_index']) },
@@ -96,7 +101,7 @@ export function antigravityMapper(line: unknown): MappedEvent[] {
         const toolData = (step['tool_call'] ?? step) as Record<string, unknown>;
         const name = firstString(toolData['name']) ?? firstString(toolData['tool']);
         const input = (toolData['input'] ?? toolData['arguments'] ?? {}) as Record<string, unknown>;
-        
+
         return [mapToolCall(name, input, line, stepConvId)];
       }
 
@@ -165,7 +170,8 @@ function mapToolCall(
   nativeSessionId?: string,
 ): MappedEvent {
   if (name === 'run_command' || name === 'bash' || name === 'shell') {
-    const cmd = firstString(input['CommandLine']) ?? firstString(input['command']) ?? firstString(input['cmd']);
+    const cmd =
+      firstString(input['CommandLine']) ?? firstString(input['command']) ?? firstString(input['cmd']);
     const event: MappedEvent = {
       type: 'command.executed',
       payload: { command: cmd, cwd: input['Cwd'] },
@@ -181,7 +187,10 @@ function mapToolCall(
     name === 'sed_file' ||
     name === 'multi_replace_file_content'
   ) {
-    const p = firstString(input['TargetFile']) ?? firstString(input['AbsolutePath']) ?? firstString(input['path']);
+    const p =
+      firstString(input['TargetFile']) ??
+      firstString(input['AbsolutePath']) ??
+      firstString(input['path']);
     const event: MappedEvent = {
       type: 'file.changed',
       payload: { path: p, tool: name },

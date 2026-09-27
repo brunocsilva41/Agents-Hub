@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -74,7 +83,10 @@ describe('diff de linhas da prévia', () => {
   });
 
   test('arquivo novo: tudo entra; iguais: diff vazio; CRLF não conta como mudança', () => {
-    assert.deepEqual(diffDeLinhas('', 'a\nb\n').map((l) => l.tipo), ['+', '+']);
+    assert.deepEqual(
+      diffDeLinhas('', 'a\nb\n').map((l) => l.tipo),
+      ['+', '+'],
+    );
     assert.deepEqual(diffDeLinhas('a\nb\n', 'a\nb\n'), []);
     assert.deepEqual(diffDeLinhas('a\r\nb\r\n', 'a\nb\n'), []);
   });
@@ -101,15 +113,22 @@ describe('integrações: estado, prévia e gravação (sem HTTP)', () => {
     mkdirSync(path.dirname(settingsClaude(home)), { recursive: true });
     writeFileSync(
       settingsClaude(home),
-      JSON.stringify({
-        env: { ANTHROPIC_API_KEY: 'sk-nao-vaza' },
-        hooks: {
-          PreToolUse: [
-            { matcher: 'Bash', hooks: [{ type: 'command', command: 'alheio.sh' }] },
-            { matcher: 'Bash', hooks: [{ type: 'command', command: '"node" "x/main.js" hook', timeout: 10 }] },
-          ],
+      JSON.stringify(
+        {
+          env: { ANTHROPIC_API_KEY: 'sk-nao-vaza' },
+          hooks: {
+            PreToolUse: [
+              { matcher: 'Bash', hooks: [{ type: 'command', command: 'alheio.sh' }] },
+              {
+                matcher: 'Bash',
+                hooks: [{ type: 'command', command: '"node" "x/main.js" hook', timeout: 10 }],
+              },
+            ],
+          },
         },
-      }, null, 2),
+        null,
+        2,
+      ),
       'utf8',
     );
     const estado = estadoDasIntegracoes(deps, ['claude', 'cursor']);
@@ -135,7 +154,10 @@ describe('integrações: estado, prévia e gravação (sem HTTP)', () => {
     assert.match(texto, /\+.*"timeout": 120/);
     assert.match(texto, /-.*"timeout": 10/);
     assert.doesNotMatch(texto, /sk-nao-vaza/);
-    assert.ok(!plano.diff.some((l) => l.tipo === '-' && l.texto.includes('alheio.sh')), 'hook alheio fica');
+    assert.ok(
+      !plano.diff.some((l) => l.tipo === '-' && l.texto.includes('alheio.sh')),
+      'hook alheio fica',
+    );
   });
 
   test('gravar exige o base da prévia: arquivo mudou no meio -> CONFIG_CHANGED e nada gravado', () => {
@@ -265,9 +287,18 @@ describe('rotas /integrations e prévia de política (HTTP)', () => {
   });
 
   test('GET /integrations lê do home injetado (nunca do home real)', async () => {
-    const { status, json } = await chamar('GET', `/integrations?projectId=${projectId}`, undefined, false);
+    const { status, json } = await chamar(
+      'GET',
+      `/integrations?projectId=${projectId}`,
+      undefined,
+      false,
+    );
     assert.equal(status, 200);
-    const lista = json['integrations'] as Array<{ agentId: string; hook: { arquivo: string | null }; mcp: { arquivo: string | null } | null }>;
+    const lista = json['integrations'] as Array<{
+      agentId: string;
+      hook: { arquivo: string | null };
+      mcp: { arquivo: string | null } | null;
+    }>;
     const claude = lista.find((i) => i.agentId === 'claude')!;
     assert.ok(claude.hook.arquivo!.startsWith(userHome), claude.hook.arquivo!);
     // Com projeto, o `.mcp.json` do Claude resolve dentro do projeto.

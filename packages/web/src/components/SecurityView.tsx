@@ -69,8 +69,8 @@ export function SecurityView(props: Props): React.JSX.Element {
         <div>
           <h2 className="settings-title">Segurança</h2>
           <p className="settings-subtitle">
-            Política, confiança nos repositórios, gate por agente e o registro do que foi decidido.
-            Toda alteração daqui fica na auditoria.
+            Política, confiança nos repositórios, gate por agente e o registro do que foi decidido. Toda
+            alteração daqui fica na auditoria.
           </p>
         </div>
         <div className="settings-header-actions">

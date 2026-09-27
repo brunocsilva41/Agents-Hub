@@ -19,7 +19,10 @@ describe('texto do erro do agente (unidade)', () => {
     assert.equal(juntarErroDoAgente(null, 'x'), null);
     assert.equal(juntarErroDoAgente('código 1', null), 'código 1');
     assert.equal(juntarErroDoAgente('código 1', 'Prompt is too long'), 'Prompt is too long (código 1)');
-    assert.equal(juntarErroDoAgente('código 1: Prompt is too long', 'Prompt is too long'), 'código 1: Prompt is too long');
+    assert.equal(
+      juntarErroDoAgente('código 1: Prompt is too long', 'Prompt is too long'),
+      'código 1: Prompt is too long',
+    );
   });
 });
 
@@ -100,15 +103,34 @@ defaults:
     const init = { type: 'system', subtype: 'init', session_id: 'nativa-123' };
     agente(
       'nativo-recusa',
-      [init, { type: 'result', subtype: 'success', is_error: true, result: 'Prompt is too long', session_id: 'nativa-123' }],
+      [
+        init,
+        {
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          result: 'Prompt is too long',
+          session_id: 'nativa-123',
+        },
+      ],
       1,
     );
     agente(
       'nativo-ok',
       [
         init,
-        { type: 'assistant', message: { content: [{ type: 'text', text: 'OK' }] }, session_id: 'nativa-123' },
-        { type: 'result', subtype: 'success', result: 'OK', total_cost_usd: 0, session_id: 'nativa-123' },
+        {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'OK' }] },
+          session_id: 'nativa-123',
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          result: 'OK',
+          total_cost_usd: 0,
+          session_id: 'nativa-123',
+        },
       ],
       0,
     );
@@ -159,7 +181,9 @@ defaults:
     });
     await esperar(() => {
       const t = hub.store.tasks.get(started.task.id);
-      return !!t && ['completed', 'failed'].includes(t.state) && !hub.sessions.isLive(started.session.id);
+      return (
+        !!t && ['completed', 'failed'].includes(t.state) && !hub.sessions.isLive(started.session.id)
+      );
     });
     return started;
   }
@@ -184,7 +208,10 @@ defaults:
         assert.equal(err.code, 'ILLEGAL_STATE');
         assert.match(err.message, new RegExp(`hub start --from ${session.id}`));
         assert.match(err.message, /context_refs/);
-        assert.equal((err.details as { continuarCom?: { from?: string } }).continuarCom?.from, session.id);
+        assert.equal(
+          (err.details as { continuarCom?: { from?: string } }).continuarCom?.from,
+          session.id,
+        );
         return true;
       },
     );

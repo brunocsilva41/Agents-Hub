@@ -142,12 +142,20 @@ describe('WorktreeManager — remoção não atravessa links de dependência', (
     const manager = new WorktreeManager(root);
     const wt = await criar(manager, 'ses-links-extra');
     // Link que NÃO está na lista de dependências (agente/ferramenta criou).
-    await symlink(alvoExtra, path.join(wt, 'link-extra'), process.platform === 'win32' ? 'junction' : 'dir');
+    await symlink(
+      alvoExtra,
+      path.join(wt, 'link-extra'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     const result = await manager.release({ projectPath: repo, worktreePath: wt, force: true });
 
     assert.equal(result.removed, true, result.reason);
-    assert.equal(existsSync(path.join(alvoExtra, 'importante.txt')), true, 'alvo do link extra foi apagado');
+    assert.equal(
+      existsSync(path.join(alvoExtra, 'importante.txt')),
+      true,
+      'alvo do link extra foi apagado',
+    );
     assertProjetoIntacto('link extra');
   });
 

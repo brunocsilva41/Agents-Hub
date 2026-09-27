@@ -108,7 +108,13 @@ describe('WorktreeReaper.sweep — quem é recolhido', () => {
 
   test('o limite é inclusivo do lado de quem expirou: exatamente na borda ainda remove', async () => {
     const { reaper } = montar([
-      { id: 'b', projectId: 'prj_1', isolation: 'worktree', workdir: dirs['expirado']!, endedAt: atras(3) },
+      {
+        id: 'b',
+        projectId: 'prj_1',
+        isolation: 'worktree',
+        workdir: dirs['expirado']!,
+        endedAt: atras(3),
+      },
     ]);
     const r = await reaper.sweep(AGORA);
     assert.deepEqual(r.removed, [dirs['expirado']]);
@@ -120,7 +126,15 @@ describe('WorktreeReaper.sweep — quem é recolhido', () => {
     console.error = (...a: unknown[]) => void erros.push(a.join(' '));
     try {
       const { reaper, podados } = montar(
-        [{ id: 'f', projectId: 'prj_1', isolation: 'worktree', workdir: dirs['falha']!, endedAt: atras(9) }],
+        [
+          {
+            id: 'f',
+            projectId: 'prj_1',
+            isolation: 'worktree',
+            workdir: dirs['falha']!,
+            endedAt: atras(9),
+          },
+        ],
         { falhaEm: dirs['falha']! },
       );
       const r = await reaper.sweep(AGORA);
@@ -128,7 +142,10 @@ describe('WorktreeReaper.sweep — quem é recolhido', () => {
       assert.deepEqual(r.removed, []);
       assert.equal(r.retained, 0);
       assert.deepEqual(podados, ['/repo']);
-      assert.ok(erros.some((e) => String(e).includes('arquivo em uso')), 'falha real é logada');
+      assert.ok(
+        erros.some((e) => String(e).includes('arquivo em uso')),
+        'falha real é logada',
+      );
     } finally {
       console.error = original;
     }

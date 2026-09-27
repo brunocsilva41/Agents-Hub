@@ -18,7 +18,11 @@ export interface EstadoDaLista {
 
 export const LISTA_INICIAL: EstadoDaLista = { abertos: new Set(), recolhidos: new Set() };
 
-export function fluxoAberto(estado: EstadoDaLista, rootId: string, selectedRootId: string | null): boolean {
+export function fluxoAberto(
+  estado: EstadoDaLista,
+  rootId: string,
+  selectedRootId: string | null,
+): boolean {
   if (estado.recolhidos.has(rootId)) return false;
   return estado.abertos.has(rootId) || rootId === selectedRootId;
 }

@@ -62,7 +62,10 @@ export interface ImportPlanRequest {
  */
 export function buildImportRequest(args: Args): ImportPlanRequest | Error {
   const agentId = args.positional[0];
-  if (!agentId) return new Error('uso: hub import <agentId> [--project <caminho>] [--kinds ...] [--to a,b] [--write]');
+  if (!agentId)
+    return new Error(
+      'uso: hub import <agentId> [--project <caminho>] [--kinds ...] [--to a,b] [--write]',
+    );
 
   const kindsParsed = parseKinds(args.flags['kinds']);
   if (kindsParsed instanceof Error) return kindsParsed;
@@ -71,7 +74,9 @@ export function buildImportRequest(args: Args): ImportPlanRequest | Error {
 
   const kinds: ImportKind[] = kindsParsed ?? (targets ? ALL_KINDS : ['instructions', 'env']);
   if (kinds.includes('mcp') && !targets) {
-    return new Error('kind "mcp" exige --to <agente1,agente2> (para quais agentes compartilhar as ferramentas)');
+    return new Error(
+      'kind "mcp" exige --to <agente1,agente2> (para quais agentes compartilhar as ferramentas)',
+    );
   }
 
   return {
@@ -103,7 +108,11 @@ export function renderDiscoveryTable(list: AgentDiscovery[]): string {
     d.instructionFiles.length > 0 ? `${d.instructionFiles.length} arquivo(s)` : '-',
   ]);
   const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
-  const line = (cells: string[]): string => cells.map((c, i) => c.padEnd(widths[i] ?? 0)).join('  ').trimEnd();
+  const line = (cells: string[]): string =>
+    cells
+      .map((c, i) => c.padEnd(widths[i] ?? 0))
+      .join('  ')
+      .trimEnd();
   const out = [bold(line(header)), ...rows.map(line)];
   const warnings = list.flatMap((d) => d.warnings.map((w) => `${d.agentId}: ${w}`));
   if (warnings.length > 0) {
@@ -124,7 +133,8 @@ export function renderDiscoveryDetail(d: AgentDiscovery): string {
   ];
   for (const s of d.mcpServers) {
     const alvo = s.transport === 'stdio' ? [s.command, ...(s.args ?? [])].join(' ') : (s.url ?? '');
-    const env = s.env && Object.keys(s.env).length > 0 ? dim(` env: ${Object.keys(s.env).join(',')}`) : '';
+    const env =
+      s.env && Object.keys(s.env).length > 0 ? dim(` env: ${Object.keys(s.env).join(',')}`) : '';
     out.push(`    - ${s.name}${s.isHub ? dim(' (Hub)') : ''} [${s.transport}] ${dim(alvo)}${env}`);
   }
   if (d.mcpServers.length === 0) out.push(`    ${dim('(nenhum)')}`);
@@ -135,7 +145,9 @@ export function renderDiscoveryDetail(d: AgentDiscovery): string {
 /** Plano (dry-run) ou resultado (`--write`) de `hub import`. */
 export function renderImportResult(r: ImportResult, cmdToApply?: string): string {
   const out: string[] = [
-    r.dryRun ? bold(`plano de importação de ${r.agentId} ${dim('(dry-run)')}`) : bold(`importação de ${r.agentId}`),
+    r.dryRun
+      ? bold(`plano de importação de ${r.agentId} ${dim('(dry-run)')}`)
+      : bold(`importação de ${r.agentId}`),
   ];
   if (r.items.length === 0) out.push(`  ${dim('(nada a importar)')}`);
   for (const item of r.items) {
@@ -165,7 +177,9 @@ export async function discoverCommand(client: HubClient, args: Args): Promise<vo
     return;
   }
   const { agents } = await client.discovery(refresh);
-  console.log(args.flags['json'] === true ? JSON.stringify(agents, null, 2) : renderDiscoveryTable(agents));
+  console.log(
+    args.flags['json'] === true ? JSON.stringify(agents, null, 2) : renderDiscoveryTable(agents),
+  );
 }
 
 export async function importCommand(
@@ -188,7 +202,13 @@ export async function importCommand(
     console.log(JSON.stringify(result, null, 2));
     return;
   }
-  const apply = ['hub import', req.agentId, ...(typeof projectFlag === 'string' ? ['--project', projectFlag] : []), '--kinds', req.kinds.join(',')]
+  const apply = [
+    'hub import',
+    req.agentId,
+    ...(typeof projectFlag === 'string' ? ['--project', projectFlag] : []),
+    '--kinds',
+    req.kinds.join(','),
+  ]
     .concat(req.targetAgents ? ['--to', req.targetAgents.join(',')] : [])
     .concat(req.overwrite ? ['--overwrite'] : [], req.includeEnv ? ['--include-env'] : [], ['--write'])
     .join(' ');

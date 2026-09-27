@@ -93,7 +93,10 @@ describe('custo do turno com streams reais (Fase 3.1)', () => {
   });
 
   test('Claude: turno morto antes do result ainda custa (a estimativa é cobrada no fechamento)', () => {
-    const r = contabilizar(claudeMapper, CLAUDE_TURNO.slice(0, 3), { model: 'claude-opus-5-5', agentId: 'claude' });
+    const r = contabilizar(claudeMapper, CLAUDE_TURNO.slice(0, 3), {
+      model: 'claude-opus-5-5',
+      agentId: 'claude',
+    });
     assert.ok(r.usd > 0, 'custo não some quando o processo é morto no meio');
   });
 
@@ -128,7 +131,12 @@ describe('custo do turno com streams reais (Fase 3.1)', () => {
     const linhas = [
       {
         event: 'step_update',
-        step_update: { step_index: 1, step_type: 'agent_response', text_delta: 'OK', usage: { input_tokens: 100, output_tokens: 5 } },
+        step_update: {
+          step_index: 1,
+          step_type: 'agent_response',
+          text_delta: 'OK',
+          usage: { input_tokens: 100, output_tokens: 5 },
+        },
       },
       { event: 'result', result: { status: 'SUCCESS', response: 'OK', usage: { total_tokens: 105 } } },
     ];
@@ -141,7 +149,13 @@ describe('custo do turno com streams reais (Fase 3.1)', () => {
       { type: 'session.auto_mode_resolved', data: { chosenModel: 'gpt-5.6-luna' } },
       {
         type: 'assistant.message',
-        data: { messageId: 'm1', model: 'gpt-5.6-luna', content: 'Não há uma descrição da tarefa.', toolRequests: [], outputTokens: 322 },
+        data: {
+          messageId: 'm1',
+          model: 'gpt-5.6-luna',
+          content: 'Não há uma descrição da tarefa.',
+          toolRequests: [],
+          outputTokens: 322,
+        },
       },
       { type: 'assistant.turn_end', data: { turnId: '0' } },
       { type: 'session.usage_checkpoint', data: { totalNanoAiu: 529821900, totalPremiumRequests: 1 } },
@@ -154,7 +168,10 @@ describe('custo do turno com streams reais (Fase 3.1)', () => {
 
   test('Copilot: acumulado de sessão retomada desconta a base do turno anterior', () => {
     const custos = new TurnCostTracker({ usd: 0.005298219, credits: 0.5298219 });
-    const [evento] = copilotMapper({ type: 'session.usage_checkpoint', data: { totalNanoAiu: 1059643800 } });
+    const [evento] = copilotMapper({
+      type: 'session.usage_checkpoint',
+      data: { totalNanoAiu: 1059643800 },
+    });
     assert.ok(evento?.cost);
     custos.observe(evento.cost);
     const aberto = custos.flush();

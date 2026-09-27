@@ -11,9 +11,26 @@ import type { Args } from './cmd-util.js';
  * faltou o objetivo — que estava lá o tempo todo.
  */
 export const BOOLEAN_FLAGS = new Set([
-  'detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh',
+  'detach',
+  'json',
+  'force',
+  'help',
+  'quiet',
+  'write',
+  'smoke',
+  'clear',
+  'overwrite',
+  'include-env',
+  'refresh',
   // Item 5.6 (init/logs/open/update/export/cost/merge/restore).
-  'yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw',
+  'yes',
+  'follow',
+  'dry-run',
+  'list',
+  'print',
+  'check',
+  'all',
+  'raw',
   // R14-14: desliga o alerta de aprovação (bipe + título do terminal).
   'no-bell',
   // `--verbose` em start/watch/send: mostra deltas e eventos técnicos.

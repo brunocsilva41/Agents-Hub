@@ -92,7 +92,12 @@ describe('handoff de sessão pausada', () => {
     const { session, task } = await hub.sessions.start({
       projectId,
       agentId: 'lento',
-      brief: { agent: 'lento', objective: 'trabalho longo que será transferido', isolation: 'none', supervision: 'semi' },
+      brief: {
+        agent: 'lento',
+        objective: 'trabalho longo que será transferido',
+        isolation: 'none',
+        supervision: 'semi',
+      },
     });
     await esperar(
       () => hub.sessions.listEvents(session.id).some((e) => e.type === 'message'),

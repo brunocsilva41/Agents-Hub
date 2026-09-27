@@ -140,7 +140,14 @@ test('avaliarVigilancia: plano do Claude em ~/.claude/plans não pausa o supervi
   const semDirs = avaliarVigilancia(evento, '/repo', 'supervised', engine, watch);
   assert.equal(semDirs.outcome, 'paused', 'sem agentDirs a escrita fora do workdir continua pausando');
 
-  const comDirs = avaliarVigilancia(evento, '/repo', 'supervised', engine, watch, agentOwnDirs('claude', home));
+  const comDirs = avaliarVigilancia(
+    evento,
+    '/repo',
+    'supervised',
+    engine,
+    watch,
+    agentOwnDirs('claude', home),
+  );
   assert.equal(comDirs.outcome, 'ok');
 });
 

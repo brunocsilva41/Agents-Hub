@@ -131,9 +131,13 @@ export function lerFormOrcamento(form: FormOrcamento, atual: BudgetSummary): Lei
   const minutos = numero(form.minutos);
 
   if (usd !== null) {
-    if (Number.isNaN(usd) || usd <= 0) return { ok: false, erro: 'Custo: informe um valor em dólares maior que zero.' };
+    if (Number.isNaN(usd) || usd <= 0)
+      return { ok: false, erro: 'Custo: informe um valor em dólares maior que zero.' };
     if (usd < atual.consumed.usd) {
-      return { ok: false, erro: `Custo: o fluxo já gastou US$ ${atual.consumed.usd.toFixed(4)} — o teto não pode ficar abaixo disso.` };
+      return {
+        ok: false,
+        erro: `Custo: o fluxo já gastou US$ ${atual.consumed.usd.toFixed(4)} — o teto não pode ficar abaixo disso.`,
+      };
     }
     if (Math.abs(usd - atual.limits.usd) > 1e-9) limits.usd = usd;
   }
@@ -142,21 +146,29 @@ export function lerFormOrcamento(form: FormOrcamento, atual: BudgetSummary): Lei
       return { ok: false, erro: 'Tokens: informe um número inteiro maior que zero.' };
     }
     if (tokens < atual.consumed.tokens) {
-      return { ok: false, erro: `Tokens: o fluxo já usou ${atual.consumed.tokens} — o teto não pode ficar abaixo disso.` };
+      return {
+        ok: false,
+        erro: `Tokens: o fluxo já usou ${atual.consumed.tokens} — o teto não pode ficar abaixo disso.`,
+      };
     }
     if (tokens !== Math.round(atual.limits.tokens)) limits.tokens = tokens;
   }
   if (minutos !== null) {
-    if (Number.isNaN(minutos) || minutos <= 0) return { ok: false, erro: 'Tempo: informe minutos maiores que zero.' };
+    if (Number.isNaN(minutos) || minutos <= 0)
+      return { ok: false, erro: 'Tempo: informe minutos maiores que zero.' };
     const seconds = Math.round(minutos * 60);
     if (seconds < 1) return { ok: false, erro: 'Tempo: o mínimo é 1 segundo.' };
     if (seconds < atual.consumed.seconds) {
-      return { ok: false, erro: `Tempo: o fluxo já usou ${Math.ceil(atual.consumed.seconds / 60)} min — o teto não pode ficar abaixo disso.` };
+      return {
+        ok: false,
+        erro: `Tempo: o fluxo já usou ${Math.ceil(atual.consumed.seconds / 60)} min — o teto não pode ficar abaixo disso.`,
+      };
     }
     if (seconds !== Math.round(atual.limits.seconds)) limits.seconds = seconds;
   }
 
-  if (Object.keys(limits).length === 0) return { ok: false, erro: 'Nada mudou em relação ao teto atual.' };
+  if (Object.keys(limits).length === 0)
+    return { ok: false, erro: 'Nada mudou em relação ao teto atual.' };
   return { ok: true, limits };
 }
 
@@ -190,8 +202,10 @@ export function motivoDaTarefa(t: TaskSummary): string | null {
   const ultima = t.attempts.at(-1);
   if (ultima?.error) return ultima.error;
   const reprovada = t.result?.validation?.checks.find((c) => !c.passed);
-  if (reprovada) return `validação reprovou: ${reprovada.name}${reprovada.detail ? ` — ${reprovada.detail}` : ''}`;
-  if (t.state === 'failed' || t.state === 'rejected' || t.state === 'canceled') return `terminou em ${ROTULO_TAREFA[t.state] ?? t.state}`;
+  if (reprovada)
+    return `validação reprovou: ${reprovada.name}${reprovada.detail ? ` — ${reprovada.detail}` : ''}`;
+  if (t.state === 'failed' || t.state === 'rejected' || t.state === 'canceled')
+    return `terminou em ${ROTULO_TAREFA[t.state] ?? t.state}`;
   return null;
 }
 
@@ -232,10 +246,16 @@ export function execucaoEmCurso(run: WorkflowRunSummary | null): boolean {
 }
 
 /** Orçamento opcional do workflow: vazio = sem teto global. */
-export function lerOrcamentoWorkflow(texto: string): { ok: true; usd?: number } | { ok: false; erro: string } {
+export function lerOrcamentoWorkflow(
+  texto: string,
+): { ok: true; usd?: number } | { ok: false; erro: string } {
   const n = numero(texto);
   if (n === null) return { ok: true };
-  if (Number.isNaN(n) || n <= 0) return { ok: false, erro: 'Orçamento do workflow: informe dólares maiores que zero, ou deixe vazio.' };
+  if (Number.isNaN(n) || n <= 0)
+    return {
+      ok: false,
+      erro: 'Orçamento do workflow: informe dólares maiores que zero, ou deixe vazio.',
+    };
   return { ok: true, usd: n };
 }
 
@@ -278,8 +298,10 @@ export function diagnosticarAgente(a: AgentSummary): DiagnosticoAgente {
 
   const v = a.verified;
   if (v) {
-    if (v.status === 'verified') notas.push(`manifesto conferido${v.version ? ` com a versão ${v.version}` : ''}`);
-    else if (v.status === 'partial') notas.push(`manifesto conferido em parte${v.version ? ` (${v.version})` : ''}`);
+    if (v.status === 'verified')
+      notas.push(`manifesto conferido${v.version ? ` com a versão ${v.version}` : ''}`);
+    else if (v.status === 'partial')
+      notas.push(`manifesto conferido em parte${v.version ? ` (${v.version})` : ''}`);
     else notas.push('manifesto não conferido contra o binário');
     if (
       nivel === 'ok' &&
@@ -294,7 +316,10 @@ export function diagnosticarAgente(a: AgentSummary): DiagnosticoAgente {
     }
   }
 
-  if (a.model) notas.push(a.model.supported ? 'aceita escolher modelo por sessão' : 'não aceita escolher modelo pelo Hub');
+  if (a.model)
+    notas.push(
+      a.model.supported ? 'aceita escolher modelo por sessão' : 'não aceita escolher modelo pelo Hub',
+    );
   if (a.loginHint) notas.push(`login: ${a.loginHint}`);
   return { nivel, estado, notas };
 }

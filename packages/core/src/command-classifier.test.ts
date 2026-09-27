@@ -63,10 +63,10 @@ const TABELA: Array<[string, RiskLevel]> = [
   ["node -e \"require('child_process').execSync('git push')\"", 'irreversible'],
   ["node -e \"require('fs').rmSync('x',{recursive:true})\"", 'escalate'],
   ['node --eval="process.exit(0)"', 'exec'],
-  ["python -c \"import shutil; shutil.rmtree('x')\"", 'escalate'],
+  ['python -c "import shutil; shutil.rmtree(\'x\')"', 'escalate'],
   ['python -c "print(1)"', 'exec'],
-  ["python3 -c \"import os; os.system('rm -rf /')\"", 'irreversible'],
-  ["python -c \"open('/home/u/.ssh/id_rsa').read()\"", 'irreversible'],
+  ['python3 -c "import os; os.system(\'rm -rf /\')"', 'irreversible'],
+  ['python -c "open(\'/home/u/.ssh/id_rsa\').read()"', 'irreversible'],
   ['bash -c "git push"', 'irreversible'],
   ["sh -c 'ls && rm -rf x'", 'irreversible'],
   ['bash -lc "npm test"', 'exec'],
@@ -145,7 +145,10 @@ const TABELA: Array<[string, RiskLevel]> = [
   ['aws s3 ls', 'irreversible'],
   ['gh pr merge 12', 'irreversible'],
   // heredoc de commit (Claude usa em todo commit): corpo é dado, não comando
-  ["git commit -m \"$(cat <<'EOF'\nfeat(core): add x (y)\n\ngit push rm -rf / não roda\nEOF\n)\"", 'exec'],
+  [
+    'git commit -m "$(cat <<\'EOF\'\nfeat(core): add x (y)\n\ngit push rm -rf / não roda\nEOF\n)"',
+    'exec',
+  ],
   ['cat <<EOF > src/x.txt\nhello git push\nEOF', 'write'],
   ['cat <<EOF\n$(git push)\nEOF', 'irreversible'],
   // estruturas de controle
@@ -303,10 +306,14 @@ describe('arquivos sensíveis — ferramentas Read/Write (1.2)', () => {
   test('worktree dentro de ~/.agents-hub não torna toda escrita sensível', () => {
     const wt = path.join(home, '.agents-hub', 'worktrees', 'ses_1');
     const ctx = { workdir: wt, mode: 'semi' as const };
-    assert.equal(engine.classify({ kind: 'file.write', path: path.join(wt, 'src', 'a.ts') }, ctx).risk, 'write');
+    assert.equal(
+      engine.classify({ kind: 'file.write', path: path.join(wt, 'src', 'a.ts') }, ctx).risk,
+      'write',
+    );
     assert.equal(engine.classify({ kind: 'command', command: 'echo x > src/a.ts' }, ctx).risk, 'write');
     assert.equal(
-      engine.classify({ kind: 'file.write', path: path.join(home, '.agents-hub', 'config.json') }, ctx).risk,
+      engine.classify({ kind: 'file.write', path: path.join(home, '.agents-hub', 'config.json') }, ctx)
+        .risk,
       'irreversible',
     );
   });
@@ -318,7 +325,9 @@ describe('modo supervised e diretório de planos do agente (1.7)', () => {
 
   test('agentOwnDirs: Claude grava planos em ~/.claude/plans; respeita CLAUDE_CONFIG_DIR', () => {
     assert.deepEqual(plans, [path.join(home, '.claude', 'plans')]);
-    assert.deepEqual(agentOwnDirs('claude', home, { CLAUDE_CONFIG_DIR: '/cfg' }), [path.join('/cfg', 'plans')]);
+    assert.deepEqual(agentOwnDirs('claude', home, { CLAUDE_CONFIG_DIR: '/cfg' }), [
+      path.join('/cfg', 'plans'),
+    ]);
     assert.deepEqual(agentOwnDirs('codex', home), []);
   });
 
@@ -354,22 +363,41 @@ describe('modo supervised e diretório de planos do agente (1.7)', () => {
 
   test('vigilância em supervised não pausa mkdir/make/cargo build/git fetch/npm install; pausa curl', () => {
     const watch = watchForMode(DEFAULT_POLICY.watch, 'supervised');
-    for (const command of ['mkdir foo', 'make build', 'cargo build', 'git fetch', 'npm install left-pad']) {
+    for (const command of [
+      'mkdir foo',
+      'make build',
+      'cargo build',
+      'git fetch',
+      'npm install left-pad',
+    ]) {
       assert.ok(!watch.pauseOn.includes(risk(command)), command);
     }
     assert.ok(watch.pauseOn.includes(risk('curl https://example.com')));
   });
 
   test('semi: comandos comuns de desenvolvimento passam no gate; rede não liberada pede aprovação', () => {
-    for (const command of ['mkdir foo', 'make build', 'cargo build', 'git fetch', 'npm install left-pad', 'npx vitest run']) {
+    for (const command of [
+      'mkdir foo',
+      'make build',
+      'cargo build',
+      'git fetch',
+      'npm install left-pad',
+      'npx vitest run',
+    ]) {
       assert.equal(engine.decide({ kind: 'command', command }, semi).decision, 'allow', command);
     }
-    assert.equal(engine.decide({ kind: 'command', command: 'curl https://example.com' }, semi).decision, 'approve');
+    assert.equal(
+      engine.decide({ kind: 'command', command: 'curl https://example.com' }, semi).decision,
+      'approve',
+    );
   });
 
   test('curl para domínio liberado em network.allowDomains é exec', () => {
     const e = new PolicyEngine({ ...DEFAULT_POLICY, network: { allowDomains: ['registry.npmjs.org'] } });
-    assert.equal(e.classify({ kind: 'command', command: 'curl https://registry.npmjs.org/x' }, semi).risk, 'exec');
+    assert.equal(
+      e.classify({ kind: 'command', command: 'curl https://registry.npmjs.org/x' }, semi).risk,
+      'exec',
+    );
   });
 });
 
@@ -378,7 +406,11 @@ describe('tokenizador de shell', () => {
     const segs = parseShell(`echo "a && b" && ls 'c; d' | wc -l`);
     assert.deepEqual(
       segs.map((s) => s.words.map((w) => w.posix)),
-      [['echo', 'a && b'], ['ls', 'c; d'], ['wc', '-l']],
+      [
+        ['echo', 'a && b'],
+        ['ls', 'c; d'],
+        ['wc', '-l'],
+      ],
     );
   });
 
@@ -386,7 +418,12 @@ describe('tokenizador de shell', () => {
     const [seg] = parseShell('cmd 2> err.log >> out.log 2>&1 < in.txt');
     assert.deepEqual(
       seg!.redirects.map((r) => [r.op, r.fd, r.target?.posix ?? null]),
-      [['>', '2', 'err.log'], ['>>', null, 'out.log'], ['>&', '2', null], ['<', null, 'in.txt']],
+      [
+        ['>', '2', 'err.log'],
+        ['>>', null, 'out.log'],
+        ['>&', '2', null],
+        ['<', null, 'in.txt'],
+      ],
     );
   });
 

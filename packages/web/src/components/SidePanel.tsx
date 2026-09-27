@@ -98,9 +98,7 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
       });
   };
 
-  const installedAgents = agents.filter(
-    (a) => a.probe?.installed === true && a.id !== session?.agentId,
-  );
+  const installedAgents = agents.filter((a) => a.probe?.installed === true && a.id !== session?.agentId);
   // Habilitação derivada SÓ do estado que o daemon informou (lib/sessionControls):
   // pausada continua encerrável e transferível, como o daemon aceita.
   const controls = deriveControls({
@@ -156,7 +154,8 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                   className="burn-rate-chip"
                   title="Projeção de custo e tokens ao fim do orçamento, no ritmo atual"
                 >
-                  📈 {formatUsd(budget.projection.projectedUsd)} · {formatTokens(budget.projection.projectedTokens)}
+                  📈 {formatUsd(budget.projection.projectedUsd)} ·{' '}
+                  {formatTokens(budget.projection.projectedTokens)}
                 </span>
               )}
             </div>
@@ -232,7 +231,11 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                   {projectContextFailed && (
                     <div className="notice warn" role="alert">
                       ⚠️ Não foi possível buscar a memória do projeto — não é um projeto sem memória.
-                      <button type="button" className="linkish" onClick={() => setRodadaMemoria((n) => n + 1)}>
+                      <button
+                        type="button"
+                        className="linkish"
+                        onClick={() => setRodadaMemoria((n) => n + 1)}
+                      >
                         tentar de novo
                       </button>
                     </div>
@@ -246,7 +249,9 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                   {!projectContextFailed && !projectGuidelines && (
                     <div className="memory-card memory-empty">
                       <div className="memory-tag">📁 Regras do Projeto</div>
-                      <div className="memory-text muted">este projeto ainda não tem memória configurada.</div>
+                      <div className="memory-text muted">
+                        este projeto ainda não tem memória configurada.
+                      </div>
                     </div>
                   )}
 
@@ -285,7 +290,16 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                   }
                   title={controls.interrupt.reason ?? 'Pede ao Hub para interromper o turno atual'}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <rect x="6" y="4" width="4" height="16"></rect>
                     <rect x="14" y="4" width="4" height="16"></rect>
                   </svg>
@@ -302,7 +316,16 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                     'Pausa a sessão sem encerrá-la — retome depois enviando uma mensagem'
                   }
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="9" y1="9" x2="9" y2="15"></line>
                     <line x1="15" y1="9" x2="15" y2="15"></line>
@@ -315,7 +338,16 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                   onClick={() => setHandoffOpen((open) => !open)}
                   title={controls.handoff.reason ?? 'Transfere o controle da sessão para outro agente'}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <polyline points="17 1 21 5 17 9"></polyline>
                     <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
                     <polyline points="7 23 3 19 7 15"></polyline>
@@ -330,7 +362,16 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                   onClick={() => setConfirmCancel(true)}
                   title={controls.cancel.reason ?? 'Encerra a sessão (pede confirmação)'}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="15" y1="9" x2="9" y2="15"></line>
                     <line x1="9" y1="9" x2="15" y2="15"></line>
@@ -346,9 +387,15 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
               )}
 
               {confirmCancel && controls.cancel.enabled && (
-                <div className="subform confirm-cancel" role="alertdialog" aria-label="Confirmar encerramento">
+                <div
+                  className="subform confirm-cancel"
+                  role="alertdialog"
+                  aria-label="Confirmar encerramento"
+                >
                   <div className="subform-title">
-                    <span>Encerrar esta sessão? O processo do agente é finalizado e não há como retomar.</span>
+                    <span>
+                      Encerrar esta sessão? O processo do agente é finalizado e não há como retomar.
+                    </span>
                   </div>
                   <div className="subform-actions">
                     <button
@@ -356,7 +403,11 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                       autoFocus
                       onClick={() => {
                         setConfirmCancel(false);
-                        act('cancel', () => hub.cancel(session.id, 'via painel'), 'Pedido de encerramento aceito pelo Hub.');
+                        act(
+                          'cancel',
+                          () => hub.cancel(session.id, 'via painel'),
+                          'Pedido de encerramento aceito pelo Hub.',
+                        );
                       }}
                     >
                       Encerrar sessão
@@ -367,7 +418,16 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
               )}
 
               <button className="btn-delegate-full" onClick={onDelegate}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
@@ -450,9 +510,7 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
                 </div>
                 <div className="kv">
                   <dt>Sessão Nativa</dt>
-                  <dd title={session.nativeSessionId ?? ''}>
-                    {session.nativeSessionId ? 'Sim' : '—'}
-                  </dd>
+                  <dd title={session.nativeSessionId ?? ''}>{session.nativeSessionId ? 'Sim' : '—'}</dd>
                 </div>
                 <div className="kv">
                   <dt>ID da Sessão</dt>
@@ -469,7 +527,9 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
           <div className="empty sidepanel-empty">
             <div className="empty-icon">🧭</div>
             <div className="empty-title">Nenhuma sessão selecionada</div>
-            <span className="empty-hint">Selecione um fluxo para ver detalhes, memórias e telemetria.</span>
+            <span className="empty-hint">
+              Selecione um fluxo para ver detalhes, memórias e telemetria.
+            </span>
           </div>
         )}
       </div>

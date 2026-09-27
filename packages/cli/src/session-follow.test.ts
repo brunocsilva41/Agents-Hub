@@ -40,28 +40,55 @@ describe('hub watch/budget/graph/send (CLI)', () => {
   test('watch de id inexistente: erro SESSION_NOT_FOUND na hora, com dica — não pendura', async () => {
     const c = capturar();
     await assert.rejects(
-      comTeto(watchCommand(h.client, args('watch', ['ses_naoexiste']), { log: c.log, pollMs: 50 }), 5000, 'hub watch'),
-      (err: unknown) => err instanceof HubApiError && err.code === 'SESSION_NOT_FOUND' && /hub sessions/.test(err.message),
+      comTeto(
+        watchCommand(h.client, args('watch', ['ses_naoexiste']), { log: c.log, pollMs: 50 }),
+        5000,
+        'hub watch',
+      ),
+      (err: unknown) =>
+        err instanceof HubApiError &&
+        err.code === 'SESSION_NOT_FOUND' &&
+        /hub sessions/.test(err.message),
     );
     // id malformado cai no mesmo erro claro (antes: stream mudo para sempre)
     await assert.rejects(
-      comTeto(watchCommand(h.client, args('watch', ['zzz']), { log: c.log, pollMs: 50 }), 5000, 'hub watch zzz'),
+      comTeto(
+        watchCommand(h.client, args('watch', ['zzz']), { log: c.log, pollMs: 50 }),
+        5000,
+        'hub watch zzz',
+      ),
       /não encontrada/,
     );
     await assert.rejects(
-      comTeto(watchCommand(h.client, args('watch', [], { root: 'ses_naoexiste' }), { log: c.log, pollMs: 50 }), 5000, 'watch --root'),
+      comTeto(
+        watchCommand(h.client, args('watch', [], { root: 'ses_naoexiste' }), { log: c.log, pollMs: 50 }),
+        5000,
+        'watch --root',
+      ),
       /não encontrada/,
     );
   });
 
   test('budget/graph de id inexistente: erro 404 claro (antes: zeros e "nenhuma sessão")', async () => {
     const c = capturar();
-    await assert.rejects(budgetCommand(h.client, args('budget', ['ses_naoexiste']), { log: c.log }), /não encontrada/);
-    await assert.rejects(graphCommand(h.client, args('graph', ['ses_naoexiste']), { log: c.log }), /não encontrada/);
+    await assert.rejects(
+      budgetCommand(h.client, args('budget', ['ses_naoexiste']), { log: c.log }),
+      /não encontrada/,
+    );
+    await assert.rejects(
+      graphCommand(h.client, args('graph', ['ses_naoexiste']), { log: c.log }),
+      /não encontrada/,
+    );
     assert.equal(c.linhas.length, 0, 'nada de barra 0% nem "nenhuma sessão"');
     // E o daemon responde 404 direto (MCP e Web usam a mesma rota).
-    await assert.rejects(h.client.budget('ses_naoexiste'), (e: unknown) => e instanceof HubApiError && e.status === 404);
-    await assert.rejects(h.client.graph('ses_naoexiste'), (e: unknown) => e instanceof HubApiError && e.status === 404);
+    await assert.rejects(
+      h.client.budget('ses_naoexiste'),
+      (e: unknown) => e instanceof HubApiError && e.status === 404,
+    );
+    await assert.rejects(
+      h.client.graph('ses_naoexiste'),
+      (e: unknown) => e instanceof HubApiError && e.status === 404,
+    );
   });
 
   test('budget/graph de sessão FILHA usam a raiz do fluxo e avisam', async () => {
@@ -82,7 +109,11 @@ describe('hub watch/budget/graph/send (CLI)', () => {
 
     const c = capturar();
     const d = await comTeto(
-      watchCommand(h.client, args('watch', [], { root: session.id }), { log: c.log, logErro: c.logErro, pollMs: 50 }),
+      watchCommand(h.client, args('watch', [], { root: session.id }), {
+        log: c.log,
+        logErro: c.logErro,
+        pollMs: 50,
+      }),
       8000,
       'hub watch --root',
     );
@@ -104,7 +135,9 @@ describe('hub watch/budget/graph/send (CLI)', () => {
     await esperar(() => h.hub.store.sessions.get(session.id)?.state === 'paused', 'sessão pausar');
     const antigos = h.hub.store.events.list({ sessionId: session.id, limit: 500 });
     assert.ok(
-      antigos.some((e) => e.type === 'error' || e.type === 'session.ended' || e.type === 'turn.completed'),
+      antigos.some(
+        (e) => e.type === 'error' || e.type === 'session.ended' || e.type === 'turn.completed',
+      ),
       'o histórico precisa ter o evento terminal antigo que confundia o send',
     );
 

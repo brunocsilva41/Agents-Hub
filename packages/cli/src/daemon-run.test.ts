@@ -96,6 +96,9 @@ describe('hub daemon com a porta ocupada', () => {
 
   test('outros erros passam como vieram', async () => {
     const original = Object.assign(new Error('EACCES'), { code: 'EACCES' });
-    assert.equal(await explicarFalhaDeListen(original, 'http://127.0.0.1:1', async () => true), original);
+    assert.equal(
+      await explicarFalhaDeListen(original, 'http://127.0.0.1:1', async () => true),
+      original,
+    );
   });
 });

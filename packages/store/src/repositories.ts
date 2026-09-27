@@ -118,9 +118,7 @@ class SqliteProjectRepository implements ProjectRepository {
     if (!bruto) return {};
     try {
       const parsed: unknown = JSON.parse(bruto);
-      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed)
-        : {};
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch {
       // Coluna corrompida não derruba o daemon: o contexto só some, como um
       // YAML quebrado faz com o do repositório.
@@ -523,8 +521,7 @@ class SqliteEventRepository implements EventRepository {
     // chamada zera no máximo N linhas e quem chama cede o event loop entre os
     // lotes. O índice parcial `idx_events_raw` (só linhas com `raw_json`) faz a
     // passada "sem nada a fazer" custar O(sessões encerradas), não O(eventos).
-    const lote =
-      limit !== undefined && Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : -1;
+    const lote = limit !== undefined && Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : -1;
     const result = this.db
       .prepare(
         `UPDATE events SET raw_json = NULL
@@ -538,7 +535,6 @@ class SqliteEventRepository implements EventRepository {
       .run(cutoffIso, lote);
     return num(result.changes);
   }
-
 }
 
 class SqliteApprovalRepository implements ApprovalRepository {

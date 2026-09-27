@@ -31,7 +31,8 @@ function pasta(): string {
 
 const ALVO: AlvoDoAutostart = {
   node: 'C:\\Program Files\\nodejs\\node.exe',
-  entrada: 'C:\\Users\\João Silva\\AppData\\Roaming\\npm\\node_modules\\agents-hub\\node_modules\\@agents-hub\\cli\\dist\\bin.js',
+  entrada:
+    'C:\\Users\\João Silva\\AppData\\Roaming\\npm\\node_modules\\agents-hub\\node_modules\\@agents-hub\\cli\\dist\\bin.js',
   nodeFlags: [],
   env: {},
 };
@@ -64,7 +65,11 @@ describe('hub autostart', () => {
 
   test('enable grava UTF-16LE com BOM (caminho com acento sobrevive); status lê; disable remove', () => {
     const dir = pasta();
-    assert.deepEqual(estadoDoAutostart(dir), { suportado: true, ativo: false, arquivo: path.join(dir, NOME_DO_ITEM) });
+    assert.deepEqual(estadoDoAutostart(dir), {
+      suportado: true,
+      ativo: false,
+      arquivo: path.join(dir, NOME_DO_ITEM),
+    });
 
     const arquivo = habilitarAutostart(dir, ALVO);
     const bruto = readFileSync(arquivo);

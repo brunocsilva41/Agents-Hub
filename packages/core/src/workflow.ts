@@ -6,7 +6,11 @@ import { sleep as defaultSleep } from './resilience.js';
 export const MAX_WORKFLOW_STEPS = 200;
 
 export const WorkflowStepSchema = z.object({
-  id: z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'id do step deve ser alfanumérico'),
+  id: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_-]+$/, 'id do step deve ser alfanumérico'),
   agent: z.string().min(1).max(64),
   objective: z.string().min(1).max(50_000),
   dependsOn: z.array(z.string()).default([]),
@@ -464,10 +468,7 @@ export async function runWorkflow(
  * primeiro passo com `usd: 100` num teto de 10 levava os 10 inteiros e o irmão
  * do mesmo lote era pulado por "orçamento esgotado" sem nada ter sido gasto.
  */
-function repartirSaldo(
-  executaveis: WorkflowStep[],
-  saldo: number | null,
-): Map<string, number | null> {
+function repartirSaldo(executaveis: WorkflowStep[], saldo: number | null): Map<string, number | null> {
   const tetos = new Map<string, number | null>();
   if (saldo === null) {
     for (const step of executaveis) tetos.set(step.id, null);

@@ -141,7 +141,8 @@ describe('loadConfig — variáveis de ambiente', () => {
   function home(conteudo?: unknown): string {
     const raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-config-env-'));
     raizes.push(raiz);
-    if (conteudo !== undefined) writeFileSync(path.join(raiz, 'config.json'), JSON.stringify(conteudo), 'utf8');
+    if (conteudo !== undefined)
+      writeFileSync(path.join(raiz, 'config.json'), JSON.stringify(conteudo), 'utf8');
     return raiz;
   }
 
@@ -172,7 +173,16 @@ describe('loadConfig — variáveis de ambiente', () => {
 // `node_modules/` e o daemon subia sem manifestos e sem painel.
 describe('raiz da instalação', () => {
   test('pacote instalado: a raiz é o próprio agents-hub/', () => {
-    const dist = path.join('C:', 'npm', 'node_modules', 'agents-hub', 'node_modules', '@agents-hub', 'daemon', 'dist');
+    const dist = path.join(
+      'C:',
+      'npm',
+      'node_modules',
+      'agents-hub',
+      'node_modules',
+      '@agents-hub',
+      'daemon',
+      'dist',
+    );
     assert.equal(installRoot(dist), path.join('C:', 'npm', 'node_modules', 'agents-hub'));
   });
 

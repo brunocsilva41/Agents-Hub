@@ -88,34 +88,148 @@ interface Arg {
 
 /** Comandos que só leem — quando também estão na allow list, o risco é `read`. */
 const READ_ONLY = new Set([
-  'ls', 'dir', 'cat', 'type', 'head', 'tail', 'grep', 'egrep', 'fgrep', 'rg', 'find', 'echo',
-  'printf', 'wc', 'which', 'where', 'tree', 'sort', 'uniq', 'cut', 'diff', 'jq', 'stat', 'file',
-  'du', 'df', 'sed', 'awk', 'get-childitem', 'gci', 'get-content', 'gc', 'select-string', 'sls',
-  'get-item', 'test-path', 'resolve-path', 'write-output', 'write-host', 'get-command', 'whoami',
-  'date', 'basename', 'dirname', 'realpath', 'readlink', 'nl', 'tac', 'column', 'fd', 'ag',
+  'ls',
+  'dir',
+  'cat',
+  'type',
+  'head',
+  'tail',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'find',
+  'echo',
+  'printf',
+  'wc',
+  'which',
+  'where',
+  'tree',
+  'sort',
+  'uniq',
+  'cut',
+  'diff',
+  'jq',
+  'stat',
+  'file',
+  'du',
+  'df',
+  'sed',
+  'awk',
+  'get-childitem',
+  'gci',
+  'get-content',
+  'gc',
+  'select-string',
+  'sls',
+  'get-item',
+  'test-path',
+  'resolve-path',
+  'write-output',
+  'write-host',
+  'get-command',
+  'whoami',
+  'date',
+  'basename',
+  'dirname',
+  'realpath',
+  'readlink',
+  'nl',
+  'tac',
+  'column',
+  'fd',
+  'ag',
 ]);
 
 /** Builtins sem efeito colateral — risco `read` mesmo fora da allow list. */
 const SAFE_BUILTINS = new Set([
-  'cd', 'pwd', 'true', 'false', ':', 'test', '[', '[[', ']]', 'read', 'set', 'shift', 'local',
-  'declare', 'typeset', 'unset', 'return', 'exit', 'wait', 'sleep', 'start-sleep', 'set-location',
-  'sl', 'get-location', 'push-location', 'pop-location', 'pushd', 'popd', 'cls', 'clear',
-  'shopt', 'setlocal', 'endlocal', 'chcp', 'title', 'rem', '@echo',
+  'cd',
+  'pwd',
+  'true',
+  'false',
+  ':',
+  'test',
+  '[',
+  '[[',
+  ']]',
+  'read',
+  'set',
+  'shift',
+  'local',
+  'declare',
+  'typeset',
+  'unset',
+  'return',
+  'exit',
+  'wait',
+  'sleep',
+  'start-sleep',
+  'set-location',
+  'sl',
+  'get-location',
+  'push-location',
+  'pop-location',
+  'pushd',
+  'popd',
+  'cls',
+  'clear',
+  'shopt',
+  'setlocal',
+  'endlocal',
+  'chcp',
+  'title',
+  'rem',
+  '@echo',
   // Cmdlets de pipeline do PowerShell que só transformam/formatam objetos.
-  'format-table', 'ft', 'format-list', 'fl', 'format-wide', 'select-object', 'select',
-  'where-object', 'measure-object', 'measure', 'sort-object', 'group-object', 'out-string',
-  'out-null', 'out-host', 'convertto-json', 'convertfrom-json', 'get-location', 'test-path',
+  'format-table',
+  'ft',
+  'format-list',
+  'fl',
+  'format-wide',
+  'select-object',
+  'select',
+  'where-object',
+  'measure-object',
+  'measure',
+  'sort-object',
+  'group-object',
+  'out-string',
+  'out-null',
+  'out-host',
+  'convertto-json',
+  'convertfrom-json',
+  'get-location',
+  'test-path',
 ]);
 
 /** Cmdlets cujo bloco é predicado/expressão, não comando. */
 const PS_PREDICATE = new Set([
-  'where-object', 'where', '?', 'sort-object', 'select-object', 'group-object', 'measure-object',
+  'where-object',
+  'where',
+  '?',
+  'sort-object',
+  'select-object',
+  'group-object',
+  'measure-object',
 ]);
 
 /** Palavras de controle: removidas antes de classificar o resto do segmento. */
 const CONTROL_WORDS = new Set([
-  '{', '}', 'then', 'else', 'do', 'done', 'fi', 'esac', '!', 'if', 'elif', 'while', 'until',
-  'time', 'coproc',
+  '{',
+  '}',
+  'then',
+  'else',
+  'do',
+  'done',
+  'fi',
+  'esac',
+  '!',
+  'if',
+  'elif',
+  'while',
+  'until',
+  'time',
+  'coproc',
 ]);
 
 /** Comandos cujos argumentos são dado, não caminho — ficam fora da varredura de segredo. */
@@ -158,7 +272,15 @@ const IRREVERSIBLE_RULES: Array<{ cmd: string; seq: string[]; label: string }> =
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'ash', 'mksh', 'busybox']);
 const NETWORK = new Set([
-  'curl', 'wget', 'invoke-webrequest', 'iwr', 'invoke-restmethod', 'irm', 'http', 'https', 'xh',
+  'curl',
+  'wget',
+  'invoke-webrequest',
+  'iwr',
+  'invoke-restmethod',
+  'irm',
+  'http',
+  'https',
+  'xh',
   'aria2c',
 ]);
 
@@ -166,11 +288,7 @@ const NETWORK = new Set([
 // Entrada
 // ---------------------------------------------------------------------------
 
-export function classifyCommand(
-  command: string,
-  view: CommandPolicyView,
-  depth = 0,
-): CommandVerdict {
+export function classifyCommand(command: string, view: CommandPolicyView, depth = 0): CommandVerdict {
   if (depth > MAX_DEPTH) return v('escalate', 'comando aninhado demais para classificar');
   const text = command.trim();
   if (text.length === 0) return v('read', 'comando vazio');
@@ -229,7 +347,15 @@ function toArg(w: ShellWord, reading: 'posix' | 'win'): Arg {
 
 const WRITE_OPS = new Set(['>', '>>', '>|', '&>', '&>>', '>&', '<>']);
 const READ_OPS = new Set(['<', '<>', '<&']);
-const NULL_DEVICES = new Set(['/dev/null', 'nul', '$null', '/dev/stderr', '/dev/stdout', '/dev/tty', 'con']);
+const NULL_DEVICES = new Set([
+  '/dev/null',
+  'nul',
+  '$null',
+  '/dev/stderr',
+  '/dev/stdout',
+  '/dev/tty',
+  'con',
+]);
 
 function classifyRedirect(red: ShellRedirect, view: CommandPolicyView): CommandVerdict {
   if (!red.target) return v('read', 'redirecionamento sem arquivo');
@@ -249,16 +375,27 @@ export function resolveArgPath(raw: string, workdir: string): { abs: string; unr
   const home = os.homedir();
   let t = raw.replaceAll(SUBST_PLACEHOLDER, '__subst__');
   t = t.replace(/^~(?=$|[\\/])/, home);
-  t = t.replace(/^(\$HOME|\$\{HOME\}|\$env:USERPROFILE|\$env:HOME|%USERPROFILE%|%HOMEPATH%)(?=$|[\\/])/i, home);
+  t = t.replace(
+    /^(\$HOME|\$\{HOME\}|\$env:USERPROFILE|\$env:HOME|%USERPROFILE%|%HOMEPATH%)(?=$|[\\/])/i,
+    home,
+  );
   const unresolved = /\$|%\w+%|__subst__/.test(t);
   return { abs: path.resolve(workdir, t), unresolved };
 }
 
-function writeTarget(raw: string, dynamic: boolean, view: CommandPolicyView, via: string): CommandVerdict {
+function writeTarget(
+  raw: string,
+  dynamic: boolean,
+  view: CommandPolicyView,
+  via: string,
+): CommandVerdict {
   const { abs, unresolved } = resolveArgPath(raw, view.workdir);
   const r = view.classifyWrite(abs);
   if ((unresolved || dynamic) && RANK[r.risk] < RANK.escalate) {
-    return v('escalate', `${via}: alvo de escrita dinâmico (${raw.replaceAll(SUBST_PLACEHOLDER, '$(...)')})`);
+    return v(
+      'escalate',
+      `${via}: alvo de escrita dinâmico (${raw.replaceAll(SUBST_PLACEHOLDER, '$(...)')})`,
+    );
   }
   return { ...r, reason: `${via}: ${r.reason}` };
 }
@@ -384,7 +521,8 @@ function matchList(list: readonly string[], name: string, args: Arg[]): string |
  */
 function scriptBlock(name: string, args: Arg[], view: CommandPolicyView, depth: number): CommandVerdict {
   const k = args.findIndex(
-    (a) => !a.quoted && a.t.startsWith('{') && !(a.t.length > 1 && a.t.endsWith('}') && !a.t.includes(' ')),
+    (a) =>
+      !a.quoted && a.t.startsWith('{') && !(a.t.length > 1 && a.t.endsWith('}') && !a.t.includes(' ')),
   );
   if (k < 0) return v('read', 'sem bloco');
   const inner: Arg[] = [];
@@ -462,7 +600,21 @@ function classifySpecific(
     case 'xargs': {
       const rest = skipFlags(
         args,
-        new Set(['-n', '-I', '-i', '-P', '-d', '-L', '-E', '-s', '-a', '--max-args', '--max-procs', '--delimiter', '--arg-file']),
+        new Set([
+          '-n',
+          '-I',
+          '-i',
+          '-P',
+          '-d',
+          '-L',
+          '-E',
+          '-s',
+          '-a',
+          '--max-args',
+          '--max-procs',
+          '--delimiter',
+          '--arg-file',
+        ]),
       );
       return rest.length === 0 ? v('read', 'xargs sem comando (echo)') : unwrap(rest, view, depth);
     }
@@ -572,7 +724,17 @@ function classifyEnv(args: Arg[], view: CommandPolicyView, depth: number): Comma
     const t = args[i]!.t;
     if (t === '-S' || t === '--split-string') {
       const s = args[i + 1]?.t ?? '';
-      return worstVerdict(r, classifyCommand(`${s} ${args.slice(i + 2).map((a) => a.t).join(' ')}`, view, depth + 1));
+      return worstVerdict(
+        r,
+        classifyCommand(
+          `${s} ${args
+            .slice(i + 2)
+            .map((a) => a.t)
+            .join(' ')}`,
+          view,
+          depth + 1,
+        ),
+      );
     }
     if (t === '-u' || t === '--unset' || t === '-C' || t === '--chdir') {
       i += 2;
@@ -592,7 +754,8 @@ function classifyEnv(args: Arg[], view: CommandPolicyView, depth: number): Comma
   }
   const rest = args.slice(i);
   // `env` sozinho imprime o ambiente — onde moram chaves de API.
-  if (rest.length === 0) return worstVerdict(r, v('escalate', 'env sem comando expõe variáveis de ambiente'));
+  if (rest.length === 0)
+    return worstVerdict(r, v('escalate', 'env sem comando expõe variáveis de ambiente'));
   return worstVerdict(r, unwrap(rest, view, depth));
 }
 
@@ -629,11 +792,19 @@ function classifyShell(
       break;
     }
     if (!/^[-+]/.test(t) || t.length === 1) break;
-    if (t === '-o' || t === '+o' || t === '-O' || t === '+O' || t === '--rcfile' || t === '--init-file') {
+    if (
+      t === '-o' ||
+      t === '+o' ||
+      t === '-O' ||
+      t === '+O' ||
+      t === '--rcfile' ||
+      t === '--init-file'
+    ) {
       i += 2;
       continue;
     }
-    if (t === '-c' || t === '--command' || (/^-[A-Za-z]+$/.test(t) && t.includes('c'))) commandMode = true;
+    if (t === '-c' || t === '--command' || (/^-[A-Za-z]+$/.test(t) && t.includes('c')))
+      commandMode = true;
     if (/^-[A-Za-z]*s[A-Za-z]*$/.test(t)) stdin = true;
     i++;
   }
@@ -662,21 +833,47 @@ function classifyCmdExe(args: Arg[], view: CommandPolicyView, depth: number): Co
     }
     return v('escalate', 'cmd sem /c: shell interativo');
   }
-  const inner = args.slice(idx + 1).map((a) => a.t).join(' ');
+  const inner = args
+    .slice(idx + 1)
+    .map((a) => a.t)
+    .join(' ');
   if (inner.trim().length === 0) return v('escalate', 'cmd /c sem comando');
   return worstVerdict(v('exec', 'cmd /c'), classifyCommand(inner, view, depth + 1));
 }
 
 function classifyPwsh(args: Arg[], view: CommandPolicyView, depth: number): CommandVerdict {
-  const withValue = ['-executionpolicy', '-ep', '-ex', '-windowstyle', '-w', '-inputformat', '-if',
-    '-outputformat', '-of', '-o', '-version', '-v', '-configurationname', '-workingdirectory', '-wd',
-    '-settingsfile', '-psconsolefile', '-custompipename'];
+  const withValue = [
+    '-executionpolicy',
+    '-ep',
+    '-ex',
+    '-windowstyle',
+    '-w',
+    '-inputformat',
+    '-if',
+    '-outputformat',
+    '-of',
+    '-o',
+    '-version',
+    '-v',
+    '-configurationname',
+    '-workingdirectory',
+    '-wd',
+    '-settingsfile',
+    '-psconsolefile',
+    '-custompipename',
+  ];
   let i = 0;
   while (i < args.length) {
     const t = args[i]!.t.toLowerCase();
     if (!t.startsWith('-') && !t.startsWith('/')) break;
     const flag = t.replace(/^\//, '-');
-    if (flag === '-encodedcommand' || flag === '-enc' || flag === '-e' || flag === '-ec' || /^-en/.test(flag)) {
+    if (
+      flag === '-encodedcommand' ||
+      flag === '-enc' ||
+      flag === '-e' ||
+      flag === '-ec' ||
+      /^-en/.test(flag)
+    ) {
       const decoded = decodePwshBase64(args[i + 1]?.t ?? '');
       if (decoded === null) return v('escalate', 'powershell -EncodedCommand ilegível');
       return worstVerdict(
@@ -686,7 +883,10 @@ function classifyPwsh(args: Arg[], view: CommandPolicyView, depth: number): Comm
     }
     if (flag === '-file' || flag === '-f') return v('escalate', 'powershell -File executa script');
     if (flag === '-command' || flag === '-c' || /^-com/.test(flag)) {
-      const inner = args.slice(i + 1).map((a) => a.t).join(' ');
+      const inner = args
+        .slice(i + 1)
+        .map((a) => a.t)
+        .join(' ');
       if (inner.trim() === '-' || inner.trim() === '') {
         return v('escalate', 'powershell lendo comandos da entrada padrão');
       }
@@ -730,7 +930,12 @@ function classifyWsl(args: Arg[], view: CommandPolicyView, depth: number): Comma
   return worstVerdict(v('exec', 'wsl'), unwrap(rest, view, depth));
 }
 
-function classifyStart(name: string, args: Arg[], view: CommandPolicyView, depth: number): CommandVerdict {
+function classifyStart(
+  name: string,
+  args: Arg[],
+  view: CommandPolicyView,
+  depth: number,
+): CommandVerdict {
   let r: CommandVerdict = v('exec', name);
   if (args.some((a, k) => /^-verb$/i.test(a.t) && /^runas$/i.test(args[k + 1]?.t ?? ''))) {
     r = v('escalate', 'elevação de privilégio (-Verb RunAs)');
@@ -800,7 +1005,10 @@ function classifyInterpreter(
   for (let k = 0; k < args.length; k++) {
     const t = args[k]!.t;
     if (spec.codeSub && k === 0 && t === spec.codeSub) {
-      code = args.slice(1).map((a) => a.t).join(' ');
+      code = args
+        .slice(1)
+        .map((a) => a.t)
+        .join(' ');
       break;
     }
     const eq = spec.codeFlags.find((f) => f.startsWith('--') && t.startsWith(`${f}=`));
@@ -874,8 +1082,16 @@ function stringLiterals(code: string): string[] {
 // --- git ------------------------------------------------------------------
 
 const GIT_GLOBAL_WITH_VALUE = new Set([
-  '-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--exec-path',
-  '--list-cmds', '--attr-source',
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--super-prefix',
+  '--config-env',
+  '--exec-path',
+  '--list-cmds',
+  '--attr-source',
 ]);
 
 /** Remove opções globais: `git -C x -c k=v push` → `push`. */
@@ -915,17 +1131,20 @@ function classifyGit(argv: Arg[], view: CommandPolicyView): CommandVerdict {
       r = v('irreversible', 'git push publica no remoto');
       break;
     case 'reset':
-      if (hasLong(rest, '--hard', '--merge', '--keep')) r = v('irreversible', 'git reset --hard descarta mudanças');
+      if (hasLong(rest, '--hard', '--merge', '--keep'))
+        r = v('irreversible', 'git reset --hard descarta mudanças');
       break;
     case 'clean':
-      if (shorts.includes('f') || hasLong(rest, '--force')) r = v('irreversible', 'git clean -f apaga arquivos não versionados');
+      if (shorts.includes('f') || hasLong(rest, '--force'))
+        r = v('irreversible', 'git clean -f apaga arquivos não versionados');
       else r = v('write', 'git clean');
       break;
     case 'branch': {
       const del = /[dD]/.test(shorts) || hasLong(rest, '--delete');
       const force = shorts.includes('D') || shorts.includes('f') || hasLong(rest, '--force');
       if (del && force) r = v('irreversible', 'git branch -D apaga branch sem checar merge');
-      else if (del || /[mMcC]/.test(shorts) || hasLong(rest, '--move', '--copy')) r = v('write', 'git branch altera branches');
+      else if (del || /[mMcC]/.test(shorts) || hasLong(rest, '--move', '--copy'))
+        r = v('write', 'git branch altera branches');
       break;
     }
     case 'tag':
@@ -933,24 +1152,33 @@ function classifyGit(argv: Arg[], view: CommandPolicyView): CommandVerdict {
       break;
     case 'stash': {
       const action = positional[0]?.t.toLowerCase();
-      if (action === 'drop' || action === 'clear') r = v('irreversible', `git stash ${action} descarta trabalho guardado`);
+      if (action === 'drop' || action === 'clear')
+        r = v('irreversible', `git stash ${action} descarta trabalho guardado`);
       break;
     }
     case 'checkout':
-      if (shorts.includes('f') || hasLong(rest, '--force') || rest.some((a) => a.t === '--' || a.t === '.')) {
+      if (
+        shorts.includes('f') ||
+        hasLong(rest, '--force') ||
+        rest.some((a) => a.t === '--' || a.t === '.')
+      ) {
         r = v('irreversible', 'git checkout descarta mudanças locais');
       }
       break;
     case 'restore': {
-      const onlyStaged = (shorts.includes('S') || hasLong(rest, '--staged')) && !(shorts.includes('W') || hasLong(rest, '--worktree'));
+      const onlyStaged =
+        (shorts.includes('S') || hasLong(rest, '--staged')) &&
+        !(shorts.includes('W') || hasLong(rest, '--worktree'));
       if (!onlyStaged) r = v('irreversible', 'git restore descarta mudanças locais');
       break;
     }
     case 'switch':
-      if (shorts.includes('f') || hasLong(rest, '--force', '--discard-changes')) r = v('irreversible', 'git switch --discard-changes');
+      if (shorts.includes('f') || hasLong(rest, '--force', '--discard-changes'))
+        r = v('irreversible', 'git switch --discard-changes');
       break;
     case 'reflog':
-      if (['expire', 'delete'].includes(positional[0]?.t.toLowerCase() ?? '')) r = v('irreversible', 'git reflog expire/delete');
+      if (['expire', 'delete'].includes(positional[0]?.t.toLowerCase() ?? ''))
+        r = v('irreversible', 'git reflog expire/delete');
       break;
     case 'update-ref':
       if (shorts.includes('d')) r = v('irreversible', 'git update-ref -d');
@@ -964,7 +1192,11 @@ function classifyGit(argv: Arg[], view: CommandPolicyView): CommandVerdict {
       if (hasLong(rest, '--prune')) r = v('irreversible', 'git gc --prune');
       break;
     case 'config':
-      if (!hasLong(rest, '--get', '--get-all', '--get-regexp', '--list', '-l') && !shorts.includes('l') && positional.length > 1) {
+      if (
+        !hasLong(rest, '--get', '--get-all', '--get-regexp', '--list', '-l') &&
+        !shorts.includes('l') &&
+        positional.length > 1
+      ) {
         r = v('escalate', 'git config altera configuração (pode apontar hooks e comandos)');
       }
       break;
@@ -975,7 +1207,9 @@ function classifyGit(argv: Arg[], view: CommandPolicyView): CommandVerdict {
 
   const base = r ?? classifyByLists('git', norm, view);
   // `-c core.fsmonitor=...`, `-c alias.x=!cmd` executam comando arbitrário.
-  const cfg = config ? v('escalate', 'git -c/--config-env pode executar comando arbitrário') : v('read', '');
+  const cfg = config
+    ? v('escalate', 'git -c/--config-env pode executar comando arbitrário')
+    : v('read', '');
   return worstVerdict(base, cfg);
 }
 
@@ -1013,27 +1247,46 @@ function isReadOnlyGit(name: string, args: Arg[]): boolean {
 
 function classifyRm(args: Arg[], view: CommandPolicyView): CommandVerdict {
   const flags = args.filter((a) => isFlag(a) && a.t !== '--');
-  const letters = flags.filter((a) => !a.t.startsWith('--')).map((a) => a.t.slice(1)).join('');
-  const recursive = /[rR]/.test(letters) || hasLong(flags, '--recursive') || flags.some((a) => /^-rec/i.test(a.t));
+  const letters = flags
+    .filter((a) => !a.t.startsWith('--'))
+    .map((a) => a.t.slice(1))
+    .join('');
+  const recursive =
+    /[rR]/.test(letters) || hasLong(flags, '--recursive') || flags.some((a) => /^-rec/i.test(a.t));
   const force = /f/i.test(letters) || hasLong(flags, '--force');
   if (recursive || force) {
-    return v('irreversible', `remoção ${recursive ? 'recursiva' : 'forçada'} (rm ${flags.map((a) => a.t).join(' ')})`);
+    return v(
+      'irreversible',
+      `remoção ${recursive ? 'recursiva' : 'forçada'} (rm ${flags.map((a) => a.t).join(' ')})`,
+    );
   }
-  return writeTargets(args.filter((a) => !isFlag(a)), view, 'rm');
+  return writeTargets(
+    args.filter((a) => !isFlag(a)),
+    view,
+    'rm',
+  );
 }
 
 function classifyDel(args: Arg[], view: CommandPolicyView): CommandVerdict {
   if (args.some((a) => /^\/[sqf]$/i.test(a.t) || /^-(rec|force)/i.test(a.t))) {
     return v('irreversible', 'remoção recursiva/forçada (del)');
   }
-  return writeTargets(args.filter((a) => !/^[-/]/.test(a.t)), view, 'del');
+  return writeTargets(
+    args.filter((a) => !/^[-/]/.test(a.t)),
+    view,
+    'del',
+  );
 }
 
 function classifyRmdir(args: Arg[], view: CommandPolicyView): CommandVerdict {
   if (args.some((a) => /^\/s$/i.test(a.t) || /^-rec/i.test(a.t) || /^-(force)/i.test(a.t))) {
     return v('irreversible', 'remoção recursiva de diretório (rd /s)');
   }
-  return writeTargets(args.filter((a) => !/^[-/]/.test(a.t) || a.t.includes('/', 1)), view, 'rmdir');
+  return writeTargets(
+    args.filter((a) => !/^[-/]/.test(a.t) || a.t.includes('/', 1)),
+    view,
+    'rmdir',
+  );
 }
 
 function writeTargets(targets: Arg[], view: CommandPolicyView, via: string): CommandVerdict {
@@ -1052,13 +1305,18 @@ function classifyFind(argv: Arg[], view: CommandPolicyView, depth: number): Comm
       const inner: Arg[] = [];
       k++;
       while (k < args.length && ![';', '\\;', '+'].includes(args[k]!.t)) inner.push(args[k++]!);
-      const innerV = inner.length > 0 ? classifyArgv(inner, view, depth + 1) : v('escalate', 'find -exec vazio');
+      const innerV =
+        inner.length > 0 ? classifyArgv(inner, view, depth + 1) : v('escalate', 'find -exec vazio');
       r = worstVerdict(r ?? v('exec', `find ${t}`), worstVerdict(v('exec', `find ${t}`), innerV));
       continue;
     }
     if (['-fprint', '-fprint0', '-fprintf', '-fls'].includes(t)) {
       const target = args[k + 1];
-      if (target) r = worstVerdict(r ?? v('write', 'find'), writeTarget(target.t, target.dynamic, view, `find ${t}`));
+      if (target)
+        r = worstVerdict(
+          r ?? v('write', 'find'),
+          writeTarget(target.t, target.dynamic, view, `find ${t}`),
+        );
       k++;
     }
   }
@@ -1096,7 +1354,8 @@ function classifySed(argv: Arg[], view: CommandPolicyView): CommandVerdict | nul
 
 function classifyAwk(argv: Arg[], view: CommandPolicyView): CommandVerdict | null {
   const args = argv.slice(1);
-  if (args.some((a) => a.t === '-f' || a.t.startsWith('--file'))) return v('escalate', 'awk -f executa script de arquivo');
+  if (args.some((a) => a.t === '-f' || a.t.startsWith('--file')))
+    return v('escalate', 'awk -f executa script de arquivo');
   const program = args.find((a) => !isFlag(a))?.t ?? '';
   if (/system\s*\(|\|\s*getline|\|\s*"|print[^;]*>|printf[^;]*>/.test(program)) {
     return v('escalate', 'programa awk executa comando ou escreve arquivo');
@@ -1105,7 +1364,11 @@ function classifyAwk(argv: Arg[], view: CommandPolicyView): CommandVerdict | nul
   return null;
 }
 
-function classifyOutputFlag(argv: Arg[], view: CommandPolicyView, flags: Set<string>): CommandVerdict | null {
+function classifyOutputFlag(
+  argv: Arg[],
+  view: CommandPolicyView,
+  flags: Set<string>,
+): CommandVerdict | null {
   const args = argv.slice(1);
   let r: CommandVerdict | null = null;
   for (let k = 0; k < args.length; k++) {
@@ -1113,7 +1376,10 @@ function classifyOutputFlag(argv: Arg[], view: CommandPolicyView, flags: Set<str
     const eq = [...flags].find((f) => t.startsWith(`${f}=`));
     const target = eq ? t.slice(eq.length + 1) : flags.has(t) ? args[k + 1]?.t : undefined;
     if (target !== undefined) {
-      r = worstVerdict(r ?? v('write', 'saída em arquivo'), writeTarget(target, false, view, argv[0]!.t));
+      r = worstVerdict(
+        r ?? v('write', 'saída em arquivo'),
+        writeTarget(target, false, view, argv[0]!.t),
+      );
     }
   }
   return r === null ? null : worstVerdict(r, classifyByLists(commandName(argv[0]!.t), argv, view));
@@ -1128,7 +1394,11 @@ function classifyDd(args: Arg[], view: CommandPolicyView): CommandVerdict {
 }
 
 /** Comandos cuja essência é criar/alterar arquivo: classificados pelo alvo, como a ferramenta Write. */
-function classifyWriteCommand(name: string, args: Arg[], view: CommandPolicyView): CommandVerdict | null {
+function classifyWriteCommand(
+  name: string,
+  args: Arg[],
+  view: CommandPolicyView,
+): CommandVerdict | null {
   const positional = (withValue: Set<string>): Arg[] => {
     const out: Arg[] = [];
     for (let k = 0; k < args.length; k++) {
@@ -1169,7 +1439,11 @@ function classifyWriteCommand(name: string, args: Arg[], view: CommandPolicyView
     case 'tee':
     case 'truncate':
     case 'unlink':
-      return writeTargets(positional(new Set(['-m', '--mode', '-d', '-t', '-r', '-s', '--size', '--reference'])), view, name);
+      return writeTargets(
+        positional(new Set(['-m', '--mode', '-d', '-t', '-r', '-s', '--size', '--reference'])),
+        view,
+        name,
+      );
     case 'new-item':
     case 'ni':
     case 'set-content':
@@ -1183,7 +1457,9 @@ function classifyWriteCommand(name: string, args: Arg[], view: CommandPolicyView
     case 'cpi':
     case 'xcopy':
     case 'robocopy': {
-      const pos = /-item$|^cpi$/.test(name) ? psTargets() : positional(new Set(['-t', '--target-directory', '-S', '--suffix']));
+      const pos = /-item$|^cpi$/.test(name)
+        ? psTargets()
+        : positional(new Set(['-t', '--target-directory', '-S', '--suffix']));
       const dest = pos.length > 1 ? pos[pos.length - 1]! : pos[0];
       let r = dest ? writeTargets([dest], view, name) : v('write', name);
       for (const src of pos.slice(0, -1)) r = worstVerdict(r, readTarget(src.t, view));
@@ -1196,7 +1472,13 @@ function classifyWriteCommand(name: string, args: Arg[], view: CommandPolicyView
     case 'ren':
     case 'rename':
     case 'rename-item':
-      return writeTargets(/-item$|^mi$/.test(name) ? psTargets() : positional(new Set(['-t', '--target-directory', '-S', '--suffix'])), view, name);
+      return writeTargets(
+        /-item$|^mi$/.test(name)
+          ? psTargets()
+          : positional(new Set(['-t', '--target-directory', '-S', '--suffix'])),
+        view,
+        name,
+      );
     case 'ln': {
       const pos = positional(new Set(['-t', '--target-directory', '-S', '--suffix']));
       const link = pos.length > 1 ? pos[pos.length - 1] : undefined;
@@ -1220,7 +1502,10 @@ function classifyNetwork(name: string, args: Arg[], view: CommandPolicyView): Co
     const t = a.t;
     const lower = t.toLowerCase();
     // Saída em arquivo.
-    if (['-o', '--output', '--output-document', '-outfile'].includes(lower) || (name === 'wget' && t === '-O')) {
+    if (
+      ['-o', '--output', '--output-document', '-outfile'].includes(lower) ||
+      (name === 'wget' && t === '-O')
+    ) {
       const target = args[k + 1];
       if (target) r = worstVerdict(r, writeTarget(target.t, target.dynamic, view, `${name} ${t}`));
       k++;
@@ -1245,7 +1530,11 @@ function classifyNetwork(name: string, args: Arg[], view: CommandPolicyView): Co
 }
 
 function hostOf(t: string): string | null {
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? t : /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(t) ? `http://${t}` : null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(t)
+    ? t
+    : /^[\w-]+(\.[\w-]+)+(:\d+)?(\/.*)?$/.test(t)
+      ? `http://${t}`
+      : null;
   if (!withScheme) return null;
   try {
     return new URL(withScheme).hostname.toLowerCase();

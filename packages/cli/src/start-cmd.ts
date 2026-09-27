@@ -3,7 +3,13 @@ import { avisoDeGateDoAgente } from './gate-aviso.js';
 import { continuacaoDe } from './continue-from.js';
 import { resolverProjeto } from './project-resolve.js';
 import { bold, dim, green, red, yellow } from './render.js';
-import { acompanhar, alertaDe, codigoDeSaida, relatarDesfecho, type Desfecho } from './session-follow.js';
+import {
+  acompanhar,
+  alertaDe,
+  codigoDeSaida,
+  relatarDesfecho,
+  type Desfecho,
+} from './session-follow.js';
 import type { EventEnvelope } from '@agents-hub/core';
 
 /**
@@ -41,9 +47,12 @@ export interface OpcoesDeStart {
  * Valida as flags de `hub start` sem rede. Devolve o brief parcial (sem
  * projeto) ou um `Error` com a mensagem para o usuário.
  */
-export function validarFlagsDeStart(args: Args): { agent: string; objective: string; brief: Omit<BriefInput, 'agent' | 'objective'> } | Error {
+export function validarFlagsDeStart(
+  args: Args,
+): { agent: string; objective: string; brief: Omit<BriefInput, 'agent' | 'objective'> } | Error {
   const agent = args.flags['agent'];
-  if (agent === true) return new Error('--agent precisa de um valor: hub start --agent claude "objetivo"');
+  if (agent === true)
+    return new Error('--agent precisa de um valor: hub start --agent claude "objetivo"');
   if (typeof agent !== 'string' || agent.trim() === '') {
     return new Error('--agent é obrigatório: você escolhe o principal a cada sessão (ADR 04.1)');
   }
@@ -64,7 +73,9 @@ export function validarFlagsDeStart(args: Args): { agent: string; objective: str
       return new Error('--isolation container ainda não está implementado (válidos: worktree, none)');
     }
     if (typeof isolation !== 'string' || !(ISOLAMENTOS as readonly string[]).includes(isolation)) {
-      return new Error(`--isolation inválido: "${String(isolation)}" (válidos: ${ISOLAMENTOS.join(', ')})`);
+      return new Error(
+        `--isolation inválido: "${String(isolation)}" (válidos: ${ISOLAMENTOS.join(', ')})`,
+      );
     }
     brief.isolation = isolation as (typeof ISOLAMENTOS)[number];
   } else {
@@ -108,7 +119,11 @@ async function validarAgente(client: HubClient, agent: string): Promise<Error | 
   );
 }
 
-export async function startCommand(client: HubClient, args: Args, o: OpcoesDeStart = {}): Promise<Desfecho | null> {
+export async function startCommand(
+  client: HubClient,
+  args: Args,
+  o: OpcoesDeStart = {},
+): Promise<Desfecho | null> {
   const log = o.log ?? ((l: string) => console.log(l));
   const logErro = o.logErro ?? ((l: string) => console.error(l));
   const falhar = (msg: string): null => {
@@ -137,13 +152,22 @@ export async function startCommand(client: HubClient, args: Args, o: OpcoesDeSta
   // `--from <sessão>`: continua o trabalho de uma sessão terminada numa nova
   // (o projeto vem dela). Ver `continue-from.ts`.
   const from = args.flags['from'];
-  if (from === true) return falhar('--from precisa do id da sessão anterior: hub start --from ses_... --agent X "objetivo"');
+  if (from === true)
+    return falhar(
+      '--from precisa do id da sessão anterior: hub start --from ses_... --agent X "objetivo"',
+    );
   const continuacao = typeof from === 'string' ? await continuacaoDe(client, from) : null;
 
-  const projectId = continuacao && args.flags['project'] === undefined
-    ? continuacao.projectId
-    : (await resolverProjeto(client, args.flags['project'])).id;
-  const brief: BriefInput = { agent: flags.agent, objective: flags.objective, ...flags.brief, ...continuacao?.brief };
+  const projectId =
+    continuacao && args.flags['project'] === undefined
+      ? continuacao.projectId
+      : (await resolverProjeto(client, args.flags['project'])).id;
+  const brief: BriefInput = {
+    agent: flags.agent,
+    objective: flags.objective,
+    ...flags.brief,
+    ...continuacao?.brief,
+  };
 
   const result = await client.startSession({
     projectId,

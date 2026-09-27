@@ -149,7 +149,10 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
       agentId: '',
       brief: { agent: 'cota', objective: 'tarefa @QUOTA=cota', isolation: 'none' },
     });
-    await esperar(() => hub.store.tasks.get(task.id)?.state === 'completed', 'tarefa concluída pela reserva');
+    await esperar(
+      () => hub.store.tasks.get(task.id)?.state === 'completed',
+      'tarefa concluída pela reserva',
+    );
 
     const t = hub.store.tasks.get(task.id)!;
     const primeira = t.attempts[0]!;

@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -116,13 +124,20 @@ describe('hub hooks install claude --write — nunca perde a config do usuário'
     const doc = JSON.parse(readFileSync(file, 'utf8')) as {
       model: string;
       permissions: { allow: string[]; deny: string[] };
-      hooks: { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }>; Stop: unknown[] };
+      hooks: {
+        PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }>;
+        Stop: unknown[];
+      };
     };
     assert.equal(doc.model, 'opus');
     assert.deepEqual(doc.permissions, { allow: ['Bash(git status)', 'Read'], deny: ['Bash(rm -rf *)'] });
     assert.equal(doc.hooks.Stop.length, 1, 'outros eventos de hook preservados');
     assert.equal(doc.hooks.PreToolUse.length, 2);
-    assert.equal(doc.hooks.PreToolUse[0]?.hooks[0]?.command, 'meu-hook.sh', 'hook do usuário preservado');
+    assert.equal(
+      doc.hooks.PreToolUse[0]?.hooks[0]?.command,
+      'meu-hook.sh',
+      'hook do usuário preservado',
+    );
     assert.match(doc.hooks.PreToolUse[1]?.hooks[0]?.command ?? '', /bin\.js" hook$/);
 
     const [b1, ...resto] = backupsDe(file);
@@ -150,7 +165,10 @@ describe('hub hooks install claude --write — nunca perde a config do usuário'
     assert.equal(readFileSync(b1!, 'utf8'), original, 'o primeiro backup nunca é sobrescrito');
     assert.ok(backups.some((b) => readFileSync(b, 'utf8') === editado));
     assert.equal((JSON.parse(readFileSync(file, 'utf8')) as { model: string }).model, 'sonnet');
-    assert.ok(!readdirSync(path.dirname(file)).some((n) => n.includes('.tmp-')), 'sem temporário esquecido');
+    assert.ok(
+      !readdirSync(path.dirname(file)).some((n) => n.includes('.tmp-')),
+      'sem temporário esquecido',
+    );
   });
 });
 
@@ -163,7 +181,11 @@ describe('hub hooks install codex --write — mexe só em codexGate.bypassHookTr
     const r1 = hub('hooks', 'install', 'codex', '--write');
     assert.equal(r1.code, 0, r1.out);
     const doc = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    assert.deepEqual(doc, { port: 48299, retention: { eventsDays: 7 }, codexGate: { bypassHookTrust: true } });
+    assert.deepEqual(doc, {
+      port: 48299,
+      retention: { eventsDays: 7 },
+      codexGate: { bypassHookTrust: true },
+    });
     const [b1] = backupsDe(file);
     assert.equal(readFileSync(b1!, 'utf8'), original);
 
@@ -184,7 +206,12 @@ describe('hub mcp install --write', () => {
         theme: 'tokyonight',
         mcp: {
           context7: { type: 'remote', url: 'https://mcp.context7.com/mcp', enabled: true },
-          fs: { type: 'local', command: ['npx', '-y', 'server-filesystem', '/tmp'], environment: { A: 'b' }, enabled: true },
+          fs: {
+            type: 'local',
+            command: ['npx', '-y', 'server-filesystem', '/tmp'],
+            environment: { A: 'b' },
+            enabled: true,
+          },
         },
       },
       null,
@@ -209,7 +236,10 @@ describe('hub mcp install --write', () => {
     assert.equal(hubEntry['enabled'], true);
     const cmd = hubEntry['command'] as string[];
     assert.ok(Array.isArray(cmd) && cmd.length === 2 && cmd[1]!.endsWith('main.js'));
-    assert.equal((hubEntry['environment'] as Record<string, string>)['AGENTS_HUB_MCP_AGENT'], 'opencode');
+    assert.equal(
+      (hubEntry['environment'] as Record<string, string>)['AGENTS_HUB_MCP_AGENT'],
+      'opencode',
+    );
 
     const [b1] = backupsDe(file);
     assert.equal(readFileSync(b1!, 'utf8'), original);
@@ -251,13 +281,20 @@ describe('hub mcp install --write', () => {
     const r1 = hub('mcp', 'install', 'codex', '--write');
     assert.equal(r1.code, 0, r1.out);
     const texto = readFileSync(file, 'utf8');
-    const doc = parseToml(texto) as { model: string; mcp_servers: Record<string, Record<string, unknown>> };
+    const doc = parseToml(texto) as {
+      model: string;
+      mcp_servers: Record<string, Record<string, unknown>>;
+    };
     assert.equal(doc.model, 'gpt-5-codex');
     assert.deepEqual(doc.mcp_servers['outro'], { command: 'npx', env: { K: 'v' } });
     const env = doc.mcp_servers['agents-hub']!['env'] as Record<string, string>;
     assert.equal(env['AGENTS_HUB_MCP_AGENT'], 'codex');
     assert.notEqual(env['AGENTS_HUB_URL'], 'http://x');
-    assert.equal((texto.match(/^\[mcp_servers\.agents-hub/gm) ?? []).length, 1, 'uma tabela só, sem sub-tabela antiga');
+    assert.equal(
+      (texto.match(/^\[mcp_servers\.agents-hub/gm) ?? []).length,
+      1,
+      'uma tabela só, sem sub-tabela antiga',
+    );
 
     const r2 = hub('mcp', 'install', 'codex', '--write');
     assert.equal(r2.code, 0, r2.out);
@@ -282,7 +319,10 @@ describe('hub mcp install --write', () => {
     assert.equal(backups.length, 2);
     assert.ok(backups.includes(original), 'backup do original preservado');
     assert.ok(backups.includes(semHub));
-    const doc = JSON.parse(readFileSync(file, 'utf8')) as { outra: number; mcpServers: Record<string, unknown> };
+    const doc = JSON.parse(readFileSync(file, 'utf8')) as {
+      outra: number;
+      mcpServers: Record<string, unknown>;
+    };
     assert.equal(doc.outra, 2);
     assert.ok(doc.mcpServers['meu'] && doc.mcpServers['agents-hub']);
   });

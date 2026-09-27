@@ -2,8 +2,7 @@ import { textoDe, type EventEnvelope } from '@agents-hub/core';
 import type { GraphSummary } from './client.js';
 import { horaLocal } from './hora.js';
 
-const supportsColor =
-  process.stdout.isTTY === true && process.env['NO_COLOR'] === undefined;
+const supportsColor = process.stdout.isTTY === true && process.env['NO_COLOR'] === undefined;
 
 const ESC = String.fromCharCode(27);
 

@@ -55,9 +55,13 @@ export function backupDatabase(dbFile: string, outFile: string): BackupResult {
   }
   const destino = path.resolve(outFile);
   if (existsSync(destino)) {
-    throw new HubError('ILLEGAL_STATE', `${destino} já existe — escolha outro --out (backup nunca sobrescreve)`, {
-      out: destino,
-    });
+    throw new HubError(
+      'ILLEGAL_STATE',
+      `${destino} já existe — escolha outro --out (backup nunca sobrescreve)`,
+      {
+        out: destino,
+      },
+    );
   }
   mkdirSync(path.dirname(destino), { recursive: true });
 
@@ -88,9 +92,13 @@ export function conferirBanco(file: string): { schemaVersion: number } {
   try {
     db = new DatabaseSync(file);
   } catch (err) {
-    throw new HubError('INVALID_PATH', `não consegui abrir ${file} como SQLite: ${(err as Error).message}`, {
-      file,
-    });
+    throw new HubError(
+      'INVALID_PATH',
+      `não consegui abrir ${file} como SQLite: ${(err as Error).message}`,
+      {
+        file,
+      },
+    );
   }
   try {
     let integridade: string;
@@ -98,9 +106,13 @@ export function conferirBanco(file: string): { schemaVersion: number } {
       const linhas = db.prepare('PRAGMA integrity_check').all() as Array<Record<string, unknown>>;
       integridade = linhas.map((l) => String(Object.values(l)[0])).join('; ');
     } catch (err) {
-      throw new HubError('INVALID_PATH', `${file} não é um banco SQLite válido: ${(err as Error).message}`, {
-        file,
-      });
+      throw new HubError(
+        'INVALID_PATH',
+        `${file} não é um banco SQLite válido: ${(err as Error).message}`,
+        {
+          file,
+        },
+      );
     }
     if (integridade !== 'ok') {
       throw new HubError('INVALID_PATH', `integrity_check de ${file} falhou: ${integridade}`, { file });
@@ -109,9 +121,13 @@ export function conferirBanco(file: string): { schemaVersion: number } {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'migrations'")
       .get();
     if (!temMigracoes) {
-      throw new HubError('INVALID_PATH', `${file} não parece um banco do Agents-Hub (sem tabela migrations)`, {
-        file,
-      });
+      throw new HubError(
+        'INVALID_PATH',
+        `${file} não parece um banco do Agents-Hub (sem tabela migrations)`,
+        {
+          file,
+        },
+      );
     }
     const row = db.prepare('SELECT MAX(version) AS v FROM migrations').get() as { v: number | null };
     const schemaVersion = Number(row.v ?? 0);
@@ -143,14 +159,20 @@ export function conferirBanco(file: string): { schemaVersion: number } {
  *    restaurado o corromperia;
  * 4. copia o backup para um temporário ao lado e renomeia por cima.
  */
-export function restoreDatabase(backupFile: string, dbFile: string, agora: Date = new Date()): RestoreResult {
+export function restoreDatabase(
+  backupFile: string,
+  dbFile: string,
+  agora: Date = new Date(),
+): RestoreResult {
   const origem = path.resolve(backupFile);
   if (!existsSync(origem)) {
     throw new HubError('INVALID_PATH', `arquivo de backup não encontrado: ${origem}`, { file: origem });
   }
   const destino = path.resolve(dbFile);
   if (origem === destino) {
-    throw new HubError('ILLEGAL_STATE', 'o backup é o próprio banco do Hub — nada a restaurar', { file: origem });
+    throw new HubError('ILLEGAL_STATE', 'o backup é o próprio banco do Hub — nada a restaurar', {
+      file: origem,
+    });
   }
   const { schemaVersion } = conferirBanco(origem);
 
@@ -173,7 +195,8 @@ export function restoreDatabase(backupFile: string, dbFile: string, agora: Date 
       rmSync(safetyCopy, { force: true });
       copyFileSync(destino, safetyCopy);
       for (const sufixo of ['-wal', '-shm']) {
-        if (existsSync(`${destino}${sufixo}`)) copyFileSync(`${destino}${sufixo}`, `${safetyCopy}${sufixo}`);
+        if (existsSync(`${destino}${sufixo}`))
+          copyFileSync(`${destino}${sufixo}`, `${safetyCopy}${sufixo}`);
       }
     }
   }

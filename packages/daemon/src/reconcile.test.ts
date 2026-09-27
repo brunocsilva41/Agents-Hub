@@ -62,13 +62,9 @@ describe('reconciliação na subida do daemon', () => {
     // processo de verdade, sem depender de nenhum CLI de agente instalado.
     writeFileSync(
       path.join(manifestos, 'node-fake.yaml'),
-      [
-        'id: node-fake',
-        'name: Node Fake',
-        'bin: node',
-        'invoke:',
-        '  oneShot: ["--version"]',
-      ].join('\n'),
+      ['id: node-fake', 'name: Node Fake', 'bin: node', 'invoke:', '  oneShot: ["--version"]'].join(
+        '\n',
+      ),
       'utf8',
     );
 

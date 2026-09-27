@@ -134,16 +134,16 @@ defaults:
     assert.equal(recusados.length, 4);
     for (const r of recusados) {
       if (r.status === 'rejected') {
-        assert.match(String((r.reason as Error)?.message ?? r.reason), /Limite de 1 sess(õ|ã)es? simultâneas/);
+        assert.match(
+          String((r.reason as Error)?.message ?? r.reason),
+          /Limite de 1 sess(õ|ã)es? simultâneas/,
+        );
       }
     }
   });
 
   test('achado 2a: aprovar uma sessão já terminal não a ressuscita', async () => {
-    const proj = hub.sessions.registerProject(
-      path.join(raiz, 'projeto-2a'),
-      'Teste Aprovação Terminal',
-    );
+    const proj = hub.sessions.registerProject(path.join(raiz, 'projeto-2a'), 'Teste Aprovação Terminal');
     mkdirSync(proj.path, { recursive: true });
 
     const sessionId = newId('ses');
@@ -200,10 +200,7 @@ defaults:
   });
 
   test('achado 2b: cancelar a sessão nega a aprovação pendente (fecha a causa-raiz)', async () => {
-    const proj = hub.sessions.registerProject(
-      path.join(raiz, 'projeto-2b'),
-      'Teste Aprovação Órfã',
-    );
+    const proj = hub.sessions.registerProject(path.join(raiz, 'projeto-2b'), 'Teste Aprovação Órfã');
     mkdirSync(proj.path, { recursive: true });
 
     const sessionId = newId('ses');
@@ -569,7 +566,16 @@ describe('auditoria: #fallback cria sessão substituta e reatribui task atomicam
         labels: {},
       },
       state: 'working',
-      attempts: [{ n: 1, agentId: 'flaky', startedAt: nowIso(), endedAt: nowIso(), outcome: 'error', error: 'falha simulada' }],
+      attempts: [
+        {
+          n: 1,
+          agentId: 'flaky',
+          startedAt: nowIso(),
+          endedAt: nowIso(),
+          outcome: 'error',
+          error: 'falha simulada',
+        },
+      ],
       result: null,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -589,12 +595,14 @@ describe('auditoria: #fallback cria sessão substituta e reatribui task atomicam
     };
 
     const originalUpdate = hub.store.tasks.update.bind(hub.store.tasks);
-    hub.store.tasks.update = ((id: string, patch: Partial<Task>) => {
+    hub.store.tasks.update = (id: string, patch: Partial<Task>) => {
       if (Object.prototype.hasOwnProperty.call(patch, 'sessionId')) {
-        throw new Error('crash simulado: escrita interrompida no meio da transação de #fallback (achado 2)');
+        throw new Error(
+          'crash simulado: escrita interrompida no meio da transação de #fallback (achado 2)',
+        );
       }
       return originalUpdate(id, patch);
-    });
+    };
 
     try {
       assert.throws(() => {
@@ -602,7 +610,17 @@ describe('auditoria: #fallback cria sessão substituta e reatribui task atomicam
           hub.store.sessions.create(replacement);
           hub.store.tasks.update(taskId, {
             sessionId: replacementId,
-            attempts: [...task.attempts, { n: 2, agentId: 'backup', startedAt: nowIso(), endedAt: null, outcome: null, error: null }],
+            attempts: [
+              ...task.attempts,
+              {
+                n: 2,
+                agentId: 'backup',
+                startedAt: nowIso(),
+                endedAt: null,
+                outcome: null,
+                error: null,
+              },
+            ],
           });
         });
       }, /crash simulado/);
@@ -623,7 +641,11 @@ describe('auditoria: #fallback cria sessão substituta e reatribui task atomicam
       // reatribuída, porque a escrita que faria isso fez parte da mesma
       // transação revertida.
       const taskDepois = hub.store.tasks.get(taskId);
-      assert.equal(taskDepois?.sessionId, originalSessionId, 'sessionId da task não pode ter mudado sem a reatribuição completa');
+      assert.equal(
+        taskDepois?.sessionId,
+        originalSessionId,
+        'sessionId da task não pode ter mudado sem a reatribuição completa',
+      );
     } finally {
       hub.store.tasks.update = originalUpdate;
     }
@@ -669,7 +691,10 @@ describe('auditoria: reconcileOnStartup fecha sessão + tasks atomicamente (acha
   });
 
   test('crash simulado entre marcar a sessão killed e fechar as tasks desfaz os dois (não deixa sessão killed com task viva)', async () => {
-    const proj = hub.sessions.registerProject(path.join(raiz, 'projeto-reconcile'), 'Teste Reconcile Atômico');
+    const proj = hub.sessions.registerProject(
+      path.join(raiz, 'projeto-reconcile'),
+      'Teste Reconcile Atômico',
+    );
     mkdirSync(proj.path, { recursive: true });
 
     const sessionId = newId('ses');
@@ -717,7 +742,9 @@ describe('auditoria: reconcileOnStartup fecha sessão + tasks atomicamente (acha
         labels: {},
       },
       state: 'working',
-      attempts: [{ n: 1, agentId: 'agente-x', startedAt: nowIso(), endedAt: null, outcome: null, error: null }],
+      attempts: [
+        { n: 1, agentId: 'agente-x', startedAt: nowIso(), endedAt: null, outcome: null, error: null },
+      ],
       result: null,
       createdAt: nowIso(),
       updatedAt: nowIso(),
@@ -726,13 +753,13 @@ describe('auditoria: reconcileOnStartup fecha sessão + tasks atomicamente (acha
 
     const originalUpdate = hub.store.tasks.update.bind(hub.store.tasks);
     let armado = true;
-    hub.store.tasks.update = ((id: string, patch: Partial<Task>) => {
+    hub.store.tasks.update = (id: string, patch: Partial<Task>) => {
       if (armado && id === taskId && patch.state === 'failed') {
         armado = false;
         throw new Error('crash simulado: escrita interrompida no meio de reconcileOnStartup (achado 3)');
       }
       return originalUpdate(id, patch);
-    });
+    };
 
     try {
       await assert.rejects(
@@ -752,7 +779,11 @@ describe('auditoria: reconcileOnStartup fecha sessão + tasks atomicamente (acha
       );
 
       const taskDepois = hub.store.tasks.get(taskId);
-      assert.equal(taskDepois?.state, 'working', 'a task não pode ter sido fechada sem a sessão também ter sido');
+      assert.equal(
+        taskDepois?.state,
+        'working',
+        'a task não pode ter sido fechada sem a sessão também ter sido',
+      );
     } finally {
       hub.store.tasks.update = originalUpdate;
     }

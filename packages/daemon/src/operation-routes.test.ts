@@ -154,15 +154,25 @@ defaults:
     });
 
     test('com token: sobe e desce o teto, persiste, emite evento e audita', async () => {
-      const s = hub.sessions.adoptExternal({ agentId: 'agente-eco', projectId, budget: { usd: 1, tokens: 1000 } });
+      const s = hub.sessions.adoptExternal({
+        agentId: 'agente-eco',
+        projectId,
+        budget: { usd: 1, tokens: 1000 },
+      });
 
-      const sobe = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: 7.5 } }, headers: operador() });
+      const sobe = await http('PUT', `/budget/${s.id}`, {
+        json: { limits: { usd: 7.5 } },
+        headers: operador(),
+      });
       assert.equal(sobe.status, 200, sobe.body);
       assert.equal(sobe.json.budget?.limits.usd, 7.5);
       assert.equal(sobe.json.budget?.limits.tokens, 1000, 'campo ausente fica como estava');
 
       // Descer também é editar — `raiseLimits` sozinho descartaria a parcela negativa.
-      const desce = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: 0.5, tokens: 400 } }, headers: operador() });
+      const desce = await http('PUT', `/budget/${s.id}`, {
+        json: { limits: { usd: 0.5, tokens: 400 } },
+        headers: operador(),
+      });
       assert.equal(desce.status, 200, desce.body);
       assert.equal(desce.json.budget?.limits.usd, 0.5);
       assert.equal(desce.json.budget?.limits.tokens, 400);
@@ -195,12 +205,18 @@ defaults:
         updatedAt: nowIso(),
       });
 
-      const r = await http('PUT', `/budget/${id}`, { json: { limits: { usd: 1.1 } }, headers: operador() });
+      const r = await http('PUT', `/budget/${id}`, {
+        json: { limits: { usd: 1.1 } },
+        headers: operador(),
+      });
       assert.equal(r.status, 400, r.body);
       assert.match(r.body, /usd \(mínimo 1\.2\)/);
       assert.equal(hub.sessions.budget(id).limits.usd, 2);
 
-      const noPiso = await http('PUT', `/budget/${id}`, { json: { limits: { usd: 1.2 } }, headers: operador() });
+      const noPiso = await http('PUT', `/budget/${id}`, {
+        json: { limits: { usd: 1.2 } },
+        headers: operador(),
+      });
       assert.equal(noPiso.status, 200, noPiso.body);
     });
 
@@ -208,20 +224,29 @@ defaults:
       const pai = hub.sessions.adoptExternal({ agentId: 'agente-eco', projectId });
       const id = newId('ses');
       hub.store.sessions.create({ ...pai, id, rootId: pai.id, parentId: pai.id, depth: 1 });
-      const r = await http('PUT', `/budget/${id}`, { json: { limits: { usd: 5 } }, headers: operador() });
+      const r = await http('PUT', `/budget/${id}`, {
+        json: { limits: { usd: 5 } },
+        headers: operador(),
+      });
       assert.equal(r.status, 400, r.body);
       assert.match(r.body, /não é raiz/);
       assert.equal(hub.store.budgets.get(id), null, 'nenhum ledger órfão criado');
     });
 
     test('sessão inexistente e corpo inválido', async () => {
-      const inexistente = await http('PUT', '/budget/ses_naoexiste', { json: { limits: { usd: 1 } }, headers: operador() });
+      const inexistente = await http('PUT', '/budget/ses_naoexiste', {
+        json: { limits: { usd: 1 } },
+        headers: operador(),
+      });
       assert.equal(inexistente.status, 404, inexistente.body);
 
       const s = hub.sessions.adoptExternal({ agentId: 'agente-eco', projectId });
       const vazio = await http('PUT', `/budget/${s.id}`, { json: { limits: {} }, headers: operador() });
       assert.equal(vazio.status, 422, vazio.body);
-      const negativo = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: -1 } }, headers: operador() });
+      const negativo = await http('PUT', `/budget/${s.id}`, {
+        json: { limits: { usd: -1 } },
+        headers: operador(),
+      });
       assert.equal(negativo.status, 422, negativo.body);
     });
   });
@@ -232,11 +257,17 @@ defaults:
       const { session: comum } = await hub.sessions.start({
         projectId,
         agentId: '',
-        brief: { agent: 'agente-eco', objective: 'responder uma saudação simples de teste', isolation: 'none' },
+        brief: {
+          agent: 'agente-eco',
+          objective: 'responder uma saudação simples de teste',
+          isolation: 'none',
+        },
       });
 
       const lista = await http('GET', '/sessions');
-      const porId = new Map((lista.json['sessions'] as Array<{ id: string; adopted: boolean }>).map((s) => [s.id, s]));
+      const porId = new Map(
+        (lista.json['sessions'] as Array<{ id: string; adopted: boolean }>).map((s) => [s.id, s]),
+      );
       assert.equal(porId.get(adotada.id)?.adopted, true);
       assert.equal(porId.get(comum.id)?.adopted, false);
       assert.equal((await http('GET', `/sessions/${adotada.id}`)).json.session?.adopted, true);
@@ -262,7 +293,9 @@ defaults:
   describe('/workflows', () => {
     test('validate: válido com lotes; inválido com erros', async () => {
       const ok = await http('POST', '/workflows/validate', {
-        json: { yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: fazer a primeira parte }\n  - { id: b, agent: agente-eco, objective: fazer a segunda parte, dependsOn: [a] }\n' },
+        json: {
+          yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: fazer a primeira parte }\n  - { id: b, agent: agente-eco, objective: fazer a segunda parte, dependsOn: [a] }\n',
+        },
       });
       assert.equal(ok.status, 200, ok.body);
       assert.equal(ok.json['valid'], true);
@@ -277,7 +310,10 @@ defaults:
 
     test('runs: dispara no daemon, encadeia e termina; projeto inexistente é 404', async () => {
       const nada = await http('POST', '/workflows/runs', {
-        json: { yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: x }\n', projectId: 'prj_naoexiste' },
+        json: {
+          yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: x }\n',
+          projectId: 'prj_naoexiste',
+        },
       });
       assert.equal(nada.status, 404, nada.body);
 

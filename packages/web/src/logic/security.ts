@@ -17,8 +17,7 @@ import type {
 // ------------------------------------------------ editor de política
 
 export type AnaliseDaCamada =
-  | { ok: true; camada: Record<string, unknown> }
-  | { ok: false; erro: string };
+  { ok: true; camada: Record<string, unknown> } | { ok: false; erro: string };
 
 /**
  * O texto do editor vira camada? Só a forma é conferida aqui (JSON, objeto na

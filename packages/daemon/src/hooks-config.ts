@@ -113,10 +113,7 @@ function entradasPreToolUse(config: Record<string, unknown>): EntradaDeHook[] {
  * Sobrescrever `hooks.PreToolUse` inteiro apagaria hooks que a pessoa
  * configurou antes — e ela só descobriria quando algo parasse de acontecer.
  */
-export function mergeHooks(
-  atual: Record<string, unknown>,
-  comando: string,
-): Record<string, unknown> {
+export function mergeHooks(atual: Record<string, unknown>, comando: string): Record<string, unknown> {
   const hooks = (atual['hooks'] ?? {}) as Record<string, unknown>;
   const semONosso = entradasPreToolUse(atual).filter(
     (entrada) => !entrada.hooks?.some((h) => comandoDoHub(h.command)),
@@ -138,9 +135,7 @@ export function mergeHooks(
 }
 
 export function hookInstalado(config: Record<string, unknown>): boolean {
-  return entradasPreToolUse(config).some((e) =>
-    e.hooks?.some((h) => comandoDoHub(h.command)),
-  );
+  return entradasPreToolUse(config).some((e) => e.hooks?.some((h) => comandoDoHub(h.command)));
 }
 
 /**
@@ -157,9 +152,7 @@ export function avisoDeTimeoutDoHook(config: Record<string, unknown>): string | 
   );
   if (nossos.length === 0) return null;
 
-  const velho = nossos.find(
-    (h) => typeof h.timeout !== 'number' || h.timeout < TIMEOUT_DO_HOOK_SEC,
-  );
+  const velho = nossos.find((h) => typeof h.timeout !== 'number' || h.timeout < TIMEOUT_DO_HOOK_SEC);
   if (!velho) return null;
   return (
     `hook do gate instalado com timeout ${velho.timeout ?? 'ausente'}${typeof velho.timeout === 'number' ? ' s' : ''} ` +

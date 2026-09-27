@@ -8,7 +8,9 @@ import { type Ctx, isObj, setDefaults, str } from './util.js';
  * ficam com o nome de exibição em vez de um id inventado.
  */
 export function modeloDoAgy(exibicao: string): string {
-  const m = /^Gemini\s+([\d.]+)\s+(Pro|Flash(?:\s+Lite)?)\s*\((High|Medium|Low)\)$/i.exec(exibicao.trim());
+  const m = /^Gemini\s+([\d.]+)\s+(Pro|Flash(?:\s+Lite)?)\s*\((High|Medium|Low)\)$/i.exec(
+    exibicao.trim(),
+  );
   if (!m) return exibicao;
   const familia = m[2]!.toLowerCase().replace(/\s+/g, '-');
   return `gemini-${m[1]}-${familia}-${m[3]!.toLowerCase()}`;
@@ -25,14 +27,17 @@ export function discoverAntigravity(ctx: Ctx): void {
   if (cli) {
     const model = str(cli.model);
     if (model) setDefaults(ctx, { model: modeloDoAgy(model) });
-    const allow = isObj(cli.permissions) && Array.isArray(cli.permissions.allow) ? cli.permissions.allow : [];
+    const allow =
+      isObj(cli.permissions) && Array.isArray(cli.permissions.allow) ? cli.permissions.allow : [];
     if (allow.length > 0) {
       ctx.warn(
         `Antigravity: ${allow.length} regra(s) em permissions.allow de antigravity-cli/settings.json valem também nas sessões do Hub`,
       );
     }
     if (cli.allowNonWorkspaceAccess === true) {
-      ctx.warn('Antigravity: allowNonWorkspaceAccess=true — o agy pode ler/escrever fora do worktree da sessão');
+      ctx.warn(
+        'Antigravity: allowNonWorkspaceAccess=true — o agy pode ler/escrever fora do worktree da sessão',
+      );
     }
   }
   // Ganchos do agy (mesmo diretório): só registramos a existência.
@@ -48,7 +53,8 @@ export function discoverAntigravity(ctx: Ctx): void {
     const model = isObj(settings.model) ? settings.model.name : settings.model;
     setDefaults(ctx, { model });
     const auth = isObj(settings.security) && isObj(settings.security.auth) ? settings.security.auth : {};
-    if (str(auth.selectedType)) ctx.evidence.push('método de login configurado em .gemini/settings.json');
+    if (str(auth.selectedType))
+      ctx.evidence.push('método de login configurado em .gemini/settings.json');
     ctx.addMcpMap(settings.mcpServers, `${dir}/settings.json`);
   }
   if (mcp) ctx.addMcpMap(mcp.mcpServers, `${dir}/config/mcp_config.json`);

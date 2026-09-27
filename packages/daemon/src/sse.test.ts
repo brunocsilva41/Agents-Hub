@@ -56,7 +56,10 @@ describe('startSseChannel — keep-alive, id: e try/catch', () => {
 
     const chunks = (res as unknown as FakeRes).chunks;
     assert.equal(chunks.length, 2);
-    assert.ok(chunks.every((c) => c === ': ping\n\n'), 'ping não deve levar id: nem data:');
+    assert.ok(
+      chunks.every((c) => c === ': ping\n\n'),
+      'ping não deve levar id: nem data:',
+    );
   });
 
   test('id: presente quando withId, ausente quando não', () => {
@@ -121,7 +124,11 @@ describe('startSseChannel — keep-alive, id: e try/catch', () => {
     fakeRes.destroyed = true;
 
     assert.doesNotThrow(() => t.mock.timers.tick(SSE_KEEPALIVE_MS));
-    assert.equal(closed, true, 'checar writableEnded/destroyed antes de escrever deve disparar o mesmo cleanup do close');
+    assert.equal(
+      closed,
+      true,
+      'checar writableEnded/destroyed antes de escrever deve disparar o mesmo cleanup do close',
+    );
     assert.equal(fakeRes.chunks.length, 0, 'nada deveria ter sido escrito numa conexão já morta');
   });
 

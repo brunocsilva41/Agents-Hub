@@ -123,7 +123,8 @@ export async function smokeTestAgent(
     // smoke não aprova nada — encerra para não liberar gasto além do teto.
     if (task?.state === 'input_required') {
       outcome.finalState = 'input_required';
-      outcome.error = 'a sessão parou pedindo aprovação (orçamento do smoke ou ação arriscada); encerrada sem aprovar';
+      outcome.error =
+        'a sessão parou pedindo aprovação (orçamento do smoke ou ação arriscada); encerrada sem aprovar';
       await client.cancel(sessionId, 'smoke: encerrado sem aprovar').catch(() => undefined);
       break;
     }

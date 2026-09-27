@@ -72,7 +72,10 @@ describe('hub init', () => {
     assert.ok(projects.some((p) => p.id === valor.project.id));
 
     assert.deepEqual(
-      valor.agents.filter((a) => a.installed).map((a) => a.id).sort(),
+      valor.agents
+        .filter((a) => a.installed)
+        .map((a) => a.id)
+        .sort(),
       ['claude', 'codex'],
     );
     assert.ok(out.some((l) => l.includes('codex') && l.includes('credencial não encontrada')));
@@ -80,7 +83,10 @@ describe('hub init', () => {
     assert.ok(valor.suggestions.includes('hub hooks install codex'));
     assert.ok(valor.suggestions.includes('hub mcp install claude'));
     assert.ok(!valor.suggestions.some((s) => s.includes('cursor')), 'agente não instalado não entra');
-    assert.ok(valor.suggestions.every((s) => !s.includes('--write')), 'nunca --write por conta própria');
+    assert.ok(
+      valor.suggestions.every((s) => !s.includes('--write')),
+      'nunca --write por conta própria',
+    );
     assert.ok(out.some((l) => l.includes(t.url)));
 
     // Rodar de novo reconhece o projeto.

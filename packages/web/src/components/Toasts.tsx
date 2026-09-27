@@ -21,7 +21,11 @@ export function Toasts() {
             <div className="toast-title">{toast.title}</div>
             {toast.detail && <div className="toast-detail">{toast.detail}</div>}
           </div>
-          <button className="toast-close" aria-label="Dispensar aviso" onClick={() => dismissToast(toast.id)}>
+          <button
+            className="toast-close"
+            aria-label="Dispensar aviso"
+            onClick={() => dismissToast(toast.id)}
+          >
             ✕
           </button>
         </div>

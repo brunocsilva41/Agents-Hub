@@ -40,13 +40,19 @@ describe('aviso de gate pré-execução ausente', () => {
   });
 
   test('codex com o bypass desligado: mesmo aviso, com o comando do codex', () => {
-    const linhas = avisoDeGate('codex', integracao('codex', { modo: 'codex-inline', comando: 'hub hooks install codex --write' }));
+    const linhas = avisoDeGate(
+      'codex',
+      integracao('codex', { modo: 'codex-inline', comando: 'hub hooks install codex --write' }),
+    );
     assert.match(linhas.join('\n'), /não está instalado para codex.*hub hooks install codex --write/);
   });
 
   test('hook instalado: sem aviso; com timeout antigo: pede para reinstalar', () => {
     assert.deepEqual(avisoDeGate('claude', integracao('claude', { instalado: true })), []);
-    const linhas = avisoDeGate('claude', integracao('claude', { instalado: true, avisoTimeout: 'hook do gate instalado com timeout 10 s' }));
+    const linhas = avisoDeGate(
+      'claude',
+      integracao('claude', { instalado: true, avisoTimeout: 'hook do gate instalado com timeout 10 s' }),
+    );
     assert.match(linhas.join('\n'), /timeout 10 s — reinstale: hub hooks install claude --write/);
   });
 
@@ -77,7 +83,11 @@ describe('hub start mostra o aviso (daemon real, agente falso)', () => {
     const c = capturar();
     await startCommand(
       h.client,
-      { command: 'start', positional: ['objetivo descritivo o bastante'], flags: { agent: 'semgate', project: h.projeto, detach: true, isolation: 'none' } },
+      {
+        command: 'start',
+        positional: ['objetivo descritivo o bastante'],
+        flags: { agent: 'semgate', project: h.projeto, detach: true, isolation: 'none' },
+      },
       { log: c.log, logErro: c.logErro },
     );
     const texto = c.texto();

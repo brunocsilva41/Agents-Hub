@@ -171,10 +171,7 @@ export function formatWorkflowResult(workflow: Workflow, resultado: WorkflowRunR
 
   const vivos = resultado.steps.filter((s) => s.state === 'blocked' || s.state === 'timeout');
   if (vivos.length > 0) {
-    lines.push(
-      '',
-      `sessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`,
-    );
+    lines.push('', `sessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`);
   }
 
   if (!resultado.ok) {

@@ -25,7 +25,11 @@ export function claudeMapper(line: unknown): MappedEvent[] {
         payload: init
           ? { subtype: obj['subtype'], tools: obj['tools'], model: obj['model'] }
           : // Subtipos de bastidor (status, hooks, compactação): técnicos.
-            { kind: 'tecnico', subtype: obj['subtype'], text: `Claude: system/${textoDe(obj['subtype'], '?')}` },
+            {
+              kind: 'tecnico',
+              subtype: obj['subtype'],
+              text: `Claude: system/${textoDe(obj['subtype'], '?')}`,
+            },
         raw: line,
       };
       if (sessionId) event.nativeSessionId = sessionId;

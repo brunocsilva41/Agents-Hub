@@ -28,8 +28,11 @@ after(() => {
 
 const INSTALLED = { version: '1.2.3', binPath: '/bin/x' };
 const NOENV = {};
-const run = (agent: string, home: string, extra: { projectDir?: string; env?: Record<string, string> } = {}) =>
-  discoverAgent(agent, { home, installed: INSTALLED, env: NOENV, ...extra });
+const run = (
+  agent: string,
+  home: string,
+  extra: { projectDir?: string; env?: Record<string, string> } = {},
+) => discoverAgent(agent, { home, installed: INSTALLED, env: NOENV, ...extra });
 
 describe('parsers', () => {
   it('JSON tolerante: comentários, vírgula final e lixo após o objeto', () => {
@@ -67,7 +70,9 @@ i = 2
 describe('claude', () => {
   it('config feliz: defaults, auth, MCP de usuário/local/projeto, instruções', async () => {
     const proj = fakeHome({
-      '.mcp.json': JSON.stringify({ mcpServers: { projsrv: { type: 'http', url: 'https://x.dev/mcp' } } }),
+      '.mcp.json': JSON.stringify({
+        mcpServers: { projsrv: { type: 'http', url: 'https://x.dev/mcp' } },
+      }),
     });
     const home = fakeHome({
       '.claude/settings.json': JSON.stringify({
@@ -94,7 +99,10 @@ describe('claude', () => {
     assert.deepEqual(hub.env, { K: '***' });
     assert.equal(d.mcpServers.find((s) => s.name === 'other')!.isHub, false);
     assert.equal(d.mcpServers.find((s) => s.name === 'projsrv')!.transport, 'http');
-    assert.deepEqual(d.instructionFiles.map((f) => f.bytes), [5]);
+    assert.deepEqual(
+      d.instructionFiles.map((f) => f.bytes),
+      [5],
+    );
   });
 
   it('arquivos ausentes: auth absent, sem exceção', async () => {
@@ -193,9 +201,12 @@ describe('opencode', () => {
       '.config/opencode/opencode.json': JSON.stringify({
         model: 'zai/glm',
         provider: { zai: { options: { baseURL: 'https://zai/v1', apiKey: SECRET } } },
-        mcp: { a: { type: 'local', command: ['node', 'a.js', '--token', SECRET], environment: { X: SECRET } } },
+        mcp: {
+          a: { type: 'local', command: ['node', 'a.js', '--token', SECRET], environment: { X: SECRET } },
+        },
       }),
-      '.config/opencode/opencode.jsonc': '{\n // c\n "mcp": { "b": { "type": "remote", "url": "https://b/mcp" }, }\n}',
+      '.config/opencode/opencode.jsonc':
+        '{\n // c\n "mcp": { "b": { "type": "remote", "url": "https://b/mcp" }, }\n}',
       '.local/share/opencode/auth.json': '{}',
       '.config/opencode/AGENTS.md': 'zz',
     });
@@ -222,7 +233,11 @@ describe('copilot', () => {
     const home = fakeHome({
       '.copilot/config.json': '// managed\n{ "loggedInUsers": [{"login":"u"}] }',
       '.copilot/settings.json': '{"model":"gemini-x"}',
-      '.copilot/mcp-config.json': JSON.stringify({ mcpServers: { s: { type: 'local', command: 'c', args: ['a'], env: { E: SECRET }, tools: ['*'] } } }),
+      '.copilot/mcp-config.json': JSON.stringify({
+        mcpServers: {
+          s: { type: 'local', command: 'c', args: ['a'], env: { E: SECRET }, tools: ['*'] },
+        },
+      }),
       '.copilot/copilot-instructions.md': 'hi',
     });
     const d = await run('copilot', home);
@@ -248,7 +263,9 @@ describe('antigravity', () => {
         security: { auth: { selectedType: 'oauth-personal' } },
         mcpServers: { u: { command: 'node', args: ['s.js'] } },
       }),
-      '.gemini/config/mcp_config.json': JSON.stringify({ mcpServers: { v: { httpUrl: 'https://v/mcp?key=' + SECRET } } }),
+      '.gemini/config/mcp_config.json': JSON.stringify({
+        mcpServers: { v: { httpUrl: 'https://v/mcp?key=' + SECRET } },
+      }),
       '.gemini/google_accounts.json': '{}',
       '.gemini/GEMINI.md': 'g',
     });
@@ -323,7 +340,8 @@ model = "M"
 describe('mimo', () => {
   it('feliz: config estilo OpenCode em ~/.config/mimocode', async () => {
     const home = fakeHome({
-      '.config/mimocode/mimocode.jsonc': '{ // c\n "model": "xiaomi/mimo", "mcp": { "m": { "type": "local", "command": ["x"] } } }',
+      '.config/mimocode/mimocode.jsonc':
+        '{ // c\n "model": "xiaomi/mimo", "mcp": { "m": { "type": "local", "command": ["x"] } } }',
       '.local/share/mimocode/auth.json': '{}',
     });
     const d = await run('mimo', home);
@@ -342,7 +360,9 @@ describe('mimo', () => {
 
 describe('cursor', () => {
   it('feliz: mcp.json', async () => {
-    const home = fakeHome({ '.cursor/mcp.json': JSON.stringify({ mcpServers: { c: { url: 'https://c/sse' } } }) });
+    const home = fakeHome({
+      '.cursor/mcp.json': JSON.stringify({ mcpServers: { c: { url: 'https://c/sse' } } }),
+    });
     const d = await run('cursor', home, { env: { CURSOR_API_KEY: 'x' } });
     assert.equal(d.mcpServers[0]!.transport, 'sse');
     assert.equal(d.auth.state, 'present');
@@ -364,16 +384,35 @@ describe('agente desconhecido', () => {
 
 describe('SEGURANÇA: segredo plantado nunca aparece no resultado', () => {
   it('nenhum agente vaza o segredo (env de MCP, auth.json, args, URL, chaves de provedor)', async () => {
-    const mcp = { s: { command: 'node', args: ['x', '--api-key', SECRET, `KEY=${SECRET}`, `--t=${SECRET}`], env: { A: SECRET, B: SECRET }, url: `https://u:${SECRET}@h/mcp?k=${SECRET}`, headers: { Authorization: `Bearer ${SECRET}` } } };
+    const mcp = {
+      s: {
+        command: 'node',
+        args: ['x', '--api-key', SECRET, `KEY=${SECRET}`, `--t=${SECRET}`],
+        env: { A: SECRET, B: SECRET },
+        url: `https://u:${SECRET}@h/mcp?k=${SECRET}`,
+        headers: { Authorization: `Bearer ${SECRET}` },
+      },
+    };
     const home = fakeHome({
       '.claude.json': JSON.stringify({ mcpServers: mcp, oauthAccount: { accessToken: SECRET } }),
       '.claude/.credentials.json': JSON.stringify({ claudeAiOauth: { accessToken: SECRET } }),
-      '.claude/settings.json': JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: SECRET, ANTHROPIC_MODEL: 'm' } }),
-      '.openclaude.json': JSON.stringify({ mcpServers: mcp, activeProviderProfileId: 'a', providerProfiles: [{ id: 'a', apiKey: SECRET, model: 'm' }] }),
+      '.claude/settings.json': JSON.stringify({
+        env: { ANTHROPIC_AUTH_TOKEN: SECRET, ANTHROPIC_MODEL: 'm' },
+      }),
+      '.openclaude.json': JSON.stringify({
+        mcpServers: mcp,
+        activeProviderProfileId: 'a',
+        providerProfiles: [{ id: 'a', apiKey: SECRET, model: 'm' }],
+      }),
       '.openclaude/.openclaude-profile.json': JSON.stringify({ env: { OPENAI_API_KEY: SECRET } }),
       '.codex/auth.json': JSON.stringify({ OPENAI_API_KEY: SECRET, tokens: { access_token: SECRET } }),
       '.codex/config.toml': `[mcp_servers.s]\ncommand = "node"\nargs = ["--token", "${SECRET}"]\n[mcp_servers.s.env]\nA = "${SECRET}"\n`,
-      '.config/opencode/opencode.json': JSON.stringify({ provider: { p: { options: { apiKey: SECRET } } }, mcp: { s: { type: 'local', command: ['n', `--password=${SECRET}`], environment: { A: SECRET } } } }),
+      '.config/opencode/opencode.json': JSON.stringify({
+        provider: { p: { options: { apiKey: SECRET } } },
+        mcp: {
+          s: { type: 'local', command: ['n', `--password=${SECRET}`], environment: { A: SECRET } },
+        },
+      }),
       '.local/share/opencode/auth.json': JSON.stringify({ p: { key: SECRET } }),
       '.copilot/mcp-config.json': JSON.stringify({ mcpServers: mcp }),
       '.copilot/config.json': JSON.stringify({ loggedInUsers: [{ token: SECRET }] }),
@@ -382,11 +421,26 @@ describe('SEGURANÇA: segredo plantado nunca aparece no resultado', () => {
       '.kimi-code/config.toml': `[providers.p]\napi_key = "${SECRET}"\n`,
       '.kimi-code/credentials/kimi-code.json': JSON.stringify({ access_token: SECRET }),
       '.kimi-code/mcp.json': JSON.stringify({ mcpServers: mcp }),
-      '.config/mimocode/mimocode.jsonc': JSON.stringify({ mcp: { s: { type: 'local', command: ['n'], environment: { A: SECRET } } } }),
+      '.config/mimocode/mimocode.jsonc': JSON.stringify({
+        mcp: { s: { type: 'local', command: ['n'], environment: { A: SECRET } } },
+      }),
       '.cursor/mcp.json': JSON.stringify({ mcpServers: mcp }),
     });
-    for (const agent of ['claude', 'openclaude', 'codex', 'opencode', 'copilot', 'antigravity', 'kimi', 'mimo', 'cursor']) {
-      const d = await run(agent, home, { projectDir: home, env: { ANTHROPIC_API_KEY: SECRET, OPENAI_API_KEY: SECRET } });
+    for (const agent of [
+      'claude',
+      'openclaude',
+      'codex',
+      'opencode',
+      'copilot',
+      'antigravity',
+      'kimi',
+      'mimo',
+      'cursor',
+    ]) {
+      const d = await run(agent, home, {
+        projectDir: home,
+        env: { ANTHROPIC_API_KEY: SECRET, OPENAI_API_KEY: SECRET },
+      });
       const dump = JSON.stringify(d);
       assert.ok(!dump.includes(SECRET), `${agent} vazou o segredo`);
       assert.ok(!dump.includes('SEGREDO'), `${agent} vazou parte do segredo`);

@@ -23,7 +23,10 @@ export async function problemasDeLayout(page: Page, escopo?: string): Promise<st
     const SELETOR =
       'button, a[href], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="option"], select, input, textarea';
     const descrever = (el: Element): string => {
-      const texto = (el.getAttribute('aria-label') || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+      const texto = (el.getAttribute('aria-label') || el.textContent || '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, 40);
       const classe = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
       return `<${el.tagName.toLowerCase()}${classe ? '.' + classe : ''}> "${texto}"`;
     };
@@ -32,7 +35,8 @@ export async function problemasDeLayout(page: Page, escopo?: string): Promise<st
     const problemas: string[] = [];
     for (const el of Array.from(raiz.querySelectorAll(SELETOR))) {
       if (el.closest('[inert]')) continue;
-      if (!(el as HTMLElement).checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
+      if (!(el as HTMLElement).checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+        continue;
       let r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
       // Rolagem VERTICAL legítima (listas, corpo do modal): traz o controle para
@@ -51,7 +55,9 @@ export async function problemasDeLayout(page: Page, escopo?: string): Promise<st
       r = el.getBoundingClientRect();
       const nome = descrever(el);
       if (r.left < -0.5 || r.right > vw + 0.5) {
-        problemas.push(`${nome}: fora do viewport horizontal (${Math.round(r.left)}..${Math.round(r.right)} de ${vw})`);
+        problemas.push(
+          `${nome}: fora do viewport horizontal (${Math.round(r.left)}..${Math.round(r.right)} de ${vw})`,
+        );
         continue;
       }
       const cx = r.left + r.width / 2;
@@ -82,9 +88,9 @@ export async function acionarNaTopbar(page: Page, nome: string | RegExp): Promis
     return;
   }
   await page.getByRole('button', { name: 'Mais opções' }).click();
-  const item = page.getByRole('menu').getByRole('menuitemradio', { name: nome }).or(
-    page.getByRole('menu').getByRole('menuitem', { name: nome }),
-  );
+  const item = page
+    .getByRole('menu')
+    .getByRole('menuitemradio', { name: nome })
+    .or(page.getByRole('menu').getByRole('menuitem', { name: nome }));
   await item.first().click();
 }
-

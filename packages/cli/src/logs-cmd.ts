@@ -96,10 +96,14 @@ export async function logsCommand(logDir: string, args: Args, options: LogsOptio
   while (options.signal?.aborted !== true) {
     await new Promise<void>((resolve) => {
       const t = setTimeout(resolve, pollMs);
-      options.signal?.addEventListener('abort', () => {
-        clearTimeout(t);
-        resolve();
-      }, { once: true });
+      options.signal?.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(t);
+          resolve();
+        },
+        { once: true },
+      );
     });
     const novo = arquivosDeLog(logDir).at(-1);
     if (novo !== undefined && novo !== atual) {

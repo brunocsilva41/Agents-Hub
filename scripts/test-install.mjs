@@ -70,7 +70,8 @@ function portaLivre() {
   });
 }
 
-const raizInstalada = () => path.join(prefixo, process.platform === 'win32' ? '' : 'lib', 'node_modules', 'agents-hub');
+const raizInstalada = () =>
+  path.join(prefixo, process.platform === 'win32' ? '' : 'lib', 'node_modules', 'agents-hub');
 const shimDoHub = () =>
   process.platform === 'win32' ? path.join(prefixo, 'hub.cmd') : path.join(prefixo, 'bin', 'hub');
 
@@ -188,15 +189,26 @@ async function principal() {
   checar(inst.status === 0, `npm i -g --prefix <tmp> ${path.basename(pacote.tgz)}`, inst.stderr);
   if (inst.status !== 0) return;
   checar(existsSync(shimDoHub()), `shim do hub em ${shimDoHub()}`);
-  checar(existsSync(path.join(raizInstalada(), 'manifests', 'claude.yaml')), 'manifestos dentro da instalação');
+  checar(
+    existsSync(path.join(raizInstalada(), 'manifests', 'claude.yaml')),
+    'manifestos dentro da instalação',
+  );
 
   console.log(`\n3. comandos offline${nodeAlternativo ? ` (node: ${nodeAlternativo})` : ''}`);
   const versao = hub(['--version']);
-  checar(versao.status === 0 && versao.stdout.trim() === pacote.versao, `hub --version = ${pacote.versao}`, versao.stdout + versao.stderr);
+  checar(
+    versao.status === 0 && versao.stdout.trim() === pacote.versao,
+    `hub --version = ${pacote.versao}`,
+    versao.stdout + versao.stderr,
+  );
 
   const ajuda = hub(['help']);
   checar(ajuda.status === 0 && ajuda.stdout.includes('hub status'), 'hub help', ajuda.stderr);
-  checar(!/ExperimentalWarning/.test(ajuda.stderr), 'hub help sem ExperimentalWarning no stderr', ajuda.stderr);
+  checar(
+    !/ExperimentalWarning/.test(ajuda.stderr),
+    'hub help sem ExperimentalWarning no stderr',
+    ajuda.stderr,
+  );
 
   const mcp = hub(['mcp']);
   const linhaMcp = mcp.stdout.split('\n').find((l) => l.includes('MCP server:')) ?? '';
@@ -205,10 +217,21 @@ async function principal() {
     'hub mcp: MCP server aponta para a instalação, não para o clone',
     linhaMcp || mcp.stderr,
   );
-  checar(mcp.stdout.includes(`127.0.0.1:${porta}`), 'hub mcp: daemon na porta de AGENTS_HUB_PORT', mcp.stdout);
+  checar(
+    mcp.stdout.includes(`127.0.0.1:${porta}`),
+    'hub mcp: daemon na porta de AGENTS_HUB_PORT',
+    mcp.stdout,
+  );
 
   const hooks = hub(['hooks', 'install', 'claude', '--project', projeto]);
-  const esperadoNoHook = path.join(raizInstalada(), 'node_modules', '@agents-hub', 'cli', 'dist', 'bin.js');
+  const esperadoNoHook = path.join(
+    raizInstalada(),
+    'node_modules',
+    '@agents-hub',
+    'cli',
+    'dist',
+    'bin.js',
+  );
   checar(
     hooks.status === 0 && hooks.stdout.includes(JSON.stringify(esperadoNoHook).slice(1, -1)),
     'hub hooks install claude (dry-run): hook aponta para a instalação',
@@ -216,7 +239,11 @@ async function principal() {
   );
 
   const hookResp = hub(['hook'], { input: '{"tool_name":"Read","tool_input":{}}' });
-  checar(hookResp.status === 0 && hookResp.stdout.includes('permissionDecision'), 'hub hook responde (daemon fora do ar)', hookResp.stdout + hookResp.stderr);
+  checar(
+    hookResp.status === 0 && hookResp.stdout.includes('permissionDecision'),
+    'hub hook responde (daemon fora do ar)',
+    hookResp.stdout + hookResp.stderr,
+  );
 
   console.log('\n4. daemon da instalação');
   const nodeDoDaemon = nodeAlternativo ?? process.execPath;
@@ -238,13 +265,25 @@ async function principal() {
   checar(painel.ok && /<html/i.test(html), `painel servido pelo daemon (GET / ${painel.status})`);
 
   const agentes = hub(['agents']);
-  checar(agentes.status === 0 && agentes.stdout.includes('claude'), 'hub agents: manifestos carregados do pacote', agentes.stdout + agentes.stderr);
+  checar(
+    agentes.status === 0 && agentes.stdout.includes('claude'),
+    'hub agents: manifestos carregados do pacote',
+    agentes.stdout + agentes.stderr,
+  );
 
   const status = hub(['status']);
-  checar(status.status === 0, 'hub status (cliente achou o daemon via AGENTS_HUB_PORT)', status.stdout + status.stderr);
+  checar(
+    status.status === 0,
+    'hub status (cliente achou o daemon via AGENTS_HUB_PORT)',
+    status.stdout + status.stderr,
+  );
 
   const doctor = hub(['doctor']);
-  checar(doctor.status === 0 && doctor.stdout.includes('agentes disponíveis'), 'hub doctor', doctor.stdout + doctor.stderr);
+  checar(
+    doctor.status === 0 && doctor.stdout.includes('agentes disponíveis'),
+    'hub doctor',
+    doctor.stdout + doctor.stderr,
+  );
 
   console.log('\n5. encerrar');
   await encerrarDaemon();

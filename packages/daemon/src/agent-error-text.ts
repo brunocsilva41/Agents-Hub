@@ -30,7 +30,10 @@ export function textoDoErroDoAgente(payload: Record<string, unknown>): string | 
  * entre parênteses. Sem falha (`null`), continua `null` — um erro emitido no
  * meio de um turno que terminou bem não vira falha.
  */
-export function juntarErroDoAgente(erroDoProcesso: string | null, doAgente: string | null): string | null {
+export function juntarErroDoAgente(
+  erroDoProcesso: string | null,
+  doAgente: string | null,
+): string | null {
   if (erroDoProcesso === null || doAgente === null) return erroDoProcesso;
   if (erroDoProcesso.includes(doAgente)) return erroDoProcesso;
   return `${doAgente} (${erroDoProcesso})`;
