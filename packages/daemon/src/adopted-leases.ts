@@ -97,11 +97,10 @@ export class AdoptedRootLeases {
     }
     if (isTerminalSessionState(session.state)) {
       this.forget(sessionId);
-      throw new HubError(
-        'ILLEGAL_STATE',
-        `A raiz adotada ${sessionId} já terminou (${session.state})`,
-        { sessionId, state: session.state },
-      );
+      throw new HubError('ILLEGAL_STATE', `A raiz adotada ${sessionId} já terminou (${session.state})`, {
+        sessionId,
+        state: session.state,
+      });
     }
     this.track(sessionId);
     return { leaseMs: this.#leaseMs };
@@ -126,9 +125,7 @@ export class AdoptedRootLeases {
         encerradas.push(sessionId);
       } catch (err) {
         // Sessão apagada ou erro de banco: não há o que renovar — só registra.
-        console.error(
-          `[leases] falha ao encerrar raiz adotada ${sessionId}: ${(err as Error).message}`,
-        );
+        console.error(`[leases] falha ao encerrar raiz adotada ${sessionId}: ${(err as Error).message}`);
       }
     }
     return encerradas;

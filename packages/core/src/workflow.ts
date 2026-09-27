@@ -1,12 +1,16 @@
 import { z } from 'zod';
 import { HubError } from './errors.js';
-import { BriefSchema, type Brief, type UpstreamResult } from './brief.js';
+import type { UpstreamResult } from './brief.js';
 import { sleep as defaultSleep } from './resilience.js';
 
 export const MAX_WORKFLOW_STEPS = 200;
 
 export const WorkflowStepSchema = z.object({
-  id: z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'id do step deve ser alfanumérico'),
+  id: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_-]+$/, 'id do step deve ser alfanumérico'),
   agent: z.string().min(1).max(64),
   objective: z.string().min(1).max(50_000),
   dependsOn: z.array(z.string()).default([]),
@@ -191,7 +195,7 @@ export type WorkflowRunEvent =
 
 export interface WorkflowRunDeps {
   /** Cria a sessão do passo. NÃO espera o passo terminar — nem deve. */
-  start(input: {
+  start: (input: {
     step: WorkflowStep;
     upstream: UpstreamResult[];
     /** Teto em dólares desta execução, já descontado do orçamento global. */
@@ -203,7 +207,7 @@ export interface WorkflowRunDeps {
      * passo nasce do branch `hub/<id>` delas, não do HEAD do projeto.
      */
     baseSessionIds: string[];
-  }): Promise<{ sessionId: string; taskId: string }>;
+  }) => Promise<{ sessionId: string; taskId: string }>;
 
   /**
    * Espera a tarefa chegar a estado terminal. É o `await` que faltava.
@@ -213,7 +217,7 @@ export interface WorkflowRunDeps {
    * original dava "a sessão não tem tarefa" para um passo que o substituto
    * concluiu. `sessionId` na resposta é onde ela terminou.
    */
-  settle(input: { step: WorkflowStep; sessionId: string; taskId: string }): Promise<{
+  settle: (input: { step: WorkflowStep; sessionId: string; taskId: string }) => Promise<{
     state: 'completed' | 'failed' | 'blocked' | 'timeout';
     summary: string | null;
     detail: string | null;
@@ -221,7 +225,7 @@ export interface WorkflowRunDeps {
     sessionId?: string;
   }>;
 
-  report?(event: WorkflowRunEvent): void;
+  report?: (event: WorkflowRunEvent) => void;
 
   /**
    * Espera `ms` milissegundos entre tentativas de `deps.start` quando a
@@ -229,7 +233,7 @@ export interface WorkflowRunDeps {
    * controle o tempo sem `setTimeout` real; o padrão usa o `sleep` de
    * `resilience.ts` (timer de verdade).
    */
-  sleep?(ms: number): Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface WorkflowRunOptions {
@@ -464,10 +468,7 @@ export async function runWorkflow(
  * primeiro passo com `usd: 100` num teto de 10 levava os 10 inteiros e o irmão
  * do mesmo lote era pulado por "orçamento esgotado" sem nada ter sido gasto.
  */
-function repartirSaldo(
-  executaveis: WorkflowStep[],
-  saldo: number | null,
-): Map<string, number | null> {
+function repartirSaldo(executaveis: WorkflowStep[], saldo: number | null): Map<string, number | null> {
   const tetos = new Map<string, number | null>();
   if (saldo === null) {
     for (const step of executaveis) tetos.set(step.id, null);

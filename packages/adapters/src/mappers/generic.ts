@@ -1,3 +1,4 @@
+import { textoDe } from '@agents-hub/core';
 import type { MappedEvent } from '../types.js';
 
 /**
@@ -8,7 +9,7 @@ import type { MappedEvent } from '../types.js';
  * escrever um mapper dedicado.
  */
 export function genericTextMapper(line: unknown): MappedEvent[] {
-  const text = typeof line === 'string' ? line : String(line ?? '');
+  const text = textoDe(line);
   if (text.trim().length === 0) return [];
 
   const lowered = text.toLowerCase();
@@ -88,7 +89,10 @@ function eventoDe(
       case 'step_finish':
         return {
           type: 'log',
-          payload: { text: `passo concluído (${firstString(part['reason']) ?? 'sem motivo'})`, reason: part['reason'] ?? null },
+          payload: {
+            text: `passo concluído (${firstString(part['reason']) ?? 'sem motivo'})`,
+            reason: part['reason'] ?? null,
+          },
           raw: line,
         };
       default:
@@ -120,8 +124,7 @@ function eventoDe(
     if (text) return { type: 'message', payload: { text }, raw: line };
   }
 
-  const text =
-    firstString(obj['text']) ?? firstString(obj['message']) ?? firstString(obj['content']);
+  const text = firstString(obj['text']) ?? firstString(obj['message']) ?? firstString(obj['content']);
   return {
     type: text ? 'message' : 'log',
     payload: text ? { text } : { data: obj },
@@ -141,7 +144,10 @@ function ferramentaOpenCode(part: Record<string, unknown>, line: unknown): Mappe
   if (command && (n.includes('bash') || n.includes('shell'))) {
     return { type: 'command.executed', payload: { tool, command, status }, raw: line };
   }
-  const path = firstString(input?.['filePath']) ?? firstString(input?.['file_path']) ?? firstString(input?.['path']);
+  const path =
+    firstString(input?.['filePath']) ??
+    firstString(input?.['file_path']) ??
+    firstString(input?.['path']);
   if (path && (n.includes('write') || n.includes('edit') || n.includes('patch'))) {
     return { type: 'file.changed', payload: { tool, path, status }, raw: line };
   }
@@ -187,7 +193,9 @@ function custoDe(
 }
 
 function objeto(v: unknown): Record<string, unknown> | null {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
 }
 
 export function firstString(value: unknown): string | undefined {

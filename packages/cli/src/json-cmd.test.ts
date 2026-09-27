@@ -36,7 +36,11 @@ describe('--json uniforme nos comandos de leitura', () => {
 
   async function rodar(command: string, positional: string[] = []): Promise<unknown> {
     const { out, err } = await capturar(() =>
-      jsonCommand(t.client, { command, positional, flags: { json: true } }, { home: t.hub.config.home, url: t.url }),
+      jsonCommand(
+        t.client,
+        { command, positional, flags: { json: true } },
+        { home: t.hub.config.home, url: t.url },
+      ),
     );
     const texto = out.join('\n');
     assert.ok(!texto.includes(ESC), `${command}: sem código de cor`);
@@ -65,14 +69,20 @@ describe('--json uniforme nos comandos de leitura', () => {
     const { sessions } = (await rodar('sessions')) as { sessions: Array<{ id: string }> };
     assert.ok(sessions.some((x) => x.id === raiz.id));
     const { projects } = (await rodar('projects')) as { projects: Array<{ name: string }> };
-    assert.deepEqual(projects.map((p) => p.name), ['projeto-json']);
+    assert.deepEqual(
+      projects.map((p) => p.name),
+      ['projeto-json'],
+    );
     assert.ok(Array.isArray(((await rodar('agents')) as { agents: unknown[] }).agents));
     assert.deepEqual(((await rodar('approvals')) as { approvals: unknown[] }).approvals, []);
     assert.equal(((await rodar('health')) as { ok: boolean }).ok, true);
   });
 
   test('graph (com total) e budget', async () => {
-    const g = (await rodar('graph', [raiz.id])) as { graph: Array<{ children: unknown[] }>; totalUsd: number };
+    const g = (await rodar('graph', [raiz.id])) as {
+      graph: Array<{ children: unknown[] }>;
+      totalUsd: number;
+    };
     assert.equal(g.graph.length, 1);
     assert.equal(g.graph[0]!.children.length, 1);
     assert.equal(g.totalUsd, 0.25);
@@ -88,7 +98,12 @@ describe('--json uniforme nos comandos de leitura', () => {
 
   test('doctor --smoke --json é recusado (gasta tokens e mostra progresso)', async () => {
     await assert.rejects(
-      () => jsonCommand(t.client, { command: 'doctor', positional: [], flags: { json: true, smoke: true } }, { home: '', url: '' }),
+      () =>
+        jsonCommand(
+          t.client,
+          { command: 'doctor', positional: [], flags: { json: true, smoke: true } },
+          { home: '', url: '' },
+        ),
       /--smoke não aceita --json/,
     );
   });

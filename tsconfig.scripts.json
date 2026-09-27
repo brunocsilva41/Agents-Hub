@@ -1,0 +1,17 @@
+// Só para o ESLint com informação de tipo (`npm run lint`): dá um programa
+// TypeScript aos scripts `.mjs` da raiz e à config do ESLint, sem checar tipos
+// (checkJs desligado) e sem emitir nada.
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.mjs", "eslint.config.mjs"]
+}

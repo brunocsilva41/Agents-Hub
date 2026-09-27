@@ -11,7 +11,17 @@ describe('variáveis que cada agente lê de fato', () => {
   });
 
   test('nenhum agente anuncia a variável genérica MODEL (sem consumidor em adapter nenhum)', () => {
-    for (const id of ['claude', 'openclaude', 'antigravity', 'codex', 'opencode', 'kimi', 'copilot', 'cursor', 'mimo']) {
+    for (const id of [
+      'claude',
+      'openclaude',
+      'antigravity',
+      'codex',
+      'opencode',
+      'kimi',
+      'copilot',
+      'cursor',
+      'mimo',
+    ]) {
       assert.ok(!variaveisLidasPeloAgente(id).some((v) => v.nome === 'MODEL'), id);
     }
   });
@@ -82,7 +92,7 @@ describe('ambiente que o projeto pode passar ao agente', () => {
   test('valor que não é string é recusado, não convertido', () => {
     // Converter viraria "[object Object]" no ambiente do processo.
     const { aceitas, recusadas } = filtrarEnvDeProjeto({
-      OPENAI_BASE_URL: { url: 'x' } as unknown as string,
+      OPENAI_BASE_URL: { url: 'x' },
     });
     assert.deepEqual(aceitas, {});
     assert.deepEqual(recusadas, ['OPENAI_BASE_URL']);

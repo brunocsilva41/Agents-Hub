@@ -52,7 +52,10 @@ describe('hub mcp — detecção estruturada do registro', () => {
   test('servidor com o nosso nome apontando para outro caminho/porta: desatualizado', () => {
     const cursor = alvo('cursor');
     const arquivo = path.join(home, 'cursor-velho.json');
-    writeFileSync(arquivo, JSON.stringify({ mcpServers: { 'agents-hub': { command: 'node', args: ['C:/antigo/main.js'] } } }));
+    writeFileSync(
+      arquivo,
+      JSON.stringify({ mcpServers: { 'agents-hub': { command: 'node', args: ['C:/antigo/main.js'] } } }),
+    );
     assert.equal(estadoDoRegistro(cursor, arquivo, serverSpec('cursor', url)).estado, 'desatualizado');
     // E porta diferente também.
     const outro = path.join(home, 'cursor-porta.json');
@@ -73,7 +76,10 @@ describe('hub mcp — detecção estruturada do registro', () => {
 
   test('arquivo inexistente: ausente; JSON quebrado: ilegível (não "registrado")', () => {
     const cursor = alvo('cursor');
-    assert.equal(estadoDoRegistro(cursor, path.join(home, 'nao-existe.json'), serverSpec('cursor', url)).estado, 'ausente');
+    assert.equal(
+      estadoDoRegistro(cursor, path.join(home, 'nao-existe.json'), serverSpec('cursor', url)).estado,
+      'ausente',
+    );
     const quebrado = path.join(home, 'quebrado.json');
     writeFileSync(quebrado, '{"mcpServers": {"agents-hub": {');
     assert.equal(estadoDoRegistro(cursor, quebrado, serverSpec('cursor', url)).estado, 'ilegivel');

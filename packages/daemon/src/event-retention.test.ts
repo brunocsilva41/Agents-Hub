@@ -100,11 +100,7 @@ describe('EventRetentionCompactor', () => {
         },
       },
     } as unknown as UnitOfWork;
-    const compactor = new EventRetentionCompactor(
-      espiao,
-      { ...DEFAULT_RETENTION, rawEventDays: 0 },
-      2,
-    );
+    const compactor = new EventRetentionCompactor(espiao, { ...DEFAULT_RETENTION, rawEventDays: 0 }, 2);
 
     // Um `setImmediate` agendado ANTES da passada só roda antes de ela
     // terminar se a passada ceder o event loop entre os lotes.
@@ -118,7 +114,10 @@ describe('EventRetentionCompactor', () => {
     assert.equal(a, b, 'a segunda chamada recebe a passada em andamento');
     assert.ok(a.rowsCompacted >= 7);
     assert.ok(chamadas.length >= 4, `esperava vários lotes, vieram ${chamadas.length}`);
-    assert.ok(chamadas.every((l) => l === 2), 'todo lote tem limite');
+    assert.ok(
+      chamadas.every((l) => l === 2),
+      'todo lote tem limite',
+    );
     assert.equal(cedeu, true, 'a passada precisa ceder o event loop entre os lotes');
   });
 

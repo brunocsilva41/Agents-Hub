@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { EventEnvelope } from '@agents-hub/core';
-import { criarNotificadorDeAprovacao, type DepsDeNotificacao, type PermissaoDeNotificacao } from './approvalNotice.js';
+import {
+  criarNotificadorDeAprovacao,
+  type DepsDeNotificacao,
+  type PermissaoDeNotificacao,
+} from './approvalNotice.js';
 
 /** R14-14: aprovação visível para quem não está olhando o painel. */
 describe('notificação de aprovação no navegador', () => {
@@ -23,7 +27,12 @@ describe('notificação de aprovação no navegador', () => {
   }
 
   const evento = (id: string, type = 'approval.requested'): EventEnvelope =>
-    ({ type, agentId: 'claude', sessionId: 'ses_1', payload: { approvalId: id, action: 'Bash: rm -rf build' } }) as unknown as EventEnvelope;
+    ({
+      type,
+      agentId: 'claude',
+      sessionId: 'ses_1',
+      payload: { approvalId: id, action: 'Bash: rm -rf build' },
+    }) as unknown as EventEnvelope;
 
   test('aba em segundo plano + permissão: notifica com a ação e foca ao clicar', () => {
     const m = montar('granted', true);

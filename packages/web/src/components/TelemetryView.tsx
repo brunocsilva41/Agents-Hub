@@ -56,7 +56,10 @@ export function TelemetryView({
   );
   const resumo = resumoDeSessoes(sessoesDoProjeto, periodo, agora);
 
-  const fluxosComCusto = useMemo(() => fluxosDoPeriodo(doProjeto, periodo, agora), [doProjeto, periodo, agora]);
+  const fluxosComCusto = useMemo(
+    () => fluxosDoPeriodo(doProjeto, periodo, agora),
+    [doProjeto, periodo, agora],
+  );
   const rootIds = useMemo(() => fluxosComCusto.map((f) => f.rootId), [fluxosComCusto]);
   const grafos = useFlowGraphs(situacao === 'ok' ? rootIds : [], revisionOf);
   const nos = useMemo(() => {
@@ -148,13 +151,16 @@ export function TelemetryView({
             {resumo.taxaDeConclusao === null ? '—' : `${Math.round(resumo.taxaDeConclusao * 100)}%`}
           </div>
           <div className="kpi-sub">
-            {resumo.concluidas} de {resumo.terminadas} {resumo.terminadas === 1 ? 'terminada' : 'terminadas'}
+            {resumo.concluidas} de {resumo.terminadas}{' '}
+            {resumo.terminadas === 1 ? 'terminada' : 'terminadas'}
           </div>
         </div>
 
         <div className="kpi-card">
           <div className="kpi-label">Custo no período</div>
-          <div className="kpi-val highlight-purple">{custoCompleto ? formatUsdShort(totalUsd) : '…'}</div>
+          <div className="kpi-val highlight-purple">
+            {custoCompleto ? formatUsdShort(totalUsd) : '…'}
+          </div>
           <div className="kpi-sub">
             {formatTokens(totalTokens)} tokens · {fluxosComCusto.length}{' '}
             {fluxosComCusto.length === 1 ? 'fluxo' : 'fluxos'}
@@ -164,8 +170,8 @@ export function TelemetryView({
 
       {grafos.resumo.falhas > 0 && (
         <div className="notice warn telemetria-aviso" role="alert">
-          O custo de {grafos.resumo.falhas} de {grafos.resumo.total} fluxo(s) não carregou ({grafos.resumo.erro}); os
-          totais abaixo estão incompletos.{' '}
+          O custo de {grafos.resumo.falhas} de {grafos.resumo.total} fluxo(s) não carregou (
+          {grafos.resumo.erro}); os totais abaixo estão incompletos.{' '}
           <button type="button" className="linkish" onClick={grafos.tentarDeNovo}>
             tentar de novo
           </button>
@@ -211,7 +217,10 @@ export function TelemetryView({
                       <td>{formatTokens(a.tokens)}</td>
                       <td>
                         <div className="pct-bar-wrap">
-                          <div className="pct-bar" style={{ width: `${pct}%`, background: agentColor(a.agentId) }} />
+                          <div
+                            className="pct-bar"
+                            style={{ width: `${pct}%`, background: agentColor(a.agentId) }}
+                          />
                           <span>{pct}%</span>
                         </div>
                       </td>
@@ -236,13 +245,23 @@ export function TelemetryView({
               <div
                 key={f.inicio}
                 className={`telemetria-barra${f.usd === 0 ? ' telemetria-barra-vazia' : ''}`}
-                style={{ height: maiorFaixa > 0 && f.usd > 0 ? `${Math.max(2, (f.usd / maiorFaixa) * 100)}%` : undefined }}
+                style={{
+                  height:
+                    maiorFaixa > 0 && f.usd > 0
+                      ? `${Math.max(2, (f.usd / maiorFaixa) * 100)}%`
+                      : undefined,
+                }}
                 title={`${new Date(f.inicio).toLocaleString('pt-BR')}: ${formatUsdShort(f.usd)} · ${formatTokens(f.tokens)} tokens`}
               />
             ))}
           </div>
           <div className="telemetria-eixo" aria-hidden="true">
-            <span>{new Date(faixas[0]!.inicio).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span>
+            <span>
+              {new Date(faixas[0]!.inicio).toLocaleString('pt-BR', {
+                dateStyle: 'short',
+                timeStyle: 'short',
+              })}
+            </span>
             <span>agora</span>
           </div>
           <p className="telemetria-nota">

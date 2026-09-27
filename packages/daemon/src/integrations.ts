@@ -205,7 +205,14 @@ function estadoDoMcp(
     comando: `hub mcp install ${target.agentId} --write`,
   };
   if (precisaDeProjeto) {
-    return { ...base, arquivo: null, precisaDeProjeto, registrado: false, atualizado: false, erro: null };
+    return {
+      ...base,
+      arquivo: null,
+      precisaDeProjeto,
+      registrado: false,
+      atualizado: false,
+      erro: null,
+    };
   }
   const arquivo = resolveConfigPath(target, projectPath ?? '');
   try {
@@ -273,7 +280,11 @@ function calcular(
       );
     }
     if (!pontos.cliExiste) {
-      throw new HubError('ILLEGAL_STATE', `CLI do Hub não encontrada em ${pontos.cli} — rode o build`, {});
+      throw new HubError(
+        'ILLEGAL_STATE',
+        `CLI do Hub não encontrada em ${pontos.cli} — rode o build`,
+        {},
+      );
     }
     const arquivo = alvo.configUsuario;
     let atual: Record<string, unknown>;
@@ -316,7 +327,11 @@ function calcular(
     );
   }
   if (!pontos.mcpExiste) {
-    throw new HubError('ILLEGAL_STATE', `MCP server do Hub não encontrado em ${pontos.mcp} — rode o build`, {});
+    throw new HubError(
+      'ILLEGAL_STATE',
+      `MCP server do Hub não encontrado em ${pontos.mcp} — rode o build`,
+      {},
+    );
   }
   const arquivo = resolveConfigPath(target, projectPath ?? '');
   let plano;

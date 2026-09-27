@@ -34,7 +34,10 @@ export function EstadoDaTela({
   }
   if (situacao === 'erro') {
     return (
-      <div className={`empty estado-tela estado-tela-erro${compacto ? ' estado-tela-compacto' : ''}`} role="alert">
+      <div
+        className={`empty estado-tela estado-tela-erro${compacto ? ' estado-tela-compacto' : ''}`}
+        role="alert"
+      >
         {!compacto && (
           <div className="empty-icon" aria-hidden="true">
             ⚠️

@@ -452,12 +452,13 @@ export class HubServer {
       });
 
       const sessoes = new Set(this.sessions.sessoesDaTask(taskId));
-      const past = sessoes.size <= 1
-        ? this.sessions.listEvents(task.sessionId, undefined, SSE_REPLAY_LIMIT)
-        : [...sessoes]
-            .flatMap((id) => this.sessions.listEvents(id, undefined, SSE_REPLAY_LIMIT))
-            .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
-            .slice(-SSE_REPLAY_LIMIT);
+      const past =
+        sessoes.size <= 1
+          ? this.sessions.listEvents(task.sessionId, undefined, SSE_REPLAY_LIMIT)
+          : [...sessoes]
+              .flatMap((id) => this.sessions.listEvents(id, undefined, SSE_REPLAY_LIMIT))
+              .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+              .slice(-SSE_REPLAY_LIMIT);
       for (const event of past) channel.send(event);
       if (past.length === SSE_REPLAY_LIMIT) {
         channel.send(truncatedReplayNotice(task.sessionId, past.length), { withId: false });
@@ -801,7 +802,11 @@ export class HubServer {
 
     this.#route('POST', '/sessions/:id/send', async (req, res, params) => {
       const body = await readBody(req, SendMessageSchema);
-      sendJson(res, 200, await this.sessions.send(param(params['id'], SessionIdSchema, 'id'), body.text));
+      sendJson(
+        res,
+        200,
+        await this.sessions.send(param(params['id'], SessionIdSchema, 'id'), body.text),
+      );
     });
 
     this.#route('POST', '/sessions/:id/interrupt', async (_req, res, params) => {
@@ -864,9 +869,7 @@ export class HubServer {
     this.#route('GET', '/approvals', (req, res) => {
       const url = new URL(req.url ?? '/', 'http://local');
       sendJson(res, 200, {
-        approvals: this.sessions.pendingApprovals(
-          url.searchParams.get('sessionId') ?? undefined,
-        ),
+        approvals: this.sessions.pendingApprovals(url.searchParams.get('sessionId') ?? undefined),
       });
     });
 
@@ -958,7 +961,11 @@ export class HubServer {
       'POST',
       '/shutdown',
       (req, res) => {
-        this.operator.audit.record({ actor: quem(req), kind: 'daemon.shutdown', action: 'POST /shutdown' });
+        this.operator.audit.record({
+          actor: quem(req),
+          kind: 'daemon.shutdown',
+          action: 'POST /shutdown',
+        });
         sendJson(res, 200, { ok: true, message: 'encerrando' });
         // Responde ANTES de derrubar: quem pediu precisa saber que foi aceito.
         setTimeout(() => void this.onShutdown?.(), 100);
@@ -989,10 +996,13 @@ export class HubServer {
       audit: this.operator.audit,
     });
     // Backup do banco (item 5.6) — ver `maintenance-routes.ts`.
-    registerMaintenanceRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
-      config: this.config,
-      audit: this.operator.audit,
-    });
+    registerMaintenanceRoutes(
+      (method, path, handler, opts) => this.#route(method, path, handler, opts),
+      {
+        config: this.config,
+        audit: this.operator.audit,
+      },
+    );
 
     // Orçamento editável e workflows pelo painel (item 6.12) — ver `operation-routes.ts`.
     registerOperationRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
@@ -1002,20 +1012,23 @@ export class HubServer {
     });
 
     // Hook do gate e MCP por agente: estado e instalação com prévia (6.12).
-    registerIntegrationRoutes((method, path, handler, opts) => this.#route(method, path, handler, opts), {
-      deps: () => ({
-        userHome: this.operator.userHome,
-        hubHome: this.config.home,
-        hubUrl: baseUrl(this.config),
-        codexBypassAtivo: this.config.codexGate.bypassHookTrust === true,
-        nodeBin: process.execPath,
-        cliMain: cliHookEntrypoint(),
-        mcpMain: mcpServerEntrypoint(),
-      }),
-      agentIds: () => this.registry.ids(),
-      projectPath: (projectId) => this.sessions.getProject(projectId).path,
-      audit: this.operator.audit,
-    });
+    registerIntegrationRoutes(
+      (method, path, handler, opts) => this.#route(method, path, handler, opts),
+      {
+        deps: () => ({
+          userHome: this.operator.userHome,
+          hubHome: this.config.home,
+          hubUrl: baseUrl(this.config),
+          codexBypassAtivo: this.config.codexGate.bypassHookTrust === true,
+          nodeBin: process.execPath,
+          cliMain: cliHookEntrypoint(),
+          mcpMain: mcpServerEntrypoint(),
+        }),
+        agentIds: () => this.registry.ids(),
+        projectPath: (projectId) => this.sessions.getProject(projectId).path,
+        audit: this.operator.audit,
+      },
+    );
 
     // ------------------------------------------------------------- grafo e custo
     // Raiz inexistente é 404 (SESSION_NOT_FOUND via `getSession`), não um
@@ -1127,8 +1140,8 @@ export function statusFor(code: string): number {
     case 'SESSION_NOT_FOUND':
     case 'TASK_NOT_FOUND':
     case 'PROJECT_NOT_FOUND':
-    // Aprovação inexistente era ILLEGAL_STATE/400 (vistoria 2026-09-25, R13-19).
     case 'APPROVAL_NOT_FOUND':
+      // Aprovação inexistente era ILLEGAL_STATE/400 (vistoria 2026-09-25, R13-19).
       return 404;
     case 'INVALID_BRIEF':
       return 422;

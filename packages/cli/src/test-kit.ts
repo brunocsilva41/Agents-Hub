@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { newId, nowIso, type AgentDiscovery, type EventCost, type EventType, type Session } from '@agents-hub/core';
+import {
+  newId,
+  nowIso,
+  type AgentDiscovery,
+  type EventCost,
+  type EventType,
+  type Session,
+} from '@agents-hub/core';
 import { createHub, type Hub, type HubDeps } from '@agents-hub/daemon';
 import { HubClient } from './client.js';
 
@@ -177,7 +184,9 @@ export function semearDiff(hub: Hub, session: Session, patch: string): string {
 }
 
 /** Captura `console.log`/`console.error` durante `fn`. */
-export async function capturar<T>(fn: () => Promise<T>): Promise<{ out: string[]; err: string[]; valor: T }> {
+export async function capturar<T>(
+  fn: () => Promise<T>,
+): Promise<{ out: string[]; err: string[]; valor: T }> {
   const out: string[] = [];
   const err: string[] = [];
   const log = console.log;
@@ -197,7 +206,12 @@ export async function capturar<T>(fn: () => Promise<T>): Promise<{ out: string[]
 export function repoGit(dir: string): (...argv: string[]) => string {
   mkdirSync(dir, { recursive: true });
   const git = (...argv: string[]): string =>
-    execFileSync('git', argv, { cwd: dir, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync('git', argv, {
+      cwd: dir,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'teste@example.com');
   git('config', 'user.name', 'Teste');

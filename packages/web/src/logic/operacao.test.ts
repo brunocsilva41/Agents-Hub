@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import type { AgentSummary, BudgetSummary, SessionSummary, TaskSummary, WorkflowRunSummary } from '@agents-hub/client';
+import type {
+  AgentSummary,
+  BudgetSummary,
+  SessionSummary,
+  TaskSummary,
+  WorkflowRunSummary,
+} from '@agents-hub/client';
 import {
   diagnosticarAgente,
   execucaoEmCurso,
@@ -42,7 +48,18 @@ describe('separarDiff', () => {
     );
     // `--- a/` e `+++ b/` são cabeçalho, não remoção/adição.
     const tipos = arquivos[0]!.linhas.map((l) => l.tipo);
-    assert.deepEqual(tipos, ['meta', 'meta', 'meta', 'meta', 'hunk', 'ctx', 'del', 'add', 'add', 'meta']);
+    assert.deepEqual(tipos, [
+      'meta',
+      'meta',
+      'meta',
+      'meta',
+      'hunk',
+      'ctx',
+      'del',
+      'add',
+      'add',
+      'meta',
+    ]);
   });
 
   test('CRLF e patch sem cabeçalho não somem', () => {
@@ -81,7 +98,10 @@ describe('orçamento editável', () => {
   });
 
   test('campo vazio não mexe; baixar acima do gasto é permitido', () => {
-    assert.deepEqual(lerFormOrcamento({ usd: '1', tokens: '', minutos: '' }, ORC), { ok: true, limits: { usd: 1 } });
+    assert.deepEqual(lerFormOrcamento({ usd: '1', tokens: '', minutos: '' }, ORC), {
+      ok: true,
+      limits: { usd: 1 },
+    });
   });
 
   test('recusa abaixo do já gasto, zero, negativo, texto e tokens fracionários', () => {
@@ -162,7 +182,9 @@ function tarefa(extra: Partial<TaskSummary>): TaskSummary {
 describe('motivoDaTarefa', () => {
   test('erro da última tentativa vence; depois validação; depois o estado', () => {
     assert.equal(
-      motivoDaTarefa(tarefa({ state: 'failed', attempts: [{ n: 1, agentId: 'a', outcome: 'x', error: 'caiu' }] })),
+      motivoDaTarefa(
+        tarefa({ state: 'failed', attempts: [{ n: 1, agentId: 'a', outcome: 'x', error: 'caiu' }] }),
+      ),
       'caiu',
     );
     assert.match(
@@ -173,7 +195,10 @@ describe('motivoDaTarefa', () => {
             summary: '',
             artifacts: [],
             usage: { usd: 0, tokens: 0, seconds: 0 },
-            validation: { passed: false, checks: [{ name: 'npm test', passed: false, detail: '3 falhas' }] },
+            validation: {
+              passed: false,
+              checks: [{ name: 'npm test', passed: false, detail: '3 falhas' }],
+            },
           },
         }),
       ) ?? '',
@@ -185,7 +210,10 @@ describe('motivoDaTarefa', () => {
 });
 
 describe('workflow', () => {
-  const run = (estados: string[], state: WorkflowRunSummary['state'] = 'running'): WorkflowRunSummary => ({
+  const run = (
+    estados: string[],
+    state: WorkflowRunSummary['state'] = 'running',
+  ): WorkflowRunSummary => ({
     id: 'wfr_a',
     name: 'w',
     description: null,
@@ -239,7 +267,14 @@ function agente(extra: Partial<AgentSummary>): AgentSummary {
     loginHint: '',
     model: { supported: true, format: 'x' },
     verified: { status: 'verified', version: '2.0.1', date: '', notes: '' },
-    probe: { agentId: 'claude', installed: true, version: '2.0.1', binPath: 'C:/bin/claude.exe', error: null, checkedAt: '' },
+    probe: {
+      agentId: 'claude',
+      installed: true,
+      version: '2.0.1',
+      binPath: 'C:/bin/claude.exe',
+      error: null,
+      checkedAt: '',
+    },
     ...extra,
   };
 }
@@ -255,7 +290,16 @@ describe('diagnosticarAgente', () => {
 
   test('não instalado: erro com o motivo do probe', () => {
     const d = diagnosticarAgente(
-      agente({ probe: { agentId: 'x', installed: false, version: null, binPath: null, error: 'binário não encontrado', checkedAt: '' } }),
+      agente({
+        probe: {
+          agentId: 'x',
+          installed: false,
+          version: null,
+          binPath: null,
+          error: 'binário não encontrado',
+          checkedAt: '',
+        },
+      }),
     );
     assert.equal(d.nivel, 'erro');
     assert.ok(d.notas.includes('binário não encontrado'));
@@ -263,12 +307,25 @@ describe('diagnosticarAgente', () => {
 
   test('versão diferente da conferida: aviso; sem probe: aviso', () => {
     assert.equal(
-      diagnosticarAgente(agente({ probe: { agentId: 'x', installed: true, version: '3.0.0', binPath: null, error: null, checkedAt: '' } })).nivel,
+      diagnosticarAgente(
+        agente({
+          probe: {
+            agentId: 'x',
+            installed: true,
+            version: '3.0.0',
+            binPath: null,
+            error: null,
+            checkedAt: '',
+          },
+        }),
+      ).nivel,
       'aviso',
     );
     assert.equal(diagnosticarAgente(agente({ probe: null })).nivel, 'aviso');
     assert.ok(
-      diagnosticarAgente(agente({ model: { supported: false, format: '' } })).notas.includes('não aceita escolher modelo pelo Hub'),
+      diagnosticarAgente(agente({ model: { supported: false, format: '' } })).notas.includes(
+        'não aceita escolher modelo pelo Hub',
+      ),
     );
   });
 });

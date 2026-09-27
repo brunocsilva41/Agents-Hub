@@ -12,7 +12,11 @@ import { claudeMapper } from './mappers/claude.js';
 const AVISO = 'failed to load skill C:\\x\\universal-agent-guide\\SKILL.md: missing YAML frontmatter';
 
 test('evento error do agente vence o stderr', () => {
-  const m = motivoDaFalha(1, ["You've hit your usage limit. Try again later."], [AVISO, 'ERROR: stream ended']);
+  const m = motivoDaFalha(
+    1,
+    ["You've hit your usage limit. Try again later."],
+    [AVISO, 'ERROR: stream ended'],
+  );
   assert.match(m, /usage limit/);
   assert.doesNotMatch(m, /SKILL/);
 });

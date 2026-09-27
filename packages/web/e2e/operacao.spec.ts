@@ -28,7 +28,10 @@ async function abrirOperacao(page: Page): Promise<void> {
 }
 
 async function secao(page: Page, nome: string): Promise<void> {
-  await page.getByRole('navigation', { name: 'Seções de operação' }).getByRole('button', { name: nome }).click();
+  await page
+    .getByRole('navigation', { name: 'Seções de operação' })
+    .getByRole('button', { name: nome })
+    .click();
 }
 
 async function semProblemas(page: Page): Promise<void> {
@@ -46,7 +49,9 @@ VIEWPORTS.forEach((vp, indice) => {
       await page.locator('.ops-toolbar select').selectOption('ses_raiz1');
 
       // Tarefas: estado, motivo de falha da validação.
-      await expect(page.getByRole('list', { name: 'Validação' })).toContainText('3 testes falharam em auth.spec.ts');
+      await expect(page.getByRole('list', { name: 'Validação' })).toContainText(
+        '3 testes falharam em auth.spec.ts',
+      );
       await expect(page.getByText('2 tentativas')).toBeVisible();
       // Artefatos.
       await expect(page.getByText('validacao.log')).toBeVisible();
@@ -65,7 +70,9 @@ VIEWPORTS.forEach((vp, indice) => {
       const novo = String(3 + indice);
       await usd.fill(novo);
       await page.getByRole('button', { name: 'Salvar teto' }).click();
-      await expect(page.getByRole('status').filter({ hasText: `Teto salvo: US$ ${novo}.00` })).toBeVisible();
+      await expect(
+        page.getByRole('status').filter({ hasText: `Teto salvo: US$ ${novo}.00` }),
+      ).toBeVisible();
       await semProblemas(page);
     });
 
@@ -79,7 +86,9 @@ VIEWPORTS.forEach((vp, indice) => {
       await expect(page.getByText('esperando aprovação: executar: npm run migrate')).toBeVisible();
       await semProblemas(page);
 
-      await page.getByLabel('YAML do workflow').fill('name: x\nsteps:\n  - { id: b, agent: claude, objective: y, dependsOn: [inexistente] }\n');
+      await page
+        .getByLabel('YAML do workflow')
+        .fill('name: x\nsteps:\n  - { id: b, agent: claude, objective: y, dependsOn: [inexistente] }\n');
       await page.getByRole('button', { name: 'Validar' }).click();
       await expect(page.getByRole('list', { name: 'Erros de validação' })).toContainText('inexistente');
       await expect(page.getByRole('button', { name: 'Executar' })).toBeDisabled();
@@ -106,7 +115,10 @@ VIEWPORTS.forEach((vp, indice) => {
       await page.getByRole('button', { name: 'Adicionar pasta' }).click();
       await expect(page.getByRole('status').filter({ hasText: 'Pasta adicionada' })).toBeVisible();
       await page.getByRole('button', { name: `Remover a pasta ${caminho}` }).click();
-      await page.getByRole('alertdialog', { name: 'Confirmar remover pasta' }).getByRole('button', { name: 'Remover pasta' }).click();
+      await page
+        .getByRole('alertdialog', { name: 'Confirmar remover pasta' })
+        .getByRole('button', { name: 'Remover pasta' })
+        .click();
       await expect(page.getByRole('status').filter({ hasText: 'Pasta removida' })).toBeVisible();
 
       // Adotada e viva: pode desanexar (com confirmação).
@@ -114,7 +126,10 @@ VIEWPORTS.forEach((vp, indice) => {
       await expect(adotadas).toContainText('Claude Code (externo)');
       await adotadas.getByRole('button', { name: 'Desanexar' }).click();
       await semProblemas(page);
-      await page.getByRole('alertdialog', { name: 'Confirmar desanexar' }).getByRole('button', { name: 'Desanexar' }).click();
+      await page
+        .getByRole('alertdialog', { name: 'Confirmar desanexar' })
+        .getByRole('button', { name: 'Desanexar' })
+        .click();
       await expect(page.getByRole('status').filter({ hasText: 'Sessão desanexada' })).toBeVisible();
 
       await page.getByRole('button', { name: 'Adotar sessão' }).click();
@@ -128,15 +143,21 @@ VIEWPORTS.forEach((vp, indice) => {
       await expect(page.getByText('respondendo')).toBeVisible();
       await expect(page.locator('.ops-pill.nivel-erro')).toHaveCount(1);
       await page.getByRole('button', { name: 'Re-sondar agentes' }).click();
-      await expect(page.getByRole('status').filter({ hasText: 'Sondagem refeita: 4 de 5' })).toBeVisible();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Sondagem refeita: 4 de 5' }),
+      ).toBeVisible();
       await semProblemas(page);
 
       await secao(page, 'Manutenção');
       await page.getByRole('button', { name: 'Recolher worktrees…' }).click();
       await semProblemas(page);
       await page.getByRole('button', { name: 'Recolher agora' }).click();
-      await expect(page.getByRole('status').filter({ hasText: '1 worktree(s) recolhido(s)' })).toBeVisible();
-      await expect(page.getByRole('list', { name: 'Falhas ao recolher' })).toContainText('arquivo em uso');
+      await expect(
+        page.getByRole('status').filter({ hasText: '1 worktree(s) recolhido(s)' }),
+      ).toBeVisible();
+      await expect(page.getByRole('list', { name: 'Falhas ao recolher' })).toContainText(
+        'arquivo em uso',
+      );
       await semProblemas(page);
     });
   });

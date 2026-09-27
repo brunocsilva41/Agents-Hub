@@ -22,3 +22,4 @@ export * from './operator-token.js';
 export * from './audit.js';
 export { policyLeaves, diffPolicy, loosenedFields, clampedFields } from './policy-edit.js';
 export * from './hub-env.js';
+export { textoDe } from './texto.js';

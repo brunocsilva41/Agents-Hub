@@ -163,12 +163,9 @@ function iguais(a: string, b: string): boolean {
  * Ordem: `Authorization: Bearer`, `X-Hub-Token`, cookie. `by` sai da ORIGEM
  * autenticada — o corpo da requisição não participa.
  */
-export function authenticateOperator(
-  req: IncomingMessage,
-  token: string,
-): OperatorIdentity | null {
+export function authenticateOperator(req: IncomingMessage, token: string): OperatorIdentity | null {
   const auth = primeiro(req.headers.authorization);
-  const bearer = auth ? /^Bearer\s+(\S+)\s*$/i.exec(auth)?.[1] ?? null : null;
+  const bearer = auth ? (/^Bearer\s+(\S+)\s*$/i.exec(auth)?.[1] ?? null) : null;
   const header = bearer ?? primeiro(req.headers[OPERATOR_TOKEN_HEADER]);
   if (header !== null) {
     if (!iguais(header.trim(), token)) return null;

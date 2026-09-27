@@ -161,7 +161,9 @@ export async function decideToolCall(
         ...(sessionId ? { sessionId } : {}),
         ...(entrada.session_id ? { nativeSessionId: entrada.session_id } : {}),
         ...(entrada.cwd ? { cwd: entrada.cwd } : {}),
-        ...(typeof entrada.tool_use_id === 'string' && entrada.tool_use_id.length > 0 && entrada.tool_use_id.length <= 200
+        ...(typeof entrada.tool_use_id === 'string' &&
+        entrada.tool_use_id.length > 0 &&
+        entrada.tool_use_id.length <= 200
           ? { toolUseId: entrada.tool_use_id }
           : {}),
         toolName,

@@ -8,7 +8,6 @@ import { createHub, type Hub } from './hub.js';
 
 const SEGREDO = 'SEGREDO-HTTP-plantado-9876543210';
 
-
 function manifesto(id: string, script: string): string {
   const s = script.replace(/\\/g, '\\\\');
   return `
@@ -66,8 +65,12 @@ describe('GET /discovery e POST /projects/:id/import', () => {
     mkdirSync(home, { recursive: true });
 
     const script = path.join(raiz, 'agente.cjs');
-    writeFileSync(script, "if (process.argv.includes('--version')) { process.stdout.write('1.0.0\\n'); } process.exit(0);\n");
-    for (const id of ['claude', 'cursor']) writeFileSync(path.join(manifestos, `${id}.yaml`), manifesto(id, script));
+    writeFileSync(
+      script,
+      "if (process.argv.includes('--version')) { process.stdout.write('1.0.0\\n'); } process.exit(0);\n",
+    );
+    for (const id of ['claude', 'cursor'])
+      writeFileSync(path.join(manifestos, `${id}.yaml`), manifesto(id, script));
 
     const instr = path.join(raiz, 'CLAUDE.md');
     writeFileSync(instr, 'Explique a decisão antes de aplicar.');
@@ -85,7 +88,17 @@ describe('GET /discovery e POST /projects/:id/import', () => {
         files: [],
         // O fake VAZA um valor de propósito: a rota tem de mascarar mesmo assim.
         mcpServers: vazado
-          ? [{ name: 'fs', transport: 'stdio', command: 'npx', args: ['fs'], env: { FS_TOKEN: SEGREDO }, source: '/x', isHub: false }]
+          ? [
+              {
+                name: 'fs',
+                transport: 'stdio',
+                command: 'npx',
+                args: ['fs'],
+                env: { FS_TOKEN: SEGREDO },
+                source: '/x',
+                isHub: false,
+              },
+            ]
           : [],
         instructionFiles: vazado ? [{ path: instr, bytes: 36 }] : [],
         warnings: [],
@@ -177,9 +190,14 @@ describe('GET /discovery e POST /projects/:id/import', () => {
     const { context } = (await ctxRes.json()) as {
       context: { prompts?: Record<string, string>; env?: Record<string, Record<string, string>> };
     };
-    assert.match(Object.values(context.prompts ?? {}).join(' '), /Explique a decisão antes de aplicar\./);
+    assert.match(
+      Object.values(context.prompts ?? {}).join(' '),
+      /Explique a decisão antes de aplicar\./,
+    );
     assert.equal(
-      Object.values(context.env ?? {}).find((e) => e['ANTHROPIC_MODEL'] !== undefined)?.['ANTHROPIC_MODEL'],
+      Object.values(context.env ?? {}).find((e) => e['ANTHROPIC_MODEL'] !== undefined)?.[
+        'ANTHROPIC_MODEL'
+      ],
       'claude-x',
     );
     assert.equal(existsSync(path.join(projetoPath, '.agents-hub', 'config.yaml')), false);
@@ -189,7 +207,10 @@ describe('GET /discovery e POST /projects/:id/import', () => {
   });
 
   test('import: validação — projeto inexistente 404, mcp sem targetAgents 422, corpo inválido 422', async () => {
-    const semProjeto = await post('/projects/prj_naoexiste/import', { agentId: 'claude', kinds: ['env'] });
+    const semProjeto = await post('/projects/prj_naoexiste/import', {
+      agentId: 'claude',
+      kinds: ['env'],
+    });
     assert.equal(semProjeto.status, 404);
 
     const semAlvo = await post(`/projects/${projectId}/import`, { agentId: 'claude', kinds: ['mcp'] });
@@ -198,7 +219,11 @@ describe('GET /discovery e POST /projects/:id/import', () => {
     const invalido = await post(`/projects/${projectId}/import`, { agentId: 'claude', kinds: ['tudo'] });
     assert.equal(invalido.status, 422);
 
-    const extra = await post(`/projects/${projectId}/import`, { agentId: 'claude', kinds: ['env'], path: '/etc' });
+    const extra = await post(`/projects/${projectId}/import`, {
+      agentId: 'claude',
+      kinds: ['env'],
+      path: '/etc',
+    });
     assert.equal(extra.status, 422);
   });
 });

@@ -50,7 +50,10 @@ export interface InitReport {
 }
 
 export function versaoAtende(versao: string, minimo: [number, number, number] = NODE_MINIMO): boolean {
-  const partes = versao.replace(/^v/, '').split('.').map((p) => Number.parseInt(p, 10));
+  const partes = versao
+    .replace(/^v/, '')
+    .split('.')
+    .map((p) => Number.parseInt(p, 10));
   for (let i = 0; i < 3; i += 1) {
     const a = partes[i] ?? 0;
     const b = minimo[i]!;
@@ -78,7 +81,9 @@ export async function perguntarNoTerminal(pergunta: string): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const resposta = (await rl.question(`${pergunta} [S/n] `)).trim().toLowerCase();
-    return resposta === '' || resposta === 's' || resposta === 'sim' || resposta === 'y' || resposta === 'yes';
+    return (
+      resposta === '' || resposta === 's' || resposta === 'sim' || resposta === 'y' || resposta === 'yes'
+    );
   } finally {
     rl.close();
   }
@@ -125,9 +130,13 @@ export async function initCommand(client: HubClient, args: Args, deps: InitDeps)
     `${nodeOk ? green('✓') : red('✗')} node ${nodeVersion} ${dim(`(mínimo ${NODE_MINIMO.join('.')})`)}`,
   );
   if (!nodeOk) {
-    console.log(`   ${yellow('atualize o Node: o banco do Hub usa node:sqlite, que não existe antes do 22.5')}`);
+    console.log(
+      `   ${yellow('atualize o Node: o banco do Hub usa node:sqlite, que não existe antes do 22.5')}`,
+    );
   } else if (!versaoAtende(nodeVersion, [22, 13, 0])) {
-    console.log(`   ${yellow('entre 22.5 e 22.12 o node:sqlite exige --experimental-sqlite; prefira Node 24')}`);
+    console.log(
+      `   ${yellow('entre 22.5 e 22.12 o node:sqlite exige --experimental-sqlite; prefira Node 24')}`,
+    );
   }
   const gitVersion = await git(['--version']);
   console.log(
@@ -150,11 +159,15 @@ export async function initCommand(client: HubClient, args: Args, deps: InitDeps)
   const instalados = agents.filter((a) => a.installed);
   console.log(renderDiscoveryTable(agents));
   if (instalados.length === 0) {
-    console.log(yellow('nenhum CLI de agente encontrado no PATH. Instale ao menos um (ex.: Claude Code, Codex).'));
+    console.log(
+      yellow('nenhum CLI de agente encontrado no PATH. Instale ao menos um (ex.: Claude Code, Codex).'),
+    );
   }
   const semAuth = instalados.filter((a) => a.auth.state === 'absent');
   for (const a of semAuth) {
-    console.log(`${yellow('⚠')} ${a.agentId}: credencial não encontrada — faça login pelo próprio CLI antes da primeira sessão`);
+    console.log(
+      `${yellow('⚠')} ${a.agentId}: credencial não encontrada — faça login pelo próprio CLI antes da primeira sessão`,
+    );
   }
 
   // 4. projeto
@@ -186,13 +199,21 @@ export async function initCommand(client: HubClient, args: Args, deps: InitDeps)
       console.log(dim('não registrado. quando quiser:'), bold('hub project add'));
     } else {
       sugestoes.push(`hub project add "${cwd}"`);
-      console.log(dim(`${cwd} não está registrado. rode`), bold('hub project add'), dim('ou `hub init --yes`'));
+      console.log(
+        dim(`${cwd} não está registrado. rode`),
+        bold('hub project add'),
+        dim('ou `hub init --yes`'),
+      );
     }
   }
   if (!ehGit) {
-    console.log(`${yellow('⚠')} não é um repositório git: sessões com isolamento (worktree) não funcionam aqui`);
+    console.log(
+      `${yellow('⚠')} não é um repositório git: sessões com isolamento (worktree) não funcionam aqui`,
+    );
   } else if (!temCommit) {
-    console.log(`${yellow('⚠')} repositório sem nenhum commit: faça um commit inicial — o worktree da sessão parte do HEAD`);
+    console.log(
+      `${yellow('⚠')} repositório sem nenhum commit: faça um commit inicial — o worktree da sessão parte do HEAD`,
+    );
   }
 
   // 5. gate e MCP (só prévia)
@@ -207,7 +228,9 @@ export async function initCommand(client: HubClient, args: Args, deps: InitDeps)
     } else if (alvo.gateNasSessoesDoHub) {
       // Sessões do Hub já são gateadas (hook por sessão em `--settings`); o
       // hook no arquivo só estende o gate ao uso do agente fora do Hub.
-      console.log(`${green('✓')} ${alvo.id}: sessões do Hub gateadas ${dim('(hook por sessão; instalar no arquivo cobre o uso fora do Hub)')}`);
+      console.log(
+        `${green('✓')} ${alvo.id}: sessões do Hub gateadas ${dim('(hook por sessão; instalar no arquivo cobre o uso fora do Hub)')}`,
+      );
       sugestoes.push(`hub hooks install ${alvo.id}`);
     } else {
       sugestoes.push(`hub hooks install ${alvo.id}`);
@@ -219,7 +242,9 @@ export async function initCommand(client: HubClient, args: Args, deps: InitDeps)
   }
   const semPrevia = sugestoes.filter((s) => s.startsWith('hub hooks') || s.startsWith('hub mcp'));
   if (semPrevia.length > 0) {
-    console.log(dim('cada comando abaixo só MOSTRA o que gravaria; acrescente --write quando concordar:'));
+    console.log(
+      dim('cada comando abaixo só MOSTRA o que gravaria; acrescente --write quando concordar:'),
+    );
     for (const s of semPrevia) console.log(`  ${s}`);
   } else if (instalados.length > 0) {
     console.log(dim('nada a sugerir para os agentes instalados.'));

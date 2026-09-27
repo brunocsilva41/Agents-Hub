@@ -104,7 +104,11 @@ describe('atalho "/" do compositor (R03-28)', () => {
 });
 
 describe('cache de grafos de vários fluxos (DAG/Telemetria)', () => {
-  const entrada = (revisao: number, estado: EntradaDoGrafo<unknown>['estado'], erro: string | null = null) => ({
+  const entrada = (
+    revisao: number,
+    estado: EntradaDoGrafo<unknown>['estado'],
+    erro: string | null = null,
+  ) => ({
     revisao,
     estado,
     nos: estado === 'ok' ? [] : null,

@@ -3,11 +3,7 @@ import { describe, test } from 'node:test';
 import { describeEvent } from './eventView.js';
 import { buildFlowTree, treeKeyTarget } from './flowTree.js';
 import { isStructural, patchSessionsFromEvent } from './hubEvents.js';
-import {
-  delegationFeedback,
-  deriveControls,
-  interruptFeedback,
-} from './sessionControls.js';
+import { delegationFeedback, deriveControls, interruptFeedback } from './sessionControls.js';
 import { olderAction, sliceWindow } from './timelineWindow.js';
 import { capToasts, toastTtlMs } from './toastPolicy.js';
 
@@ -137,10 +133,13 @@ describe('grafo do fluxo (6.9)', () => {
 
   test('sessão irmã sem pai (transferência) pendura na raiz como handoff', () => {
     const rows = buildFlowTree('r', [s('r', null, '1'), s('h', null, '2')]);
-    assert.deepEqual(rows.map((r) => [r.session.id, r.edge]), [
-      ['r', 'root'],
-      ['h', 'handoff'],
-    ]);
+    assert.deepEqual(
+      rows.map((r) => [r.session.id, r.edge]),
+      [
+        ['r', 'root'],
+        ['h', 'handoff'],
+      ],
+    );
   });
 
   test('teclado: ↓/↑ percorrem, → vai ao filho, ← volta ao pai', () => {
@@ -191,9 +190,21 @@ describe('janela da timeline (6.3)', () => {
   });
 
   test('rolar ao topo revela o local antes de pedir ao daemon', () => {
-    assert.equal(olderAction({ scrollTop: 0, hidden: 10, hasMoreBefore: true, loadingOlder: false }), 'expand');
-    assert.equal(olderAction({ scrollTop: 0, hidden: 0, hasMoreBefore: true, loadingOlder: false }), 'fetch');
-    assert.equal(olderAction({ scrollTop: 0, hidden: 0, hasMoreBefore: true, loadingOlder: true }), null);
-    assert.equal(olderAction({ scrollTop: 500, hidden: 10, hasMoreBefore: true, loadingOlder: false }), null);
+    assert.equal(
+      olderAction({ scrollTop: 0, hidden: 10, hasMoreBefore: true, loadingOlder: false }),
+      'expand',
+    );
+    assert.equal(
+      olderAction({ scrollTop: 0, hidden: 0, hasMoreBefore: true, loadingOlder: false }),
+      'fetch',
+    );
+    assert.equal(
+      olderAction({ scrollTop: 0, hidden: 0, hasMoreBefore: true, loadingOlder: true }),
+      null,
+    );
+    assert.equal(
+      olderAction({ scrollTop: 500, hidden: 10, hasMoreBefore: true, loadingOlder: false }),
+      null,
+    );
   });
 });

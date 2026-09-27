@@ -135,8 +135,7 @@ const FlowItem = memo(function FlowItem({
         onClick={() => {
           onToggle(flow.rootId);
           if (!contains) {
-            const target =
-              flow.sessions.find((s) => isLiveState(s.state)) ?? flow.sessions[0];
+            const target = flow.sessions.find((s) => isLiveState(s.state)) ?? flow.sessions[0];
             if (target) onSelect(target.id);
           }
         }}
@@ -166,7 +165,16 @@ const FlowItem = memo(function FlowItem({
           </div>
         </div>
         <span className={`chevron-icon${open ? ' rotated' : ''}`} aria-hidden="true">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
         </span>
@@ -179,7 +187,13 @@ const FlowItem = memo(function FlowItem({
           </div>
         ) : (
           <div className="flow-tree">
-            <FlowTree nodes={graph} selectedId={selectedId} onSelect={onSelect} failed={graphFailed} onRetry={retry} />
+            <FlowTree
+              nodes={graph}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              failed={graphFailed}
+              onRetry={retry}
+            />
           </div>
         ))}
     </div>

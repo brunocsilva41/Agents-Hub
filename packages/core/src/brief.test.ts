@@ -49,10 +49,7 @@ describe('fan-in no brief', () => {
     // num ciclo. Se o resultado do passo anterior fosse concatenado ao
     // objetivo, duas execuções da mesma tarefa pareceriam tarefas diferentes
     // e o ciclo passaria batido.
-    assert.equal(
-      objectiveHash(comUpstream.objective),
-      objectiveHash(semUpstream.objective),
-    );
+    assert.equal(objectiveHash(comUpstream.objective), objectiveHash(semUpstream.objective));
   });
 
   test('sem fan-in a seção não existe', () => {

@@ -21,7 +21,12 @@ after(() => {
 function inserirProjetos(db: DatabaseSync, n: number, prefixo: string): void {
   const stmt = db.prepare('INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)');
   for (let i = 0; i < n; i += 1) {
-    stmt.run(`prj_${prefixo}${i}`, `${prefixo}-${i}`, path.join(raiz, `${prefixo}-${i}`), new Date().toISOString());
+    stmt.run(
+      `prj_${prefixo}${i}`,
+      `${prefixo}-${i}`,
+      path.join(raiz, `${prefixo}-${i}`),
+      new Date().toISOString(),
+    );
   }
 }
 
@@ -75,7 +80,10 @@ describe('backupDatabase — consistente com WAL', () => {
   });
 
   test('banco inexistente é erro claro', () => {
-    assert.throws(() => backupDatabase(path.join(raiz, 'nada', 'hub.db'), path.join(raiz, 'nada', 'b.db')), /não encontrado/);
+    assert.throws(
+      () => backupDatabase(path.join(raiz, 'nada', 'hub.db'), path.join(raiz, 'nada', 'b.db')),
+      /não encontrado/,
+    );
   });
 });
 
@@ -97,8 +105,8 @@ describe('restoreDatabase', () => {
     const r = restoreDatabase(backup, dbFile, new Date(2026, 8, 26, 10, 0, 0));
     assert.equal(r.restored, dbFile);
     assert.ok(r.safetyCopy && existsSync(r.safetyCopy), 'cópia de segurança do atual');
-    assert.match(path.basename(r.safetyCopy!), /^hub\.db\.pre-restore-20260926-100000/);
-    assert.equal(contarProjetos(r.safetyCopy!), 10, 'a cópia de segurança tem o estado de antes');
+    assert.match(path.basename(r.safetyCopy), /^hub\.db\.pre-restore-20260926-100000/);
+    assert.equal(contarProjetos(r.safetyCopy), 10, 'a cópia de segurança tem o estado de antes');
     assert.equal(existsSync(`${dbFile}-wal`), false, 'o -wal velho foi descartado');
     assert.equal(contarProjetos(dbFile), 3, 'o banco agora é o do backup');
     // E abre normalmente pelo caminho do Hub (migra sem erro).
@@ -113,7 +121,10 @@ describe('restoreDatabase', () => {
     db.close();
     const lixo = path.join(dir, 'lixo.db');
     writeFileSync(lixo, 'isto não é sqlite'.repeat(100));
-    assert.throws(() => restoreDatabase(lixo, dbFile), (err: unknown) => isHubError(err));
+    assert.throws(
+      () => restoreDatabase(lixo, dbFile),
+      (err: unknown) => isHubError(err),
+    );
     const outro = path.join(dir, 'outro.db');
     const o = new DatabaseSync(outro);
     o.exec('CREATE TABLE qualquer (x INTEGER)');
@@ -126,7 +137,11 @@ describe('restoreDatabase', () => {
     const dir = path.join(raiz, 'futuro');
     const futuro = path.join(dir, 'futuro.db');
     const db = openDatabase(futuro);
-    db.prepare('INSERT INTO migrations (version, name, applied_at) VALUES (?, ?, ?)').run(9999, 'x', 'y');
+    db.prepare('INSERT INTO migrations (version, name, applied_at) VALUES (?, ?, ?)').run(
+      9999,
+      'x',
+      'y',
+    );
     db.close();
     assert.throws(() => conferirBanco(futuro), /só conhece até/);
   });

@@ -73,6 +73,7 @@ export function createRefetchScheduler(
     try {
       promise = Promise.resolve(run());
     } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- repassa ao `onError` o valor lançado, intacto
       promise = Promise.reject(err);
     }
     promise

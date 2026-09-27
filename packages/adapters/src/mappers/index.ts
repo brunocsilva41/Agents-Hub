@@ -24,9 +24,7 @@ const MAPPERS: Record<string, EventMapper> = {
 export function resolveMapper(name: string): EventMapper {
   const mapper = MAPPERS[name];
   if (!mapper) {
-    throw new Error(
-      `Mapper "${name}" não registrado. Disponíveis: ${Object.keys(MAPPERS).join(', ')}`,
-    );
+    throw new Error(`Mapper "${name}" não registrado. Disponíveis: ${Object.keys(MAPPERS).join(', ')}`);
   }
   return mapper;
 }
@@ -44,4 +42,3 @@ export {
   genericJsonMapper,
   genericTextMapper,
 };
-

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -239,9 +239,9 @@ test(
         'prompt de teste',
       );
 
-      const resposta = (await fetch(`${envAdapter.baseUrl}/__env_de_teste`).then((r) =>
-        r.json(),
-      )) as { valor: string | null };
+      const resposta = (await fetch(`${envAdapter.baseUrl}/__env_de_teste`).then((r) => r.json())) as {
+        valor: string | null;
+      };
       assert.equal(
         resposta.valor,
         'valor-do-projeto',

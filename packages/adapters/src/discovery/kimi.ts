@@ -24,7 +24,9 @@ export function discoverKimi(ctx: Ctx): void {
     try {
       if (readdirSync(credDir).length > 0) ctx.credFile(credDir, '.kimi-code/credentials/');
     } catch (e) {
-      ctx.warn(`Kimi: não foi possível listar credentials/: ${e instanceof Error ? e.message : String(e)}`);
+      ctx.warn(
+        `Kimi: não foi possível listar credentials/: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
   for (const k of ['KIMI_API_KEY', 'MOONSHOT_API_KEY']) ctx.envVar(k);

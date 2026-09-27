@@ -157,33 +157,39 @@ test('ramo POSIX usa which e a primeira linha, sem lógica de extensão', async 
 });
 
 test('cache de resolução', async (t) => {
-  await t.test('positivo: segunda chamada não varre o PATH de novo enquanto o arquivo existe', async () => {
-    clearBinCache();
-    await comoPlataforma('win32', async () => {
-      const deps = depsWin(['C:\\real\\codexf.exe'], { PATH: 'C:\\real', PATHEXT });
-      const primeira = await resolveBin('codexf', deps);
-      const consultasAposPrimeira = deps.consultas.length;
-      const segunda = await resolveBin('codexf', deps);
-      assert.deepEqual(primeira, segunda);
-      // Só a checagem de existência do caminho cacheado, nenhuma varredura.
-      assert.equal(deps.consultas.length, consultasAposPrimeira + 1);
-    });
-  });
+  await t.test(
+    'positivo: segunda chamada não varre o PATH de novo enquanto o arquivo existe',
+    async () => {
+      clearBinCache();
+      await comoPlataforma('win32', async () => {
+        const deps = depsWin(['C:\\real\\codexf.exe'], { PATH: 'C:\\real', PATHEXT });
+        const primeira = await resolveBin('codexf', deps);
+        const consultasAposPrimeira = deps.consultas.length;
+        const segunda = await resolveBin('codexf', deps);
+        assert.deepEqual(primeira, segunda);
+        // Só a checagem de existência do caminho cacheado, nenhuma varredura.
+        assert.equal(deps.consultas.length, consultasAposPrimeira + 1);
+      });
+    },
+  );
 
-  await t.test('positivo: binário removido do disco é procurado de novo (não spawna caminho morto)', async () => {
-    clearBinCache();
-    await comoPlataforma('win32', async () => {
-      const arquivos = ['C:\\a\\codexg.exe', 'C:\\b\\codexg.exe'];
-      const existe = new Set(arquivos.map((a) => a.toLowerCase()));
-      const deps: LookupDeps = {
-        ...depsWin([], { PATH: 'C:\\a;C:\\b', PATHEXT }),
-        existsSync: (p) => existe.has(p.toLowerCase()),
-      };
-      assert.equal((await resolveBin('codexg', deps))?.path, 'C:\\a\\codexg.exe');
-      existe.delete('c:\\a\\codexg.exe');
-      assert.equal((await resolveBin('codexg', deps))?.path, 'C:\\b\\codexg.exe');
-    });
-  });
+  await t.test(
+    'positivo: binário removido do disco é procurado de novo (não spawna caminho morto)',
+    async () => {
+      clearBinCache();
+      await comoPlataforma('win32', async () => {
+        const arquivos = ['C:\\a\\codexg.exe', 'C:\\b\\codexg.exe'];
+        const existe = new Set(arquivos.map((a) => a.toLowerCase()));
+        const deps: LookupDeps = {
+          ...depsWin([], { PATH: 'C:\\a;C:\\b', PATHEXT }),
+          existsSync: (p) => existe.has(p.toLowerCase()),
+        };
+        assert.equal((await resolveBin('codexg', deps))?.path, 'C:\\a\\codexg.exe');
+        existe.delete('c:\\a\\codexg.exe');
+        assert.equal((await resolveBin('codexg', deps))?.path, 'C:\\b\\codexg.exe');
+      });
+    },
+  );
 
   await t.test('negativo expira: agente instalado depois do boot é achado após o TTL', async () => {
     clearBinCache();
@@ -224,46 +230,43 @@ test('cache de resolução', async (t) => {
 });
 
 test('fallback do Windows quando o PATH não tem o binário', async (t) => {
-  await t.test(
-    'tenta os 5 caminhos hardcoded na ordem certa e usa o primeiro que existir',
-    async () => {
-      clearBinCache();
-      await comoPlataforma('win32', async () => {
-        const home = os.homedir();
-        const candidato3 = path.join(home, '.local', 'bin', 'codex-fb-test.exe');
-        const originalLocalAppData = process.env['LOCALAPPDATA'];
-        const originalAppData = process.env['APPDATA'];
-        process.env['LOCALAPPDATA'] = 'C:\\Users\\fake\\AppData\\Local';
-        process.env['APPDATA'] = 'C:\\Users\\fake\\AppData\\Roaming';
-        try {
-          const tentativas: string[] = [];
-          const deps: LookupDeps = {
-            ...depsWin([], { PATH: '', PATHEXT }),
-            existsSync: (p: string) => {
-              tentativas.push(p);
-              return p === candidato3;
-            },
-          };
+  await t.test('tenta os 5 caminhos hardcoded na ordem certa e usa o primeiro que existir', async () => {
+    clearBinCache();
+    await comoPlataforma('win32', async () => {
+      const home = os.homedir();
+      const candidato3 = path.join(home, '.local', 'bin', 'codex-fb-test.exe');
+      const originalLocalAppData = process.env['LOCALAPPDATA'];
+      const originalAppData = process.env['APPDATA'];
+      process.env['LOCALAPPDATA'] = 'C:\\Users\\fake\\AppData\\Local';
+      process.env['APPDATA'] = 'C:\\Users\\fake\\AppData\\Roaming';
+      try {
+        const tentativas: string[] = [];
+        const deps: LookupDeps = {
+          ...depsWin([], { PATH: '', PATHEXT }),
+          existsSync: (p: string) => {
+            tentativas.push(p);
+            return p === candidato3;
+          },
+        };
 
-          const resolved = await resolveBin('codex-fb-test', deps);
-          assert.equal(resolved?.path, candidato3);
-          assert.equal(resolved?.needsShell, false);
+        const resolved = await resolveBin('codex-fb-test', deps);
+        assert.equal(resolved?.path, candidato3);
+        assert.equal(resolved?.needsShell, false);
 
-          // Confirma a ORDEM: os dois primeiros caminhos (agy, Programs) são
-          // tentados e rejeitados antes do terceiro (.local/bin) ser aceito.
-          assert.equal(tentativas.length, 3);
-          assert.ok(tentativas[0]?.includes(path.join('agy', 'bin')));
-          assert.ok(tentativas[1]?.includes(path.join('Programs', 'codex-fb-test')));
-          assert.equal(tentativas[2], candidato3);
-        } finally {
-          if (originalLocalAppData === undefined) delete process.env['LOCALAPPDATA'];
-          else process.env['LOCALAPPDATA'] = originalLocalAppData;
-          if (originalAppData === undefined) delete process.env['APPDATA'];
-          else process.env['APPDATA'] = originalAppData;
-        }
-      });
-    },
-  );
+        // Confirma a ORDEM: os dois primeiros caminhos (agy, Programs) são
+        // tentados e rejeitados antes do terceiro (.local/bin) ser aceito.
+        assert.equal(tentativas.length, 3);
+        assert.ok(tentativas[0]?.includes(path.join('agy', 'bin')));
+        assert.ok(tentativas[1]?.includes(path.join('Programs', 'codex-fb-test')));
+        assert.equal(tentativas[2], candidato3);
+      } finally {
+        if (originalLocalAppData === undefined) delete process.env['LOCALAPPDATA'];
+        else process.env['LOCALAPPDATA'] = originalLocalAppData;
+        if (originalAppData === undefined) delete process.env['APPDATA'];
+        else process.env['APPDATA'] = originalAppData;
+      }
+    });
+  });
 
   await t.test('nada no PATH nem nos 5 caminhos: devolve null', async () => {
     clearBinCache();
@@ -294,51 +297,63 @@ function comPath<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   });
 }
 
-test('caminho com acento no PATH é resolvido íntegro (sem `where`/code page OEM)', { skip: !ehWindows }, async () => {
-  const { raiz, bin } = dirAcentuado();
-  const nome = `fakeacento${process.pid}`;
-  const esperado = path.join(bin, `${nome}.cmd`);
-  writeFileSync(esperado, '@echo off\r\necho fake 1.2.3\r\n');
-  try {
-    clearBinCache();
-    const resolved = await comPath(bin, () => resolveBin(nome));
-    assert.equal(resolved?.path, esperado);
-    assert.ok(existsSync(resolved.path), 'o caminho devolvido tem de existir de verdade');
-  } finally {
-    clearBinCache();
-    rmSync(raiz, { recursive: true, force: true });
-  }
-});
+test(
+  'caminho com acento no PATH é resolvido íntegro (sem `where`/code page OEM)',
+  { skip: !ehWindows },
+  async () => {
+    const { raiz, bin } = dirAcentuado();
+    const nome = `fakeacento${process.pid}`;
+    const esperado = path.join(bin, `${nome}.cmd`);
+    writeFileSync(esperado, '@echo off\r\necho fake 1.2.3\r\n');
+    try {
+      clearBinCache();
+      const resolved = await comPath(bin, () => resolveBin(nome));
+      assert.equal(resolved?.path, esperado);
+      assert.ok(existsSync(resolved.path), 'o caminho devolvido tem de existir de verdade');
+    } finally {
+      clearBinCache();
+      rmSync(raiz, { recursive: true, force: true });
+    }
+  },
+);
 
-test('registry: agente instalado depois do boot aparece no probe forçado, com caminho acentuado', { skip: !ehWindows }, async () => {
-  const { raiz, bin } = dirAcentuado();
-  const nome = `fakeinstala${process.pid}`;
-  const manifest = AgentManifestSchema.parse({
-    id: 'fake-instala',
-    name: 'Fake',
-    bin: nome,
-    detect: { timeoutMs: 20_000 },
-    invoke: { oneShot: ['-p'] },
-  });
-  try {
-    clearBinCache();
-    await comPath(bin, async () => {
-      const registry = new AgentRegistry();
-      registry.register(manifest);
-
-      const antes = await registry.probe('fake-instala', true);
-      assert.equal(antes.installed, false);
-
-      // "Instala" o agente com o daemon no ar.
-      writeFileSync(path.join(bin, `${nome}.cmd`), '@echo off\r\necho fake 1.2.3\r\n');
-
-      const depois = await registry.probe('fake-instala', true);
-      assert.equal(depois.installed, true, `probe forçado não achou o agente recém-instalado: ${depois.error}`);
-      assert.equal(depois.binPath, path.join(bin, `${nome}.cmd`));
-      assert.equal(depois.version, '1.2.3');
+test(
+  'registry: agente instalado depois do boot aparece no probe forçado, com caminho acentuado',
+  { skip: !ehWindows },
+  async () => {
+    const { raiz, bin } = dirAcentuado();
+    const nome = `fakeinstala${process.pid}`;
+    const manifest = AgentManifestSchema.parse({
+      id: 'fake-instala',
+      name: 'Fake',
+      bin: nome,
+      detect: { timeoutMs: 20_000 },
+      invoke: { oneShot: ['-p'] },
     });
-  } finally {
-    clearBinCache();
-    rmSync(raiz, { recursive: true, force: true });
-  }
-});
+    try {
+      clearBinCache();
+      await comPath(bin, async () => {
+        const registry = new AgentRegistry();
+        registry.register(manifest);
+
+        const antes = await registry.probe('fake-instala', true);
+        assert.equal(antes.installed, false);
+
+        // "Instala" o agente com o daemon no ar.
+        writeFileSync(path.join(bin, `${nome}.cmd`), '@echo off\r\necho fake 1.2.3\r\n');
+
+        const depois = await registry.probe('fake-instala', true);
+        assert.equal(
+          depois.installed,
+          true,
+          `probe forçado não achou o agente recém-instalado: ${depois.error}`,
+        );
+        assert.equal(depois.binPath, path.join(bin, `${nome}.cmd`));
+        assert.equal(depois.version, '1.2.3');
+      });
+    } finally {
+      clearBinCache();
+      rmSync(raiz, { recursive: true, force: true });
+    }
+  },
+);

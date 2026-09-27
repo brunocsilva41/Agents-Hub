@@ -52,7 +52,9 @@ function git(cwd: string, args: string[]): void {
 }
 
 /** Roda `fn` capturando o console; devolve as linhas e restaura `process.exitCode`. */
-async function capturar(fn: () => Promise<void>): Promise<{ linhas: string[]; exitCode: number | undefined }> {
+async function capturar(
+  fn: () => Promise<void>,
+): Promise<{ linhas: string[]; exitCode: number | undefined }> {
   const linhas: string[] = [];
   const log = console.log;
   const err = console.error;
@@ -162,7 +164,11 @@ describe('hub workflow run / hub start com agentes falsos (item 2.9)', () => {
     return capturar(() =>
       workflowCommand(
         client,
-        { command: 'workflow', positional: ['run', arquivo(yaml)], flags: { project: projeto, ...flags } },
+        {
+          command: 'workflow',
+          positional: ['run', arquivo(yaml)],
+          flags: { project: projeto, ...flags },
+        },
         { intervaloMs: 100, esperaMaxMs: 60_000 },
       ),
     );

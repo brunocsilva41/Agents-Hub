@@ -1,4 +1,4 @@
-import type { EventEnvelope, Workflow, WorkflowRunResult } from '@agents-hub/core';
+import { textoDe, type EventEnvelope, type Workflow, type WorkflowRunResult } from '@agents-hub/core';
 import type { BudgetSummary, GraphSummary, TaskStatus } from '@agents-hub/client';
 
 /**
@@ -116,23 +116,23 @@ export function formatEvents(events: EventEnvelope[], includeVerbose = false): s
       const p = event.payload;
       switch (event.type) {
         case 'message':
-          return `[${time}] ${truncate(String(p['text'] ?? ''), 1500)}`;
+          return `[${time}] ${truncate(textoDe(p['text']), 1500)}`;
         case 'command.executed':
-          return `[${time}] $ ${String(p['command'] ?? '')} → ${String(p['exitCode'] ?? '?')}`;
+          return `[${time}] $ ${textoDe(p['command'])} → ${textoDe(p['exitCode'], '?')}`;
         case 'file.changed':
           return `[${time}] alterou ${describeFiles(p)}`;
         case 'tool.call':
-          return `[${time}] ferramenta ${String(p['tool'] ?? '')}`;
+          return `[${time}] ferramenta ${textoDe(p['tool'])}`;
         case 'delegation.requested':
-          return `[${time}] delegou para ${String(p['targetAgent'] ?? '')}: ${String(p['objective'] ?? '')}`;
+          return `[${time}] delegou para ${textoDe(p['targetAgent'])}: ${textoDe(p['objective'])}`;
         case 'delegation.completed':
-          return `[${time}] delegação a ${String(p['agentId'] ?? '')} terminou: ${String(p['state'] ?? '')}`;
+          return `[${time}] delegação a ${textoDe(p['agentId'])} terminou: ${textoDe(p['state'])}`;
         case 'error':
           return `[${time}] ERRO: ${textoDeErro(p)}`;
         case 'turn.completed':
           return `[${time}] turno concluído`;
         case 'session.ended':
-          return `[${time}] sessão encerrada (${String(p['reason'] ?? '')})`;
+          return `[${time}] sessão encerrada (${textoDe(p['reason'])})`;
         case 'budget.exceeded':
           return `[${time}] ORÇAMENTO ESGOTADO`;
         default:
@@ -171,10 +171,7 @@ export function formatWorkflowResult(workflow: Workflow, resultado: WorkflowRunR
 
   const vivos = resultado.steps.filter((s) => s.state === 'blocked' || s.state === 'timeout');
   if (vivos.length > 0) {
-    lines.push(
-      '',
-      `sessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`,
-    );
+    lines.push('', `sessões ainda vivas no daemon: ${vivos.map((s) => s.sessionId).join(', ')}`);
   }
 
   if (!resultado.ok) {
@@ -202,7 +199,7 @@ function textoDeErro(p: Record<string, unknown>): string {
     if (typeof v === 'string' && v.trim().length > 0) return truncate(v.trim(), 500);
   }
   const razao = p['reason'] ?? p['subtype'];
-  return razao === undefined || razao === null ? 'sem detalhe' : String(razao);
+  return textoDe(razao, 'sem detalhe');
 }
 
 function truncate(text: string, max: number): string {
@@ -213,9 +210,9 @@ function describeFiles(payload: Record<string, unknown>): string {
   const files = payload['files'];
   if (Array.isArray(files)) {
     return files
-      .map((f) => String((f as Record<string, unknown>)['path'] ?? ''))
+      .map((f) => textoDe((f as Record<string, unknown>)['path']))
       .filter(Boolean)
       .join(', ');
   }
-  return String(payload['path'] ?? '');
+  return textoDe(payload['path']);
 }

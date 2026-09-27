@@ -67,7 +67,10 @@ describe('registro de projeto: caminho canônico (8.3, caixa)', () => {
     const c = hub.sessions.registerProject(dir.toLowerCase());
     assert.equal(b.id, a.id);
     assert.equal(c.id, a.id);
-    assert.equal(hub.sessions.listProjects().filter((p) => p.path.toLowerCase() === dir.toLowerCase()).length, 1);
+    assert.equal(
+      hub.sessions.listProjects().filter((p) => p.path.toLowerCase() === dir.toLowerCase()).length,
+      1,
+    );
   });
 
   test('mesma pasta pelo nome curto 8.3 devolve o mesmo projeto (Windows)', { skip: !win }, (t) => {
@@ -83,14 +86,18 @@ describe('registro de projeto: caminho canônico (8.3, caixa)', () => {
     assert.equal(a.path, dir, 'gravado pelo nome longo, não pelo 8.3');
   });
 
-  test('pasta extra com outra caixa: "já pertence", não "está DENTRO" dela mesma (Windows)', { skip: !win }, () => {
-    const principal = pasta('Principal');
-    const extra = pasta('Extra');
-    const p = hub.sessions.registerProject(principal);
-    hub.sessions.addProjectFolder(p.id, extra);
-    assert.throws(
-      () => hub.sessions.addProjectFolder(p.id, extra.toUpperCase()),
-      (err: Error) => /já pertence ao projeto/.test(err.message) && !/DENTRO/.test(err.message),
-    );
-  });
+  test(
+    'pasta extra com outra caixa: "já pertence", não "está DENTRO" dela mesma (Windows)',
+    { skip: !win },
+    () => {
+      const principal = pasta('Principal');
+      const extra = pasta('Extra');
+      const p = hub.sessions.registerProject(principal);
+      hub.sessions.addProjectFolder(p.id, extra);
+      assert.throws(
+        () => hub.sessions.addProjectFolder(p.id, extra.toUpperCase()),
+        (err: Error) => /já pertence ao projeto/.test(err.message) && !/DENTRO/.test(err.message),
+      );
+    },
+  );
 });

@@ -32,7 +32,12 @@ export function useCarga<T>(
     if (chave === null) return;
     let cancelado = false;
     // Recarregar a MESMA chave mantém o dado na tela; trocar de chave zera.
-    setCarga((c) => ({ estado: 'carregando', dados: c.chave === chave ? c.dados : null, erro: null, chave }));
+    setCarga((c) => ({
+      estado: 'carregando',
+      dados: c.chave === chave ? c.dados : null,
+      erro: null,
+      chave,
+    }));
     buscar()
       .then((dados) => {
         if (!cancelado) setCarga({ estado: 'ok', dados, erro: null, chave });

@@ -172,9 +172,13 @@ export function SessionModal({
       >
         <div className="modal-body">
           <div className="modal-header-banner">
-            <div className="modal-icon-badge" aria-hidden="true">{delegateFrom ? '🔄' : '⚡'}</div>
+            <div className="modal-icon-badge" aria-hidden="true">
+              {delegateFrom ? '🔄' : '⚡'}
+            </div>
             <div>
-              <h2 id={tituloId}>{delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}</h2>
+              <h2 id={tituloId}>
+                {delegateFrom ? `Delegar a partir de ${delegateFrom.agentId}` : 'Iniciar Nova Sessão'}
+              </h2>
               <p className="hint" id={descricaoId}>
                 {delegateFrom
                   ? 'Transfere uma sub-tarefa para outro agente especialista.'
@@ -271,9 +275,7 @@ export function SessionModal({
                     </div>
                     <div className="agent-card-meta">
                       <div className="agent-card-name">{a.name}</div>
-                      <div className="agent-card-vendor">
-                        {disponivel ? a.vendor : 'não instalado'}
-                      </div>
+                      <div className="agent-card-vendor">{disponivel ? a.vendor : 'não instalado'}</div>
                     </div>
                   </button>
                 );
@@ -327,7 +329,7 @@ export function SessionModal({
               <select
                 id={`${base}-supervisao`}
                 value={supervision}
-                onChange={(e) => setSupervision(e.target.value as any)}
+                onChange={(e) => setSupervision(e.target.value as typeof supervision)}
               >
                 <option value="semi">Semi-Autônomo (Pausa em irreversíveis)</option>
                 <option value="supervised">Supervisionado (Aprova todo comando)</option>
@@ -340,7 +342,7 @@ export function SessionModal({
               <select
                 id={`${base}-isolamento`}
                 value={isolation}
-                onChange={(e) => setIsolation(e.target.value as any)}
+                onChange={(e) => setIsolation(e.target.value as typeof isolation)}
               >
                 <option value="worktree">Git Worktree (Seguro e isolado)</option>
                 <option value="none">Direto no diretório principal</option>
@@ -388,7 +390,7 @@ export function SessionModal({
           <button
             type="button"
             className="primary"
-            onClick={submit}
+            onClick={() => void submit()}
             disabled={!isValid || action.busy !== null}
           >
             {action.busy !== null ? 'Iniciando…' : 'Iniciar Sessão'}

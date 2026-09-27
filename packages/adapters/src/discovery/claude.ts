@@ -23,7 +23,7 @@ export function readClaudeFamily(ctx: Ctx, dir: string, globalJson: string, envK
       baseUrl: env.ANTHROPIC_BASE_URL,
     });
     for (const k of envKeys) {
-      if (typeof env[k] === 'string' && (env[k] as string).length > 0) {
+      if (typeof env[k] === 'string' && env[k].length > 0) {
         ctx.configCred(`${path.basename(dir)}/settings.json env.${k}`, true);
       }
     }

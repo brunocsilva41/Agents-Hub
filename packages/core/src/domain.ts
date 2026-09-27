@@ -44,13 +44,7 @@ export function isTerminalSessionState(state: SessionState): boolean {
 }
 
 export type SessionState =
-  | 'idle'
-  | 'running'
-  | 'waiting_approval'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'killed';
+  'idle' | 'running' | 'waiting_approval' | 'paused' | 'completed' | 'failed' | 'killed';
 
 /**
  * Modo de supervisão. Herdado do pai para o filho e NUNCA escalado:

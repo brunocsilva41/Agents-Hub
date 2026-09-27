@@ -28,7 +28,11 @@ function totalUsd(nodes: GraphSummary[]): number {
   return nodes.reduce((sum, node) => sum + node.usd + totalUsd(node.children), 0);
 }
 
-export async function jsonCommand(client: HubClient, args: Args, ctx: { home: string; url: string }): Promise<void> {
+export async function jsonCommand(
+  client: HubClient,
+  args: Args,
+  ctx: { home: string; url: string },
+): Promise<void> {
   switch (args.command) {
     case 'status': {
       const [health, { agents }, { sessions }, { approvals }] = await Promise.all([
@@ -67,7 +71,9 @@ export async function jsonCommand(client: HubClient, args: Args, ctx: { home: st
     case 'doctor': {
       if (args.flags['smoke'] === true) {
         // `--smoke` gasta tokens e imprime progresso: não combina com saída pura.
-        throw new Error('--smoke não aceita --json (abre sessões reais e mostra progresso); rode sem --json');
+        throw new Error(
+          '--smoke não aceita --json (abre sessões reais e mostra progresso); rode sem --json',
+        );
       }
       const [{ probes }, { agents }] = await Promise.all([client.probeAgents(), client.agents()]);
       const hookWarnings = HOOK_TARGETS.flatMap((alvo) => {
@@ -78,7 +84,9 @@ export async function jsonCommand(client: HubClient, args: Args, ctx: { home: st
         probes,
         installed: probes.filter((p) => p.installed).length,
         total: probes.length,
-        loginHints: Object.fromEntries(agents.filter((a) => a.loginHint).map((a) => [a.id, a.loginHint])),
+        loginHints: Object.fromEntries(
+          agents.filter((a) => a.loginHint).map((a) => [a.id, a.loginHint]),
+        ),
         hookWarnings,
       });
     }

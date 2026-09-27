@@ -233,7 +233,11 @@ describe('revisão de preços 2026-09-26', () => {
     const e = estimateTokenCost(MTOK, { model: 'claude-opus-5-5' });
     assert.equal(e.model, 'claude-opus-5-5');
     assert.equal(e.usd, 24, '4 entrada + 20 saída');
-    assert.equal(findModelPrice('claude-opus-5-5[1m]')?.id, 'claude-opus-5-5', 'sufixo [1m] do Claude Code');
+    assert.equal(
+      findModelPrice('claude-opus-5-5[1m]')?.id,
+      'claude-opus-5-5',
+      'sufixo [1m] do Claude Code',
+    );
     assert.equal(AGENT_FALLBACK_MODEL['claude'], 'claude-opus-5-5');
   });
 

@@ -268,26 +268,23 @@ function readOnDiskConfig(configFile: string): HubConfigOnDisk {
   if (!existsSync(configFile)) return {};
 
   // BOM do Bloco de Notas não é erro de quem escreveu o arquivo.
-  const texto = readFileSync(configFile, 'utf8').replace(/^﻿/, '');
+  const texto = readFileSync(configFile, 'utf8').replace(/^\uFEFF/, '');
   let raw: unknown;
   try {
     raw = JSON.parse(texto);
   } catch (err) {
-    throw new HubError(
-      'HUB_CONFIG_INVALID',
-      mensagemDeJsonInvalido(configFile, texto, err as Error),
-      { path: configFile },
-    );
+    throw new HubError('HUB_CONFIG_INVALID', mensagemDeJsonInvalido(configFile, texto, err as Error), {
+      path: configFile,
+    });
   }
 
   const parsed = HubConfigOnDiskSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(raiz)'}: ${i.message}`);
-    throw new HubError(
-      'HUB_CONFIG_INVALID',
-      `${configFile} é inválido — ${issues.join('; ')}`,
-      { path: configFile, issues },
-    );
+    throw new HubError('HUB_CONFIG_INVALID', `${configFile} é inválido — ${issues.join('; ')}`, {
+      path: configFile,
+      issues,
+    });
   }
   return parsed.data;
 }

@@ -24,7 +24,10 @@ type Resposta = { status: number; body: string; headers?: Record<string, string>
 
 describe('HubClient contra servidor falso', () => {
   const recebidas: Recebida[] = [];
-  let proxima: Resposta | ((req: IncomingMessage, res: ServerResponse) => void) = { status: 200, body: '{}' };
+  let proxima: Resposta | ((req: IncomingMessage, res: ServerResponse) => void) = {
+    status: 200,
+    body: '{}',
+  };
   let base = '';
 
   const server = createServer((req, res) => {
@@ -86,7 +89,9 @@ describe('HubClient contra servidor falso', () => {
         error: { code: 'INVALID_BRIEF', message: 'Brief inválido', details: [{ path: 'objective' }] },
       }),
     };
-    const e = await erroDe(new HubClient(base).startSession({ projectId: 'prj_1', brief: { agent: 'a', objective: 'o' } }));
+    const e = await erroDe(
+      new HubClient(base).startSession({ projectId: 'prj_1', brief: { agent: 'a', objective: 'o' } }),
+    );
     assert.equal(e.code, 'INVALID_BRIEF');
     assert.equal(e.status, 422);
     assert.equal(e.message, 'Brief inválido');
@@ -137,7 +142,7 @@ describe('HubClient contra servidor falso', () => {
     assert.equal(recebidas[0]?.url, '/sessions/ses_abc/cancel');
     assert.equal(recebidas[0]?.contentType, 'application/json');
     assert.equal(recebidas[0]?.auth, 'Bearer t1');
-    assert.deepEqual(JSON.parse(recebidas[0]!.body), { reason: 'motivo' });
+    assert.deepEqual(JSON.parse(recebidas[0].body), { reason: 'motivo' });
     assert.equal(recebidas[1]?.auth, undefined);
     assert.equal(recebidas[2]?.auth, undefined);
   });
@@ -173,7 +178,7 @@ describe('HubClient contra servidor falso', () => {
     assert.equal(recebidas[0]?.url, '/projects/prj_1/folders/pfd_2');
     assert.equal(recebidas[0]?.body, '');
     assert.equal(recebidas[1]?.method, 'PUT');
-    assert.deepEqual(JSON.parse(recebidas[1]!.body), { memory: 'm' });
+    assert.deepEqual(JSON.parse(recebidas[1].body), { memory: 'm' });
     assert.equal(recebidas[1]?.auth, 'Bearer tk');
   });
 

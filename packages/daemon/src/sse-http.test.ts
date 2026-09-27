@@ -6,7 +6,6 @@ import { after, before, describe, test } from 'node:test';
 import { makeEvent, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
-
 /**
  * Endurecimento do SSE (Fase 5), exercitado contra o daemon HTTP de verdade —
  * não só a função `startSseChannel` isolada. `since=abc` e o teto de conexões
@@ -126,7 +125,11 @@ defaults:
 
     const primeira = new AbortController();
     const resPrimeira = await fetch(`${baseUrl}/events`, { signal: primeira.signal });
-    assert.equal(resPrimeira.status, 200, 'a 1ª conexão deve caber dentro do teto (maxSseConnections=1)');
+    assert.equal(
+      resPrimeira.status,
+      200,
+      'a 1ª conexão deve caber dentro do teto (maxSseConnections=1)',
+    );
 
     try {
       const resSegunda = await fetch(`${baseUrl}/events`);
@@ -147,7 +150,11 @@ defaults:
   });
 
   test('sessão com histórico maior que o teto de replay recebe o sinal de truncamento', async () => {
-    const session = hub.sessions.adoptExternal({ agentId: 'agente-sse', projectId, title: 'sessão SSE' });
+    const session = hub.sessions.adoptExternal({
+      agentId: 'agente-sse',
+      projectId,
+      title: 'sessão SSE',
+    });
 
     // Mais eventos que o teto de replay (500) — semeados direto no banco, sem
     // rodar processo nenhum: o que este teste cobre é o sinal de truncamento,
@@ -166,7 +173,7 @@ defaults:
     const res = await fetch(`${baseUrl}/events?sessionId=${session.id}`, { signal: controller.signal });
     assert.equal(res.status, 200);
 
-    const reader = res.body?.getReader();
+    const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = res.body?.getReader();
     assert.ok(reader, 'stream deveria ter corpo legível');
 
     const decoder = new TextDecoder();
@@ -188,14 +195,14 @@ defaults:
       .split('\n')
       .find((linha) => linha.startsWith('data:') && linha.includes('"truncated":true'));
     assert.ok(linhaComTruncado, 'o aviso deveria vir como um evento data: normal');
-    const parsed = JSON.parse(linhaComTruncado!.slice('data:'.length).trim()) as EventEnvelope;
+    const parsed = JSON.parse(linhaComTruncado.slice('data:'.length).trim()) as EventEnvelope;
     assert.equal(parsed.payload['truncated'], true);
     assert.equal(parsed.payload['sessionId'], session.id);
     assert.equal(parsed.payload['sentCount'], 500);
 
     // O aviso sintético não deveria levar `id:` — ele não tem `seq` real, e
     // reconectar com `Last-Event-ID` igual ao dele perderia eventos de verdade.
-    const idxData = acumulado.indexOf(linhaComTruncado!);
+    const idxData = acumulado.indexOf(linhaComTruncado);
     const antesDoData = acumulado.slice(Math.max(0, idxData - 20), idxData);
     assert.doesNotMatch(antesDoData, /id: 0\n$/);
   });

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/prettierrc",
+  "printWidth": 105,
+  "singleQuote": true,
+  "semi": true,
+  "trailingComma": "all",
+  "arrowParens": "always",
+  "bracketSpacing": true,
+  "endOfLine": "auto",
+  "overrides": [
+    {
+      "files": ["*.yaml", "*.yml", "*.css", "*.html"],
+      "options": { "singleQuote": false }
+    },
+    {
+      "files": [".github/**/*.yml"],
+      "options": { "singleQuote": true }
+    }
+  ]
+}

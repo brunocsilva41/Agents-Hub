@@ -76,7 +76,8 @@ async function patchDeArquivoNovo(worktreePath: string, arquivo: string): Promis
 function contarLinhasAdicionadas(patches: string[]): number {
   return patches.reduce(
     (total, patch) =>
-      total + patch.split(QUEBRA_DE_LINHA).filter((l) => l.startsWith('+') && !l.startsWith('+++')).length,
+      total +
+      patch.split(QUEBRA_DE_LINHA).filter((l) => l.startsWith('+') && !l.startsWith('+++')).length,
     0,
   );
 }
@@ -330,9 +331,7 @@ export async function persistDiff(
   const cabecalho = [
     `# Sessão: ${sessionId}`,
     `# Arquivos alterados: ${capture.filesChanged} (+${capture.insertions} −${capture.deletions})`,
-    capture.untracked.length > 0
-      ? `# Arquivos novos: ${capture.untracked.join(', ')}`
-      : '',
+    capture.untracked.length > 0 ? `# Arquivos novos: ${capture.untracked.join(', ')}` : '',
     '',
   ]
     .filter((l) => l.length > 0)

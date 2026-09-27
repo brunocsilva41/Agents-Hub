@@ -22,11 +22,7 @@ export function validarDiretorioDeProjeto(bruto: unknown, campo = 'path'): strin
     throw invalido(campo, bruto, 'caminho contém caractere nulo');
   }
   if (!path.isAbsolute(bruto)) {
-    throw invalido(
-      campo,
-      bruto,
-      'caminho relativo não é aceito — informe o caminho absoluto da pasta',
-    );
+    throw invalido(campo, bruto, 'caminho relativo não é aceito — informe o caminho absoluto da pasta');
   }
 
   let stat;
@@ -71,7 +67,11 @@ export function canonicalizarCaminho(bruto: string): string {
 }
 
 /** Mesma pasta? Canônica e, no Windows (FS sem caixa), sem diferenciar caixa. */
-export function mesmoCaminho(a: string, b: string, plataforma: NodeJS.Platform = process.platform): boolean {
+export function mesmoCaminho(
+  a: string,
+  b: string,
+  plataforma: NodeJS.Platform = process.platform,
+): boolean {
   const x = canonicalizarCaminho(a);
   const y = canonicalizarCaminho(b);
   return plataforma === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y;

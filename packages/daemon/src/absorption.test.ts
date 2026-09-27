@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
 /** O único backup versionado (`<arquivo>.bak-*`) ao lado de `file`. */
 function unicoBackup(file: string): string {
-  const nomes = readdirSync(path.dirname(file)).filter((n) => n.startsWith(`${path.basename(file)}.bak-`));
+  const nomes = readdirSync(path.dirname(file)).filter((n) =>
+    n.startsWith(`${path.basename(file)}.bak-`),
+  );
   assert.equal(nomes.length, 1, `esperava 1 backup, achei ${nomes.join(', ')}`);
   return path.join(path.dirname(file), nomes[0]!);
 }
@@ -154,7 +164,10 @@ describe('ImportService', () => {
   });
 
   let n = 0;
-  function cenario(discovery: (dir: string) => AgentDiscovery, extra: { readMcpEnv?: () => Record<string, string> } = {}) {
+  function cenario(
+    discovery: (dir: string) => AgentDiscovery,
+    extra: { readMcpEnv?: () => Record<string, string> } = {},
+  ) {
     n += 1;
     const dir = path.join(raiz, `c${n}`);
     home = path.join(dir, 'home');
@@ -162,7 +175,11 @@ describe('ImportService', () => {
     mkdirSync(home, { recursive: true });
     mkdirSync(projeto, { recursive: true });
     const found = discovery(dir);
-    const discSvc = new DiscoveryService(fakeRegistry([found.agentId, 'cursor', 'codex', 'claude', 'kimi']), async () => found, { home });
+    const discSvc = new DiscoveryService(
+      fakeRegistry([found.agentId, 'cursor', 'codex', 'claude', 'kimi']),
+      async () => found,
+      { home },
+    );
     const svc = new ImportService(discSvc, { home, ...extra });
 
     let ctx: ProjectContext = {};
@@ -175,10 +192,25 @@ describe('ImportService', () => {
         gravacoes.push(structuredClone(c));
       },
     };
-    return { svc, access, home, projeto, dir, gravacoes, getCtx: () => ctx, setCtx: (c: ProjectContext) => (ctx = c) };
+    return {
+      svc,
+      access,
+      home,
+      projeto,
+      dir,
+      gravacoes,
+      getCtx: () => ctx,
+      setCtx: (c: ProjectContext) => (ctx = c),
+    };
   }
 
-  const req = (over: object = {}) => ({ agentId: 'claude', kinds: ['instructions', 'env', 'mcp'] as ('instructions' | 'env' | 'mcp')[], dryRun: true, targetAgents: ['cursor', 'codex'], ...over });
+  const req = (over: object = {}) => ({
+    agentId: 'claude',
+    kinds: ['instructions', 'env', 'mcp'] as ('instructions' | 'env' | 'mcp')[],
+    dryRun: true,
+    targetAgents: ['cursor', 'codex'],
+    ...over,
+  });
 
   function comServidores(dir: string): AgentDiscovery {
     const origem = path.join(dir, 'origem.json');
@@ -189,9 +221,30 @@ describe('ImportService', () => {
       defaults: { model: 'claude-x', baseUrl: 'http://localhost:11434' },
       instructionFiles: [{ path: instr, bytes: 41 }],
       mcpServers: [
-        { name: 'fs', transport: 'stdio', command: 'npx', args: ['-y', 'fs-server'], env: { FS_TOKEN: '***' }, source: origem, isHub: false },
-        { name: 'web', transport: 'http', url: 'https://mcp.exemplo.dev/mcp', source: origem, isHub: false },
-        { name: 'agents-hub', transport: 'stdio', command: 'node', args: ['hub.js'], source: origem, isHub: true },
+        {
+          name: 'fs',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', 'fs-server'],
+          env: { FS_TOKEN: '***' },
+          source: origem,
+          isHub: false,
+        },
+        {
+          name: 'web',
+          transport: 'http',
+          url: 'https://mcp.exemplo.dev/mcp',
+          source: origem,
+          isHub: false,
+        },
+        {
+          name: 'agents-hub',
+          transport: 'stdio',
+          command: 'node',
+          args: ['hub.js'],
+          source: origem,
+          isHub: true,
+        },
       ],
     });
   }
@@ -296,11 +349,21 @@ describe('ImportService', () => {
     const c = cenario(comServidores);
     const cursorFile = path.join(c.home, '.cursor', 'mcp.json');
     mkdirSync(path.dirname(cursorFile), { recursive: true });
-    const original = JSON.stringify({ tema: 'escuro', mcpServers: { fs: { command: 'MEU-FS' }, antigo: { command: 'x' } } }, null, 2);
+    const original = JSON.stringify(
+      { tema: 'escuro', mcpServers: { fs: { command: 'MEU-FS' }, antigo: { command: 'x' } } },
+      null,
+      2,
+    );
     writeFileSync(cursorFile, original);
 
-    const r = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }));
-    const doc = JSON.parse(readFileSync(cursorFile, 'utf8')) as { tema: string; mcpServers: Record<string, Record<string, unknown>> };
+    const r = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }),
+    );
+    const doc = JSON.parse(readFileSync(cursorFile, 'utf8')) as {
+      tema: string;
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
 
     assert.equal(doc.tema, 'escuro', 'chaves alheias preservadas');
     assert.equal(doc.mcpServers['fs']?.['command'], 'MEU-FS', 'entrada existente NÃO é sobrescrita');
@@ -312,7 +375,10 @@ describe('ImportService', () => {
 
     // segunda execução: nada novo, nada duplicado
     const antes = readFileSync(cursorFile, 'utf8');
-    const r2 = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }));
+    const r2 = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }),
+    );
     assert.equal(r2.items.length, 0);
     assert.equal(readFileSync(cursorFile, 'utf8'), antes);
   });
@@ -328,13 +394,18 @@ describe('ImportService', () => {
     const novo = readFileSync(tomlFile, 'utf8');
     assert.ok(novo.startsWith(original), 'conteúdo original intacto no início');
     assert.equal((novo.match(/\[mcp_servers\.fs\]/g) ?? []).length, 1, 'fs não duplicado');
-    assert.ok(novo.includes('[mcp_servers.web]') && novo.includes('url = "https://mcp.exemplo.dev/mcp"'));
+    assert.ok(
+      novo.includes('[mcp_servers.web]') && novo.includes('url = "https://mcp.exemplo.dev/mcp"'),
+    );
     assert.equal(readFileSync(unicoBackup(tomlFile), 'utf8'), original);
   });
 
   test('mcp: sem includeEnv, NENHUM valor de env é copiado nem exposto', async () => {
     const c = cenario(comServidores, { readMcpEnv: () => ({ FS_TOKEN: SEGREDO_ENV }) });
-    const r = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }));
+    const r = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }),
+    );
     const arquivo = readFileSync(path.join(c.home, '.cursor', 'mcp.json'), 'utf8');
     assert.ok(!arquivo.includes(SEGREDO_ENV));
     assert.ok(!arquivo.includes('FS_TOKEN'));
@@ -344,30 +415,46 @@ describe('ImportService', () => {
 
   test('mcp: includeEnv copia só valores que existem na origem; resposta segue sem valor', async () => {
     const c = cenario(comServidores, { readMcpEnv: () => ({ FS_TOKEN: SEGREDO_ENV }) });
-    const r = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false, includeEnv: true }));
-    const doc = JSON.parse(readFileSync(path.join(c.home, '.cursor', 'mcp.json'), 'utf8')) as { mcpServers: { fs: { env: Record<string, string> } } };
+    const r = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false, includeEnv: true }),
+    );
+    const doc = JSON.parse(readFileSync(path.join(c.home, '.cursor', 'mcp.json'), 'utf8')) as {
+      mcpServers: { fs: { env: Record<string, string> } };
+    };
     assert.equal(doc.mcpServers.fs.env['FS_TOKEN'], SEGREDO_ENV);
     assert.ok(!tudo(r).includes(SEGREDO_ENV), 'valor nunca sai na resposta');
     assert.ok(tudo(r).includes('FS_TOKEN'), 'só o nome aparece');
 
     // valor ausente na origem (ou a própria máscara) -> não copia
     const c2 = cenario(comServidores, { readMcpEnv: () => ({ FS_TOKEN: '***' }) });
-    const r2 = await c2.svc.run(c2.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false, includeEnv: true }));
-    const doc2 = JSON.parse(readFileSync(path.join(c2.home, '.cursor', 'mcp.json'), 'utf8')) as { mcpServers: { fs: Record<string, unknown> } };
+    const r2 = await c2.svc.run(
+      c2.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false, includeEnv: true }),
+    );
+    const doc2 = JSON.parse(readFileSync(path.join(c2.home, '.cursor', 'mcp.json'), 'utf8')) as {
+      mcpServers: { fs: Record<string, unknown> };
+    };
     assert.equal(doc2.mcpServers.fs['env'], undefined);
     assert.ok(r2.skipped.some((s) => /não encontrado na origem/.test(s.reason)));
   });
 
   test('mcp: dry-run com includeEnv também não escreve nem vaza', async () => {
     const c = cenario(comServidores, { readMcpEnv: () => ({ FS_TOKEN: SEGREDO_ENV }) });
-    const r = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], includeEnv: true }));
+    const r = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], includeEnv: true }),
+    );
     assert.ok(!existsSync(path.join(c.home, '.cursor')));
     assert.ok(!tudo(r).includes(SEGREDO_ENV));
   });
 
   test('mcp: destino não confirmado (kimi) e destino = origem são pulados, sem escrever', async () => {
     const c = cenario(comServidores);
-    const r = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['kimi', 'claude'], dryRun: false }));
+    const r = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['kimi', 'claude'], dryRun: false }),
+    );
     assert.equal(r.items.length, 0);
     assert.ok(r.skipped.some((s) => s.what === 'mcp → kimi' && /não confirmado/.test(s.reason)));
     assert.ok(r.skipped.some((s) => s.what === 'mcp → claude' && /igual à origem/.test(s.reason)));
@@ -379,14 +466,20 @@ describe('ImportService', () => {
     const f = path.join(c.home, '.cursor', 'mcp.json');
     mkdirSync(path.dirname(f), { recursive: true });
     writeFileSync(f, '{ quebrado');
-    const r = await c.svc.run(c.access, req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }));
+    const r = await c.svc.run(
+      c.access,
+      req({ kinds: ['mcp'], targetAgents: ['cursor'], dryRun: false }),
+    );
     assert.equal(readFileSync(f, 'utf8'), '{ quebrado');
     assert.ok(r.skipped.some((s) => /JSON válido/.test(s.reason)));
   });
 
   test('mcp sem targetAgents é erro explícito', async () => {
     const c = cenario(comServidores);
-    await assert.rejects(() => c.svc.run(c.access, { agentId: 'claude', kinds: ['mcp'], dryRun: true }), /targetAgents/);
+    await assert.rejects(
+      () => c.svc.run(c.access, { agentId: 'claude', kinds: ['mcp'], dryRun: true }),
+      /targetAgents/,
+    );
   });
 });
 
@@ -395,14 +488,23 @@ describe('readMcpEnvFromSource', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'hub-env-'));
     try {
       const j = path.join(dir, 'a.json');
-      writeFileSync(j, JSON.stringify({ projects: { p: { mcpServers: { fs: { env: { K: 'v1' } } } } } }));
+      writeFileSync(
+        j,
+        JSON.stringify({ projects: { p: { mcpServers: { fs: { env: { K: 'v1' } } } } } }),
+      );
       assert.deepEqual(readMcpEnvFromSource({ name: 'fs', source: j }), { K: 'v1' });
 
       const t = path.join(dir, 'c.toml');
-      writeFileSync(t, '[mcp_servers.a]\ncommand = "x"\nenv = { K1 = "v1", K2 = "v2" }\n\n[mcp_servers.b]\ncommand = "y"\n\n[mcp_servers.b.env]\nK3 = "v3"\n');
+      writeFileSync(
+        t,
+        '[mcp_servers.a]\ncommand = "x"\nenv = { K1 = "v1", K2 = "v2" }\n\n[mcp_servers.b]\ncommand = "y"\n\n[mcp_servers.b.env]\nK3 = "v3"\n',
+      );
       assert.deepEqual(readMcpEnvFromSource({ name: 'a', source: t }), { K1: 'v1', K2: 'v2' });
       assert.deepEqual(readMcpEnvFromSource({ name: 'b', source: t }), { K3: 'v3' });
-      assert.deepEqual(readMcpEnvFromSource({ name: 'a', source: path.join(dir, 'nao-existe.toml') }), {});
+      assert.deepEqual(
+        readMcpEnvFromSource({ name: 'a', source: path.join(dir, 'nao-existe.toml') }),
+        {},
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

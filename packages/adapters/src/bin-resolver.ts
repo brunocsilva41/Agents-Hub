@@ -53,7 +53,7 @@ export interface LookupDeps {
 }
 
 export const defaultLookupDeps: LookupDeps = {
-  execFileAsync: realExecFileAsync as LookupDeps['execFileAsync'],
+  execFileAsync: realExecFileAsync,
   existsSync,
   isFile: (p) => {
     try {
@@ -124,10 +124,11 @@ async function lookup(bin: string, deps: LookupDeps): Promise<ResolvedBin | null
     // A mesma varredura acha, na pasta do npm, o script sh sem extensão
     // (instalado para o Git Bash) E o shim .cmd. O primeiro o Windows não
     // sabe executar (ENOENT) — por isso a preferência .exe > .cmd/.bat.
+    const [primeiro = bin] = candidates;
     const best =
       candidates.find((c) => /\.exe$/i.test(c)) ??
       candidates.find((c) => /\.(cmd|bat)$/i.test(c)) ??
-      (candidates[0] as string);
+      primeiro;
 
     return comShimDesembrulhado(best, deps);
   }
@@ -190,11 +191,7 @@ export function candidatosNoPath(bin: string, deps: LookupDeps = defaultLookupDe
   return achados;
 }
 
-function lookupFallback(
-  bin: string,
-  isWindows: boolean,
-  deps: LookupDeps,
-): ResolvedBin | null {
+function lookupFallback(bin: string, isWindows: boolean, deps: LookupDeps): ResolvedBin | null {
   if (!isWindows) return null;
   const fallbacks = [
     path.join(process.env['LOCALAPPDATA'] ?? '', 'agy', 'bin', `${bin}.exe`),
@@ -309,9 +306,7 @@ export function resolverShimNpm(
   // repassa `%*`; o alvo é o último antes do `%*` (o primeiro pode ser o
   // `node.exe` local).
   const antesDoRepasse = linha.slice(0, linha.indexOf('%*'));
-  const relativos = [...antesDoRepasse.matchAll(/"%~?dp0%?\\?([^"%]+)"/gi)].map(
-    (m) => m[1] as string,
-  );
+  const relativos = [...antesDoRepasse.matchAll(/"%~?dp0%?\\?([^"%]+)"/gi)].map((m) => m[1] as string);
   const relativo = relativos.at(-1);
   if (!relativo) return null;
 

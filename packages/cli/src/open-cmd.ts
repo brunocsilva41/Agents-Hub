@@ -19,7 +19,7 @@ export const abrirNoNavegador: Opener = (url) =>
         : process.platform === 'darwin'
           ? ['open', [url]]
           : ['xdg-open', [url]];
-    const filho = spawn(bin, argv as string[], { detached: true, stdio: 'ignore', windowsHide: true });
+    const filho = spawn(bin, argv, { detached: true, stdio: 'ignore', windowsHide: true });
     filho.once('error', reject);
     filho.once('spawn', () => {
       filho.unref();
@@ -32,7 +32,11 @@ export const abrirNoNavegador: Opener = (url) =>
  * URL da API. Quem chama garante o daemon no ar antes (`withDaemon`).
  * `--print` só imprime a URL (útil em SSH/sem ambiente gráfico).
  */
-export async function openCommand(url: string, args: Args, opener: Opener = abrirNoNavegador): Promise<void> {
+export async function openCommand(
+  url: string,
+  args: Args,
+  opener: Opener = abrirNoNavegador,
+): Promise<void> {
   if (flagOn(args, 'print')) {
     console.log(url);
     return;

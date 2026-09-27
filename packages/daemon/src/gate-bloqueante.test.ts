@@ -29,7 +29,6 @@ process.stdout.write('agente de teste no ar\\n');
 setTimeout(() => process.exit(0), ms);
 `;
 
-
 function manifesto(id: string, script: string, dormirMs: number): string {
   const esc = script.replace(/\\/g, '\\\\');
   return `
@@ -102,11 +101,17 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
       ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
     });
     const texto = await resposta.text();
-    return { status: resposta.status, body: texto ? (JSON.parse(texto) as Record<string, unknown>) : {} };
+    return {
+      status: resposta.status,
+      body: texto ? (JSON.parse(texto) as Record<string, unknown>) : {},
+    };
   }
 
   /** O que o hook do agente faz: pergunta e fica esperando o veredito. */
-  function perguntarAoGate(sessionId: string, command = 'git push origin main'): Promise<RespostaDoGate> {
+  function perguntarAoGate(
+    sessionId: string,
+    command = 'git push origin main',
+  ): Promise<RespostaDoGate> {
     return http('POST', '/hooks/pretooluse', {
       sessionId,
       toolName: 'Bash',
@@ -156,7 +161,11 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     mkdirSync(manifestos, { recursive: true });
     mkdirSync(projetoPath, { recursive: true });
     writeFileSync(script, SCRIPT_AGENTE, 'utf8');
-    writeFileSync(path.join(manifestos, 'dorminhoco.yaml'), manifesto('dorminhoco', script, 30_000), 'utf8');
+    writeFileSync(
+      path.join(manifestos, 'dorminhoco.yaml'),
+      manifesto('dorminhoco', script, 30_000),
+      'utf8',
+    );
     writeFileSync(path.join(manifestos, 'rapido.yaml'), manifesto('rapido', script, 800), 'utf8');
 
     hub = createHub({
@@ -250,7 +259,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     assert.doesNotMatch(veredito.explanation, /política do projeto proíbe/i);
     assert.ok(veredito.approvalId);
 
-    const apv = hub.store.approvals.get(veredito.approvalId!);
+    const apv = hub.store.approvals.get(veredito.approvalId);
     assert.equal(apv?.state, 'denied');
     assert.equal(apv?.resolvedBy, 'tempo esgotado');
 

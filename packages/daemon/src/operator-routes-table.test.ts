@@ -39,7 +39,11 @@ describe('tabela de rotas: toda rota de operador exige o token', () => {
   let hub: Hub;
   let porta = 0;
 
-  function http(method: string, caminho: string, headers: Record<string, string> = {}): Promise<Resposta> {
+  function http(
+    method: string,
+    caminho: string,
+    headers: Record<string, string> = {},
+  ): Promise<Resposta> {
     return new Promise((resolve, reject) => {
       const h: Record<string, string> = { host: `127.0.0.1:${porta}`, ...headers };
       const corpo = method === 'POST' || method === 'PUT' ? Buffer.from('{}') : undefined;
@@ -47,14 +51,21 @@ describe('tabela de rotas: toda rota de operador exige o token', () => {
         h['content-type'] = 'application/json';
         h['content-length'] = String(corpo.length);
       }
-      const req = request({ host: '127.0.0.1', port: porta, method, path: caminho, headers: h }, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }),
-        );
-        res.on('error', reject);
-      });
+      const req = request(
+        { host: '127.0.0.1', port: porta, method, path: caminho, headers: h },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString('utf8'),
+            }),
+          );
+          res.on('error', reject);
+        },
+      );
       req.on('error', reject);
       if (corpo !== undefined) req.write(corpo);
       req.end();
@@ -115,7 +126,10 @@ describe('tabela de rotas: toda rota de operador exige o token', () => {
     for (const r of hub.server.routeTable()) {
       // Nome do parâmetro não importa para o casamento: `/a/:id` e `/a/:x` são a mesma rota.
       const chave = `${r.method} ${r.path.replace(/:\w+/g, ':')}`;
-      assert.ok(!vistos.has(chave), `rota duplicada: ${r.method} ${r.path} (já registrada como ${vistos.get(chave)})`);
+      assert.ok(
+        !vistos.has(chave),
+        `rota duplicada: ${r.method} ${r.path} (já registrada como ${vistos.get(chave)})`,
+      );
       vistos.set(chave, `${r.method} ${r.path}`);
     }
   });
@@ -128,7 +142,11 @@ describe('tabela de rotas: toda rota de operador exige o token', () => {
       const primeira = tabela.findIndex(
         (o) => o.method === r.method && new RegExp(`^${o.path.replace(/:\w+/g, '[^/]+')}$`).test(url),
       );
-      assert.equal(primeira, i, `${r.method} ${url} casa antes com ${tabela[primeira]?.method} ${tabela[primeira]?.path}`);
+      assert.equal(
+        primeira,
+        i,
+        `${r.method} ${url} casa antes com ${tabela[primeira]?.method} ${tabela[primeira]?.path}`,
+      );
     }
   });
 
@@ -161,7 +179,9 @@ describe('tabela de rotas: toda rota de operador exige o token', () => {
   });
 
   test('controle: com o token certo a mesma requisição passa da autenticação', async () => {
-    const res = await http('POST', '/approvals/apv_inexistente', { authorization: `Bearer ${hub.operatorToken}` });
+    const res = await http('POST', '/approvals/apv_inexistente', {
+      authorization: `Bearer ${hub.operatorToken}`,
+    });
     assert.notEqual(res.status, 401, res.body);
     assert.notEqual(res.status, 403, res.body);
   });

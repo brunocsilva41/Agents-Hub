@@ -55,25 +55,22 @@ test('quoteForShell no Windows', async (t) => {
     });
   });
 
-  await t.test(
-    'reproduz o valor exato do -c hooks= do gate do Codex com caminhos com espaço',
-    () => {
-      // O mesmo formato que `codex-gate.ts` monta: comando entre aspas TOML já
-      // escapadas (`\"...\"`), com caminhos reais desta máquina que têm espaço
-      // ("Program Files", "Bruno Silva") — o caso que falhou contra o binário
-      // real antes da correção.
-      const comando =
-        '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Bruno Silva\\Documents\\Projetos\\Agents-Hub\\packages\\cli\\dist\\main.js" hook --dialect codex';
-      const tomlEscapado = comando.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const valorDoHooks = `hooks={PreToolUse=[{matcher="*",hooks=[{type="command",command="${tomlEscapado}",timeoutSec=20}]}]}`;
+  await t.test('reproduz o valor exato do -c hooks= do gate do Codex com caminhos com espaço', () => {
+    // O mesmo formato que `codex-gate.ts` monta: comando entre aspas TOML já
+    // escapadas (`\"...\"`), com caminhos reais desta máquina que têm espaço
+    // ("Program Files", "Bruno Silva") — o caso que falhou contra o binário
+    // real antes da correção.
+    const comando =
+      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Bruno Silva\\Documents\\Projetos\\Agents-Hub\\packages\\cli\\dist\\main.js" hook --dialect codex';
+    const tomlEscapado = comando.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const valorDoHooks = `hooks={PreToolUse=[{matcher="*",hooks=[{type="command",command="${tomlEscapado}",timeoutSec=20}]}]}`;
 
-      const quotado = comoWindows(() => quoteForShell(valorDoHooks));
+    const quotado = comoWindows(() => quoteForShell(valorDoHooks));
 
-      // O teste que importa: reconstruir o argv como o processo filho faria
-      // (regra do CommandLineToArgvW) e conferir que volta ao valor original.
-      assert.equal(desfazerQuoteDeArgv(quotado), valorDoHooks);
-    },
-  );
+    // O teste que importa: reconstruir o argv como o processo filho faria
+    // (regra do CommandLineToArgvW) e conferir que volta ao valor original.
+    assert.equal(desfazerQuoteDeArgv(quotado), valorDoHooks);
+  });
 });
 
 /**

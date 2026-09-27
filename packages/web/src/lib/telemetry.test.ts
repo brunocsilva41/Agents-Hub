@@ -39,7 +39,10 @@ describe('telemetria com as definições do resto do painel (R03-27)', () => {
     assert.equal(r.falharam, 1);
     assert.equal(r.encerradas, 1);
     assert.equal(r.taxaDeConclusao, 1 / 3);
-    assert.equal(resumoDeSessoes([{ state: 'running', createdAt: ha(1) }], 'tudo', AGORA).taxaDeConclusao, null);
+    assert.equal(
+      resumoDeSessoes([{ state: 'running', createdAt: ha(1) }], 'tudo', AGORA).taxaDeConclusao,
+      null,
+    );
     assert.equal(resumoDeSessoes([], 'tudo', AGORA).taxaDeConclusao, null);
   });
 
@@ -47,10 +50,20 @@ describe('telemetria com as definições do resto do painel (R03-27)', () => {
     const r = resumoDeSessoes(sessoes, '24h', AGORA);
     assert.equal(r.total, 7);
     assert.equal(resumoDeSessoes(sessoes, '30d', AGORA).total, 8);
-    assert.equal(resumoDeSessoes([{ state: 'running', createdAt: ha(24 * 40) }], '24h', AGORA).aoVivo, 1);
+    assert.equal(
+      resumoDeSessoes([{ state: 'running', createdAt: ha(24 * 40) }], '24h', AGORA).aoVivo,
+      1,
+    );
   });
 
-  const no = (id: string, agentId: string, usd: number, tokens: number, horas: number, filhos: NoDeCusto[] = []): NoDeCusto => ({
+  const no = (
+    id: string,
+    agentId: string,
+    usd: number,
+    tokens: number,
+    horas: number,
+    filhos: NoDeCusto[] = [],
+  ): NoDeCusto => ({
     sessionId: id,
     agentId,
     usd,
@@ -68,7 +81,12 @@ describe('telemetria com as definições do resto do painel (R03-27)', () => {
       { agentId: 'claude', usd: 1.5, tokens: 1500, sessoes: 2 },
       { agentId: 'codex', usd: 0.25, tokens: 400, sessoes: 1 },
     ]);
-    assert.deepEqual(custoPorAgente(grafo, '7d', AGORA)[0], { agentId: 'codex', usd: 3.25, tokens: 9400, sessoes: 2 });
+    assert.deepEqual(custoPorAgente(grafo, '7d', AGORA)[0], {
+      agentId: 'codex',
+      usd: 3.25,
+      tokens: 9400,
+      sessoes: 2,
+    });
   });
 
   test('achatar não repete sessão', () => {
@@ -86,8 +104,14 @@ describe('telemetria com as definições do resto do painel (R03-27)', () => {
   });
 
   test('só os fluxos que podem ter sessão no período precisam de /graph', () => {
-    const fluxos = [{ id: 'a', updatedAt: ha(1) }, { id: 'b', updatedAt: ha(24 * 3) }];
-    assert.deepEqual(fluxosDoPeriodo(fluxos, '24h', AGORA).map((f) => f.id), ['a']);
+    const fluxos = [
+      { id: 'a', updatedAt: ha(1) },
+      { id: 'b', updatedAt: ha(24 * 3) },
+    ];
+    assert.deepEqual(
+      fluxosDoPeriodo(fluxos, '24h', AGORA).map((f) => f.id),
+      ['a'],
+    );
     assert.equal(fluxosDoPeriodo(fluxos, 'tudo', AGORA).length, 2);
   });
 });

@@ -50,7 +50,7 @@ function status(agenteAtual: string, tentativas: Array<[string, string | null]>)
     },
     live: true,
     budget: orcamento,
-  } as TaskStatus;
+  };
 }
 
 /**
@@ -79,7 +79,12 @@ describe('formatTaskStatus: troca de agente visível', () => {
   });
 
   test('retry no mesmo agente não é fallback', () => {
-    const texto = formatTaskStatus(status('claude', [['claude', 'falhou'], ['claude', null]]));
+    const texto = formatTaskStatus(
+      status('claude', [
+        ['claude', 'falhou'],
+        ['claude', null],
+      ]),
+    );
     assert.doesNotMatch(texto, /FALLBACK/);
   });
 });

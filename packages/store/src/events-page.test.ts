@@ -71,12 +71,18 @@ describe('eventos: página pelo fim e para trás', () => {
       [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
     );
     const ultima = store.events.list({ sessionId, beforeSeq: 3, limit: 10 });
-    assert.deepEqual(ultima.map((e) => e.seq), [1, 2]);
+    assert.deepEqual(
+      ultima.map((e) => e.seq),
+      [1, 2],
+    );
   });
 
   test('sem newest/beforeSeq o comportamento antigo (do começo) continua', () => {
     const { store, sessionId } = semear(30);
     const lidos = store.events.list({ sessionId, limit: 3 });
-    assert.deepEqual(lidos.map((e) => e.seq), [1, 2, 3]);
+    assert.deepEqual(
+      lidos.map((e) => e.seq),
+      [1, 2, 3],
+    );
   });
 });

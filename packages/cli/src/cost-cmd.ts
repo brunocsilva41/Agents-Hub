@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { chaveDeCaminho } from './project-resolve.js';
 import type { GraphSummary, HubClient, ProjectSummary } from './client.js';
 import { flagOn, flagString, imprimirJson, instanteDe, type Args } from './cmd-util.js';
@@ -18,7 +17,14 @@ export interface CostReport {
   byAgent: Array<Soma & { agentId: string }>;
   byProject: Array<Soma & { projectId: string; name: string | null }>;
   byDay: Array<Soma & { day: string }>;
-  topFlows: Array<{ rootId: string; title: string | null; agentId: string; usd: number; tokens: number; createdAt: string }>;
+  topFlows: Array<{
+    rootId: string;
+    title: string | null;
+    agentId: string;
+    usd: number;
+    tokens: number;
+    createdAt: string;
+  }>;
 }
 
 function vazio(): Soma {
@@ -128,8 +134,11 @@ export async function costCommand(client: HubClient, args: Args): Promise<CostRe
     return report;
   }
 
-  const periodo = since === null ? 'desde sempre' : `desde ${since.slice(0, 16).replace('T', ' ')} (UTC)`;
-  console.log(`${bold('custo')} ${dim(periodo)}${report.projectId ? dim(` · projeto ${report.projectId}`) : ''}`);
+  const periodo =
+    since === null ? 'desde sempre' : `desde ${since.slice(0, 16).replace('T', ' ')} (UTC)`;
+  console.log(
+    `${bold('custo')} ${dim(periodo)}${report.projectId ? dim(` · projeto ${report.projectId}`) : ''}`,
+  );
   console.log(
     `${bold(`US$ ${report.total.usd.toFixed(4)}`)} · ${formatTokens(report.total.tokens)} tokens · ` +
       `${report.total.flows} fluxo(s), ${report.total.sessions} sessão(ões)`,
@@ -148,6 +157,8 @@ export async function costCommand(client: HubClient, args: Args): Promise<CostRe
   for (const f of report.topFlows.slice(0, 5)) {
     console.log(`  ${bold(f.rootId)} ${cyan(f.agentId)} US$ ${f.usd.toFixed(4)} ${dim(f.title ?? '')}`);
   }
-  console.log(dim('\ncusto informado pelos próprios agentes; o Copilot fatura em créditos, não em dólares.'));
+  console.log(
+    dim('\ncusto informado pelos próprios agentes; o Copilot fatura em créditos, não em dólares.'),
+  );
   return report;
 }

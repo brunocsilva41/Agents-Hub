@@ -150,7 +150,7 @@ export function loadProjectOverrides(
     console.warn(`[project-config] ${ignoredExecFieldsWarning(projectPath, ignorados)}`);
   }
   return {
-    overrides: withoutExecFields(lido.loaded.overrides) as ProjectPolicyOverrides,
+    overrides: withoutExecFields(lido.loaded.overrides),
     error: lido.loaded.error,
     ignoredExecFields: ignorados,
   };
@@ -300,10 +300,7 @@ interface LoadedProjectContext {
   error: string | null;
 }
 
-const contextCache = new Map<
-  string,
-  { mtimeMs: number; size: number; ctx: ProjectContext } | null
->();
+const contextCache = new Map<string, { mtimeMs: number; size: number; ctx: ProjectContext } | null>();
 
 /**
  * Lê memória e prompts do projeto, com o mesmo cache por mtime+size da política

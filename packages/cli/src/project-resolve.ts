@@ -46,7 +46,11 @@ export function chaveDeCaminho(bruto: string, plataforma: NodeJS.Platform = proc
 }
 
 /** `filho` é `pai` ou está dentro dele (comparando pelas chaves canônicas). */
-export function contemCaminho(pai: string, filho: string, plataforma: NodeJS.Platform = process.platform): boolean {
+export function contemCaminho(
+  pai: string,
+  filho: string,
+  plataforma: NodeJS.Platform = process.platform,
+): boolean {
   const a = chaveDeCaminho(pai, plataforma);
   const b = chaveDeCaminho(filho, plataforma);
   if (a === b) return true;
@@ -58,11 +62,15 @@ export function contemCaminho(pai: string, filho: string, plataforma: NodeJS.Pla
  * O projeto registrado que contém `dir` — o mais específico, se houver
  * aninhamento legado (o daemon hoje recusa pastas sobrepostas).
  */
-export function projetoQueContem(projects: readonly ProjectSummary[], dir: string): ProjectSummary | undefined {
+export function projetoQueContem(
+  projects: readonly ProjectSummary[],
+  dir: string,
+): ProjectSummary | undefined {
   let melhor: ProjectSummary | undefined;
   for (const p of projects) {
     if (!contemCaminho(p.path, dir)) continue;
-    if (melhor === undefined || chaveDeCaminho(p.path).length > chaveDeCaminho(melhor.path).length) melhor = p;
+    if (melhor === undefined || chaveDeCaminho(p.path).length > chaveDeCaminho(melhor.path).length)
+      melhor = p;
   }
   return melhor;
 }

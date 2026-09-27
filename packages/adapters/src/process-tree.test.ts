@@ -113,12 +113,12 @@ test('killProcessTree mata o processo raiz e o neto que ignora SIGTERM', async (
   assert.ok(pidVivo(netoPid), 'neto deveria estar vivo antes do kill');
 
   let fallbackChamado = false;
-  await killProcessTree(parent.pid!, () => {
+  await killProcessTree(parent.pid, () => {
     fallbackChamado = true;
     parent.kill('SIGKILL');
   });
 
-  await aguardarMorte(parent.pid!);
+  await aguardarMorte(parent.pid);
   await aguardarMorte(netoPid);
 
   if (process.platform === 'win32') {
@@ -230,7 +230,11 @@ test('imagemPareceEsperada: aceita o executável que o shim npm desembrulhado de
   // que roda o script do PRÓPRIO agente, ou do .exe real — não de um cmd.exe.
   assert.equal(imagemPareceEsperada('node.exe', 'copilot', 'C:\\Program Files\\nodejs\\node.exe'), true);
   assert.equal(
-    imagemPareceEsperada('opencode.exe', 'opencode', 'C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe'),
+    imagemPareceEsperada(
+      'opencode.exe',
+      'opencode',
+      'C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe',
+    ),
     true,
   );
   // Sem o executável resolvido, node continua recusado.
@@ -253,9 +257,7 @@ test('pidPareceReciclado: processo nascido bem depois do último updatedAt é re
 
 test('pidPareceReciclado: dentro da tolerância de relógio não conta como reciclado', () => {
   const referencia = new Date('2026-01-01T00:00:00.000Z').toISOString();
-  const dentroDaFolga = new Date(
-    new Date(referencia).getTime() + TOLERANCIA_RELOGIO_MS - 1,
-  );
+  const dentroDaFolga = new Date(new Date(referencia).getTime() + TOLERANCIA_RELOGIO_MS - 1);
   assert.equal(pidPareceReciclado(dentroDaFolga, referencia), false);
 });
 

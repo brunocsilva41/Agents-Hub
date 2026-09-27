@@ -88,7 +88,7 @@ export {
 export { DecisoesDoGate } from './gate-idempotencia.js';
 export { guardRequest, type GuardVerdict } from './guard.js';
 export { createHub, type Hub, type HubDeps } from './hub.js';
-export { instalarRedeDeSeguranca } from './safety-net.js';
+export { encerradorDoProcesso, instalarRedeDeSeguranca } from './safety-net.js';
 export {
   MCP_TARGETS,
   mcpTargets,

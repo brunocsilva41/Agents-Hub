@@ -32,7 +32,12 @@ let porta = 0;
 function http(
   method: string,
   caminho: string,
-  opts: { headers?: Record<string, string>; body?: Buffer | string; chunked?: boolean; timeoutMs?: number } = {},
+  opts: {
+    headers?: Record<string, string>;
+    body?: Buffer | string;
+    chunked?: boolean;
+    timeoutMs?: number;
+  } = {},
 ): Promise<Resposta> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { host: `127.0.0.1:${porta}`, ...(opts.headers ?? {}) };
@@ -41,12 +46,23 @@ function http(
       headers['content-length'] = String(body.length);
     }
     const req = request(
-      { host: '127.0.0.1', port: porta, method, path: caminho, headers, timeout: opts.timeoutMs ?? 5000 },
+      {
+        host: '127.0.0.1',
+        port: porta,
+        method,
+        path: caminho,
+        headers,
+        timeout: opts.timeoutMs ?? 5000,
+      },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
         res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }),
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString('utf8'),
+          }),
         );
         res.on('error', reject);
       },

@@ -1,9 +1,4 @@
-import type {
-  AgentDiscovery,
-  EventEnvelope,
-  ImportKind,
-  ImportResult,
-} from '@agents-hub/core';
+import type { AgentDiscovery, EventEnvelope, ImportKind, ImportResult } from '@agents-hub/core';
 import type {
   AgentSummary,
   ApprovalSummary,
@@ -145,9 +140,7 @@ export class HubClient {
   }
 
   discoverAgent(agentId: string, refresh = false): Promise<{ agent: AgentDiscovery }> {
-    return this.#get(
-      `/discovery/${encodeURIComponent(agentId)}${refresh ? '?refresh=1' : ''}`,
-    );
+    return this.#get(`/discovery/${encodeURIComponent(agentId)}${refresh ? '?refresh=1' : ''}`);
   }
 
   /** `dryRun` é verdadeiro por padrão no daemon: só grava com `dryRun: false`. */
@@ -237,9 +230,7 @@ export class HubClient {
    * `interrupted: false`: a sessão existe, mas não havia turno em andamento.
    * `state`: estado depois da interrupção (`idle` quando parou um turno).
    */
-  async interrupt(
-    sessionId: string,
-  ): Promise<{ ok: boolean; interrupted?: boolean; state?: string }> {
+  async interrupt(sessionId: string): Promise<{ ok: boolean; interrupted?: boolean; state?: string }> {
     return this.#post(`/sessions/${idSegment(sessionId, 'ses')}/interrupt`, {});
   }
 
@@ -640,8 +631,7 @@ export class HubClient {
 
     if (!response.ok) {
       const error = parsed['error'] as
-        | { code?: string; message?: string; details?: unknown }
-        | undefined;
+        { code?: string; message?: string; details?: unknown } | undefined;
       throw new HubApiError(
         error?.message ?? text,
         error?.code ?? String(response.status),

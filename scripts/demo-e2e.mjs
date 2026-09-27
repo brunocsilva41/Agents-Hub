@@ -272,7 +272,9 @@ function gitShow(cwd, ref, arquivo) {
 function imprimirGrafo(nos, recuo = 0) {
   for (const no of nos) {
     const custo = `US$ ${Number(no.usd ?? 0).toFixed(4)} / ${no.tokens ?? 0} tokens`;
-    console.log(`    ${'  '.repeat(recuo)}${recuo ? '└─ ' : ''}${no.agentId} [${no.state}] prof=${no.depth} ${custo}`);
+    console.log(
+      `    ${'  '.repeat(recuo)}${recuo ? '└─ ' : ''}${no.agentId} [${no.state}] prof=${no.depth} ${custo}`,
+    );
     imprimirGrafo(no.children ?? [], recuo + 1);
   }
 }
@@ -396,6 +398,7 @@ async function main(ctx) {
   // `dorminhoco`: turno longo (gate, cancel, interrupt, pause, handoff).
   // `flaky`/`backup`: cadeia de fallback da capability `instavel`.
   // `obreiro`: faz o trabalho (workflow, custo, prune, confiança).
+  /** @type {Array<[string, Record<string, unknown>]>} */
   const jsonl = [
     ['dorminhoco', { sleepMs: 30_000, capability: 'lento' }],
     ['flaky', { capability: 'instavel', supervision: 'autonomous' }],
@@ -447,7 +450,10 @@ async function main(ctx) {
     `daemon isolado no ar${base ? ` em ${base}` : ''}`,
     base ? `home ${home}` : (ctx.saida ?? []).join(''),
   );
-  exigir(await ehNosso(base, home), 'o daemon na porta aceita o token da home temporária (não toca ~/.agents-hub)');
+  exigir(
+    await ehNosso(base, home),
+    'o daemon na porta aceita o token da home temporária (não toca ~/.agents-hub)',
+  );
   const token = lerToken(home);
 
   const novoProjeto = async (dir, nome) => {
@@ -460,7 +466,8 @@ async function main(ctx) {
       projectId,
       brief: { agent, objective, isolation: 'none', ...extra },
     });
-    if (r.status !== 201) throw new Error(`POST /sessions (${agent}) → HTTP ${r.status} ${r.texto.slice(0, 300)}`);
+    if (r.status !== 201)
+      throw new Error(`POST /sessions (${agent}) → HTTP ${r.status} ${r.texto.slice(0, 300)}`);
     return { sessionId: r.json.session.id, taskId: r.json.task.id, session: r.json.session };
   };
   /** A task no estado pedido (até 5 s); devolve a última lida de qualquer jeito. */
@@ -499,7 +506,9 @@ async function main(ctx) {
       );
       const cookie = [navegacao.headers['set-cookie'] ?? []].flat().join('; ');
       passo(
-        cookie.includes(`hub_operator=${token}`) && /HttpOnly/i.test(cookie) && /SameSite=Strict/i.test(cookie),
+        cookie.includes(`hub_operator=${token}`) &&
+          /HttpOnly/i.test(cookie) &&
+          /SameSite=Strict/i.test(cookie),
         'navegar até o painel emite o cookie de operador (HttpOnly, SameSite=Strict)',
       );
       const semNavegacao = await getCru(base, '/', {});
@@ -515,12 +524,18 @@ async function main(ctx) {
     const ids = (agentes.json?.agents ?? []).map((a) => a.id);
     passo(
       agentes.status === 200 &&
-        ['raiz', 'filho', 'neto', 'dorminhoco', 'flaky', 'backup', 'obreiro'].every((i) => ids.includes(i)),
+        ['raiz', 'filho', 'neto', 'dorminhoco', 'flaky', 'backup', 'obreiro'].every((i) =>
+          ids.includes(i),
+        ),
       'GET /agents lista os 7 agentes falsos',
       ids.join(', '),
     );
     const sessoes = await req(base, 'GET', '/sessions');
-    passo(sessoes.status === 200 && Array.isArray(sessoes.json?.sessions), 'GET /sessions responde', `HTTP ${sessoes.status}`);
+    passo(
+      sessoes.status === 200 && Array.isArray(sessoes.json?.sessions),
+      'GET /sessions responde',
+      `HTTP ${sessoes.status}`,
+    );
 
     const semToken = await req(base, 'POST', '/approvals/apv_demoinexistente', { decision: 'approved' });
     const politicaSemToken = await req(base, 'PUT', '/policy', { maxDepth: 9 });
@@ -543,17 +558,33 @@ async function main(ctx) {
     });
     exigir(adot.status === 201 && !!adot.json?.session?.id, 'sessão-raiz aberta', `HTTP ${adot.status}`);
     const raizId = adot.json.session.id;
-    passo(adot.json.session.depth === 0 && adot.json.session.parentId === null, 'raiz tem profundidade 0 e nenhum pai');
+    passo(
+      adot.json.session.depth === 0 && adot.json.session.parentId === null,
+      'raiz tem profundidade 0 e nenhum pai',
+    );
 
-    const brief = (agent, objective) => ({ agent, objective, isolation: 'none', supervision: 'autonomous' });
+    const brief = (agent, objective) => ({
+      agent,
+      objective,
+      isolation: 'none',
+      supervision: 'autonomous',
+    });
     const d1 = await req(base, 'POST', `/sessions/${raizId}/delegate`, {
       brief: brief('filho', 'tarefa do filho: relatar que está vivo'),
     });
-    exigir(d1.status === 201 && !!d1.json?.taskId, 'raiz delegou ao filho', `HTTP ${d1.status} ${d1.json?.error?.message ?? ''}`);
+    exigir(
+      d1.status === 201 && !!d1.json?.taskId,
+      'raiz delegou ao filho',
+      `HTTP ${d1.status} ${d1.json?.error?.message ?? ''}`,
+    );
     const d2 = await req(base, 'POST', `/sessions/${d1.json.sessionId}/delegate`, {
       brief: brief('neto', 'tarefa do neto: relatar que está vivo'),
     });
-    exigir(d2.status === 201 && !!d2.json?.taskId, 'filho delegou ao neto', `HTTP ${d2.status} ${d2.json?.error?.message ?? ''}`);
+    exigir(
+      d2.status === 201 && !!d2.json?.taskId,
+      'filho delegou ao neto',
+      `HTTP ${d2.status} ${d2.json?.error?.message ?? ''}`,
+    );
 
     const tNeto = await esperarTarefaTerminal(base, d2.json.taskId);
     passo(tNeto.state === 'completed', 'tarefa do neto terminou', `estado ${tNeto.state}`);
@@ -566,29 +597,44 @@ async function main(ctx) {
     imprimirGrafo(grafo.json?.graph ?? []);
     const porAgente = Object.fromEntries(nos.map((n) => [n.agentId, n]));
     passo(
-      nos.length === 3 && porAgente.raiz?.depth === 0 && porAgente.filho?.depth === 1 && porAgente.neto?.depth === 2,
+      nos.length === 3 &&
+        porAgente.raiz?.depth === 0 &&
+        porAgente.filho?.depth === 1 &&
+        porAgente.neto?.depth === 2,
       'grafo tem raiz -> filho -> neto com profundidades 0/1/2',
       nos.map((n) => `${n.agentId}:${n.depth}`).join(' '),
     );
     passo(
-      nos.filter((n) => n.agentId !== 'raiz').every((n) => n.state === 'completed' || n.state === 'idle'),
+      nos
+        .filter((n) => n.agentId !== 'raiz')
+        .every((n) => n.state === 'completed' || n.state === 'idle'),
       'filho e neto em estado terminal/concluído',
       nos.map((n) => `${n.agentId}=${n.state}`).join(' '),
     );
     const orc = await req(base, 'GET', `/budget/${raizId}`);
     const consumido = orc.json?.budget?.consumed;
-    passo(orc.status === 200 && Number(consumido?.usd ?? 1) === 0, 'custo total do fluxo é zero', `US$ ${consumido?.usd}`);
     passo(
-      /FAKE_OK do agente neto/.test(tNeto.result?.summary ?? '') && /FAKE_OK do agente filho/.test(tFilho.result?.summary ?? ''),
+      orc.status === 200 && Number(consumido?.usd ?? 1) === 0,
+      'custo total do fluxo é zero',
+      `US$ ${consumido?.usd}`,
+    );
+    passo(
+      /FAKE_OK do agente neto/.test(tNeto.result?.summary ?? '') &&
+        /FAKE_OK do agente filho/.test(tFilho.result?.summary ?? ''),
       'resultados carregam a saída dos agentes falsos',
     );
   });
 
   // --- gate pré-execução ------------------------------------------------------
   await etapa('gate pré-execução (aprovar e negar) e cancel', async () => {
-    const { sessionId, taskId } = await iniciar(projectId, 'dorminhoco', 'sessão que vai pedir para rodar git push', {
-      supervision: 'semi',
-    });
+    const { sessionId, taskId } = await iniciar(
+      projectId,
+      'dorminhoco',
+      'sessão que vai pedir para rodar git push',
+      {
+        supervision: 'semi',
+      },
+    );
     await turnoRodando(sessionId);
 
     // O hook do agente pergunta e FICA ESPERANDO o veredito.
@@ -625,22 +671,34 @@ async function main(ctx) {
     }, 'segunda aprovação pendente do gate');
     const negar = await req(base, 'POST', `/approvals/${apv2.id}`, { decision: 'denied' }, token);
     const r2 = await hook2;
-    const depois = await esperar(async () => {
-      const s = await sessao(base, sessionId);
-      return s.session?.state !== 'waiting_approval' ? s : null;
-    }, 'sessão sair de waiting_approval', 5000);
+    const depois = await esperar(
+      async () => {
+        const s = await sessao(base, sessionId);
+        return s.session?.state !== 'waiting_approval' ? s : null;
+      },
+      'sessão sair de waiting_approval',
+      5000,
+    );
     passo(
-      negar.status === 200 && r2.json?.permission === 'deny' && depois.live === true && depois.session?.state === 'running',
+      negar.status === 200 &&
+        r2.json?.permission === 'deny' &&
+        depois.live === true &&
+        depois.session?.state === 'running',
       'negar → o hook recebe deny e a sessão SEGUE viva',
       `hook ${r2.json?.permission}, sessão ${depois.session?.state}, live ${depois.live}`,
     );
 
     // Cancel: a mesma sessão, ainda no meio do turno.
-    const cancel = await req(base, 'POST', `/sessions/${sessionId}/cancel`, { reason: 'fim da demo do gate' });
+    const cancel = await req(base, 'POST', `/sessions/${sessionId}/cancel`, {
+      reason: 'fim da demo do gate',
+    });
     const t = await esperarTarefaTerminal(base, taskId);
     const fim = await sessao(base, sessionId);
     passo(
-      cancel.status === 200 && fim.session?.state === 'killed' && fim.live === false && t.state === 'canceled',
+      cancel.status === 200 &&
+        fim.session?.state === 'killed' &&
+        fim.live === false &&
+        t.state === 'canceled',
       'cancel de sessão viva → sessão killed, task canceled',
       `sessão ${fim.session?.state}, task ${t.state}`,
     );
@@ -648,16 +706,23 @@ async function main(ctx) {
 
   // --- interrupt / pause + send ----------------------------------------------
   await etapa('interrupt e pause + send retomando', async () => {
-    const a = await iniciar(projectId, 'dorminhoco', 'turno longo que será interrompido', { supervision: 'semi' });
+    const a = await iniciar(projectId, 'dorminhoco', 'turno longo que será interrompido', {
+      supervision: 'semi',
+    });
     await turnoRodando(a.sessionId);
     const intr = await req(base, 'POST', `/sessions/${a.sessionId}/interrupt`, {});
     const ta = await estadoDaTarefa(a.taskId, 'input_required');
     passo(
-      intr.status === 200 && intr.json?.interrupted === true && intr.json?.state === 'idle' && ta?.state === 'input_required',
+      intr.status === 200 &&
+        intr.json?.interrupted === true &&
+        intr.json?.state === 'idle' &&
+        ta?.state === 'input_required',
       'interrupt para o turno sem matar a sessão (idle, task input_required)',
       `interrupted ${intr.json?.interrupted}, sessão ${intr.json?.state}, task ${ta?.state}`,
     );
-    const envioA = await req(base, 'POST', `/sessions/${a.sessionId}/send`, { text: 'continue de onde parou @NOSLEEP' });
+    const envioA = await req(base, 'POST', `/sessions/${a.sessionId}/send`, {
+      text: 'continue de onde parou @NOSLEEP',
+    });
     const fimA = await esperarTarefaTerminal(base, a.taskId);
     passo(
       envioA.status === 200 && fimA.state === 'completed',
@@ -665,7 +730,9 @@ async function main(ctx) {
       `send ${envioA.status} (${envioA.json?.mode ?? '?'}), task ${fimA.state}`,
     );
 
-    const b = await iniciar(projectId, 'dorminhoco', 'turno longo que será pausado', { supervision: 'semi' });
+    const b = await iniciar(projectId, 'dorminhoco', 'turno longo que será pausado', {
+      supervision: 'semi',
+    });
     await turnoRodando(b.sessionId);
     const pausa = await req(base, 'POST', `/sessions/${b.sessionId}/pause`, {});
     const tb = await estadoDaTarefa(b.taskId, 'input_required');
@@ -674,7 +741,9 @@ async function main(ctx) {
       'pause deixa a sessão paused e a task input_required',
       `sessão ${pausa.json?.state}, task ${tb?.state}`,
     );
-    const envioB = await req(base, 'POST', `/sessions/${b.sessionId}/send`, { text: 'pode seguir @NOSLEEP' });
+    const envioB = await req(base, 'POST', `/sessions/${b.sessionId}/send`, {
+      text: 'pode seguir @NOSLEEP',
+    });
     const fimB = await esperarTarefaTerminal(base, b.taskId);
     passo(
       envioB.status === 200 && fimB.state === 'completed',
@@ -685,11 +754,17 @@ async function main(ctx) {
 
   // --- fallback ----------------------------------------------------------------
   await etapa('fallback', async () => {
-    const { taskId } = await iniciar(projectId, 'flaky', 'tarefa que o primeiro agente não consegue @FAIL=flaky');
+    const { taskId } = await iniciar(
+      projectId,
+      'flaky',
+      'tarefa que o primeiro agente não consegue @FAIL=flaky',
+    );
     const t = await esperarTarefaTerminal(base, taskId);
     const agentes = (t.attempts ?? []).map((x) => x.agentId);
     passo(
-      t.state === 'completed' && agentes.join(',') === 'flaky,backup' && /RESULTADO_backup/.test(t.result?.summary ?? ''),
+      t.state === 'completed' &&
+        agentes.join(',') === 'flaky,backup' &&
+        /RESULTADO_backup/.test(t.result?.summary ?? ''),
       'agente que falha com 429 → substituto (backup) conclui e a task segue',
       `task ${t.state}, tentativas ${agentes.join(' -> ')}`,
     );
@@ -752,7 +827,9 @@ async function main(ctx) {
 
   // --- custo ----------------------------------------------------------------------
   await etapa('custo: sem dupla contagem e estouro com aprovação', async () => {
-    const c = await iniciar(projectId, 'obreiro', 'tarefa que custa @TOKENS=1000 @COST=0.25', { budget: { usd: 1 } });
+    const c = await iniciar(projectId, 'obreiro', 'tarefa que custa @TOKENS=1000 @COST=0.25', {
+      budget: { usd: 1 },
+    });
     const t = await esperarTarefaTerminal(base, c.taskId);
     const orc = (await req(base, 'GET', `/budget/${c.sessionId}`)).json?.budget;
     passo(
@@ -761,17 +838,28 @@ async function main(ctx) {
       `US$ ${orc?.consumed?.usd} / ${orc?.consumed?.tokens} tokens`,
     );
 
-    const e = await iniciar(projectId, 'obreiro', 'tarefa cara demais @COST=0.3', { budget: { usd: 0.1 } });
+    const e = await iniciar(projectId, 'obreiro', 'tarefa cara demais @COST=0.3', {
+      budget: { usd: 0.1 },
+    });
     const [apv] = await esperar(async () => {
       const a = await aprovacoesPendentes(base, e.sessionId);
       return a.length > 0 ? a : null;
     }, 'aprovação de estouro');
-    passo(apv?.detail?.kind === 'budget', 'estouro do teto abre aprovação de orçamento', apv?.action ?? '');
-    await esperar(async () => (await sessao(base, e.sessionId)).live === false, 'fim do processo do agente caro');
+    passo(
+      apv?.detail?.kind === 'budget',
+      'estouro do teto abre aprovação de orçamento',
+      apv?.action ?? '',
+    );
+    await esperar(
+      async () => (await sessao(base, e.sessionId)).live === false,
+      'fim do processo do agente caro',
+    );
     const ok = await req(base, 'POST', `/approvals/${apv.id}`, { decision: 'approved' }, token);
     const te = await esperarTarefaTerminal(base, e.taskId);
     passo(
-      ok.status === 200 && te.state === 'completed' && (await aprovacoesPendentes(base, e.sessionId)).length === 0,
+      ok.status === 200 &&
+        te.state === 'completed' &&
+        (await aprovacoesPendentes(base, e.sessionId)).length === 0,
       'aprovar o estouro finaliza a tarefa sem aprovação sobrando',
       `task ${te.state}`,
     );
@@ -779,9 +867,14 @@ async function main(ctx) {
 
   // --- handoff ------------------------------------------------------------------
   await etapa('handoff', async () => {
-    const h = await iniciar(projectId, 'dorminhoco', 'trabalho que passará para outro agente', { supervision: 'semi' });
+    const h = await iniciar(projectId, 'dorminhoco', 'trabalho que passará para outro agente', {
+      supervision: 'semi',
+    });
     await turnoRodando(h.sessionId);
-    const r = await req(base, 'POST', `/sessions/${h.sessionId}/handoff`, { agentId: 'obreiro', reason: 'especialista' });
+    const r = await req(base, 'POST', `/sessions/${h.sessionId}/handoff`, {
+      agentId: 'obreiro',
+      reason: 'especialista',
+    });
     const t = await esperarTarefaTerminal(base, h.taskId);
     const evs = await eventos(base, h.sessionId);
     const ev = evs.find((x) => x.type === 'session.handoff');
@@ -798,21 +891,30 @@ async function main(ctx) {
 
   // --- prune -------------------------------------------------------------------
   await etapa('prune preservando o trabalho no branch', async () => {
-    const p = await iniciar(repoId, 'obreiro', 'produzir trabalho no worktree @WRITE=obra.txt', { isolation: 'worktree' });
+    const p = await iniciar(repoId, 'obreiro', 'produzir trabalho no worktree @WRITE=obra.txt', {
+      isolation: 'worktree',
+    });
     const t = await esperarTarefaTerminal(base, p.taskId);
     const workdir = (await sessao(base, p.sessionId)).session?.workdir;
-    exigir(t.state === 'completed' && !!workdir && existsSync(workdir), 'sessão em worktree concluída com o worktree no disco', workdir ?? '');
+    exigir(
+      t.state === 'completed' && !!workdir && existsSync(workdir),
+      'sessão em worktree concluída com o worktree no disco',
+      workdir ?? '',
+    );
     // Trabalho que ninguém commitou (ex.: arquivo deixado depois do fim).
     writeFileSync(path.join(workdir, 'sobra.txt'), 'trabalho não commitado\n', 'utf8');
     const sweep = await req(base, 'POST', '/maintenance/sweep', {}, token);
     const removidos = sweep.json?.sweep?.removed ?? [];
     passo(
-      sweep.status === 200 && removidos.some((w) => path.resolve(w) === path.resolve(workdir)) && !existsSync(workdir),
+      sweep.status === 200 &&
+        removidos.some((w) => path.resolve(w) === path.resolve(workdir)) &&
+        !existsSync(workdir),
       'prune (POST /maintenance/sweep) recolhe o worktree expirado',
       `HTTP ${sweep.status}, ${removidos.length} removido(s)`,
     );
     passo(
-      gitShow(repo, `hub/${p.sessionId}`, 'obra.txt') !== null && gitShow(repo, `hub/${p.sessionId}`, 'sobra.txt') !== null,
+      gitShow(repo, `hub/${p.sessionId}`, 'obra.txt') !== null &&
+        gitShow(repo, `hub/${p.sessionId}`, 'sobra.txt') !== null,
       'o trabalho (inclusive o não commitado) ficou no branch hub/<id>',
     );
   });
@@ -822,7 +924,11 @@ async function main(ctx) {
     const dir = path.join(raiz, 'repo-nao-confiavel');
     const marcador = path.join(raiz, 'pwned.txt');
     mkdirSync(path.join(dir, '.agents-hub'), { recursive: true });
-    writeFileSync(path.join(dir, 'pwn.cjs'), `require('fs').writeFileSync(${JSON.stringify(marcador)}, 'executado');\n`, 'utf8');
+    writeFileSync(
+      path.join(dir, 'pwn.cjs'),
+      `require('fs').writeFileSync(${JSON.stringify(marcador)}, 'executado');\n`,
+      'utf8',
+    );
     writeFileSync(
       path.join(dir, '.agents-hub', 'config.yaml'),
       [
@@ -861,7 +967,9 @@ async function main(ctx) {
     );
     const textoAviso = String(aviso?.payload?.text ?? '');
     passo(
-      /validation\.command/.test(textoAviso) && /ANTHROPIC_BASE_URL/.test(textoAviso) && ctxRepo?.trust === 'untrusted',
+      /validation\.command/.test(textoAviso) &&
+        /ANTHROPIC_BASE_URL/.test(textoAviso) &&
+        ctxRepo?.trust === 'untrusted',
       'aviso na timeline e repo marcado untrusted',
       `trust ${ctxRepo?.trust}`,
     );

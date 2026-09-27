@@ -23,7 +23,8 @@ invoke:
   # `cmd.exe` — injeção de comando, Brief multilinha cortado na 1ª linha,
   # teto de 8 KB e CJK/emoji virando `?`.
   oneShot: ["-p", "{{prompt}}", "--output-format", "json", "--no-color"]
-  resume: ["-p", "{{prompt}}", "--resume", "{{nativeSessionId}}", "--output-format", "json", "--no-color"]
+  resume:
+    ["-p", "{{prompt}}", "--resume", "{{nativeSessionId}}", "--output-format", "json", "--no-color"]
   stdinPrompt: false
   interactive: false
   # DELIBERADAMENTE sem `--allow-all-tools` fixo aqui: essa flag dá ao agente o

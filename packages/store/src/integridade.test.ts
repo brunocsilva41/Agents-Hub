@@ -92,7 +92,11 @@ describe('R09-08: somas de custo e listagens por tipo escalam com o que importa'
     );
     assert.match(porTipo, /idx_events_type_sessao/, porTipo);
     assert.doesNotMatch(porTipo, /TEMP B-TREE/, porTipo);
-    const porTask = plano(db, `SELECT * FROM events WHERE task_id = ? ORDER BY session_id, seq LIMIT 10`, 't');
+    const porTask = plano(
+      db,
+      `SELECT * FROM events WHERE task_id = ? ORDER BY session_id, seq LIMIT 10`,
+      't',
+    );
     assert.match(porTask, /idx_events_task_sessao/, porTask);
     assert.doesNotMatch(porTask, /TEMP B-TREE/, porTask);
   });
@@ -264,20 +268,25 @@ describe('R09-17: integridade no schema', () => {
     db.exec('PRAGMA foreign_keys = ON;');
     // Sobe até a 9, planta a duplicidade que a guarda do daemon evitava.
     const ate9 = MIGRATIONS.filter((m) => m.version <= 9);
-    db.exec(`CREATE TABLE migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);`);
+    db.exec(
+      `CREATE TABLE migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);`,
+    );
     for (const m of ate9) {
       db.exec(m.sql);
       db.prepare('INSERT INTO migrations VALUES (?, ?, ?)').run(m.version, m.name, 'x');
     }
-    db.exec(`INSERT INTO projects (id, name, path, default_branch, created_at) VALUES ('prj_1','p','/p','main','1')`);
+    db.exec(
+      `INSERT INTO projects (id, name, path, default_branch, created_at) VALUES ('prj_1','p','/p','main','1')`,
+    );
     db.exec(`INSERT INTO project_folders (id, project_id, path, label, is_primary, created_at) VALUES
       ('pfd_nova','prj_1','/nova',NULL,1,'2021'),
       ('pfd_velha','prj_1','/velha',NULL,1,'2020'),
       ('pfd_comum','prj_1','/comum',NULL,0,'2019')`);
     migrate(db);
-    const linhas = db
-      .prepare('SELECT id, is_primary FROM project_folders ORDER BY id')
-      .all() as Array<{ id: string; is_primary: number }>;
+    const linhas = db.prepare('SELECT id, is_primary FROM project_folders ORDER BY id').all() as Array<{
+      id: string;
+      is_primary: number;
+    }>;
     assert.deepEqual(
       linhas.map((l) => [l.id, l.is_primary]),
       [

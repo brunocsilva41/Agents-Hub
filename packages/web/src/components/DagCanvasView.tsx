@@ -108,8 +108,12 @@ export function DagCanvasView({
       <div className="dag-canvas-container">
         {cabecalho}
         <div className="dag-empty-canvas">
-          <div className="dag-empty-icon" aria-hidden="true">🕸</div>
-          <h3>{filtrado ? `Nenhum fluxo em “${nomeDoProjeto ?? projectId}”` : 'Nenhum fluxo no Hub ainda'}</h3>
+          <div className="dag-empty-icon" aria-hidden="true">
+            🕸
+          </div>
+          <h3>
+            {filtrado ? `Nenhum fluxo em “${nomeDoProjeto ?? projectId}”` : 'Nenhum fluxo no Hub ainda'}
+          </h3>
           <p>
             {filtrado
               ? 'Este projeto ainda não tem sessões. Veja todos os projetos ou inicie uma sessão nele.'
@@ -178,7 +182,12 @@ function FlowGraph({
     }
     return { estado: entrada?.estado === 'erro' ? 'erro' : 'carregando' };
   };
-  const total = custos ? [...custos.values()].reduce((s, c) => ({ usd: s.usd + c.usd, tokens: s.tokens + c.tokens }), { usd: 0, tokens: 0 }) : null;
+  const total = custos
+    ? [...custos.values()].reduce((s, c) => ({ usd: s.usd + c.usd, tokens: s.tokens + c.tokens }), {
+        usd: 0,
+        tokens: 0,
+      })
+    : null;
   const rows = useMemo(() => buildFlowTree(flow.rootId, flow.sessions), [flow.rootId, flow.sessions]);
   const buttons = useRef<Array<HTMLButtonElement | null>>([]);
   const selectedIndex = rows.findIndex((r) => r.session.id === selectedId);
@@ -310,7 +319,9 @@ function DagNode({
           </span>
         </div>
 
-        <div className="dag-node-title">{session.title || (depth === 0 ? 'Sem título' : 'Tarefa secundária')}</div>
+        <div className="dag-node-title">
+          {session.title || (depth === 0 ? 'Sem título' : 'Tarefa secundária')}
+        </div>
 
         <div className="dag-node-footer">
           <span>{formatAgo(session.updatedAt)}</span>

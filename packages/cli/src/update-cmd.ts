@@ -67,13 +67,17 @@ function acharInstalacao(packageDir: string): { root: string; prefix: string } |
   // `npm i -g --prefix P`: Windows instala em `P/node_modules`, POSIX em `P/lib/node_modules`.
   const nmGlobal = path.dirname(root);
   const acima = path.dirname(nmGlobal);
-  const prefix = path.basename(acima) === 'lib' && process.platform !== 'win32' ? path.dirname(acima) : acima;
+  const prefix =
+    path.basename(acima) === 'lib' && process.platform !== 'win32' ? path.dirname(acima) : acima;
   return { root, prefix };
 }
 
 async function git(repo: string, argv: string[]): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', repo, ...argv], { windowsHide: true, timeout: 60_000 });
+    const { stdout } = await execFileAsync('git', ['-C', repo, ...argv], {
+      windowsHide: true,
+      timeout: 60_000,
+    });
     return stdout.trim();
   } catch {
     return null;
@@ -164,7 +168,9 @@ export async function updateCommand(args: Args, deps: UpdateDeps = {}): Promise<
   if (instalacao) {
     console.log(`${dim('instalado pelo pacote (tarball) em:')} ${bold(instalacao.root)}`);
     console.log(
-      dim('o `npm i -g` da versão nova substitui no mesmo lugar: hooks e MCP gravados nos agentes continuam valendo.'),
+      dim(
+        'o `npm i -g` da versão nova substitui no mesmo lugar: hooks e MCP gravados nos agentes continuam valendo.',
+      ),
     );
   } else if (repo) {
     console.log(`${dim('instalado a partir do clone git:')} ${bold(repo)}`);
@@ -181,16 +187,25 @@ export async function updateCommand(args: Args, deps: UpdateDeps = {}): Promise<
           : yellow(`${report.behind} commit(s) novo(s) no remoto.`),
       );
     } else if (report.upstream) {
-      console.log(dim('para consultar o remoto (faz `git fetch`, não mexe no seu branch):'), bold('hub update --check'));
+      console.log(
+        dim('para consultar o remoto (faz `git fetch`, não mexe no seu branch):'),
+        bold('hub update --check'),
+      );
     }
     if (report.dirty > 0) {
-      console.log(yellow(`o clone tem ${report.dirty} arquivo(s) modificado(s): o pull pode recusar — commite ou guarde antes.`));
+      console.log(
+        yellow(
+          `o clone tem ${report.dirty} arquivo(s) modificado(s): o pull pode recusar — commite ou guarde antes.`,
+        ),
+      );
     }
   } else {
     console.log(dim('não achei um clone git acima de'), bold(packageDir));
   }
   console.log(`${'\n'}${dim('para atualizar:')}`);
   for (const passo of report.steps) console.log(`  ${passo}`);
-  console.log(dim('o `hub restart` importa: o daemon sobrevive ao terminal e seguiria no código antigo.'));
+  console.log(
+    dim('o `hub restart` importa: o daemon sobrevive ao terminal e seguiria no código antigo.'),
+  );
   return report;
 }

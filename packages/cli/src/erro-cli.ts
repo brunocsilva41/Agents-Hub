@@ -23,7 +23,10 @@ export const PREFIXO_DE_ERRO = 'hub:';
 
 /** Erro de uso (argumento/flag faltando ou inválido): mostra a linha de uso. */
 export class ErroDeUso extends Error {
-  constructor(message: string, readonly comando?: string) {
+  constructor(
+    message: string,
+    readonly comando?: string,
+  ) {
     super(message);
     this.name = 'ErroDeUso';
   }
@@ -87,7 +90,13 @@ export function mostrarErro(
   const [primeira = '', ...resto] = linhasDeErro(err);
   logErro(red(primeira));
   for (const linha of resto) {
-    logErro(linha.startsWith('veja:') || linha === 'uso:' ? dim(linha) : linha.startsWith('  - ') ? linha : bold(linha));
+    logErro(
+      linha.startsWith('veja:') || linha === 'uso:'
+        ? dim(linha)
+        : linha.startsWith('  - ')
+          ? linha
+          : bold(linha),
+    );
   }
   process.exitCode = 1;
 }

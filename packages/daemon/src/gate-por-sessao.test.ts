@@ -50,7 +50,11 @@ process.stdout.write('fim\\n');
 process.exit(0);
 `;
 
-async function esperar<T>(sonda: () => T | undefined | null | false, oque: string, ms = 30_000): Promise<T> {
+async function esperar<T>(
+  sonda: () => T | undefined | null | false,
+  oque: string,
+  ms = 30_000,
+): Promise<T> {
   const limite = Date.now() + ms;
   for (;;) {
     const v = sonda();
@@ -146,7 +150,9 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
 
   test('conteúdo do arquivo = o que `hub hooks install` gravaria (bin.js, matcher de risco, 120 s)', () => {
     const cfg = conteudoDoSettingsDaSessao(process.execPath, cliHookEntrypoint()) as {
-      hooks: { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string; timeout: number }> }> };
+      hooks: {
+        PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string; timeout: number }> }>;
+      };
     };
     const [entrada] = cfg.hooks.PreToolUse;
     assert.equal(entrada?.matcher, MATCHER_DE_RISCO);
@@ -159,7 +165,12 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
     const { session, task } = await hub.sessions.start({
       projectId: projetoId,
       agentId: 'claude-falso',
-      brief: { agent: 'claude-falso', objective: 'tentar um push forçado', isolation: 'none', supervision: 'semi' },
+      brief: {
+        agent: 'claude-falso',
+        objective: 'tentar um push forçado',
+        isolation: 'none',
+        supervision: 'semi',
+      },
     });
     const arquivo = caminhoDoSettingsDaSessao(home, session.id);
 
@@ -177,13 +188,17 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
     assert.equal(r.status, 200);
 
     const resultado = await esperar(
-      () => (existsSync(saida) ? (JSON.parse(readFileSync(saida, 'utf8')) as Record<string, unknown>) : null),
+      () =>
+        existsSync(saida) ? (JSON.parse(readFileSync(saida, 'utf8')) as Record<string, unknown>) : null,
       'saída do agente falso',
     );
     assert.equal(resultado['semSettings'], undefined, 'o agente não recebeu --settings');
     assert.equal(resultado['arquivo'], arquivo);
     assert.equal(resultado['existia'], true);
-    const decisao = resultado['decisao'] as { permissionDecision?: string; permissionDecisionReason?: string } | null;
+    const decisao = resultado['decisao'] as {
+      permissionDecision?: string;
+      permissionDecisionReason?: string;
+    } | null;
     assert.equal(decisao?.permissionDecision, 'deny', JSON.stringify(resultado));
     assert.match(decisao?.permissionDecisionReason ?? '', /humano negou/i);
     assert.equal(existsSync(`${saida}.executou`), false, 'a ferramenta NÃO pode ter rodado');
@@ -200,7 +215,12 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
     const { session } = await hub.sessions.start({
       projectId: projetoId,
       agentId: 'claude-falso',
-      brief: { agent: 'claude-falso', objective: 'duas perguntas iguais', isolation: 'none', supervision: 'semi' },
+      brief: {
+        agent: 'claude-falso',
+        objective: 'duas perguntas iguais',
+        isolation: 'none',
+        supervision: 'semi',
+      },
     });
     const corpo = JSON.stringify({
       sessionId: session.id,
@@ -209,17 +229,24 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
       toolUseId: 'toolu_duplicado',
     });
     const perguntar = (): Promise<Record<string, unknown>> =>
-      fetch(`${base}/hooks/pretooluse`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: corpo }).then(
-        (r) => r.json() as Promise<Record<string, unknown>>,
-      );
+      fetch(`${base}/hooks/pretooluse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: corpo,
+      }).then((r) => r.json() as Promise<Record<string, unknown>>);
     const a = perguntar();
     const b = perguntar();
     const apv = await esperar(
-      () => hub.store.approvals.listPending({ sessionId: session.id }).find((x) => /origin dev/.test(x.action)),
+      () =>
+        hub.store.approvals
+          .listPending({ sessionId: session.id })
+          .find((x) => /origin dev/.test(x.action)),
       'aprovação',
     );
     await new Promise((r) => setTimeout(r, 300));
-    const doGate = hub.store.approvals.listPending({ sessionId: session.id }).filter((x) => /origin dev/.test(x.action));
+    const doGate = hub.store.approvals
+      .listPending({ sessionId: session.id })
+      .filter((x) => /origin dev/.test(x.action));
     assert.equal(doGate.length, 1, 'duas aprovações para a mesma chamada');
     await hub.sessions.resolveApproval(apv.id, 'approved', 'teste');
     const [ra, rb] = await Promise.all([a, b]);

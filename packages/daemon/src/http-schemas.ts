@@ -71,9 +71,7 @@ export const ProjectContextSchema = z
     // `project-config`, não aqui: o schema garante forma, a lista garante
     // segurança, e misturar as duas responsabilidades faria a regra de
     // segurança viver em dois lugares que podem divergir.
-    env: z
-      .record(z.string().max(64), z.record(z.string().max(128), z.string().max(2_000)))
-      .optional(),
+    env: z.record(z.string().max(64), z.record(z.string().max(128), z.string().max(2_000))).optional(),
   })
   .strict();
 
@@ -116,9 +114,7 @@ export const SendMessageSchema = z
   })
   .strict();
 
-export const CancelSchema = z
-  .object({ reason: z.string().max(1000).optional() })
-  .strict();
+export const CancelSchema = z.object({ reason: z.string().max(1000).optional() }).strict();
 
 export const HandoffSessionSchema = z
   .object({
@@ -170,7 +166,6 @@ export const CreateTaskSchema = z
   })
   .strict();
 
-
 /** Query params chegam como texto e podem ser lixo; NaN vira ausência. */
 export function inteiroOpcional(valor: string | null, max: number): number | undefined {
   if (valor === null) return undefined;
@@ -218,7 +213,10 @@ export const AgentIdParamSchema = z
 export const ImportSchema = z
   .object({
     agentId: AgentIdParamSchema,
-    kinds: z.array(z.enum(['instructions', 'env', 'mcp'])).min(1).max(3),
+    kinds: z
+      .array(z.enum(['instructions', 'env', 'mcp']))
+      .min(1)
+      .max(3),
     dryRun: z.boolean().default(true),
     targetAgents: z.array(AgentIdParamSchema).max(32).optional(),
     overwrite: z.boolean().optional(),

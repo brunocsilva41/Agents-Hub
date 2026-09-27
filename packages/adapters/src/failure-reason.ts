@@ -28,7 +28,8 @@ export function mensagemDoEventoDeErro(evento: Pick<MappedEvent, 'type' | 'paylo
   return null;
 }
 
-const PARECE_AVISO = /\b(warn(ing)?|aviso|deprecat\w*|notice|info)\b|skill\.md|missing yaml frontmatter/i;
+const PARECE_AVISO =
+  /\b(warn(ing)?|aviso|deprecat\w*|notice|info)\b|skill\.md|missing yaml frontmatter/i;
 const PARECE_ERRO =
   /\b(error|erro|fatal|failed|failure|falh\w*|exception|denied|refused|unauthori[sz]ed|forbidden|limit|quota|credits?)\b|\b[45]\d\d\b/i;
 

@@ -9,7 +9,9 @@ import { capturar, limpar, montarHub } from './test-kit.js';
 function projetos(dbFile: string): string[] {
   const db = new DatabaseSync(dbFile);
   try {
-    return (db.prepare('SELECT name FROM projects ORDER BY name').all() as Array<{ name: string }>).map((r) => r.name);
+    return (db.prepare('SELECT name FROM projects ORDER BY name').all() as Array<{ name: string }>).map(
+      (r) => r.name,
+    );
   } finally {
     db.close();
   }
@@ -29,7 +31,9 @@ describe('hub backup / hub restore', () => {
 
       // 1. backup com o daemon no ar: vai pela rota autenticada e fica na auditoria.
       const out = path.join(t.raiz, 'meu-backup.db');
-      const b = await capturar(() => backupCommand(t.client, onde, { command: 'backup', positional: [], flags: { out, json: true } }));
+      const b = await capturar(() =>
+        backupCommand(t.client, onde, { command: 'backup', positional: [], flags: { out, json: true } }),
+      );
       const lido = JSON.parse(b.out.join('\n')) as { path: string; via: string };
       assert.equal(lido.via, 'daemon');
       assert.equal(lido.path, out);
@@ -38,7 +42,12 @@ describe('hub backup / hub restore', () => {
 
       // 2. restore com o daemon no ar é recusado.
       await assert.rejects(
-        () => restoreCommand(t.client, onde, { command: 'restore', positional: [out], flags: { write: true } }),
+        () =>
+          restoreCommand(t.client, onde, {
+            command: 'restore',
+            positional: [out],
+            flags: { write: true },
+          }),
         /daemon está rodando/,
       );
 
@@ -55,20 +64,32 @@ describe('hub backup / hub restore', () => {
       assert.deepEqual(projetos(onde.dbFile), ['p1', 'p2', 'p3']);
 
       // 4. sem --write: só confere e mostra o plano.
-      const previa = await capturar(() => restoreCommand(t.client, onde, { command: 'restore', positional: [out], flags: {} }));
+      const previa = await capturar(() =>
+        restoreCommand(t.client, onde, { command: 'restore', positional: [out], flags: {} }),
+      );
       assert.ok(previa.out.some((l) => l.includes('prévia')));
       assert.deepEqual(projetos(onde.dbFile), ['p1', 'p2', 'p3']);
 
       // 5. --write: troca, e o banco anterior fica guardado.
-      const r = await capturar(() => restoreCommand(t.client, onde, { command: 'restore', positional: [out], flags: { write: true } }));
+      const r = await capturar(() =>
+        restoreCommand(t.client, onde, {
+          command: 'restore',
+          positional: [out],
+          flags: { write: true },
+        }),
+      );
       assert.ok(r.out.some((l) => l.includes('banco restaurado')));
       assert.deepEqual(projetos(onde.dbFile), ['p1', 'p2']);
-      const guardada = readdirSync(path.dirname(onde.dbFile)).find((f) => f.startsWith('hub.db.pre-restore-'));
+      const guardada = readdirSync(path.dirname(onde.dbFile)).find((f) =>
+        f.startsWith('hub.db.pre-restore-'),
+      );
       assert.ok(guardada, 'cópia de segurança do banco anterior');
       assert.deepEqual(projetos(path.join(path.dirname(onde.dbFile), guardada)), ['p1', 'p2', 'p3']);
 
       // 6. daemon parado: backup é feito localmente, no lugar padrão.
-      const local = await capturar(() => backupCommand(t.client, onde, { command: 'backup', positional: [], flags: { json: true } }));
+      const local = await capturar(() =>
+        backupCommand(t.client, onde, { command: 'backup', positional: [], flags: { json: true } }),
+      );
       const l = JSON.parse(local.out.join('\n')) as { path: string; via: string };
       assert.equal(l.via, 'local');
       assert.equal(path.dirname(l.path), path.join(onde.home, 'backups'));
@@ -85,7 +106,12 @@ describe('hub backup / hub restore', () => {
     await t.fechar();
     try {
       await assert.rejects(
-        () => restoreCommand(t.client, onde, { command: 'restore', positional: [path.join(t.raiz, 'nao-existe.db')], flags: {} }),
+        () =>
+          restoreCommand(t.client, onde, {
+            command: 'restore',
+            positional: [path.join(t.raiz, 'nao-existe.db')],
+            flags: {},
+          }),
         /não encontrado/,
       );
       const outro = path.join(t.raiz, 'outro.db');
@@ -93,7 +119,12 @@ describe('hub backup / hub restore', () => {
       db.exec('CREATE TABLE x (y INTEGER)');
       db.close();
       await assert.rejects(
-        () => restoreCommand(t.client, onde, { command: 'restore', positional: [outro], flags: { write: true } }),
+        () =>
+          restoreCommand(t.client, onde, {
+            command: 'restore',
+            positional: [outro],
+            flags: { write: true },
+          }),
         /não parece um banco do Agents-Hub/,
       );
     } finally {

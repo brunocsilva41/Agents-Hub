@@ -4,11 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
-import {
-  loadProjectOverrides,
-  mergeProjectPolicy,
-  PROJECT_CONFIG_RELATIVE,
-} from './project-config.js';
+import { loadProjectOverrides, mergeProjectPolicy, PROJECT_CONFIG_RELATIVE } from './project-config.js';
 
 describe('config por projeto', () => {
   test('o projeto CONFIÁVEL define o comando de validação, que é o caso de uso principal', () => {
@@ -168,7 +164,10 @@ describe('config por projeto', () => {
   });
 
   test('o projeto PODE desligar allowWriteOutsideWorkdir se a global permite', () => {
-    const global = { ...DEFAULT_POLICY, paths: { ...DEFAULT_POLICY.paths, allowWriteOutsideWorkdir: true } };
+    const global = {
+      ...DEFAULT_POLICY,
+      paths: { ...DEFAULT_POLICY.paths, allowWriteOutsideWorkdir: true },
+    };
     const merged = mergeProjectPolicy(global, {
       paths: { allowWriteOutsideWorkdir: false },
     } as never);
@@ -193,11 +192,7 @@ describe('YAML de projeto quebrado — sinal visível, não silêncio', () => {
   });
 
   test('YAML quebrado cai na política global (vazio), mas o erro vem junto — não só {}', () => {
-    writeFileSync(
-      path.join(raiz, PROJECT_CONFIG_RELATIVE),
-      'policy: [nao: fecha',
-      'utf8',
-    );
+    writeFileSync(path.join(raiz, PROJECT_CONFIG_RELATIVE), 'policy: [nao: fecha', 'utf8');
 
     const { overrides, error } = loadProjectOverrides(raiz);
     assert.deepEqual(overrides, {}, 'lado seguro: sem overrides, a política global vale inteira');
@@ -220,11 +215,7 @@ describe('YAML de projeto quebrado — sinal visível, não silêncio', () => {
   });
 
   test('YAML válido não gera erro', () => {
-    writeFileSync(
-      path.join(raiz, PROJECT_CONFIG_RELATIVE),
-      'policy:\n  maxDepth: 1\n',
-      'utf8',
-    );
+    writeFileSync(path.join(raiz, PROJECT_CONFIG_RELATIVE), 'policy:\n  maxDepth: 1\n', 'utf8');
     const { overrides, error } = loadProjectOverrides(raiz);
     assert.equal(error, null);
     assert.equal(overrides.maxDepth, 1);

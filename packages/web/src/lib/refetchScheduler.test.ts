@@ -12,9 +12,12 @@ describe('agendador de recarga', () => {
   test('rajada de 50 eventos em 10 ms cada vira UMA busca', async () => {
     const clock = new FakeClock();
     let buscas = 0;
-    const s = createRefetchScheduler(async () => {
-      buscas += 1;
-    }, { delayMs: 300, maxWaitMs: 1500, clock });
+    const s = createRefetchScheduler(
+      async () => {
+        buscas += 1;
+      },
+      { delayMs: 300, maxWaitMs: 1500, clock },
+    );
 
     for (let i = 0; i < 50; i += 1) {
       s.request();
@@ -27,9 +30,12 @@ describe('agendador de recarga', () => {
   test('fluxo contínuo não adia para sempre: maxWait garante atualização', async () => {
     const clock = new FakeClock();
     let buscas = 0;
-    const s = createRefetchScheduler(async () => {
-      buscas += 1;
-    }, { delayMs: 300, maxWaitMs: 1500, clock });
+    const s = createRefetchScheduler(
+      async () => {
+        buscas += 1;
+      },
+      { delayMs: 300, maxWaitMs: 1500, clock },
+    );
 
     // Um evento a cada 100 ms por 3 s: o debounce sozinho nunca dispararia.
     for (let i = 0; i < 30; i += 1) {
@@ -107,9 +113,12 @@ describe('agendador de recarga', () => {
   test('dispose cancela o agendado', async () => {
     const clock = new FakeClock();
     let buscas = 0;
-    const s = createRefetchScheduler(async () => {
-      buscas += 1;
-    }, { clock });
+    const s = createRefetchScheduler(
+      async () => {
+        buscas += 1;
+      },
+      { clock },
+    );
     s.request();
     s.dispose();
     await clock.advance(5000);

@@ -85,7 +85,7 @@ export function silenciarAvisoDoSqlite(proc: { emitWarning: EmitWarning } = proc
     if (tipo === 'ExperimentalWarning' && /\bSQLite\b/i.test(texto)) return;
     original(aviso, ...resto);
   };
-  proc.emitWarning = filtrado as EmitWarning;
+  proc.emitWarning = filtrado;
 }
 
 /**

@@ -205,13 +205,7 @@ export type WorkflowValidationSummary =
   | { valid: false; errors: string[]; workflow: null; executionOrder: [] };
 
 export type WorkflowRunStepStateSummary =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'skipped'
-  | 'blocked'
-  | 'timeout';
+  'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'blocked' | 'timeout';
 
 /** Execução de workflow conduzida pelo daemon (`/workflows/runs`). */
 export interface WorkflowRunSummary {

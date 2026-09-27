@@ -15,7 +15,12 @@ describe('HubClient com token de operador', () => {
     let body = '';
     req.on('data', (c: Buffer) => (body += c.toString('utf8')));
     req.on('end', () => {
-      recebidas.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers.authorization, body });
+      recebidas.push({
+        method: req.method ?? '',
+        url: req.url ?? '',
+        auth: req.headers.authorization,
+        body,
+      });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ approval: {}, entries: [], policy: {} }));
     });
@@ -37,7 +42,7 @@ describe('HubClient com token de operador', () => {
     await client.audit({ since: '2h', projectId: 'prj_x' });
 
     assert.equal(recebidas[0]?.auth, `Bearer ${'a'.repeat(64)}`);
-    assert.deepEqual(JSON.parse(recebidas[0]!.body), { decision: 'approved' }, 'sem `by` no corpo');
+    assert.deepEqual(JSON.parse(recebidas[0].body), { decision: 'approved' }, 'sem `by` no corpo');
     assert.equal(recebidas[1]?.method, 'PUT');
     assert.equal(recebidas[1]?.url, '/policy');
     assert.equal(recebidas[1]?.auth, `Bearer ${'b'.repeat(64)}`);

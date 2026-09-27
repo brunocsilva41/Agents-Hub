@@ -15,7 +15,6 @@ interface Args {
   flags: Record<string, string | boolean>;
 }
 
-
 /**
  * `hub pause` era a rota órfã do audit: existia no daemon (`sessions.pause`,
  * `POST /sessions/:id/pause`) e no client (`HubClient.pause`), mas nenhuma
@@ -94,7 +93,10 @@ describe('hub pause (CLI)', () => {
     }
 
     assert.equal(hub.store.sessions.get(session.id)?.state, 'paused');
-    assert.ok(linhas.some((l) => l.includes('pausada')), 'deveria confirmar a pausa no console');
+    assert.ok(
+      linhas.some((l) => l.includes('pausada')),
+      'deveria confirmar a pausa no console',
+    );
   });
 
   test('sem sessionId, recusa com argumento obrigatório ausente', async () => {
@@ -145,7 +147,10 @@ describe('hub pause (CLI)', () => {
     } finally {
       console.log = originalLog;
     }
-    assert.ok(linhas.some((l) => l.includes('nenhum turno em andamento')), linhas.join(' | '));
+    assert.ok(
+      linhas.some((l) => l.includes('nenhum turno em andamento')),
+      linhas.join(' | '),
+    );
     assert.ok(!linhas.some((l) => l.includes('turno interrompido')), linhas.join(' | '));
     assert.equal(hub.store.sessions.get(session.id)?.state, 'running');
   });

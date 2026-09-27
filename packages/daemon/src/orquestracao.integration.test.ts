@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY, type EventEnvelope } from '@agents-hub/core';
+import { DEFAULT_POLICY, textoDe, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -116,7 +116,11 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
         '',
       ].join('\n');
     for (const id of ['flaky', 'backup', 'gama']) {
-      writeFileSync(path.join(manifestos, `${id}.yaml`), manifesto(id, 'autonomous', 'tarefa-falsa'), 'utf8');
+      writeFileSync(
+        path.join(manifestos, `${id}.yaml`),
+        manifesto(id, 'autonomous', 'tarefa-falsa'),
+        'utf8',
+      );
     }
     writeFileSync(path.join(manifestos, 'solo.yaml'), manifesto('solo', 'semi', 'sozinho'), 'utf8');
 
@@ -178,7 +182,11 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
   }
 
   async function terminal(taskId: string): Promise<string> {
-    await esperar(() => TERMINAIS.has(hub.store.tasks.get(taskId)?.state ?? ''), 20_000, `task ${taskId} terminal`);
+    await esperar(
+      () => TERMINAIS.has(hub.store.tasks.get(taskId)?.state ?? ''),
+      20_000,
+      `task ${taskId} terminal`,
+    );
     return hub.store.tasks.get(taskId)!.state;
   }
 
@@ -227,7 +235,9 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       brief: brief('solo', 'baixar algo @TOOL=curl_http://x.example', { supervision: 'semi' }),
     });
     await esperar(
-      () => hub.store.tasks.get(task.id)?.state === 'input_required' || TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''),
+      () =>
+        hub.store.tasks.get(task.id)?.state === 'input_required' ||
+        TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''),
       20_000,
       'pausa ou fim',
     );
@@ -250,7 +260,11 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
     );
     // Outro projeto (sem o override) não é afetado.
     const outro = projeto();
-    const livre = await hub.sessions.start({ projectId: outro, agentId: '', brief: brief('gama', 'tarefa livre') });
+    const livre = await hub.sessions.start({
+      projectId: outro,
+      agentId: '',
+      brief: brief('gama', 'tarefa livre'),
+    });
     await terminal(livre.task.id);
     await terminal(primeira.task.id);
   });
@@ -266,7 +280,9 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
     await terminal(task.id);
     const avisos = hub.sessions
       .listEvents(session.id)
-      .filter((e) => e.type === 'log' && String(e.payload['text'] ?? '').includes('modo "autonomous" pedido'));
+      .filter(
+        (e) => e.type === 'log' && textoDe(e.payload['text']).includes('modo "autonomous" pedido'),
+      );
     assert.equal(avisos.length, 1);
   });
 
@@ -281,7 +297,9 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       brief: brief('solo', 'demora @SLEEP=6000', { budget: { seconds: 1 } }),
     });
     await esperar(
-      () => hub.store.tasks.get(task.id)?.state === 'input_required' || TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''),
+      () =>
+        hub.store.tasks.get(task.id)?.state === 'input_required' ||
+        TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''),
       20_000,
       'estouro de tempo',
     );
@@ -289,8 +307,8 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
     assert.ok(Date.now() - inicio < 5_000, 'a run deveria ter parado antes do fim natural (6 s)');
     const [pendente] = hub.sessions.pendingApprovals(session.id);
     assert.equal(pendente?.detail['kind'], 'budget');
-    assert.match(pendente!.action, /s de 1s de tempo/);
-    await hub.sessions.resolveApproval(pendente!.id, 'denied', 'teste');
+    assert.match(pendente.action, /s de 1s de tempo/);
+    await hub.sessions.resolveApproval(pendente.id, 'denied', 'teste');
   });
 
   test('aprovar estouro com o turno JÁ concluído não relança o agente: só finaliza', async () => {
@@ -301,7 +319,11 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       agentId: '',
       brief: brief('solo', 'caro @COST=0.9', { budget: { usd: 0.5 } }),
     });
-    await esperar(() => hub.sessions.pendingApprovals(session.id).length > 0, 20_000, 'aprovação de orçamento');
+    await esperar(
+      () => hub.sessions.pendingApprovals(session.id).length > 0,
+      20_000,
+      'aprovação de orçamento',
+    );
     await esperar(() => !hub.sessions.isLive(session.id), 20_000, 'fim do processo');
     const [pendente] = hub.sessions.pendingApprovals(session.id);
 
@@ -330,7 +352,11 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
 
     await assert.rejects(hub.sessions.send(session.id, 'e aí?'), /aguardando aprovação/);
     assert.equal(hub.sessions.pendingApprovals(session.id).length, 1);
-    await hub.sessions.resolveApproval(hub.sessions.pendingApprovals(session.id)[0]!.id, 'denied', 'teste');
+    await hub.sessions.resolveApproval(
+      hub.sessions.pendingApprovals(session.id)[0]!.id,
+      'denied',
+      'teste',
+    );
   });
 
   // ------------------------------------------------- 2.9 código entre passos
@@ -351,7 +377,10 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       brief: brief('solo', 'executar o plano @REQUIRE=plan.txt', { isolation: 'worktree' }),
       baseSessionIds: [a.session.id],
     });
-    assert.ok(existsSync(path.join(b.session.workdir, 'plan.txt')), 'o worktree do passo seguinte deveria ter o código');
+    assert.ok(
+      existsSync(path.join(b.session.workdir, 'plan.txt')),
+      'o worktree do passo seguinte deveria ter o código',
+    );
     assert.equal(await terminal(b.task.id), 'completed');
   });
 

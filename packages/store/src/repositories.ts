@@ -2,6 +2,7 @@ import {
   HubError,
   newId,
   nowIso,
+  textoDe,
   ZERO_USAGE,
   type Approval,
   type Artifact,
@@ -74,7 +75,7 @@ function one<T extends Row>(
   return (stmt.all(...params) as T[])[0];
 }
 
-const str = (v: unknown): string => (typeof v === 'string' ? v : String(v ?? ''));
+const str = (v: unknown): string => textoDe(v);
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v ?? 0));
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -117,9 +118,7 @@ class SqliteProjectRepository implements ProjectRepository {
     if (!bruto) return {};
     try {
       const parsed: unknown = JSON.parse(bruto);
-      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as ProjectHubContext)
-        : {};
+      return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch {
       // Coluna corrompida não derruba o daemon: o contexto só some, como um
       // YAML quebrado faz com o do repositório.
@@ -522,8 +521,7 @@ class SqliteEventRepository implements EventRepository {
     // chamada zera no máximo N linhas e quem chama cede o event loop entre os
     // lotes. O índice parcial `idx_events_raw` (só linhas com `raw_json`) faz a
     // passada "sem nada a fazer" custar O(sessões encerradas), não O(eventos).
-    const lote =
-      limit !== undefined && Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : -1;
+    const lote = limit !== undefined && Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : -1;
     const result = this.db
       .prepare(
         `UPDATE events SET raw_json = NULL
@@ -537,7 +535,6 @@ class SqliteEventRepository implements EventRepository {
       .run(cutoffIso, lote);
     return num(result.changes);
   }
-
 }
 
 class SqliteApprovalRepository implements ApprovalRepository {

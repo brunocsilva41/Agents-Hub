@@ -35,7 +35,10 @@ export interface TreeRow<T extends TreeSession> {
  * desconhecido — sessão cujo pai não está na lista — sobe como filho da raiz,
  * para nunca sumir da tela.
  */
-export function buildFlowTree<T extends TreeSession>(rootId: string, sessions: readonly T[]): TreeRow<T>[] {
+export function buildFlowTree<T extends TreeSession>(
+  rootId: string,
+  sessions: readonly T[],
+): TreeRow<T>[] {
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const root = byId.get(rootId);
   const kids = new Map<string, T[]>();

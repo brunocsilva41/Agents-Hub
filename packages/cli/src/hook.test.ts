@@ -73,8 +73,8 @@ describe('ponte do hook: dois dialetos, saídas opostas para "permitir"', () => 
 
 function decisao(saida: string): string | undefined {
   if (saida === '') return undefined;
-  return (JSON.parse(saida) as { hookSpecificOutput: { permissionDecision: string } })
-    .hookSpecificOutput.permissionDecision;
+  return (JSON.parse(saida) as { hookSpecificOutput: { permissionDecision: string } }).hookSpecificOutput
+    .permissionDecision;
 }
 
 const SESSAO = 'ses_abc123';
@@ -172,9 +172,19 @@ describe('resposta do daemon no dialeto do Claude', () => {
 
   test('"escalate" (nome antigo) vira "ask", que é o que o Claude Code aceita', async () => {
     await comDaemon(
-      { permission: 'escalate', explanation: 'precisa de gente', reason: 'r', risk: 'escalate', sessionId: null },
+      {
+        permission: 'escalate',
+        explanation: 'precisa de gente',
+        reason: 'r',
+        risk: 'escalate',
+        sessionId: null,
+      },
       async (url) => {
-        const { saida } = await decideToolCall({ tool_name: 'Bash', tool_input: { command: 'x' } }, url, 'claude');
+        const { saida } = await decideToolCall(
+          { tool_name: 'Bash', tool_input: { command: 'x' } },
+          url,
+          'claude',
+        );
         assert.equal(decisao(saida), 'ask');
       },
     );
@@ -182,11 +192,22 @@ describe('resposta do daemon no dialeto do Claude', () => {
 
   test('o motivo repassado ao agente é a explicação do daemon', async () => {
     await comDaemon(
-      { permission: 'deny', explanation: 'ninguém respondeu em 55s', reason: 'r', risk: 'escalate', sessionId: SESSAO },
+      {
+        permission: 'deny',
+        explanation: 'ninguém respondeu em 55s',
+        reason: 'r',
+        risk: 'escalate',
+        sessionId: SESSAO,
+      },
       async (url) => {
-        const { saida } = await decideToolCall({ tool_name: 'Bash', tool_input: { command: 'x' } }, url, 'claude', {
-          sessionId: SESSAO,
-        });
+        const { saida } = await decideToolCall(
+          { tool_name: 'Bash', tool_input: { command: 'x' } },
+          url,
+          'claude',
+          {
+            sessionId: SESSAO,
+          },
+        );
         assert.match(saida, /ninguém respondeu em 55s/);
       },
     );
@@ -196,7 +217,8 @@ describe('resposta do daemon no dialeto do Claude', () => {
 describe('timeout do hook instalado', () => {
   test('instalação grava timeout maior que a espera do daemon', () => {
     const cfg = mergeHooks({}, '"node" "C:/x/main.js" hook');
-    const pre = (cfg['hooks'] as { PreToolUse: Array<{ hooks: Array<{ timeout: number }> }> }).PreToolUse;
+    const pre = (cfg['hooks'] as { PreToolUse: Array<{ hooks: Array<{ timeout: number }> }> })
+      .PreToolUse;
     assert.equal(pre[0]?.hooks[0]?.timeout, TIMEOUT_DO_HOOK_SEC);
     assert.ok(TIMEOUT_DO_HOOK_SEC >= 120);
     assert.equal(avisoDeTimeoutDoHook(cfg), null);
@@ -208,7 +230,10 @@ describe('timeout do hook instalado', () => {
       hooks: {
         PreToolUse: [
           { matcher: 'Bash', hooks: [{ type: 'command', command: 'outro-hook' }] },
-          { matcher: 'Bash|Write', hooks: [{ type: 'command', command: '"node" "C:/x/main.js" hook', timeout: 10 }] },
+          {
+            matcher: 'Bash|Write',
+            hooks: [{ type: 'command', command: '"node" "C:/x/main.js" hook', timeout: 10 }],
+          },
         ],
       },
     };
@@ -235,7 +260,8 @@ describe('comando do hook instalado', () => {
   test('reinstalar sobre a entrada antiga (main.js) substitui em vez de duplicar', () => {
     const antiga = mergeHooks({}, '"node" "C:/x/main.js" hook');
     const nova = mergeHooks(antiga, '"node" "C:/y/bin.js" hook');
-    const pre = (nova['hooks'] as { PreToolUse: Array<{ hooks: Array<{ command: string }> }> }).PreToolUse;
+    const pre = (nova['hooks'] as { PreToolUse: Array<{ hooks: Array<{ command: string }> }> })
+      .PreToolUse;
     assert.equal(pre.length, 1);
     assert.equal(pre[0]?.hooks[0]?.command, '"node" "C:/y/bin.js" hook');
   });

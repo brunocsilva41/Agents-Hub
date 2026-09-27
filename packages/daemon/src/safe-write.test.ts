@@ -27,9 +27,16 @@ describe('safe-write — backup versionado, escrita atômica, leitura que recusa
     const c = backupVersionado(f, t);
     assert.deepEqual(
       [a, b, c].map((p) => path.basename(p)),
-      ['settings.json.bak-20260926-090807', 'settings.json.bak-20260926-090807-2', 'settings.json.bak-20260926-090807-3'],
+      [
+        'settings.json.bak-20260926-090807',
+        'settings.json.bak-20260926-090807-2',
+        'settings.json.bak-20260926-090807-3',
+      ],
     );
-    assert.deepEqual([a, b, c].map((p) => readFileSync(p, 'utf8')), ['v1', 'v2', 'v3']);
+    assert.deepEqual(
+      [a, b, c].map((p) => readFileSync(p, 'utf8')),
+      ['v1', 'v2', 'v3'],
+    );
   });
 
   test('gravarComBackup: sem temporário esquecido; arquivo novo não gera backup', () => {

@@ -53,25 +53,28 @@ export async function policyCommand(
       return editar(client, projectId, (layer, view) => {
         const lista = listaDeComandos(layer, view, sub, projectId !== undefined);
         const nova =
-          acao === 'add'
-            ? [...new Set([...lista, prefixo])]
-            : lista.filter((item) => item !== prefixo);
+          acao === 'add' ? [...new Set([...lista, prefixo])] : lista.filter((item) => item !== prefixo);
         definirCaminho(layer, `commands.${sub}`, nova);
       });
     }
     case 'mode': {
-      const nivel = obrigatorio(rest[0], 'nível de risco (read|write|exec|escalate|irreversible|budget)');
+      const nivel = obrigatorio(
+        rest[0],
+        'nível de risco (read|write|exec|escalate|irreversible|budget)',
+      );
       const decisao = obrigatorio(rest[1], 'decisão (allow|approve|deny)');
       return editar(client, projectId, (layer) => definirCaminho(layer, `risk.${nivel}`, decisao));
     }
     default:
-      throw new Error(
-        `subcomando desconhecido: "${sub}". Use show, set, unset, allow, deny ou mode.`,
-      );
+      throw new Error(`subcomando desconhecido: "${sub}". Use show, set, unset, allow, deny ou mode.`);
   }
 }
 
-async function policyShow(client: HubClient, projectId: string | undefined, json: boolean): Promise<void> {
+async function policyShow(
+  client: HubClient,
+  projectId: string | undefined,
+  json: boolean,
+): Promise<void> {
   const { policy } = await client.policy(projectId);
   if (json) {
     console.log(JSON.stringify(policy, null, 2));
@@ -82,7 +85,9 @@ async function policyShow(client: HubClient, projectId: string | undefined, json
 
   const p = policy.project;
   if (p) {
-    console.log(`${NL}${bold('Camada do projeto')} ${dim(p.file)} ${p.trusted ? green('(confiável)') : dim('(não confiável)')}`);
+    console.log(
+      `${NL}${bold('Camada do projeto')} ${dim(p.file)} ${p.trusted ? green('(confiável)') : dim('(não confiável)')}`,
+    );
     if (p.error) console.log(red(`  ${p.error}`));
     console.log(formatarCamada(p.layer));
     if (p.clamped.length > 0) {
@@ -96,7 +101,11 @@ async function policyShow(client: HubClient, projectId: string | undefined, json
   const ef = (p ?? policy.global).effective;
   console.log(`${NL}${bold('Efetiva')} ${dim(p ? '(global + projeto)' : '(padrão + global)')}`);
   const risk = (ef['risk'] ?? {}) as Record<string, string>;
-  console.log(`  risco:      ${Object.entries(risk).map(([k, v]) => `${k}=${colorirDecisao(v)}`).join('  ')}`);
+  console.log(
+    `  risco:      ${Object.entries(risk)
+      .map(([k, v]) => `${k}=${colorirDecisao(v)}`)
+      .join('  ')}`,
+  );
   const cmds = (ef['commands'] ?? {}) as { allow?: string[]; deny?: string[] };
   console.log(`  allow:      ${(cmds.allow ?? []).join(', ') || dim('(vazia)')}`);
   console.log(`  deny:       ${(cmds.deny ?? []).join(', ') || dim('(vazia)')}`);
@@ -132,17 +141,11 @@ async function editar(
   console.log(green('✓ camada do projeto gravada'), dim(res.project.file));
   if (res.clamped.length > 0) {
     console.log(
-      yellow(
-        `⚠ sem efeito — o projeto só aperta a política global: ${res.clamped.join(', ')}`,
-      ),
+      yellow(`⚠ sem efeito — o projeto só aperta a política global: ${res.clamped.join(', ')}`),
     );
   }
   if (res.ignoredExecFields.length > 0) {
-    console.log(
-      yellow(
-        `⚠ ignorados até "hub project trust": ${res.ignoredExecFields.join(', ')}`,
-      ),
-    );
+    console.log(yellow(`⚠ ignorados até "hub project trust": ${res.ignoredExecFields.join(', ')}`));
   }
 }
 
@@ -230,7 +233,7 @@ function colorirDecisao(d: string): string {
 export async function auditCommand(client: HubClient, args: Args): Promise<void> {
   const q: AuditQuery = {};
   const texto = (k: string): string | undefined =>
-    typeof args.flags[k] === 'string' ? (args.flags[k] as string) : undefined;
+    typeof args.flags[k] === 'string' ? args.flags[k] : undefined;
 
   const sessao = texto('session') ?? args.positional[0];
   if (sessao) q.sessionId = sessao;

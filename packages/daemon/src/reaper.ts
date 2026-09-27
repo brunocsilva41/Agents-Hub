@@ -49,12 +49,19 @@ export class WorktreeReaper {
 
   start(): void {
     if (this.#timer) return;
+    // Passada do timer: ninguém espera por ela, então a falha (git que não
+    // responde, banco fechado) é registrada AQUI. Antes era `void this.sweep()`
+    // — rejeição sem dono, que caía no `unhandledRejection` genérico.
+    const passada = (): void => {
+      this.sweep().catch((err: unknown) => {
+        console.error(
+          `[reaper] varredura de worktrees falhou: ${(err as Error)?.message ?? String(err)}`,
+        );
+      });
+    };
     // Uma passada na largada: o daemon pode ter ficado dias desligado.
-    void this.sweep();
-    this.#timer = setInterval(
-      () => void this.sweep(),
-      Math.max(1, this.retention.sweepIntervalMinutes) * 60_000,
-    );
+    passada();
+    this.#timer = setInterval(passada, Math.max(1, this.retention.sweepIntervalMinutes) * 60_000);
     // Um coletor de disco não pode ser o motivo de o processo não conseguir sair.
     this.#timer.unref?.();
   }
@@ -105,9 +112,7 @@ export class WorktreeReaper {
         // de verdade — vale log explícito, não só um número que não distingue
         // os dois casos.
         result.failed.push({ path: session.workdir, reason: outcome.reason });
-        console.error(
-          `[reaper] falha ao remover worktree ${session.workdir}: ${outcome.reason}`,
-        );
+        console.error(`[reaper] falha ao remover worktree ${session.workdir}: ${outcome.reason}`);
       }
       await this.worktrees.prune(project.path);
     }

@@ -142,7 +142,9 @@ export function custoPorAgente(
     linha.sessoes += 1;
     por.set(no.agentId, linha);
   }
-  return [...por.values()].sort((a, b) => b.usd - a.usd || b.tokens - a.tokens || a.agentId.localeCompare(b.agentId));
+  return [...por.values()].sort(
+    (a, b) => b.usd - a.usd || b.tokens - a.tokens || a.agentId.localeCompare(b.agentId),
+  );
 }
 
 export interface FaixaDeCusto {
@@ -158,7 +160,11 @@ export interface FaixaDeCusto {
  * faixas do começo da primeira sessão até agora. Faixas contadas para trás a
  * partir de agora — sem alinhar ao relógio, que dependeria do fuso.
  */
-export function custoNoTempo(nos: readonly NoDeCusto[], periodo: Periodo, agora: number): FaixaDeCusto[] {
+export function custoNoTempo(
+  nos: readonly NoDeCusto[],
+  periodo: Periodo,
+  agora: number,
+): FaixaDeCusto[] {
   const todos = achatarGrafo(nos).filter((n) => Number.isFinite(Date.parse(n.startedAt)));
   let desde = inicioDoPeriodo(periodo, agora);
   let n = periodo === '24h' ? 24 : periodo === '7d' ? 7 : periodo === '30d' ? 30 : 12;
@@ -169,8 +175,8 @@ export function custoNoTempo(nos: readonly NoDeCusto[], periodo: Periodo, agora:
   }
   const passo = Math.max(1, (agora - desde) / n);
   const faixas: FaixaDeCusto[] = Array.from({ length: n }, (_, i) => ({
-    inicio: desde! + i * passo,
-    fim: desde! + (i + 1) * passo,
+    inicio: desde + i * passo,
+    fim: desde + (i + 1) * passo,
     usd: 0,
     tokens: 0,
   }));

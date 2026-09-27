@@ -14,7 +14,12 @@ const SES = 'ses_mimo123';
 
 describe('genericJsonMapper — envelope `run --format json` (MiMo)', () => {
   test('qualquer linha com sessionID revela o id nativo', () => {
-    const [e] = genericJsonMapper({ type: 'step_start', timestamp: 1, sessionID: SES, part: { type: 'step-start' } });
+    const [e] = genericJsonMapper({
+      type: 'step_start',
+      timestamp: 1,
+      sessionID: SES,
+      part: { type: 'step-start' },
+    });
     assert.equal(e?.nativeSessionId, SES);
   });
 
@@ -47,7 +52,11 @@ describe('genericJsonMapper — envelope `run --format json` (MiMo)', () => {
     const [e] = genericJsonMapper({
       type: 'tool_use',
       sessionID: SES,
-      part: { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'git push' } } },
+      part: {
+        type: 'tool',
+        tool: 'bash',
+        state: { status: 'completed', input: { command: 'git push' } },
+      },
     });
     assert.equal(e?.type, 'command.executed');
     assert.equal(e?.payload['command'], 'git push');
@@ -57,7 +66,11 @@ describe('genericJsonMapper — envelope `run --format json` (MiMo)', () => {
     const [e] = genericJsonMapper({
       type: 'tool_use',
       sessionID: SES,
-      part: { type: 'tool', tool: 'write', state: { status: 'completed', input: { filePath: 'src/a.ts' } } },
+      part: {
+        type: 'tool',
+        tool: 'write',
+        state: { status: 'completed', input: { filePath: 'src/a.ts' } },
+      },
     });
     assert.equal(e?.type, 'file.changed');
     assert.equal(e?.payload['path'], 'src/a.ts');
@@ -87,7 +100,11 @@ describe('genericJsonMapper — stream-json estilo Claude (Cursor)', () => {
   });
 
   test('usage no topo continua virando custo', () => {
-    const [e] = genericJsonMapper({ type: 'result', session_id: 'c-1', usage: { input_tokens: 10, output_tokens: 5 } });
+    const [e] = genericJsonMapper({
+      type: 'result',
+      session_id: 'c-1',
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
     assert.deepEqual(e?.cost, { inputTokens: 10, outputTokens: 5 });
   });
 });

@@ -27,4 +27,3 @@ export async function pauseCommand(client: HubClient, args: Args): Promise<void>
   console.log(green('sessão pausada — o turno em andamento foi parado'));
   console.log(dim(`   retome com: hub send ${sessionId} "<próxima instrução>"`));
 }
-

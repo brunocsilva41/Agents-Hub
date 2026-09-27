@@ -66,8 +66,11 @@ describe('API REST de tasks (/api/tasks) — automação externa', () => {
     assert.equal(formatted['id'], 'tsk_123456');
     assert.equal(formatted['state'], 'completed');
     assert.equal(formatted['sessionState'], 'completed');
-    assert.equal((formatted['brief'] as any).objective, 'Refatorar módulo de pagamentos');
-    assert.equal((formatted['result'] as any).summary, 'Refatoração concluída');
+    assert.equal(
+      (formatted['brief'] as { objective: string }).objective,
+      'Refatorar módulo de pagamentos',
+    );
+    assert.equal((formatted['result'] as { summary: string }).summary, 'Refatoração concluída');
   });
 
   test('CreateTaskSchema valida payload de criação', () => {

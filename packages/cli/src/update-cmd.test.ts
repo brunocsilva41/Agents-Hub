@@ -63,7 +63,10 @@ describe('hub update', () => {
     gitR('commit', '-q', '-am', 'tres');
 
     const { out, valor } = await capturar(() =>
-      updateCommand({ command: 'update', positional: [], flags: { check: true, json: true } }, { packageDir: local }),
+      updateCommand(
+        { command: 'update', positional: [], flags: { check: true, json: true } },
+        { packageDir: local },
+      ),
     );
     assert.equal(valor.behind, 2);
     assert.equal(valor.ahead, 0);
@@ -76,7 +79,10 @@ describe('hub update', () => {
     const pacote = path.join(prefixo, 'node_modules', 'agents-hub');
     const cli = path.join(pacote, 'node_modules', '@agents-hub', 'cli');
     mkdirSync(cli, { recursive: true });
-    writeFileSync(path.join(pacote, 'package.json'), JSON.stringify({ name: 'agents-hub', version: '0.1.0' }));
+    writeFileSync(
+      path.join(pacote, 'package.json'),
+      JSON.stringify({ name: 'agents-hub', version: '0.1.0' }),
+    );
     if (process.platform !== 'win32') {
       t.skip('layout do prefixo global do Windows (POSIX usa <prefixo>/lib/node_modules)');
       return;

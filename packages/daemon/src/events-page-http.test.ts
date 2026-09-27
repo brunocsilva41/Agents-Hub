@@ -6,7 +6,6 @@ import { after, before, describe, test } from 'node:test';
 import { newId, nowIso, type EventEnvelope, type Session } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
-
 /**
  * `GET /sessions/:id/events` pelo fim (`tail=1`) e para trás (`before=`).
  *

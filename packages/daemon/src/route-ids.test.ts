@@ -36,7 +36,10 @@ function cru(
         res.setEncoding('utf8');
         res.on('data', (c: string) => (texto += c));
         res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, body: texto ? JSON.parse(texto) : {} }),
+          resolve({
+            status: res.statusCode ?? 0,
+            body: texto ? (JSON.parse(texto) as { error?: { code?: string } }) : {},
+          }),
         );
       },
     );

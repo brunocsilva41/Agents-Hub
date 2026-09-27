@@ -145,11 +145,14 @@ export function renderExportMarkdown(dados: SessionExport): string {
   } else {
     // A linha do evento traz a hora LOCAL (R07-18): a data também, e o fuso
     // fica dito uma vez, porque o arquivo pode ser lido em outra máquina.
-    l.push(`_horários na hora local de quem exportou (${rotuloDoFuso(new Date(dados.events[0]!.ts).getTimezoneOffset())})_`, '');
+    l.push(
+      `_horários na hora local de quem exportou (${rotuloDoFuso(new Date(dados.events[0]!.ts).getTimezoneOffset())})_`,
+      '',
+    );
     l.push('```text');
     for (const e of dados.events) {
       // Data completa na frente: a linha do terminal só traz a hora.
-      l.push(`${dataHoraLocal(e.ts).slice(0, 10)} ${semCor(renderEvent({ ...e, raw: null } as EventEnvelope))}`);
+      l.push(`${dataHoraLocal(e.ts).slice(0, 10)} ${semCor(renderEvent({ ...e, raw: null }))}`);
     }
     l.push('```', '');
   }
@@ -198,5 +201,7 @@ export async function exportCommand(client: HubClient, args: Args): Promise<void
   }
   mkdirSync(path.dirname(destino), { recursive: true });
   writeFileSync(destino, texto.endsWith(NEWLINE) ? texto : texto + NEWLINE, 'utf8');
-  console.log(`${green('exportado')} ${bold(destino)} ${dim(`(${formato}, ${dados.events.length} eventos)`)}`);
+  console.log(
+    `${green('exportado')} ${bold(destino)} ${dim(`(${formato}, ${dados.events.length} eventos)`)}`,
+  );
 }

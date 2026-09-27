@@ -28,14 +28,23 @@ describe('manifesto do Kimi 2.0.0', () => {
       ] as const) {
         const { args } = montarInvocacao(kimi, { ...CTX, mode }, template, 'oi', id);
         for (const proibida of ['-y', '--yolo', '--auto', '--plan']) {
-          assert.ok(!args.includes(proibida), `${mode}: "${proibida}" faz o kimi 2.0.0 sair com "Cannot combine --prompt with ..."`);
+          assert.ok(
+            !args.includes(proibida),
+            `${mode}: "${proibida}" faz o kimi 2.0.0 sair com "Cannot combine --prompt with ..."`,
+          );
         }
       }
     });
   }
 
   test('supervised cria a sessão com o perfil só-leitura `plan`', () => {
-    const { args } = montarInvocacao(kimi, { ...CTX, mode: 'supervised' }, kimi.invoke.oneShot, 'oi', null);
+    const { args } = montarInvocacao(
+      kimi,
+      { ...CTX, mode: 'supervised' },
+      kimi.invoke.oneShot,
+      'oi',
+      null,
+    );
     const i = args.indexOf('--agent');
     assert.ok(i >= 0 && args[i + 1] === 'plan', `argv: ${JSON.stringify(args)}`);
   });
@@ -67,7 +76,10 @@ describe('kimiMapper (stream-json 2.0.0)', () => {
     });
     assert.equal(e?.type, 'log');
     assert.equal(e?.payload['level'], 'warn');
-    assert.equal(e?.payload['text'], 'Kimi: tentativa 1/10 falhou (APIConnectionError: Connection error.); nova tentativa em 1s');
+    assert.equal(
+      e?.payload['text'],
+      'Kimi: tentativa 1/10 falhou (APIConnectionError: Connection error.); nova tentativa em 1s',
+    );
   });
 
   test('a última retentativa avisa que é a última', () => {
@@ -95,10 +107,17 @@ describe('kimiMapper (stream-json 2.0.0)', () => {
       content: 'vou rodar os testes',
       tool_calls: [
         { type: 'function', id: 't1', function: { name: 'Bash', arguments: '{"command":"npm test"}' } },
-        { type: 'function', id: 't2', function: { name: 'Write', arguments: '{"path":"src/a.ts","content":"x"}' } },
+        {
+          type: 'function',
+          id: 't2',
+          function: { name: 'Write', arguments: '{"path":"src/a.ts","content":"x"}' },
+        },
       ],
     });
-    assert.deepEqual(eventos.map((e) => e.type), ['message', 'command.executed', 'file.changed']);
+    assert.deepEqual(
+      eventos.map((e) => e.type),
+      ['message', 'command.executed', 'file.changed'],
+    );
     assert.equal(eventos[1]?.payload['command'], 'npm test');
     assert.equal(eventos[2]?.payload['path'], 'src/a.ts');
   });
@@ -106,9 +125,14 @@ describe('kimiMapper (stream-json 2.0.0)', () => {
   test('assistant só com tool_calls (sem content) não perde a chamada', () => {
     const eventos = kimiMapper({
       role: 'assistant',
-      tool_calls: [{ type: 'function', id: 't1', function: { name: 'Read', arguments: '{"path":"a"}' } }],
+      tool_calls: [
+        { type: 'function', id: 't1', function: { name: 'Read', arguments: '{"path":"a"}' } },
+      ],
     });
-    assert.deepEqual(eventos.map((e) => e.type), ['tool.call']);
+    assert.deepEqual(
+      eventos.map((e) => e.type),
+      ['tool.call'],
+    );
   });
 
   test('role tool da 2.0.0 é RESULTADO (tool_call_id), não chamada', () => {

@@ -1,6 +1,7 @@
 import {
   baseUrl,
   createHub,
+  encerradorDoProcesso,
   instalarRedeDeSeguranca,
   readHubEnv,
   type Hub,
@@ -40,15 +41,12 @@ export async function runDaemon(): Promise<void> {
 
   // A guarda de reentrância existia só no outro entrypoint — e é este aqui que
   // o autostart usa. Dois Ctrl-C rodavam dois desligamentos concorrentes sobre
-  // o mesmo banco.
-  let encerrando = false;
-  const stop = async (): Promise<void> => {
-    if (encerrando) return;
-    encerrando = true;
+  // o mesmo banco. E sai mesmo que `hub.shutdown()` rejeite — ver
+  // `encerradorDoProcesso`.
+  const stop = encerradorDoProcesso(async (): Promise<void> => {
     console.log(dim('\nencerrando sessões vivas…'));
     await hub.shutdown();
-    process.exit(0);
-  };
+  });
   process.on('SIGINT', () => void stop());
   process.on('SIGTERM', () => void stop());
 

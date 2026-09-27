@@ -92,7 +92,10 @@ class Parser {
         t = n;
       } else if (last) {
         const existing = t[seg];
-        if (existing !== undefined && (Array.isArray(existing) || this.declared.has(existing as object))) {
+        if (
+          existing !== undefined &&
+          (Array.isArray(existing) || this.declared.has(existing as object))
+        ) {
           this.fail(`tabela [${path.join('.')}] declarada duas vezes`);
         }
         t = this.child(t, seg);
@@ -183,13 +186,20 @@ class Parser {
     const c = this.s[this.i + 1];
     this.i += 2;
     switch (c) {
-      case 'n': return '\n';
-      case 't': return '\t';
-      case 'r': return '\r';
-      case 'b': return '\b';
-      case 'f': return '\f';
-      case '"': return '"';
-      case '\\': return '\\';
+      case 'n':
+        return '\n';
+      case 't':
+        return '\t';
+      case 'r':
+        return '\r';
+      case 'b':
+        return '\b';
+      case 'f':
+        return '\f';
+      case '"':
+        return '"';
+      case '\\':
+        return '\\';
       case 'u':
       case 'U': {
         const len = c === 'u' ? 4 : 8;
@@ -287,5 +297,5 @@ class Parser {
 }
 
 export function parseToml(text: string): Record<string, unknown> {
-  return new Parser(text.replace(/^﻿/, '')).parse();
+  return new Parser(text.replace(/^\uFEFF/, '')).parse();
 }

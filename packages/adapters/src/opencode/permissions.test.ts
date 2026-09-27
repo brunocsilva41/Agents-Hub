@@ -55,7 +55,11 @@ async function subirServidorFalso(): Promise<ServidorFalso> {
     req.on('data', (c: Buffer) => (raw += c.toString('utf8')));
     req.on('end', () => {
       const url = req.url ?? '';
-      estado.requests.push({ method: req.method ?? '', url, body: raw ? (JSON.parse(raw) as unknown) : null });
+      estado.requests.push({
+        method: req.method ?? '',
+        url,
+        body: raw ? (JSON.parse(raw) as unknown) : null,
+      });
       const json = (status: number, body: unknown): void => {
         res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(body));
@@ -65,8 +69,10 @@ async function subirServidorFalso(): Promise<ServidorFalso> {
       if (req.method === 'GET' && url === '/api/agent') {
         return json(200, { data: estado.agentes.map((id) => ({ id })) });
       }
-      if (req.method === 'POST' && url === '/api/session') return json(200, { data: { id: 'ses_falsa' } });
-      if (req.method === 'GET' && url === '/api/session/ses_falsa') return json(200, { data: { id: 'ses_falsa' } });
+      if (req.method === 'POST' && url === '/api/session')
+        return json(200, { data: { id: 'ses_falsa' } });
+      if (req.method === 'GET' && url === '/api/session/ses_falsa')
+        return json(200, { data: { id: 'ses_falsa' } });
       if (req.method === 'POST' && url === '/api/session/ses_falsa/agent') {
         res.writeHead(204);
         return res.end();
@@ -218,7 +224,9 @@ describe('OpenCode: modo do Hub → agente com permissão real', () => {
     const recusa = acharRecusa();
     assert.equal((recusa?.body as Record<string, unknown> | undefined)?.['reply'], 'reject');
     assert.ok(!eventos.some((e) => e.type === 'approval.requested'));
-    assert.ok(eventos.some((e) => e.type === 'log' && /recusado pelo Hub/.test(String(e.payload['text']))));
+    assert.ok(
+      eventos.some((e) => e.type === 'log' && /recusado pelo Hub/.test(String(e.payload['text']))),
+    );
   });
 
   test('o brief enviado não volta como evento (eco do prompt)', async () => {
@@ -235,7 +243,9 @@ describe('OpenCode: modo do Hub → agente com permissão real', () => {
 
 describe('OpenCode: config dos agentes hub-*', () => {
   test('supervised nega edição, shell, rede e subagente; semi/autonomous negam o irreversível', () => {
-    const cfg = configDosAgentesDoHub() as { agent: Record<string, { permission: Record<string, unknown> }> };
+    const cfg = configDosAgentesDoHub() as {
+      agent: Record<string, { permission: Record<string, unknown> }>;
+    };
     const sup = cfg.agent['hub-supervised']!.permission;
     assert.equal(sup['*'], 'deny');
     for (const k of ['edit', 'bash', 'webfetch', 'task', 'question', 'external_directory']) {
@@ -324,43 +334,61 @@ describe('OpenCode: servidor subido pelo Hub', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('OPENCODE_CONFIG_DIR aponta para o opencode.json dos agentes hub-*', { timeout: 20_000 }, async () => {
-    const configDir = path.join(dir, 'cfg-do-hub');
-    const m = AgentManifestSchema.parse({ id: 'opencode', name: 'x', bin: binName, invoke: { oneShot: ['run'] } });
-    const a = createOpenCodeAdapter(m, { port: 48931, configDir });
-    try {
-      const h = await a.start(ctx('semi'), 'oi');
-      await drenar(h.events);
-      await h.done;
-      const r = (await fetch(`${a.baseUrl}/__config`).then((x) => x.json())) as { dir: string; agents: string[] };
-      assert.equal(path.resolve(r.dir), path.resolve(configDir));
-      assert.deepEqual(r.agents.sort(), ['hub-autonomous', 'hub-semi', 'hub-supervised']);
-      assert.ok(readFileSync(path.join(configDir, 'opencode.json'), 'utf8').includes('hub-supervised'));
-    } finally {
-      await a.close();
-    }
-  });
+  test(
+    'OPENCODE_CONFIG_DIR aponta para o opencode.json dos agentes hub-*',
+    { timeout: 20_000 },
+    async () => {
+      const configDir = path.join(dir, 'cfg-do-hub');
+      const m = AgentManifestSchema.parse({
+        id: 'opencode',
+        name: 'x',
+        bin: binName,
+        invoke: { oneShot: ['run'] },
+      });
+      const a = createOpenCodeAdapter(m, { port: 48931, configDir });
+      try {
+        const h = await a.start(ctx('semi'), 'oi');
+        await drenar(h.events);
+        await h.done;
+        const r = (await fetch(`${a.baseUrl}/__config`).then((x) => x.json())) as {
+          dir: string;
+          agents: string[];
+        };
+        assert.equal(path.resolve(r.dir), path.resolve(configDir));
+        assert.deepEqual(r.agents.sort(), ['hub-autonomous', 'hub-semi', 'hub-supervised']);
+        assert.ok(
+          readFileSync(path.join(configDir, 'opencode.json'), 'utf8').includes('hub-supervised'),
+        );
+      } finally {
+        await a.close();
+      }
+    },
+  );
 
-  test('probe devolve a versão do --version e não inventa autenticação', { timeout: 20_000 }, async () => {
-    const m = AgentManifestSchema.parse({
-      id: 'opencode',
-      name: 'x',
-      bin: binName,
-      detect: { args: ['--version'], versionRegex: '(\\d+\\.\\d+\\.\\d+)' },
-      invoke: { oneShot: ['run'] },
-    });
-    const a = createOpenCodeAdapter(m, { port: 48932, configDir: path.join(dir, 'cfg2') });
-    try {
-      // Servidor no ar na porta: antes, isto bastava para "servidor no ar" + authenticated:true.
-      const h = await a.start(ctx('semi'), 'oi');
-      await drenar(h.events);
-      await h.done;
-      const p = await a.probe();
-      assert.equal(p.installed, true);
-      assert.equal(p.version, '1.18.32');
-      assert.equal(p.authenticated, null);
-    } finally {
-      await a.close();
-    }
-  });
+  test(
+    'probe devolve a versão do --version e não inventa autenticação',
+    { timeout: 20_000 },
+    async () => {
+      const m = AgentManifestSchema.parse({
+        id: 'opencode',
+        name: 'x',
+        bin: binName,
+        detect: { args: ['--version'], versionRegex: '(\\d+\\.\\d+\\.\\d+)' },
+        invoke: { oneShot: ['run'] },
+      });
+      const a = createOpenCodeAdapter(m, { port: 48932, configDir: path.join(dir, 'cfg2') });
+      try {
+        // Servidor no ar na porta: antes, isto bastava para "servidor no ar" + authenticated:true.
+        const h = await a.start(ctx('semi'), 'oi');
+        await drenar(h.events);
+        await h.done;
+        const p = await a.probe();
+        assert.equal(p.installed, true);
+        assert.equal(p.version, '1.18.32');
+        assert.equal(p.authenticated, null);
+      } finally {
+        await a.close();
+      }
+    },
+  );
 });

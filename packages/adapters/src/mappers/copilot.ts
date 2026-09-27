@@ -156,7 +156,11 @@ export function copilotMapper(line: unknown): MappedEvent[] {
       return [
         {
           type: 'log',
-          payload: { kind: 'tecnico', turnId: data['turnId'], text: 'Copilot: chamada de modelo concluída' },
+          payload: {
+            kind: 'tecnico',
+            turnId: data['turnId'],
+            text: 'Copilot: chamada de modelo concluída',
+          },
           raw: line,
         },
       ];

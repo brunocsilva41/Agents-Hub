@@ -29,19 +29,16 @@ const arquivos = descobrirTestes();
 // sempre significa "esqueci de compilar", e sair 0 aqui devolveria verde a um
 // portão que não testou nada.
 if (arquivos.length === 0) {
-  console.error(
-    'Nenhum teste encontrado em packages/*/dist. Rode `npm run build:packages` antes.',
-  );
+  console.error('Nenhum teste encontrado em packages/*/dist. Rode `npm run build:packages` antes.');
   process.exit(1);
 }
 
 console.error(`Rodando ${arquivos.length} arquivos de teste.`);
 
-const filho = spawn(
-  process.execPath,
-  ['--test', '--experimental-sqlite', ...arquivos],
-  { stdio: 'inherit', cwd: raizDoRepo },
-);
+const filho = spawn(process.execPath, ['--test', '--experimental-sqlite', ...arquivos], {
+  stdio: 'inherit',
+  cwd: raizDoRepo,
+});
 
 filho.on('error', (err) => {
   console.error(`Não foi possível iniciar o runner: ${err.message}`);

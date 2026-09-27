@@ -27,10 +27,14 @@ export function SaudeOps({ agents, onChanged }: Props): React.JSX.Element {
 
   const resondar = (): void => {
     void acao
-      .executar('probe', () => hub.probeAgents(), (r) => {
-        const instalados = r.probes.filter((p) => p.installed).length;
-        return `Sondagem refeita: ${instalados} de ${r.probes.length} agentes encontrados.`;
-      })
+      .executar(
+        'probe',
+        () => hub.probeAgents(),
+        (r) => {
+          const instalados = r.probes.filter((p) => p.installed).length;
+          return `Sondagem refeita: ${instalados} de ${r.probes.length} agentes encontrados.`;
+        },
+      )
       .then((r) => {
         if (r) onChanged();
       });
@@ -42,7 +46,11 @@ export function SaudeOps({ agents, onChanged }: Props): React.JSX.Element {
         id="saude-daemon"
         titulo="Daemon"
         acoes={
-          <button type="button" onClick={() => setTick((n) => n + 1)} disabled={saude.estado === 'carregando' && !saude.dados}>
+          <button
+            type="button"
+            onClick={() => setTick((n) => n + 1)}
+            disabled={saude.estado === 'carregando' && !saude.dados}
+          >
             Atualizar
           </button>
         }
@@ -104,7 +112,9 @@ export function SaudeOps({ agents, onChanged }: Props): React.JSX.Element {
                     <strong>{a.name}</strong>
                     <span className="ops-mono ops-muted">{a.id}</span>
                     <span className="ops-muted">{d.estado}</span>
-                    {a.probe?.checkedAt && <span className="ops-muted ops-push">sondado {formatAgo(a.probe.checkedAt)}</span>}
+                    {a.probe?.checkedAt && (
+                      <span className="ops-muted ops-push">sondado {formatAgo(a.probe.checkedAt)}</span>
+                    )}
                   </div>
                   {d.notas.length > 0 && (
                     <ul className="ops-notes">

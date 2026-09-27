@@ -1,4 +1,4 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ServerResponse } from 'node:http';
 import { z } from 'zod';
 import { HubError } from '@agents-hub/core';
 import type { AuditTrail } from './audit.js';

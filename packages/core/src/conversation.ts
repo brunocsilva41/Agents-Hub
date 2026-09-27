@@ -50,9 +50,7 @@ export function rebuildConversation(input: RebuildInput): string {
     );
   }
 
-  partes.push(
-    ['## Nova mensagem', '', input.message].join('\n'),
-  );
+  partes.push(['## Nova mensagem', '', input.message].join('\n'));
 
   return partes.join('\n\n');
 }
@@ -119,7 +117,9 @@ function descrever(evento: EventEnvelope): string | null {
 
     case 'delegation.requested': {
       const alvo = comoTexto(p['targetAgent']);
-      return alvo ? `- você delegou para ${alvo}: ${truncar(comoTexto(p['objective']) ?? '', 200)}` : null;
+      return alvo
+        ? `- você delegou para ${alvo}: ${truncar(comoTexto(p['objective']) ?? '', 200)}`
+        : null;
     }
 
     case 'delegation.completed': {

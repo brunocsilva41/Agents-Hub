@@ -1,4 +1,13 @@
-import { constants, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  constants,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 // Subcaminho, não o índice: `config.ts` importa este arquivo, e o hook do gate
 // (que lê a config a cada Bash/Edit/Write do agente) pagava ~140 ms para
@@ -67,7 +76,11 @@ export function gravarAtomico(file: string, conteudo: string): void {
  * Backup (se o arquivo existe) e escrita atômica. Devolve o caminho do
  * backup, ou `null` quando o arquivo não existia.
  */
-export function gravarComBackup(file: string, conteudo: string, agora: Date = new Date()): string | null {
+export function gravarComBackup(
+  file: string,
+  conteudo: string,
+  agora: Date = new Date(),
+): string | null {
   const backup = existsSync(file) ? backupVersionado(file, agora) : null;
   gravarAtomico(file, conteudo);
   return backup;
@@ -106,7 +119,7 @@ export function lerJsonDeConfig(file: string): JsonDeConfig {
   const avisos: string[] = [];
   let valor: unknown;
   try {
-    valor = JSON.parse(raw.replace(/^﻿/, ''));
+    valor = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch (estrito) {
     const tolerante = parseJsonTolerant(raw);
     if (tolerante.error !== undefined || tolerante.note !== undefined) {

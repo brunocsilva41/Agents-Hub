@@ -61,7 +61,10 @@ describe('saída de erro única (R07-21)', () => {
     const err = new HubApiError('Brief inválido', 'INVALID_BRIEF', 400, {
       issues: [{ path: 'objective', message: 'curto demais' }],
     });
-    assert.deepEqual(linhasDeErro(err), ['hub: [INVALID_BRIEF] Brief inválido', '  - objective: curto demais']);
+    assert.deepEqual(linhasDeErro(err), [
+      'hub: [INVALID_BRIEF] Brief inválido',
+      '  - objective: curto demais',
+    ]);
     const saida: string[] = [];
     mostrarErro(err, (l) => saida.push(l));
     assert.equal(process.exitCode, 1);
@@ -80,7 +83,10 @@ describe('saída de erro única (R07-21)', () => {
     const linhas = linhasDeErro(pego);
     assert.equal(linhas[0], 'hub: argumento obrigatório ausente: sessionId');
     assert.ok(linhas.includes('uso:'));
-    assert.ok(linhas.some((l) => /hub watch <sessionId>/.test(l)), linhas.join('\n'));
+    assert.ok(
+      linhas.some((l) => /hub watch <sessionId>/.test(l)),
+      linhas.join('\n'),
+    );
     assert.equal(linhas.at(-1), 'veja: hub watch --help');
   });
 
@@ -96,6 +102,7 @@ describe('saída de erro única (R07-21)', () => {
       console.error = original;
     }
     assert.equal(process.exitCode, 1);
+    // eslint-disable-next-line no-control-regex -- o ESC da cor é justamente o que se mede
     assert.match(saida[0] ?? '', /^(\u001b\[31m)?hub: \[ENOENT\] arquivo sumiu/);
   });
 });

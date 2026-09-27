@@ -13,7 +13,6 @@ import { HubClient } from '@agents-hub/client';
 import { CallerIdentity } from './caller.js';
 import { buildMcpServer } from './server.js';
 
-
 interface ToolTextResult {
   content: Array<{ type: string; text: string }>;
   isError?: boolean;
@@ -234,9 +233,13 @@ steps:
       const repo = path.join(raiz, 'repo-workflow');
       mkdirSync(repo, { recursive: true });
       const git = (...args: string[]): void => {
-        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@l', '-c', 'commit.gpgsign=false', ...args], {
-          cwd: repo,
-        });
+        execFileSync(
+          'git',
+          ['-c', 'user.name=t', '-c', 'user.email=t@l', '-c', 'commit.gpgsign=false', ...args],
+          {
+            cwd: repo,
+          },
+        );
       };
       git('init', '-q');
       writeFileSync(path.join(repo, 'README.md'), '# repo\n', 'utf8');
@@ -264,7 +267,10 @@ steps:
     isolation: worktree
     dependsOn: [plano]
 `;
-        const result = await client.callTool({ name: 'hub_workflow_run', arguments: { yaml, project: repo } });
+        const result = await client.callTool({
+          name: 'hub_workflow_run',
+          arguments: { yaml, project: repo },
+        });
         assert.equal(enviados.length, 2, textOf(result));
         assert.equal(enviados[0]?.baseSessionIds, undefined);
         assert.deepEqual(enviados[1]?.baseSessionIds, [enviados[0]?.sessao]);
@@ -449,18 +455,27 @@ steps:
     await Promise.all([buildMcpServer(hubClient, callerFilho).connect(st), clienteFilho.connect(ct)]);
     try {
       for (const alvo of [raizDoChamador, irmao, eu]) {
-        const r = await clienteFilho.callTool({ name: 'hub_agent_cancel', arguments: { session_id: alvo.id } });
+        const r = await clienteFilho.callTool({
+          name: 'hub_agent_cancel',
+          arguments: { session_id: alvo.id },
+        });
         assert.equal(r.isError, true, `cancelar ${alvo.title} deveria ser recusado: ${textOf(r)}`);
         assert.match(textOf(r), /não está abaixo de você/);
         assert.equal(hub.store.sessions.get(alvo.id)?.state, 'running');
       }
 
       // Ler o irmão (mesmo fluxo) continua permitido.
-      const leitura = await clienteFilho.callTool({ name: 'hub_agent_events', arguments: { session_id: irmao.id } });
+      const leitura = await clienteFilho.callTool({
+        name: 'hub_agent_events',
+        arguments: { session_id: irmao.id },
+      });
       assert.equal(leitura.isError, undefined, textOf(leitura));
 
       // O neto foi delegado (indiretamente) por ele: pode pausar.
-      const pausa = await clienteFilho.callTool({ name: 'hub_session_pause', arguments: { session_id: neto.id } });
+      const pausa = await clienteFilho.callTool({
+        name: 'hub_session_pause',
+        arguments: { session_id: neto.id },
+      });
       assert.equal(pausa.isError, undefined, textOf(pausa));
       assert.equal(hub.store.sessions.get(neto.id)?.state, 'paused');
     } finally {
@@ -507,8 +522,11 @@ steps:
     assert.match(textOf(result), /- steps:/);
   });
 
-  test('hub_workflow_run: quem rodou acompanha os passos (raízes próprias) pelas tools', { timeout: 30_000 }, async () => {
-    const yaml = `
+  test(
+    'hub_workflow_run: quem rodou acompanha os passos (raízes próprias) pelas tools',
+    { timeout: 30_000 },
+    async () => {
+      const yaml = `
 name: workflow-acompanhado
 steps:
   - id: passo
@@ -516,12 +534,18 @@ steps:
     objective: "Fazer a coisa do passo para o teste de escopo do workflow"
     isolation: none
 `;
-    const texto = textOf(await client.callTool({ name: 'hub_workflow_run', arguments: { yaml, project: projetoPath } }));
-    const sessao = /\[sessão (ses_[a-z0-9]+)\]/i.exec(texto)?.[1];
-    assert.ok(sessao, texto);
-    const eventos = await client.callTool({ name: 'hub_agent_events', arguments: { session_id: sessao } });
-    assert.equal(eventos.isError, undefined, textOf(eventos));
-  });
+      const texto = textOf(
+        await client.callTool({ name: 'hub_workflow_run', arguments: { yaml, project: projetoPath } }),
+      );
+      const sessao = /\[sessão (ses_[a-z0-9]+)\]/i.exec(texto)?.[1];
+      assert.ok(sessao, texto);
+      const eventos = await client.callTool({
+        name: 'hub_agent_events',
+        arguments: { session_id: sessao },
+      });
+      assert.equal(eventos.isError, undefined, textOf(eventos));
+    },
+  );
 
   // ------------------------------------------------ saídas enxutas (achado 16)
 
@@ -530,7 +554,9 @@ steps:
     const curto = textOf(await client.callTool({ name: 'hub_agent_list', arguments: {} }));
     assert.doesNotMatch(curto, /LIMITACAO-SEGUNDA/);
     assert.match(curto, /\(\+1; verbose: true para ver\)/);
-    const longo = textOf(await client.callTool({ name: 'hub_agent_list', arguments: { verbose: true } }));
+    const longo = textOf(
+      await client.callTool({ name: 'hub_agent_list', arguments: { verbose: true } }),
+    );
     assert.match(longo, /LIMITACAO-SEGUNDA-SO-NO-VERBOSE/);
     assert.ok(curto.length < longo.length);
   });

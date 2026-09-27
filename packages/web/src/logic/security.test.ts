@@ -226,12 +226,21 @@ describe('trocar de aba com edição não salva', () => {
   });
 
   test('com edição: pergunta, e "não" mantém na aba', () => {
-    assert.equal(podeTrocarDeAba('settings', 'timeline', { settings: true }, () => false), false);
-    assert.equal(podeTrocarDeAba('settings', 'timeline', { settings: true }, () => true), true);
+    assert.equal(
+      podeTrocarDeAba('settings', 'timeline', { settings: true }, () => false),
+      false,
+    );
+    assert.equal(
+      podeTrocarDeAba('settings', 'timeline', { settings: true }, () => true),
+      true,
+    );
   });
 
   test('clicar na própria aba não pergunta', () => {
-    assert.equal(podeTrocarDeAba('settings', 'settings', { settings: true }, () => false), true);
+    assert.equal(
+      podeTrocarDeAba('settings', 'settings', { settings: true }, () => false),
+      true,
+    );
   });
 
   test('qualquer área suja conta', () => {

@@ -32,7 +32,12 @@ function rotulo(s: SessionSummary): string {
  * O que uma sessão produziu e o que se pode fazer com ela fora da timeline:
  * tarefas, diff, artefatos e o teto do fluxo.
  */
-export function SessaoOps({ sessions, sessionId, onEscolher, onAbrirNaTimeline }: Props): React.JSX.Element {
+export function SessaoOps({
+  sessions,
+  sessionId,
+  onEscolher,
+  onAbrirNaTimeline,
+}: Props): React.JSX.Element {
   const ordenadas = useMemo(
     () => [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [sessions],
@@ -81,7 +86,11 @@ export function SessaoOps({ sessions, sessionId, onEscolher, onAbrirNaTimeline }
           <Tarefas sessionId={sessao.id} revisao={sessao.updatedAt} />
           <Diff sessionId={sessao.id} />
           <Artefatos sessionId={sessao.id} revisao={sessao.updatedAt} />
-          <Orcamento rootId={raizDe(sessao)} ehRaiz={raizDe(sessao) === sessao.id} revisao={sessao.updatedAt} />
+          <Orcamento
+            rootId={raizDe(sessao)}
+            ehRaiz={raizDe(sessao) === sessao.id}
+            revisao={sessao.updatedAt}
+          />
         </>
       )}
     </div>
@@ -102,9 +111,17 @@ function Tarefas({ sessionId, revisao }: { sessionId: string; revisao: string })
         </button>
       }
     >
-      <EstadoDaCarga estado={carga.estado} erro={carga.erro} temDados={carga.dados !== null} oQue="as tarefas" onTentar={carga.recarregar} />
+      <EstadoDaCarga
+        estado={carga.estado}
+        erro={carga.erro}
+        temDados={carga.dados !== null}
+        oQue="as tarefas"
+        onTentar={carga.recarregar}
+      />
       {carga.estado !== 'erro' && carga.dados && tarefas.length === 0 && (
-        <p className="ops-muted">Esta sessão não tem tarefa (sessões adotadas não recebem tarefa do Hub).</p>
+        <p className="ops-muted">
+          Esta sessão não tem tarefa (sessões adotadas não recebem tarefa do Hub).
+        </p>
       )}
       {tarefas.length > 0 && (
         <ul className="ops-list">
@@ -114,7 +131,9 @@ function Tarefas({ sessionId, revisao }: { sessionId: string; revisao: string })
             return (
               <li key={t.id} className="ops-item">
                 <div className="ops-item-head">
-                  <span className={`ops-pill estado-${t.state}`}>{ROTULO_TAREFA[t.state] ?? t.state}</span>
+                  <span className={`ops-pill estado-${t.state}`}>
+                    {ROTULO_TAREFA[t.state] ?? t.state}
+                  </span>
                   <span className="ops-mono" title={t.id}>
                     {t.id}
                   </span>
@@ -157,7 +176,10 @@ function Diff({ sessionId }: { sessionId: string }): React.JSX.Element {
   const [pedido, setPedido] = useState(false);
   useEffect(() => setPedido(false), [sessionId]);
   const carga = useCarga(pedido ? sessionId : null, () => hub.diff(sessionId));
-  const arquivos = useMemo(() => (carga.dados?.diff ? separarDiff(carga.dados.diff) : []), [carga.dados]);
+  const arquivos = useMemo(
+    () => (carga.dados?.diff ? separarDiff(carga.dados.diff) : []),
+    [carga.dados],
+  );
 
   return (
     <Cartao
@@ -174,7 +196,13 @@ function Diff({ sessionId }: { sessionId: string }): React.JSX.Element {
       }
     >
       {pedido && (
-        <EstadoDaCarga estado={carga.estado} erro={carga.erro} temDados={carga.dados !== null} oQue="o diff" onTentar={carga.recarregar} />
+        <EstadoDaCarga
+          estado={carga.estado}
+          erro={carga.erro}
+          temDados={carga.dados !== null}
+          oQue="o diff"
+          onTentar={carga.recarregar}
+        />
       )}
       {pedido && carga.estado === 'ok' && carga.dados.diff === null && (
         <p className="ops-muted">{carga.dados.message ?? 'Sem diff.'}</p>
@@ -197,7 +225,8 @@ function Diff({ sessionId }: { sessionId: string }): React.JSX.Element {
               <details key={`${a.caminho}-${i}`} className="ops-diff-file" open={arquivos.length <= 3}>
                 <summary>
                   <span className="ops-mono ops-diff-path">{a.caminho}</span>
-                  <span className="ops-add">+{a.adicoes}</span> <span className="ops-del">−{a.remocoes}</span>
+                  <span className="ops-add">+{a.adicoes}</span>{' '}
+                  <span className="ops-del">−{a.remocoes}</span>
                   {a.binario && <span className="ops-muted"> · binário</span>}
                 </summary>
                 <pre className="ops-diff-body">
@@ -247,7 +276,13 @@ function Artefatos({ sessionId, revisao }: { sessionId: string; revisao: string 
         </button>
       }
     >
-      <EstadoDaCarga estado={carga.estado} erro={carga.erro} temDados={carga.dados !== null} oQue="os artefatos" onTentar={carga.recarregar} />
+      <EstadoDaCarga
+        estado={carga.estado}
+        erro={carga.erro}
+        temDados={carga.dados !== null}
+        oQue="os artefatos"
+        onTentar={carga.recarregar}
+      />
       {carga.estado !== 'erro' && carga.dados && lista.length === 0 && (
         <p className="ops-muted">Nenhum artefato registrado para esta sessão.</p>
       )}
@@ -260,7 +295,11 @@ function Artefatos({ sessionId, revisao }: { sessionId: string; revisao: string 
                 {a.path}
               </span>
               {typeof navigator !== 'undefined' && navigator.clipboard && (
-                <button type="button" onClick={() => copiar(a.path)} aria-label={`Copiar caminho de ${a.path}`}>
+                <button
+                  type="button"
+                  onClick={() => copiar(a.path)}
+                  aria-label={`Copiar caminho de ${a.path}`}
+                >
                   {copiado === a.path ? 'Copiado' : 'Copiar caminho'}
                 </button>
               )}
@@ -272,7 +311,15 @@ function Artefatos({ sessionId, revisao }: { sessionId: string; revisao: string 
   );
 }
 
-function Orcamento({ rootId, ehRaiz, revisao }: { rootId: string; ehRaiz: boolean; revisao: string }): React.JSX.Element {
+function Orcamento({
+  rootId,
+  ehRaiz,
+  revisao,
+}: {
+  rootId: string;
+  ehRaiz: boolean;
+  revisao: string;
+}): React.JSX.Element {
   const carga = useCarga(rootId, () => hub.budget(rootId).then((r) => r.budget), revisao);
   const acao = useAcao();
   const [form, setForm] = useState<FormOrcamento | null>(null);
@@ -297,7 +344,11 @@ function Orcamento({ rootId, ehRaiz, revisao }: { rootId: string; ehRaiz: boolea
     }
     setErroForm(null);
     void acao
-      .executar('teto', () => hub.setBudget(rootId, lido.limits), (r) => `Teto salvo: US$ ${r.budget.limits.usd.toFixed(2)}.`)
+      .executar(
+        'teto',
+        () => hub.setBudget(rootId, lido.limits),
+        (r) => `Teto salvo: US$ ${r.budget.limits.usd.toFixed(2)}.`,
+      )
       .then((r) => {
         if (!r) return;
         setForm(null);
@@ -331,7 +382,13 @@ function Orcamento({ rootId, ehRaiz, revisao }: { rootId: string; ehRaiz: boolea
           : `Esta é uma sub-sessão: o teto é o da raiz ${rootId}, que vale para o fluxo inteiro.`
       }
     >
-      <EstadoDaCarga estado={carga.estado} erro={carga.erro} temDados={carga.dados !== null} oQue="o orçamento" onTentar={carga.recarregar} />
+      <EstadoDaCarga
+        estado={carga.estado}
+        erro={carga.erro}
+        temDados={carga.dados !== null}
+        oQue="o orçamento"
+        onTentar={carga.recarregar}
+      />
       {budget && (
         <>
           <p className="ops-muted">

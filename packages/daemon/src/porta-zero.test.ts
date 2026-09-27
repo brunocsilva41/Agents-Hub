@@ -35,7 +35,10 @@ describe('HubServer com port: 0 — a porta real vem do bind, não de palpite', 
     a = createHub({ home: path.join(raiz, 'a'), manifestsDir: manifestos, port: 0 });
     b = createHub({ home: path.join(raiz, 'b'), manifestsDir: manifestos, port: 0 });
     // Simultâneos de propósito: dois binds em paralelo não podem colidir.
-    [portaA, portaB] = (await Promise.all([a.start(), b.start()])).map((e) => e.port) as [number, number];
+    [portaA, portaB] = (await Promise.all([a.start(), b.start()])).map((e) => e.port) as [
+      number,
+      number,
+    ];
   });
 
   after(async () => {
@@ -95,7 +98,10 @@ describe('HubServer com port: 0 — a porta real vem do bind, não de palpite', 
       [portaB, b.operatorToken],
     ] as const) {
       const status = (await decidir(porta, token)).status;
-      assert.ok(status !== 401 && status !== 403 && status < 500, `porta ${porta} com o próprio token: ${status}`);
+      assert.ok(
+        status !== 401 && status !== 403 && status < 500,
+        `porta ${porta} com o próprio token: ${status}`,
+      );
     }
   });
 });

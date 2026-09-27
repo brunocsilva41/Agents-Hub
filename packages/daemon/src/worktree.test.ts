@@ -100,7 +100,7 @@ describe('WorktreeManager', () => {
     const falhaSymlink = async () => {
       throw new Error('EPERM: operação não permitida (symlink simulado para teste)');
     };
-    const manager = new WorktreeManager(root, falhaSymlink as typeof import('node:fs/promises').symlink);
+    const manager = new WorktreeManager(root, falhaSymlink);
 
     const originalError = console.error;
     const chamadas: string[] = [];

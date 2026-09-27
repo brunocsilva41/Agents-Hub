@@ -75,3 +75,34 @@ function formatar(valor: unknown): string {
   if (valor instanceof Error) return valor.stack ?? `${valor.name}: ${valor.message}`;
   return typeof valor === 'string' ? valor : JSON.stringify(valor);
 }
+
+/**
+ * Encerramento por sinal (Ctrl-C, SIGTERM) ou por `POST /shutdown`: desliga e
+ * SAI — mesmo que o desligamento falhe.
+ *
+ * O caminho anterior era `process.on('SIGINT', () => void shutdown())`, com a
+ * guarda de reentrância ligada ANTES do `await hub.shutdown()`. Se o
+ * desligamento rejeitasse (banco já fechado, `opencode serve` que não morre),
+ * a rejeição caía no `unhandledRejection` — que registra e NÃO derruba — e o
+ * `process.exit` nunca rodava: daemon meio desligado, porta presa, e todo
+ * Ctrl-C seguinte ignorado pela guarda. Aqui a falha é registrada e o processo
+ * sai com código 1; a reconciliação da próxima subida limpa o registro.
+ */
+export function encerradorDoProcesso<A extends unknown[]>(
+  desligar: (...args: A) => Promise<void>,
+  sair: (codigo: number) => void = (codigo) => process.exit(codigo),
+): (...args: A) => Promise<void> {
+  let encerrando = false;
+  return async (...args: A) => {
+    if (encerrando) return;
+    encerrando = true;
+    let codigo = 0;
+    try {
+      await desligar(...args);
+    } catch (falha) {
+      console.error(`[agents-hub] desligamento falhou — saindo mesmo assim: ${formatar(falha)}`);
+      codigo = 1;
+    }
+    sair(codigo);
+  };
+}

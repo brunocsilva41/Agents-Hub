@@ -41,9 +41,7 @@ export function interpretarRevisao(resposta: string, revisorId: string): Validat
       {
         name: `revisão (${revisorId})`,
         passed: true,
-        detail: aprovou
-          ? resumir(texto)
-          : `veredito ambíguo, tratado como aprovação: ${resumir(texto)}`,
+        detail: aprovou ? resumir(texto) : `veredito ambíguo, tratado como aprovação: ${resumir(texto)}`,
       },
     ],
   };

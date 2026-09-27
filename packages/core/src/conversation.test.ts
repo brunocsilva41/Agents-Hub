@@ -10,11 +10,7 @@ const brief = parseBrief({
   acceptanceCriteria: ['os testes continuam passando'],
 });
 
-function evento(
-  type: EventEnvelope['type'],
-  payload: Record<string, unknown>,
-  seq = 1,
-): EventEnvelope {
+function evento(type: EventEnvelope['type'], payload: Record<string, unknown>, seq = 1): EventEnvelope {
   return makeEvent({ sessionId: 'ses_x', agentId: 'copilot', type, payload }, seq);
 }
 

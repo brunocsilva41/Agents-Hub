@@ -32,7 +32,12 @@ export async function continuacaoDe(client: HubClient, sessionId: string): Promi
     projectId: session.projectId,
     brief: {
       upstream: [
-        { step: 'sessão anterior', agent: session.agentId, summary: resumo, sessionRef: `session:${session.id}` },
+        {
+          step: 'sessão anterior',
+          agent: session.agentId,
+          summary: resumo,
+          sessionRef: `session:${session.id}`,
+        },
       ],
       contextRefs: [`session:${session.id}`],
     },

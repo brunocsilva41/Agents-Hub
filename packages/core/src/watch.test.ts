@@ -91,10 +91,7 @@ describe('portão de delegação', () => {
   });
 
   test('sessão semi delega livremente', () => {
-    const verdict = engine.decide(
-      { kind: 'delegation', agent: 'codex' },
-      { workdir, mode: 'semi' },
-    );
+    const verdict = engine.decide({ kind: 'delegation', agent: 'codex' }, { workdir, mode: 'semi' });
     assert.equal(verdict.decision, 'allow');
   });
 });

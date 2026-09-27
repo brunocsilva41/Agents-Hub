@@ -33,10 +33,7 @@ describe('leitura do veredito da revisão', () => {
   });
 
   test('texto que cita as duas palavras não reprova por acidente', () => {
-    const r = interpretarRevisao(
-      'APROVADO. Não reprovado em nenhum critério, tudo certo.',
-      'codex',
-    );
+    const r = interpretarRevisao('APROVADO. Não reprovado em nenhum critério, tudo certo.', 'codex');
     assert.equal(r.passed, true, 'a presença de "aprovado" desempata a favor de não reciclar');
   });
 

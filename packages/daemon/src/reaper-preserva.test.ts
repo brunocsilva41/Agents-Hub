@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -98,7 +106,11 @@ describe('WorktreeReaper: recolhe worktree com trabalho sem perder o trabalho', 
     mkdirSync(path.join(info.path, 'build'), { recursive: true });
     writeFileSync(path.join(info.path, 'build', 'saida.js'), 'ignorado', 'utf8');
 
-    const reaper = new WorktreeReaper(storeCom([{ id: sessionId, workdir: info.path }]), manager, retention);
+    const reaper = new WorktreeReaper(
+      storeCom([{ id: sessionId, workdir: info.path }]),
+      manager,
+      retention,
+    );
     const sweep = await reaper.sweep(agora);
 
     assert.deepEqual(sweep.failed, [], JSON.stringify(sweep.failed));
@@ -155,7 +167,11 @@ describe('WorktreeReaper: recolhe worktree com trabalho sem perder o trabalho', 
     unlinkSync(path.join(info.path, '.git'));
     assert.match(await worktreesRegistrados(), /ses-meio/);
 
-    const reaper = new WorktreeReaper(storeCom([{ id: 'ses-meio', workdir: info.path }]), manager, retention);
+    const reaper = new WorktreeReaper(
+      storeCom([{ id: 'ses-meio', workdir: info.path }]),
+      manager,
+      retention,
+    );
     const sweep = await reaper.sweep(agora);
 
     assert.deepEqual(sweep.failed, [], JSON.stringify(sweep.failed));

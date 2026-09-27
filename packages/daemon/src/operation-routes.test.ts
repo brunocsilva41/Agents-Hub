@@ -31,11 +31,19 @@ function portaLivre(): Promise<number> {
 
 let porta = 0;
 
+/** Corpo JSON das rotas — tipado só nos campos que os testes leem. */
+interface Corpo {
+  budget?: { limits: { usd: number; tokens: number } };
+  session?: { adopted: boolean };
+  run?: Record<string, unknown> & { id: string };
+  [campo: string]: unknown;
+}
+
 function http(
   method: string,
   caminho: string,
   opts: { headers?: Record<string, string>; json?: unknown } = {},
-): Promise<{ status: number; body: string; json: Record<string, any> }> {
+): Promise<{ status: number; body: string; json: Corpo }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { host: `127.0.0.1:${porta}`, ...(opts.headers ?? {}) };
     const body = opts.json === undefined ? undefined : Buffer.from(JSON.stringify(opts.json));
@@ -48,9 +56,9 @@ function http(
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
         const texto = Buffer.concat(chunks).toString('utf8');
-        let json: Record<string, any> = {};
+        let json: Corpo = {};
         try {
-          json = JSON.parse(texto) as Record<string, any>;
+          json = JSON.parse(texto) as Corpo;
         } catch {
           /* corpo vazio */
         }
@@ -146,21 +154,31 @@ defaults:
     });
 
     test('com token: sobe e desce o teto, persiste, emite evento e audita', async () => {
-      const s = hub.sessions.adoptExternal({ agentId: 'agente-eco', projectId, budget: { usd: 1, tokens: 1000 } });
+      const s = hub.sessions.adoptExternal({
+        agentId: 'agente-eco',
+        projectId,
+        budget: { usd: 1, tokens: 1000 },
+      });
 
-      const sobe = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: 7.5 } }, headers: operador() });
+      const sobe = await http('PUT', `/budget/${s.id}`, {
+        json: { limits: { usd: 7.5 } },
+        headers: operador(),
+      });
       assert.equal(sobe.status, 200, sobe.body);
-      assert.equal(sobe.json['budget'].limits.usd, 7.5);
-      assert.equal(sobe.json['budget'].limits.tokens, 1000, 'campo ausente fica como estava');
+      assert.equal(sobe.json.budget?.limits.usd, 7.5);
+      assert.equal(sobe.json.budget?.limits.tokens, 1000, 'campo ausente fica como estava');
 
       // Descer também é editar — `raiseLimits` sozinho descartaria a parcela negativa.
-      const desce = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: 0.5, tokens: 400 } }, headers: operador() });
+      const desce = await http('PUT', `/budget/${s.id}`, {
+        json: { limits: { usd: 0.5, tokens: 400 } },
+        headers: operador(),
+      });
       assert.equal(desce.status, 200, desce.body);
-      assert.equal(desce.json['budget'].limits.usd, 0.5);
-      assert.equal(desce.json['budget'].limits.tokens, 400);
+      assert.equal(desce.json.budget?.limits.usd, 0.5);
+      assert.equal(desce.json.budget?.limits.tokens, 400);
 
       const lido = await http('GET', `/budget/${s.id}`);
-      assert.equal(lido.json['budget'].limits.usd, 0.5);
+      assert.equal(lido.json.budget?.limits.usd, 0.5);
       assert.equal(hub.store.budgets.get(s.id)?.limits.usd, 0.5, 'persistido no banco');
 
       const eventos = hub.sessions.listEvents(s.id).filter((e) => e.type === 'budget.updated');
@@ -187,12 +205,18 @@ defaults:
         updatedAt: nowIso(),
       });
 
-      const r = await http('PUT', `/budget/${id}`, { json: { limits: { usd: 1.1 } }, headers: operador() });
+      const r = await http('PUT', `/budget/${id}`, {
+        json: { limits: { usd: 1.1 } },
+        headers: operador(),
+      });
       assert.equal(r.status, 400, r.body);
       assert.match(r.body, /usd \(mínimo 1\.2\)/);
       assert.equal(hub.sessions.budget(id).limits.usd, 2);
 
-      const noPiso = await http('PUT', `/budget/${id}`, { json: { limits: { usd: 1.2 } }, headers: operador() });
+      const noPiso = await http('PUT', `/budget/${id}`, {
+        json: { limits: { usd: 1.2 } },
+        headers: operador(),
+      });
       assert.equal(noPiso.status, 200, noPiso.body);
     });
 
@@ -200,20 +224,29 @@ defaults:
       const pai = hub.sessions.adoptExternal({ agentId: 'agente-eco', projectId });
       const id = newId('ses');
       hub.store.sessions.create({ ...pai, id, rootId: pai.id, parentId: pai.id, depth: 1 });
-      const r = await http('PUT', `/budget/${id}`, { json: { limits: { usd: 5 } }, headers: operador() });
+      const r = await http('PUT', `/budget/${id}`, {
+        json: { limits: { usd: 5 } },
+        headers: operador(),
+      });
       assert.equal(r.status, 400, r.body);
       assert.match(r.body, /não é raiz/);
       assert.equal(hub.store.budgets.get(id), null, 'nenhum ledger órfão criado');
     });
 
     test('sessão inexistente e corpo inválido', async () => {
-      const inexistente = await http('PUT', '/budget/ses_naoexiste', { json: { limits: { usd: 1 } }, headers: operador() });
+      const inexistente = await http('PUT', '/budget/ses_naoexiste', {
+        json: { limits: { usd: 1 } },
+        headers: operador(),
+      });
       assert.equal(inexistente.status, 404, inexistente.body);
 
       const s = hub.sessions.adoptExternal({ agentId: 'agente-eco', projectId });
       const vazio = await http('PUT', `/budget/${s.id}`, { json: { limits: {} }, headers: operador() });
       assert.equal(vazio.status, 422, vazio.body);
-      const negativo = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: -1 } }, headers: operador() });
+      const negativo = await http('PUT', `/budget/${s.id}`, {
+        json: { limits: { usd: -1 } },
+        headers: operador(),
+      });
       assert.equal(negativo.status, 422, negativo.body);
     });
   });
@@ -224,14 +257,20 @@ defaults:
       const { session: comum } = await hub.sessions.start({
         projectId,
         agentId: '',
-        brief: { agent: 'agente-eco', objective: 'responder uma saudação simples de teste', isolation: 'none' },
+        brief: {
+          agent: 'agente-eco',
+          objective: 'responder uma saudação simples de teste',
+          isolation: 'none',
+        },
       });
 
       const lista = await http('GET', '/sessions');
-      const porId = new Map((lista.json['sessions'] as Array<{ id: string; adopted: boolean }>).map((s) => [s.id, s]));
+      const porId = new Map(
+        (lista.json['sessions'] as Array<{ id: string; adopted: boolean }>).map((s) => [s.id, s]),
+      );
       assert.equal(porId.get(adotada.id)?.adopted, true);
       assert.equal(porId.get(comum.id)?.adopted, false);
-      assert.equal((await http('GET', `/sessions/${adotada.id}`)).json['session'].adopted, true);
+      assert.equal((await http('GET', `/sessions/${adotada.id}`)).json.session?.adopted, true);
 
       const recusa = await http('POST', `/sessions/${comum.id}/detach`, { json: {} });
       assert.equal(recusa.status, 400, recusa.body);
@@ -254,7 +293,9 @@ defaults:
   describe('/workflows', () => {
     test('validate: válido com lotes; inválido com erros', async () => {
       const ok = await http('POST', '/workflows/validate', {
-        json: { yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: fazer a primeira parte }\n  - { id: b, agent: agente-eco, objective: fazer a segunda parte, dependsOn: [a] }\n' },
+        json: {
+          yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: fazer a primeira parte }\n  - { id: b, agent: agente-eco, objective: fazer a segunda parte, dependsOn: [a] }\n',
+        },
       });
       assert.equal(ok.status, 200, ok.body);
       assert.equal(ok.json['valid'], true);
@@ -269,7 +310,10 @@ defaults:
 
     test('runs: dispara no daemon, encadeia e termina; projeto inexistente é 404', async () => {
       const nada = await http('POST', '/workflows/runs', {
-        json: { yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: x }\n', projectId: 'prj_naoexiste' },
+        json: {
+          yaml: 'name: w\nsteps:\n  - { id: a, agent: agente-eco, objective: x }\n',
+          projectId: 'prj_naoexiste',
+        },
       });
       assert.equal(nada.status, 404, nada.body);
 
@@ -281,21 +325,21 @@ defaults:
         },
       });
       assert.equal(r.status, 201, r.body);
-      const id = r.json['run'].id as string;
+      const id = r.json.run?.id ?? '';
 
-      let run: Record<string, any> = r.json['run'];
+      let run: Record<string, unknown> = r.json.run ?? {};
       const limite = Date.now() + 30_000;
       while (run['state'] === 'running' && Date.now() < limite) {
         await new Promise((res) => setTimeout(res, 250));
-        run = (await http('GET', `/workflows/runs/${id}`)).json['run'];
+        run = (await http('GET', `/workflows/runs/${id}`)).json.run ?? {};
       }
       assert.equal(run['state'], 'completed', JSON.stringify(run));
       const [a, b] = run['steps'] as Array<{ state: string; sessionId: string }>;
       assert.equal(a?.state, 'completed');
       assert.equal(b?.state, 'completed');
       // `b` só nasceu depois de `a` terminar.
-      const sa = hub.sessions.getSession(a!.sessionId);
-      const sb = hub.sessions.getSession(b!.sessionId);
+      const sa = hub.sessions.getSession(a.sessionId);
+      const sb = hub.sessions.getSession(b.sessionId);
       assert.ok(sb.createdAt >= (sa.endedAt ?? ''), `${sb.createdAt} >= ${sa.endedAt}`);
 
       const lista = await http('GET', '/workflows/runs');

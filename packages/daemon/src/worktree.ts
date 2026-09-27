@@ -113,7 +113,10 @@ export function removerSemSeguirLinks(
   try {
     unlinkSync(alvo);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EPERM' && (err as NodeJS.ErrnoException).code !== 'EACCES') {
+    if (
+      (err as NodeJS.ErrnoException).code !== 'EPERM' &&
+      (err as NodeJS.ErrnoException).code !== 'EACCES'
+    ) {
       throw err;
     }
     chmodSync(alvo, 0o666);
@@ -289,7 +292,7 @@ export class WorktreeManager {
         const motivo = (err as Error).message;
         const aviso = `não foi possível ligar "${nome}" em ${worktreePath}: ${motivo}`;
         avisos.push(aviso);
-        // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+        // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
         console.error(`[worktree] ${aviso} — build/testes podem falhar neste worktree`);
       }
     }
@@ -329,7 +332,7 @@ export class WorktreeManager {
     // `node_modules` inteiro para o branch.)
     const recusa = this.#desfazerLinks(params.worktreePath);
     if (recusa !== null) {
-      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
       console.error(`[worktree] remoção de ${params.worktreePath} recusada: ${recusa}`);
       return { removed: false, reason: recusa };
     }
@@ -350,10 +353,7 @@ export class WorktreeManager {
         return this.#apagarOrfao(params.projectPath, params.worktreePath);
       }
 
-      const falha = await this.#preservarTrabalho(
-        params.worktreePath,
-        params.preserveWork.sessionId,
-      );
+      const falha = await this.#preservarTrabalho(params.worktreePath, params.preserveWork.sessionId);
       if (falha !== null) {
         if (!(await this.#reconhecidoPeloGit(params.worktreePath))) {
           // Registrado, mas meio-apagado (sem `.git`/admin dir): o git não
@@ -361,10 +361,8 @@ export class WorktreeManager {
           return this.#apagarOrfao(params.projectPath, params.worktreePath);
         }
         await this.#ligarDependencias(params.projectPath, params.worktreePath);
-        // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
-        console.error(
-          `[worktree] trabalho de ${params.worktreePath} não pôde ser commitado: ${falha}`,
-        );
+        // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
+        console.error(`[worktree] trabalho de ${params.worktreePath} não pôde ser commitado: ${falha}`);
         return { removed: false, reason: `trabalho não commitado, worktree mantido: ${falha}` };
       }
       // Trabalho já está no branch: o que sobrar no diretório é ignorado pelo git.
@@ -554,10 +552,8 @@ export class WorktreeManager {
       // packages/`), mas o catch silencioso ficava pronto pra esconder um erro
       // real assim que alguém religasse a função. Loga para não repetir aqui o
       // mesmo buraco que `currentRef` tinha.
-      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
-      console.error(
-        `[worktree] falha ao listar worktrees de ${projectPath}: ${(err as Error).message}`,
-      );
+      // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
+      console.error(`[worktree] falha ao listar worktrees de ${projectPath}: ${(err as Error).message}`);
       return [];
     }
   }
@@ -594,7 +590,7 @@ export class WorktreeManager {
     } catch (err) {
       const motivo = (err as Error).message;
       const aviso = `não foi possível resolver HEAD em ${dir}, worktree criado sobre a ref literal "HEAD": ${motivo}`;
-      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
       console.error(`[worktree] ${aviso}`);
       return { ref: 'HEAD', warning: aviso };
     }

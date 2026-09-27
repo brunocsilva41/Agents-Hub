@@ -105,22 +105,26 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
   const gravar = async (): Promise<void> => {
     if (!analise.ok || !revisadoEAtual) return;
     const camada = analise.camada;
-    const ok = await action.run('gravar', async () => {
-      if (escopoEfetivo === 'project') {
-        const r = await hub.setProjectPolicy(projectId, camada);
-        setResultado({ avisos: avisosDePolitica(r), backup: null });
-      } else {
-        const r = await hub.setGlobalPolicy(camada);
-        setResultado({ avisos: avisosDePolitica(r), backup: r.backup });
-        if (r.loosened.length > 0) {
-          pushToast({
-            kind: 'warn',
-            title: 'Política global gravada — e AFROUXADA',
-            detail: r.loosened.join(', '),
-          });
+    const ok = await action.run(
+      'gravar',
+      async () => {
+        if (escopoEfetivo === 'project') {
+          const r = await hub.setProjectPolicy(projectId, camada);
+          setResultado({ avisos: avisosDePolitica(r), backup: null });
+        } else {
+          const r = await hub.setGlobalPolicy(camada);
+          setResultado({ avisos: avisosDePolitica(r), backup: r.backup });
+          if (r.loosened.length > 0) {
+            pushToast({
+              kind: 'warn',
+              title: 'Política global gravada — e AFROUXADA',
+              detail: r.loosened.join(', '),
+            });
+          }
         }
-      }
-    }, 'política gravada');
+      },
+      'política gravada',
+    );
     setConfirmando(false);
     if (ok) {
       setPrevia(null);
@@ -136,10 +140,9 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
     <div className="settings-card sec-policy">
       <h3 className="card-title">Editor de política</h3>
       <p className="card-desc">
-        A camada <strong>global</strong> (<code>config.json</code> do Hub) vale para todos os
-        projetos e pode afrouxar. A camada do <strong>projeto</strong> (
-        <code>.agents-hub/config.yaml</code>) só aperta: o que tentar afrouxar é gravado, mas não
-        vale aqui.
+        A camada <strong>global</strong> (<code>config.json</code> do Hub) vale para todos os projetos e
+        pode afrouxar. A camada do <strong>projeto</strong> (<code>.agents-hub/config.yaml</code>) só
+        aperta: o que tentar afrouxar é gravado, mas não vale aqui.
       </p>
 
       <div className="seg sec-seg" role="group" aria-label="Camada da política">
@@ -183,10 +186,7 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
               revisão) são ignorados. Veja "Confiança do projeto".
             </p>
           )}
-          <ListaDeAvisos
-            avisos={avisosDePolitica(projeto)}
-            titulo="Na camada gravada hoje"
-          />
+          <ListaDeAvisos avisos={avisosDePolitica(projeto)} titulo="Na camada gravada hoje" />
         </div>
       )}
 
@@ -209,7 +209,9 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
           {arquivo ? (
             <>
               Grava em <code>{arquivo}</code>
-              {escopoEfetivo === 'global' ? ' (com backup versionado).' : ' (o resto do arquivo é preservado).'}
+              {escopoEfetivo === 'global'
+                ? ' (com backup versionado).'
+                : ' (o resto do arquivo é preservado).'}
             </>
           ) : (
             'carregando…'
@@ -269,7 +271,7 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
           {action.busy === 'revisar' ? 'revisando…' : 'Revisar alterações'}
         </button>
         <button
-          className={revisadoEAtual && previa!.avisos.afrouxa.length > 0 ? 'danger' : 'primary'}
+          className={revisadoEAtual && previa.avisos.afrouxa.length > 0 ? 'danger' : 'primary'}
           onClick={() => setConfirmando(true)}
           disabled={!revisadoEAtual || !sujo || action.busy !== null}
           title={revisadoEAtual ? undefined : 'Revise antes de gravar'}
@@ -280,7 +282,9 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
 
       {efetiva && (
         <details className="sec-efetiva">
-          <summary>Política efetiva agora ({escopoEfetivo === 'global' ? 'global' : 'neste projeto'})</summary>
+          <summary>
+            Política efetiva agora ({escopoEfetivo === 'global' ? 'global' : 'neste projeto'})
+          </summary>
           <pre>{JSON.stringify(efetiva, null, 2)}</pre>
         </details>
       )}

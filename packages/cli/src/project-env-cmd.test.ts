@@ -12,7 +12,11 @@ import { MASCARA, projectEnvCommand, valorParaMostrar } from './project-env-cmd.
  *   inexistente são erros claros, e nada é gravado.
  */
 
-const args = (flags: Record<string, string | boolean>) => ({ command: 'project', positional: ['env'], flags });
+const args = (flags: Record<string, string | boolean>) => ({
+  command: 'project',
+  positional: ['env'],
+  flags,
+});
 
 describe('hub project env', () => {
   let h: HubDeTeste;
@@ -22,7 +26,9 @@ describe('hub project env', () => {
     h = await montarHubDeTeste([{ id: 'ok', modo: 'ok' }], { prefixo: 'hub-cli-env-' });
     h.hub.sessions.registerProject(h.projeto, 'projeto-env');
     // PUT /projects/:id/context exige o token de operador.
-    client = new HubClient(`http://${h.hub.config.host}:${h.hub.config.port}`, { token: h.hub.operatorToken });
+    client = new HubClient(`http://${h.hub.config.host}:${h.hub.config.port}`, {
+      token: h.hub.operatorToken,
+    });
   });
 
   after(async () => {
@@ -41,14 +47,33 @@ describe('hub project env', () => {
 
   test('--set de chave secreta: grava o valor real, mas o eco e a listagem mascaram', async () => {
     const c = capturar();
-    await projectEnvCommand(client, args({ agent: 'ok', set: 'OPENAI_API_KEY=abc-segredo-123' }), h.projeto, c);
-    assert.equal((await envSalvo())['ok']?.['OPENAI_API_KEY'], 'abc-segredo-123', 'o valor real vai para o banco');
+    await projectEnvCommand(
+      client,
+      args({ agent: 'ok', set: 'OPENAI_API_KEY=abc-segredo-123' }),
+      h.projeto,
+      c,
+    );
+    assert.equal(
+      (await envSalvo())['ok']?.['OPENAI_API_KEY'],
+      'abc-segredo-123',
+      'o valor real vai para o banco',
+    );
     assert.doesNotMatch(c.texto(), /abc-segredo-123/, 'o eco não pode mostrar o segredo');
     assert.match(c.texto(), new RegExp(`OPENAI_API_KEY=${MASCARA.replace(/\*/g, '\\*')}`));
 
     // Valor que parece credencial sob nome inocente também é mascarado.
-    await projectEnvCommand(client, args({ agent: 'ok', set: 'OPENAI_EXTRA_HEADER=Bearer xyz987' }), h.projeto, capturar());
-    await projectEnvCommand(client, args({ agent: 'ok', set: 'OPENAI_BASE_URL=http://localhost:11434/v1' }), h.projeto, capturar());
+    await projectEnvCommand(
+      client,
+      args({ agent: 'ok', set: 'OPENAI_EXTRA_HEADER=Bearer xyz987' }),
+      h.projeto,
+      capturar(),
+    );
+    await projectEnvCommand(
+      client,
+      args({ agent: 'ok', set: 'OPENAI_BASE_URL=http://localhost:11434/v1' }),
+      h.projeto,
+      capturar(),
+    );
 
     const lista = capturar();
     await projectEnvCommand(client, args({}), h.projeto, lista);
@@ -83,7 +108,13 @@ describe('hub project env', () => {
   test('--agent inexistente é erro listando os válidos e não grava nada', async () => {
     const antes = await envSalvo();
     await assert.rejects(
-      () => projectEnvCommand(client, args({ agent: 'naoexiste', set: 'OPENAI_BASE_URL=x' }), h.projeto, capturar()),
+      () =>
+        projectEnvCommand(
+          client,
+          args({ agent: 'naoexiste', set: 'OPENAI_BASE_URL=x' }),
+          h.projeto,
+          capturar(),
+        ),
       /agente "naoexiste" não registrado\. Disponíveis: ok/,
     );
     await assert.rejects(

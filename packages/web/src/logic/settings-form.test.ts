@@ -155,7 +155,10 @@ describe('campo de modelo por agente (item 4.3: só quando model.supported)', ()
     const nomes = camposDeEnvDoAgente('claude', comModelo).map((c) => c.nome);
     assert.deepEqual(nomes, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'MODEL']);
     const extras = extrasDoAgente({ MODEL: 'opus', ANTHROPIC_MODEL: 'legado' }, 'claude', comModelo);
-    assert.deepEqual(extras.map(([k]) => k), ['ANTHROPIC_MODEL']);
+    assert.deepEqual(
+      extras.map(([k]) => k),
+      ['ANTHROPIC_MODEL'],
+    );
   });
 
   test('daemon sem o campo `model` (anterior ao 4.3): comportamento antigo, sem quebrar', () => {

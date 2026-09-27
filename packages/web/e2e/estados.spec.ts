@@ -55,17 +55,26 @@ async function tentarDeNovoEm(page: Page | Locator, texto: string | RegExp): Pro
 test.describe('falha 500 por tela (1440px)', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('/sessions 500: lista, timeline, DAG, Telemetria e Operação dizem que FALHOU; tentar de novo recupera', async ({ page }) => {
+  test('/sessions 500: lista, timeline, DAG, Telemetria e Operação dizem que FALHOU; tentar de novo recupera', async ({
+    page,
+  }) => {
     CENARIO.falhar = /^\/sessions$/;
     await abrir(page);
-    const naLista = page.locator('#coluna-fluxos').getByRole('alert').filter({ hasText: 'Não foi possível carregar as sessões' });
+    const naLista = page
+      .locator('#coluna-fluxos')
+      .getByRole('alert')
+      .filter({ hasText: 'Não foi possível carregar as sessões' });
     await expect(naLista).toBeVisible();
     await expect(naLista).toContainText('falha simulada');
     await expect(page.locator('#coluna-fluxos')).not.toContainText('Nenhum fluxo');
-    await expect(page.locator('.col-center').getByRole('alert')).toContainText('Não foi possível carregar as sessões');
+    await expect(page.locator('.col-center').getByRole('alert')).toContainText(
+      'Não foi possível carregar as sessões',
+    );
     // Banner global também nomeia o recurso e tem a ação.
     await expect(page.locator('.app-error-banner')).toContainText('sessões:');
-    await expect(page.locator('.app-error-banner').getByRole('button', { name: 'Tentar de novo' })).toBeVisible();
+    await expect(
+      page.locator('.app-error-banner').getByRole('button', { name: 'Tentar de novo' }),
+    ).toBeVisible();
 
     await acionarNaTopbar(page, /^Grafo DAG/);
     await expect(alertaCom(page, 'Não foi possível carregar as sessões')).toBeVisible();
@@ -100,7 +109,9 @@ test.describe('falha 500 por tela (1440px)', () => {
     await expect(page.locator('.swarm-card')).toHaveCount(5);
   });
 
-  test('/projects 500: Configurações não finge "primeiros passos"; Segurança avisa', async ({ page }) => {
+  test('/projects 500: Configurações não finge "primeiros passos"; Segurança avisa', async ({
+    page,
+  }) => {
     CENARIO.falhar = /^\/projects$/;
     await abrir(page);
     await acionarNaTopbar(page, /^Configurações/);
@@ -126,16 +137,28 @@ test.describe('falha 500 por tela (1440px)', () => {
     await abrir(page);
     await page.locator('.flow-head', { hasText: 'Refatorar' }).first().click();
     const painel = page.locator('#coluna-painel');
-    await expect(painel.getByRole('alert').filter({ hasText: 'Não foi possível carregar o orçamento' })).toBeVisible();
+    await expect(
+      painel.getByRole('alert').filter({ hasText: 'Não foi possível carregar o orçamento' }),
+    ).toBeVisible();
     await expect(painel.getByRole('alert').filter({ hasText: 'memória do projeto' })).toBeVisible();
     CENARIO.falhar = null;
-    await painel.getByRole('alert').filter({ hasText: 'orçamento' }).getByRole('button', { name: /tentar de novo/i }).click();
+    await painel
+      .getByRole('alert')
+      .filter({ hasText: 'orçamento' })
+      .getByRole('button', { name: /tentar de novo/i })
+      .click();
     await expect(painel.locator('.budget-pct')).toBeVisible();
-    await painel.getByRole('alert').filter({ hasText: 'memória' }).getByRole('button', { name: /tentar de novo/i }).click();
+    await painel
+      .getByRole('alert')
+      .filter({ hasText: 'memória' })
+      .getByRole('button', { name: /tentar de novo/i })
+      .click();
     await expect(painel).toContainText('Usar TypeScript estrito.');
   });
 
-  test('grafo de um fluxo que falha: árvore da lista, DAG e Telemetria avisam com "tentar de novo"', async ({ page }) => {
+  test('grafo de um fluxo que falha: árvore da lista, DAG e Telemetria avisam com "tentar de novo"', async ({
+    page,
+  }) => {
     CENARIO.falhar = /^\/graph\//;
     await abrir(page);
     await page.locator('.flow-head', { hasText: 'Refatorar' }).first().click();
@@ -161,11 +184,16 @@ test.describe('falha 500 por tela (1440px)', () => {
     { secao: 'Saúde', rota: /^\/health$/, texto: 'Não foi possível carregar o estado do daemon' },
   ];
   for (const caso of OPERACAO) {
-    test(`Operação › ${caso.secao}: ${caso.rota} 500 mostra erro com "Tentar de novo"`, async ({ page }) => {
+    test(`Operação › ${caso.secao}: ${caso.rota} 500 mostra erro com "Tentar de novo"`, async ({
+      page,
+    }) => {
       CENARIO.falhar = caso.rota;
       await abrir(page);
       await acionarNaTopbar(page, /^Operação/);
-      await page.getByRole('navigation', { name: 'Seções de operação' }).getByRole('button', { name: caso.secao }).click();
+      await page
+        .getByRole('navigation', { name: 'Seções de operação' })
+        .getByRole('button', { name: caso.secao })
+        .click();
       if (caso.secao === 'Sessão') await page.locator('.ops-toolbar select').selectOption('ses_raiz1');
       await expect(alertaCom(page, caso.texto)).toBeVisible();
       CENARIO.falhar = null;
@@ -176,7 +204,11 @@ test.describe('falha 500 por tela (1440px)', () => {
 
   const SEGURANCA: Array<{ secao: string; rota: RegExp; texto: string }> = [
     { secao: 'Política', rota: /^\/policy$/, texto: 'Não foi possível ler a política' },
-    { secao: 'Confiança do projeto', rota: /\/context$/, texto: 'Não foi possível ler o estado do repositório' },
+    {
+      secao: 'Confiança do projeto',
+      rota: /\/context$/,
+      texto: 'Não foi possível ler o estado do repositório',
+    },
     { secao: 'Gate e MCP', rota: /^\/integrations$/, texto: 'Não foi possível ler as integrações' },
     { secao: 'Aprovações', rota: /^\/audit$/, texto: 'Falha ao ler o histórico' },
     { secao: 'Auditoria', rota: /^\/audit$/, texto: 'Falha ao ler a auditoria' },
@@ -197,7 +229,9 @@ test.describe('falha 500 por tela (1440px)', () => {
     });
   }
 
-  test('Configurações › Agentes detectados: /discovery 500 mostra erro com "tentar de novo"', async ({ page }) => {
+  test('Configurações › Agentes detectados: /discovery 500 mostra erro com "tentar de novo"', async ({
+    page,
+  }) => {
     CENARIO.falhar = /^\/discovery$/;
     await abrir(page);
     await acionarNaTopbar(page, /^Configurações/);
@@ -205,7 +239,10 @@ test.describe('falha 500 por tela (1440px)', () => {
     const alerta = page.locator('.settings-erro').filter({ hasText: /./ });
     await expect(alerta.first()).toBeVisible();
     CENARIO.falhar = null;
-    await alerta.first().getByRole('button', { name: /tentar de novo/i }).click();
+    await alerta
+      .first()
+      .getByRole('button', { name: /tentar de novo/i })
+      .click();
     await expect(page.locator('.settings-erro')).toHaveCount(0);
   });
 });
@@ -227,11 +264,15 @@ test.describe('Hub vazio (1440px)', () => {
     await expect(page.getByRole('button', { name: 'Criar Nova Sessão' })).toBeVisible();
 
     await acionarNaTopbar(page, /^Swarm/);
-    await expect(page.locator('main.tab-view-container')).toContainText('Nenhum agente registrado no Hub');
+    await expect(page.locator('main.tab-view-container')).toContainText(
+      'Nenhum agente registrado no Hub',
+    );
 
     await acionarNaTopbar(page, /^Telemetria/);
     await expect(page.locator('main.tab-view-container')).toContainText('Nenhuma sessão no Hub ainda');
-    await expect(page.locator('main.tab-view-container')).toContainText('Nenhuma sessão começou neste período');
+    await expect(page.locator('main.tab-view-container')).toContainText(
+      'Nenhuma sessão começou neste período',
+    );
 
     await acionarNaTopbar(page, /^Configurações/);
     await expect(page.getByText('Primeiros passos')).toBeVisible();
@@ -331,17 +372,24 @@ test.describe('interação (1440px)', () => {
     await dialogo.getByLabel(/Caminho da Pasta Principal/).fill('C:\\projetos\\gama');
     await dialogo.getByLabel(/Pastas Adicionais/).fill('C:\\projetos\\gama-lib\nC:\\projetos\\ruim');
     await dialogo.getByRole('button', { name: 'Criar & Vincular Projeto' }).click();
-    await expect(dialogo.getByRole('alert').filter({ hasText: 'Projeto criado, mas 1 pasta' })).toBeVisible();
+    await expect(
+      dialogo.getByRole('alert').filter({ hasText: 'Projeto criado, mas 1 pasta' }),
+    ).toBeVisible();
     // A lista já mostra o projeto, e ele fica selecionado no filtro.
     await expect(page.getByLabel('Filtrar por projeto')).toHaveValue('prj_novo1');
-    await expect(page.getByLabel('Filtrar por projeto').locator('option', { hasText: 'gama' })).toHaveCount(1);
+    await expect(
+      page.getByLabel('Filtrar por projeto').locator('option', { hasText: 'gama' }),
+    ).toHaveCount(1);
     expect(PROJETOS_CRIADOS).toHaveLength(1);
 
     CENARIO.recusarPasta = null;
     await dialogo.getByRole('button', { name: 'Concluir' }).click();
     await expect(dialogo).toHaveCount(0);
     expect(PROJETOS_CRIADOS, 'não recria o projeto').toHaveLength(1);
-    expect(PASTAS_VINCULADAS.map((p) => p.path)).toEqual(['C:\\projetos\\gama-lib', 'C:\\projetos\\ruim']);
+    expect(PASTAS_VINCULADAS.map((p) => p.path)).toEqual([
+      'C:\\projetos\\gama-lib',
+      'C:\\projetos\\ruim',
+    ]);
   });
 
   test('DAG: filtro de projeto e custo por nó', async ({ page }) => {
@@ -365,7 +413,7 @@ test.describe('interação (1440px)', () => {
   test('Telemetria: "ao vivo" igual à pílula do topo e custo por agente do /graph', async ({ page }) => {
     await abrir(page);
     await expect(page.locator('.flow-head').first()).toBeVisible();
-    const pilula =(await page.locator('.pill.status .status-text').innerText()).match(/\d+/)?.[0];
+    const pilula = (await page.locator('.pill.status .status-text').innerText()).match(/\d+/)?.[0];
     await acionarNaTopbar(page, /^Telemetria/);
     const aoVivo = page.locator('.kpi-card', { hasText: 'Ao vivo agora' }).locator('.kpi-val');
     await expect(aoVivo).toHaveText(pilula!);

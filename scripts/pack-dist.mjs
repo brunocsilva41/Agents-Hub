@@ -55,7 +55,11 @@ export function comandoNpm() {
   for (const c of candidatos) {
     if (c && c.endsWith('.js') && existsSync(c)) return { cmd: process.execPath, prefixo: [c] };
   }
-  return { cmd: process.platform === 'win32' ? 'npm.cmd' : 'npm', prefixo: [], shell: process.platform === 'win32' };
+  return {
+    cmd: process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    prefixo: [],
+    shell: process.platform === 'win32',
+  };
 }
 
 export function npm(args, opcoes = {}) {
@@ -86,9 +90,11 @@ function copiarDist(origem, destino) {
 function exigirBuild() {
   const faltando = [];
   for (const p of PACOTES) {
-    if (!existsSync(path.join(RAIZ_DO_REPO, 'packages', p, 'dist', 'index.js'))) faltando.push(`packages/${p}/dist`);
+    if (!existsSync(path.join(RAIZ_DO_REPO, 'packages', p, 'dist', 'index.js')))
+      faltando.push(`packages/${p}/dist`);
   }
-  if (!existsSync(path.join(RAIZ_DO_REPO, 'packages', 'web', 'dist', 'index.html'))) faltando.push('packages/web/dist');
+  if (!existsSync(path.join(RAIZ_DO_REPO, 'packages', 'web', 'dist', 'index.html')))
+    faltando.push('packages/web/dist');
   if (faltando.length > 0) {
     throw new Error(`build ausente (${faltando.join(', ')}). Rode antes: npm run build`);
   }
@@ -112,7 +118,10 @@ export function empacotar({ saida = path.join(RAIZ_DO_REPO, 'dist-pack') } = {})
   // no bundle, o `npm pack` marca as dependências deles (zod, yaml, SDK do MCP)
   // como "do bundle" sem incluí-las, e o `npm i -g` cria pastas VAZIAS no
   // lugar delas (visto: ERR_MODULE_NOT_FOUND de zod no primeiro `hub help`).
-  const pkgs = PACOTES.map((p) => ({ p, pkg: lerJson(path.join(RAIZ_DO_REPO, 'packages', p, 'package.json')) }));
+  const pkgs = PACOTES.map((p) => ({
+    p,
+    pkg: lerJson(path.join(RAIZ_DO_REPO, 'packages', p, 'package.json')),
+  }));
   const externas = {};
   for (const { pkg } of pkgs) {
     for (const [dep, faixa] of Object.entries(pkg.dependencies ?? {})) {
@@ -129,7 +138,8 @@ export function empacotar({ saida = path.join(RAIZ_DO_REPO, 'dist-pack') } = {})
     ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'],
     { cwd: staging },
   );
-  if (inst.status !== 0) throw new Error(`npm install das dependências falhou (${inst.status}):
+  if (inst.status !== 0)
+    throw new Error(`npm install das dependências falhou (${inst.status}):
 ${inst.stderr}`);
 
   // Depois os pacotes do workspace — DEPOIS do install, que apagaria o que não
@@ -145,7 +155,10 @@ ${inst.stderr}`);
     // (o `@agents-hub/daemon` do MCP é só de teste). Versão alinhada à do pacote.
     const { bin: _bin, devDependencies: _dev, scripts: _scripts, ...resto } = pkg;
     const deps = Object.fromEntries(
-      Object.entries(pkg.dependencies ?? {}).map(([d, f]) => [d, d.startsWith('@agents-hub/') ? versao : f]),
+      Object.entries(pkg.dependencies ?? {}).map(([d, f]) => [
+        d,
+        d.startsWith('@agents-hub/') ? versao : f,
+      ]),
     );
     writeFileSync(
       path.join(destino, 'package.json'),
@@ -155,7 +168,9 @@ ${inst.stderr}`);
   }
 
   cpSync(path.join(RAIZ_DO_REPO, 'manifests'), path.join(staging, 'manifests'), { recursive: true });
-  cpSync(path.join(RAIZ_DO_REPO, 'packages', 'web', 'dist'), path.join(staging, 'web'), { recursive: true });
+  cpSync(path.join(RAIZ_DO_REPO, 'packages', 'web', 'dist'), path.join(staging, 'web'), {
+    recursive: true,
+  });
   cpSync(path.join(RAIZ_DO_REPO, 'README.md'), path.join(staging, 'README.md'));
   cpSync(path.join(RAIZ_DO_REPO, 'LICENSE'), path.join(staging, 'LICENSE'));
 
@@ -220,4 +235,3 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     process.exitCode = 1;
   }
 }
-

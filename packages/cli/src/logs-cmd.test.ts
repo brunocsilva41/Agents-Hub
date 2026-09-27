@@ -28,11 +28,15 @@ describe('hub logs', () => {
       ['daemon-2026-09-24.log', 'daemon-2026-09-25.log'],
     );
 
-    const { out } = await capturar(() => logsCommand(dir, { command: 'logs', positional: [], flags: { lines: '5' } }));
+    const { out } = await capturar(() =>
+      logsCommand(dir, { command: 'logs', positional: [], flags: { lines: '5' } }),
+    );
     assert.ok(out[0]?.includes('daemon-2026-09-25.log'));
     assert.deepEqual(out[1]?.split('\n'), ['linha 76', 'linha 77', 'linha 78', 'linha 79', 'linha 80']);
 
-    const padrao = await capturar(() => logsCommand(dir, { command: 'logs', positional: [], flags: {} }));
+    const padrao = await capturar(() =>
+      logsCommand(dir, { command: 'logs', positional: [], flags: {} }),
+    );
     assert.equal(padrao.out[1]?.split('\n').length, 50, '50 linhas por padrão');
   });
 
@@ -42,7 +46,9 @@ describe('hub logs', () => {
       () => logsCommand(dir, { command: 'logs', positional: [], flags: { lines: 'abc' } }),
       /--lines inválido/,
     );
-    const { out } = await capturar(() => logsCommand(dir, { command: 'logs', positional: [], flags: {} }));
+    const { out } = await capturar(() =>
+      logsCommand(dir, { command: 'logs', positional: [], flags: {} }),
+    );
     assert.ok(out.some((l) => l.includes('nenhum log')));
   });
 
@@ -54,11 +60,15 @@ describe('hub logs', () => {
     const ctl = new AbortController();
 
     const seguindo = capturar(() =>
-      logsCommand(dir, { command: 'logs', positional: [], flags: { follow: true } }, {
-        signal: ctl.signal,
-        pollMs: 20,
-        write: (t) => escrito.push(t),
-      }),
+      logsCommand(
+        dir,
+        { command: 'logs', positional: [], flags: { follow: true } },
+        {
+          signal: ctl.signal,
+          pollMs: 20,
+          write: (t) => escrito.push(t),
+        },
+      ),
     );
     await new Promise((r) => setTimeout(r, 60));
     appendFileSync(hoje, 'nova linha\n');
@@ -68,8 +78,14 @@ describe('hub logs', () => {
     ctl.abort();
     const { out } = await seguindo;
 
-    assert.ok(out.some((l) => l.includes('já estava')), 'mostra o fim antes de seguir');
+    assert.ok(
+      out.some((l) => l.includes('já estava')),
+      'mostra o fim antes de seguir',
+    );
     assert.equal(escrito.join(''), 'nova linha\ndia seguinte\n');
-    assert.ok(out.some((l) => l.includes('daemon-2026-09-26.log')), 'anuncia o arquivo novo');
+    assert.ok(
+      out.some((l) => l.includes('daemon-2026-09-26.log')),
+      'anuncia o arquivo novo',
+    );
   });
 });

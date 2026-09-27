@@ -64,7 +64,7 @@ describe('client: ids no caminho não viram path traversal', () => {
       (id) => client.removeFolder('prj_abc', id),
       (id) => client.removeFolder(id, 'pfd_abc'),
       (id) => client.projectContext(id),
-      (id) => client.saveProjectContext(id, {} as never),
+      (id) => client.saveProjectContext(id, {}),
       (id) => client.graph(id),
       (id) => client.budget(id),
     ];

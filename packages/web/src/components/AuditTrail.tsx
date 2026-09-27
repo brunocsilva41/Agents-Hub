@@ -59,7 +59,8 @@ export function AuditTrail({ projects, sessions, projectId }: Props): React.JSX.
     void buscar(filtros);
   }, [filtros, buscar]);
 
-  const mudar = (parcial: Partial<FiltrosDeAuditoria>): void => setFiltros((f) => ({ ...f, ...parcial }));
+  const mudar = (parcial: Partial<FiltrosDeAuditoria>): void =>
+    setFiltros((f) => ({ ...f, ...parcial }));
 
   const exportar = (): void => {
     if (!entradas) return;
@@ -73,14 +74,14 @@ export function AuditTrail({ projects, sessions, projectId }: Props): React.JSX.
   };
 
   const nomeDoProjeto = (id: string | null): string | null =>
-    id ? projects.find((p) => p.id === id)?.name ?? id : null;
+    id ? (projects.find((p) => p.id === id)?.name ?? id) : null;
 
   return (
     <div className="settings-card">
       <h3 className="card-title">Trilha de auditoria</h3>
       <p className="card-desc">
-        Decisões do gate, aprovações, política, confiança e instalações — com quem agiu. Mais
-        recente primeiro.
+        Decisões do gate, aprovações, política, confiança e instalações — com quem agiu. Mais recente
+        primeiro.
       </p>
 
       <div className="sec-filtros">
@@ -135,7 +136,9 @@ export function AuditTrail({ projects, sessions, projectId }: Props): React.JSX.
           </datalist>
         </label>
       </div>
-      {!sessaoValida && <div className="aviso-inline">Id de sessão tem a forma ses_… (letras e números).</div>}
+      {!sessaoValida && (
+        <div className="aviso-inline">Id de sessão tem a forma ses_… (letras e números).</div>
+      )}
 
       <div className="sec-acoes sec-acoes-topo">
         <span className="dim" role="status">
@@ -152,7 +155,11 @@ export function AuditTrail({ projects, sessions, projectId }: Props): React.JSX.
       {erro && (
         <div className="settings-erro" role="alert">
           Falha ao ler a auditoria: {erro}
-          <button className="ghost" onClick={() => void buscar(filtros)} disabled={carregando || !sessaoValida}>
+          <button
+            className="ghost"
+            onClick={() => void buscar(filtros)}
+            disabled={carregando || !sessaoValida}
+          >
             tentar de novo
           </button>
         </div>

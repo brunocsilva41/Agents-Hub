@@ -40,7 +40,10 @@ describe('mergeHooks / hookInstalado', () => {
     assert.deepEqual(duas['permissions'], atual.permissions);
     const hooks = duas['hooks'] as Record<string, unknown[]>;
     assert.deepEqual(hooks['PostToolUse'], atual.hooks.PostToolUse, 'outros eventos intocados');
-    const pre = hooks['PreToolUse'] as Array<{ matcher: string; hooks: Array<{ command: string; timeout?: number }> }>;
+    const pre = hooks['PreToolUse'] as Array<{
+      matcher: string;
+      hooks: Array<{ command: string; timeout?: number }>;
+    }>;
     assert.equal(pre.length, 2, 'reinstalar não duplica');
     assert.deepEqual(pre[0], alheio, 'o hook alheio continua, na mesma posição');
     assert.equal(pre[1]?.matcher, MATCHER_DE_RISCO);
@@ -56,7 +59,12 @@ describe('mergeHooks / hookInstalado', () => {
 
   test('hookInstalado reconhece só o nosso comando', () => {
     assert.equal(hookInstalado({}), false);
-    assert.equal(hookInstalado({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'x' }] }] } }), false);
+    assert.equal(
+      hookInstalado({
+        hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'x' }] }] },
+      }),
+      false,
+    );
     assert.equal(hookInstalado(mergeHooks({}, NOSSO)), true);
   });
 
@@ -114,10 +122,19 @@ describe('gravarConfig / leitura — num HOME temporário', () => {
     assert.equal(inalterado.backup, null);
     assert.equal(readdirSync(path.dirname(file)).length, 1, 'nenhum backup à toa');
 
-    const mudado = gravarConfig(file, lido, { ...lido, model: 'sonnet' }, new Date('2026-09-26T11:00:00Z'));
+    const mudado = gravarConfig(
+      file,
+      lido,
+      { ...lido, model: 'sonnet' },
+      new Date('2026-09-26T11:00:00Z'),
+    );
     assert.equal(mudado.acao, 'atualizado');
     assert.ok(mudado.backup && existsSync(mudado.backup), 'backup gravado antes de regravar');
-    assert.deepEqual(JSON.parse(readFileSync(mudado.backup, 'utf8')), conteudo, 'backup tem o conteúdo anterior');
+    assert.deepEqual(
+      JSON.parse(readFileSync(mudado.backup, 'utf8')),
+      conteudo,
+      'backup tem o conteúdo anterior',
+    );
   });
 
   test('arquivo que não parseia: leitura para gravar LANÇA; leitura para exibir não', () => {
@@ -125,7 +142,11 @@ describe('gravarConfig / leitura — num HOME temporário', () => {
     writeFileSync(file, '{ "model": "opus", ', 'utf8');
     assert.throws(() => lerConfigParaGravar(file));
     assert.doesNotThrow(() => lerConfig(file));
-    assert.equal(readFileSync(file, 'utf8'), '{ "model": "opus", ', 'o arquivo da pessoa não foi tocado');
+    assert.equal(
+      readFileSync(file, 'utf8'),
+      '{ "model": "opus", ',
+      'o arquivo da pessoa não foi tocado',
+    );
   });
 
   test('JSONC (comentário) é aceito para gravar, e a config é preservada no merge', () => {

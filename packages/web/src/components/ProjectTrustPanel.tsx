@@ -53,7 +53,9 @@ export function ProjectTrustPanel({ project, onChanged }: Props): React.JSX.Elem
     return (
       <div className="settings-card">
         <h3 className="card-title">Confiança do projeto</h3>
-        <div className="settings-vazio">Escolha um projeto no topo para ver o que o repositório declara.</div>
+        <div className="settings-vazio">
+          Escolha um projeto no topo para ver o que o repositório declara.
+        </div>
       </div>
     );
   }
@@ -77,8 +79,8 @@ export function ProjectTrustPanel({ project, onChanged }: Props): React.JSX.Elem
     <div className="settings-card">
       <h3 className="card-title">Confiança do projeto</h3>
       <p className="card-desc">
-        O que o <code>.agents-hub/config.yaml</code> de <strong>{project.name}</strong> pode mudar
-        na sua máquina, e se está valendo.
+        O que o <code>.agents-hub/config.yaml</code> de <strong>{project.name}</strong> pode mudar na sua
+        máquina, e se está valendo.
       </p>
 
       {erro && (
@@ -117,12 +119,20 @@ export function ProjectTrustPanel({ project, onChanged }: Props): React.JSX.Elem
 
           <div className="sec-acoes">
             {repo.trust !== 'untrusted' && (
-              <button className="danger" onClick={() => setConfirmar('retirar')} disabled={action.busy !== null}>
+              <button
+                className="danger"
+                onClick={() => setConfirmar('retirar')}
+                disabled={action.busy !== null}
+              >
                 Retirar confiança…
               </button>
             )}
             {repo.trust !== 'trusted' && !resumo.vazio && (
-              <button className="primary" onClick={() => setConfirmar('confiar')} disabled={action.busy !== null}>
+              <button
+                className="primary"
+                onClick={() => setConfirmar('confiar')}
+                disabled={action.busy !== null}
+              >
                 {repo.trust === 'suspended' ? 'Confiar no conteúdo novo…' : 'Confiar neste conteúdo…'}
               </button>
             )}
@@ -169,7 +179,10 @@ function OQueORepoQuer({ resumo }: { resumo: ResumoDaConfianca }): React.JSX.Ele
       {grupos
         .filter((g) => g.itens.length > 0)
         .map((g) => (
-          <div key={g.titulo} className={`sec-aviso ${g.perigo ? 'sec-aviso-perigo' : 'sec-aviso-alerta'}`}>
+          <div
+            key={g.titulo}
+            className={`sec-aviso ${g.perigo ? 'sec-aviso-perigo' : 'sec-aviso-alerta'}`}
+          >
             <strong>{g.titulo}</strong>
             <ul>
               {g.itens.map((i) => (

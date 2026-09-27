@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY } from '@agents-hub/core';
+import { DEFAULT_POLICY, textoDe } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -141,7 +141,7 @@ defaults:
 
     const erros = hub.store.events
       .list({ sessionId, types: ['error'] })
-      .map((e) => String(e.payload['message'] ?? ''));
+      .map((e) => textoDe(e.payload['message']));
     assert.deepEqual(erros, [], `nenhum erro fantasma do pump antigo: ${erros.join(' | ')}`);
     assert.equal(hub.store.sessions.get(sessionId)?.agentId, 'rapido-b');
   });

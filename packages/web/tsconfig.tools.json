@@ -1,0 +1,18 @@
+// Só para o ESLint com informação de tipo (`npm run lint`): cobre o que roda
+// em Node fora do Vite e fora do `tsc -b` — os testes e2e do Playwright e a
+// própria config dele. Não emite nada.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+}

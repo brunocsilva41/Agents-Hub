@@ -67,9 +67,9 @@ export function resumoDosGrafos(
 }
 
 /** Custo por sessão a partir das árvores prontas (para sobrepor aos nós do DAG). */
-export function custoPorSessao<N extends { sessionId: string; usd: number; tokens: number; children: N[] }>(
-  arvores: readonly N[],
-): Map<string, { usd: number; tokens: number }> {
+export function custoPorSessao<
+  N extends { sessionId: string; usd: number; tokens: number; children: N[] },
+>(arvores: readonly N[]): Map<string, { usd: number; tokens: number }> {
   const mapa = new Map<string, { usd: number; tokens: number }>();
   const visitar = (no: N): void => {
     if (mapa.has(no.sessionId)) return;

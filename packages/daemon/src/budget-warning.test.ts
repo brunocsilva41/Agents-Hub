@@ -21,7 +21,12 @@ describe('projeção viva e budget.warning (Fase 3)', () => {
   let hub: Hub;
   let projetoPath: string;
 
-  function escreverManifest(manifestos: string, id: string, scriptPath: string, mapper: 'generic-text' | 'claude'): void {
+  function escreverManifest(
+    manifestos: string,
+    id: string,
+    scriptPath: string,
+    mapper: 'generic-text' | 'claude',
+  ): void {
     writeFileSync(
       path.join(manifestos, `${id}.yaml`),
       `
@@ -254,7 +259,7 @@ process.stdin.on('end', () => {
     const [approval] = hub.sessions.pendingApprovals(started.session.id);
     assert.ok(approval, 'deveria existir uma aprovação de orçamento pendente');
 
-    await hub.sessions.resolveApproval(approval!.id, 'approved');
+    await hub.sessions.resolveApproval(approval.id, 'approved');
 
     // 2ª rodada: dispara depois da aprovação reabrir a sessão. `send()` (o
     // caminho de retomada usado aqui, fora do laço de retry) relança a MESMA

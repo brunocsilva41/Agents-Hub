@@ -29,6 +29,7 @@ export function viewOf(event: EventEnvelope): EventView {
 const ESC = '\u001B';
 
 /** CSI (`ESC[…m`), OSC (`ESC]…BEL`) e as sequências de dois bytes. */
+// eslint-disable-next-line no-control-regex -- casar ESC/BEL é o objetivo: tirar ANSI do texto
 const ANSI = /\u001B\[[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B[@-Z\\-_]/g;
 
 /**
@@ -81,7 +82,11 @@ export function describeEvent(event: EventEnvelope): EventView {
     case 'turn.completed':
       // Turno parado a pedido (interrupt/pause): a sessão segue viva.
       if (p['interrupted'] === true) {
-        return { text: `⏹ ${str(p['message']) || 'turno interrompido'}`, kind: 'lifecycle', verbose: false };
+        return {
+          text: `⏹ ${str(p['message']) || 'turno interrompido'}`,
+          kind: 'lifecycle',
+          verbose: false,
+        };
       }
       return {
         text: `✓ turno concluído${event.cost?.usd ? ` — US$ ${event.cost.usd.toFixed(4)}` : ''}`,
@@ -117,7 +122,7 @@ export function describeEvent(event: EventEnvelope): EventView {
 
     case 'command.executed':
       return {
-        text: `$ ${str(p['command'])}${p['exitCode'] === undefined || p['exitCode'] === null ? '' : ` → ${String(p['exitCode'])}`}`,
+        text: `$ ${str(p['command'])}${p['exitCode'] === undefined || p['exitCode'] === null ? '' : ` → ${str(p['exitCode'])}`}`,
         kind: 'command',
         verbose: false,
       };
@@ -127,7 +132,7 @@ export function describeEvent(event: EventEnvelope): EventView {
 
     case 'delegation.requested':
       return {
-        text: `→ delegou para ${str(p['targetAgent'])} (nível ${String(p['depth'] ?? '?')}): ${str(p['objective'])}`,
+        text: `→ delegou para ${str(p['targetAgent'])} (nível ${str(p['depth']) || '?'}): ${str(p['objective'])}`,
         kind: 'delegation',
         verbose: false,
       };
@@ -143,7 +148,11 @@ export function describeEvent(event: EventEnvelope): EventView {
       return { text: `⏸ aguardando aprovação: ${str(p['action'])}`, kind: 'error', verbose: false };
 
     case 'budget.warning':
-      return { text: '⚠️ alerta: consumo atingiu mais de 80% do orçamento', kind: 'warn', verbose: false };
+      return {
+        text: '⚠️ alerta: consumo atingiu mais de 80% do orçamento',
+        kind: 'warn',
+        verbose: false,
+      };
 
     case 'budget.exceeded':
       return { text: '✗ orçamento do fluxo esgotado', kind: 'error', verbose: false };

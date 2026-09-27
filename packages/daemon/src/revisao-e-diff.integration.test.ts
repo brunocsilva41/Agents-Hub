@@ -102,7 +102,11 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
         retries: { max: 0, backoffMs: 10 },
         fallback: {},
         watch: { pauseOn: [], flagOn: [] },
-        validation: { command: null, commandTimeoutSeconds: 60, review: { enabled: true, agent: 'revisor' } },
+        validation: {
+          command: null,
+          commandTimeoutSeconds: 60,
+          review: { enabled: true, agent: 'revisor' },
+        },
       },
     });
     await hub.start();
@@ -137,7 +141,11 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
   }
 
   const iniciar = (projectId: string, objective: string) =>
-    hub.sessions.start({ projectId, agentId: '', brief: { agent: 'autor', objective, isolation: 'none' } });
+    hub.sessions.start({
+      projectId,
+      agentId: '',
+      brief: { agent: 'autor', objective, isolation: 'none' },
+    });
 
   // A task vira `failed` antes de a sessão fechar: o diff é gravado no
   // fechamento, então a espera é pela SESSÃO terminal.
@@ -162,7 +170,9 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
     );
     const eventos = hub.store.events.list({ sessionId: session.id, types: ['log'], limit: 500 });
     assert.ok(
-      eventos.some((e) => e.payload['kind'] === 'review.approved' && /APROVADO/.test(String(e.payload['text']))),
+      eventos.some(
+        (e) => e.payload['kind'] === 'review.approved' && /APROVADO/.test(String(e.payload['text'])),
+      ),
       'evento de revisão aprovada',
     );
   });
@@ -180,7 +190,10 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
 
   test('sessão CANCELADA depois de escrever gera o artefato de diff', async () => {
     const projectId = projetoGit();
-    const { session, task } = await iniciar(projectId, 'escrever e esperar @WRITE=meio.txt @SLEEP=20000');
+    const { session, task } = await iniciar(
+      projectId,
+      'escrever e esperar @WRITE=meio.txt @SLEEP=20000',
+    );
     const arquivo = path.join(hub.store.sessions.get(session.id)!.workdir, 'meio.txt');
     await esperar(() => existsSync(arquivo), 'agente escrever');
     await hub.sessions.cancel(session.id, 'teste');

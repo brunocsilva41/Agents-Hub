@@ -112,7 +112,9 @@ export async function planejarMerge(
   }
   plano.currentBranch = atual.stdout.trim();
   if (plano.currentBranch === branch) {
-    plano.blockers.push(`o projeto está com ${branch} em checkout — troque para o branch de destino antes`);
+    plano.blockers.push(
+      `o projeto está com ${branch} em checkout — troque para o branch de destino antes`,
+    );
   }
   if (plano.currentBranch === 'HEAD') {
     plano.warnings.push('HEAD destacado (detached): o resultado não fica em branch nenhum');
@@ -128,7 +130,9 @@ export async function planejarMerge(
   }
   for (const marcador of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REBASE_HEAD']) {
     if ((await git.tentar(['rev-parse', '-q', '--verify', marcador])).ok) {
-      plano.blockers.push(`há um ${marcador} pendente no repositório — termine ou aborte essa operação antes`);
+      plano.blockers.push(
+        `há um ${marcador} pendente no repositório — termine ou aborte essa operação antes`,
+      );
     }
   }
 
@@ -146,7 +150,9 @@ export async function planejarMerge(
   if (diff && diff.trim().length > 0) plano.patch = diff;
 
   if (plano.commits.length === 0 && plano.patch === null && plano.blockers.length === 0) {
-    plano.blockers.push('nada a aplicar: o branch não tem commits novos e a sessão não deixou alterações capturadas');
+    plano.blockers.push(
+      'nada a aplicar: o branch não tem commits novos e a sessão não deixou alterações capturadas',
+    );
   }
   return plano;
 }
@@ -185,7 +191,9 @@ export async function aplicarMerge(plano: MergePlan): Promise<{ applied: string[
       if (!r.ok) {
         const arquivos = await conflitos(git);
         await git.tentar(['cherry-pick', '--abort']);
-        throw new Error(`cherry-pick com conflito (desfeito): ${arquivos.join(', ') || r.stderr.trim()}`);
+        throw new Error(
+          `cherry-pick com conflito (desfeito): ${arquivos.join(', ') || r.stderr.trim()}`,
+        );
       }
       feito.push(`cherry-pick de ${plano.commits.length} commit(s) de ${plano.branch}`);
     } else {
@@ -197,7 +205,9 @@ export async function aplicarMerge(plano: MergePlan): Promise<{ applied: string[
         await git.tentar(['reset', '--merge']);
         throw new Error(`squash com conflito (desfeito): ${arquivos.join(', ') || r.stderr.trim()}`);
       }
-      feito.push(`squash de ${plano.commits.length} commit(s) de ${plano.branch} (preparado no índice, sem commit)`);
+      feito.push(
+        `squash de ${plano.commits.length} commit(s) de ${plano.branch} (preparado no índice, sem commit)`,
+      );
     }
   }
 
@@ -234,7 +244,9 @@ function imprimirPlano(plano: MergePlan): void {
   }
   if (plano.patch !== null) {
     const arquivos = plano.patch.split(/\r?\n/).filter((l) => l.startsWith('diff --git')).length;
-    console.log(`\nalterações não commitadas do agente: ${arquivos} arquivo(s) ${dim('(do diff capturado — hub diff)')}`);
+    console.log(
+      `\nalterações não commitadas do agente: ${arquivos} arquivo(s) ${dim('(do diff capturado — hub diff)')}`,
+    );
   }
   for (const w of plano.warnings) console.log(yellow(`⚠ ${w}`));
   for (const b of plano.blockers) console.log(red(`✗ ${b}`));
@@ -270,7 +282,9 @@ export async function mergeCommand(client: HubClient, args: Args): Promise<Merge
   }
   const executar = flagOn(args, 'write') && !flagOn(args, 'dry-run');
   if (!executar) {
-    console.log(`\n${dim('prévia — nada foi alterado. para aplicar:')} ${bold(`hub ${args.command} ${sessionId} --write`)}`);
+    console.log(
+      `\n${dim('prévia — nada foi alterado. para aplicar:')} ${bold(`hub ${args.command} ${sessionId} --write`)}`,
+    );
     return plano;
   }
 

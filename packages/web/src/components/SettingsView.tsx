@@ -228,10 +228,9 @@ export function SettingsView({
         <div>
           <h2 className="settings-title">Configurações do projeto</h2>
           <p className="settings-subtitle">
-            Gravadas no Hub desta máquina, por projeto (fora do repositório). Valem para o
-            painel, para a CLI e para as sessões que um agente delega a outro. O
-            <code>.agents-hub/config.yaml</code> do repositório só vale depois de{' '}
-            <code>hub project trust</code>.
+            Gravadas no Hub desta máquina, por projeto (fora do repositório). Valem para o painel, para a
+            CLI e para as sessões que um agente delega a outro. O<code>.agents-hub/config.yaml</code> do
+            repositório só vale depois de <code>hub project trust</code>.
           </p>
         </div>
         <div className="settings-header-actions">
@@ -291,9 +290,9 @@ export function SettingsView({
         <div className="settings-vazio settings-card">
           <h3 className="card-title">Primeiros passos</h3>
           <p className="card-desc">
-            Prompts, memória e modelos vivem dentro de um projeto — registre a pasta do
-            repositório para configurá-los. Enquanto isso, veja em "Agentes detectados" o que cada
-            CLI já tem instalado nesta máquina.
+            Prompts, memória e modelos vivem dentro de um projeto — registre a pasta do repositório para
+            configurá-los. Enquanto isso, veja em "Agentes detectados" o que cada CLI já tem instalado
+            nesta máquina.
           </p>
           {onNewProject && (
             <button className="primary" onClick={onNewProject}>
@@ -347,8 +346,8 @@ export function SettingsView({
             <div className="settings-card">
               <h3 className="card-title">Instruções por agente</h3>
               <p className="card-desc">
-                Entram no prompt antes da tarefa, como enquadramento. Chegam também ao agente que
-                recebe a tarefa por delegação, por retentativa e por substituição no fallback.
+                Entram no prompt antes da tarefa, como enquadramento. Chegam também ao agente que recebe
+                a tarefa por delegação, por retentativa e por substituição no fallback.
               </p>
 
               <ChipsDeAgente
@@ -402,8 +401,8 @@ export function SettingsView({
                   }}
                 />
                 <div className="help">
-                  Entra no prompt como enquadramento — não é misturada ao objetivo da tarefa, que é
-                  o que o Hub usa para detectar um agente pedindo de volta o que já pediu.
+                  Entra no prompt como enquadramento — não é misturada ao objetivo da tarefa, que é o que
+                  o Hub usa para detectar um agente pedindo de volta o que já pediu.
                 </div>
               </div>
             </div>
@@ -413,8 +412,8 @@ export function SettingsView({
             <div className="settings-card">
               <h3 className="card-title">Modelo local por agente</h3>
               <p className="card-desc">
-                Cada CLI descobre o provedor pelo ambiente. Apontar o endereço para um servidor
-                local faz o agente rodar sem sair da máquina.
+                Cada CLI descobre o provedor pelo ambiente. Apontar o endereço para um servidor local faz
+                o agente rodar sem sair da máquina.
               </p>
 
               <ChipsDeAgente
@@ -425,82 +424,82 @@ export function SettingsView({
 
               {camposFixos.length === 0 && (
                 <div className="help help-warn" style={{ marginTop: 16 }}>
-                  <strong>{agenteAtual?.name ?? agenteSelecionado}</strong> não lê nenhuma variável
-                  de provedor que o projeto possa definir — ele usa a própria configuração (login e
-                  modelo escolhidos no CLI). Não há o que ajustar aqui para este agente.
+                  <strong>{agenteAtual?.name ?? agenteSelecionado}</strong> não lê nenhuma variável de
+                  provedor que o projeto possa definir — ele usa a própria configuração (login e modelo
+                  escolhidos no CLI). Não há o que ajustar aqui para este agente.
                 </div>
               )}
 
               {campoBaseUrl && (
-              <div className="field" style={{ marginTop: 16 }}>
-                <label htmlFor="base-url">
-                  {campoBaseUrl.rotulo} <code>{campoBaseUrl.nome}</code>
-                </label>
-                <input
-                  id="base-url"
-                  type="text"
-                  disabled={bloqueado}
-                  placeholder={
-                    campoBaseUrl.nome.startsWith('OPENAI_') ? 'http://localhost:11434/v1' : 'https://…'
-                  }
-                  value={envDoAgente[campoBaseUrl.nome] ?? ''}
-                  onChange={(e) => mudarEnv(agenteSelecionado, campoBaseUrl.nome, e.target.value)}
-                />
-                {/* Os servidores locais sugeridos falam a API da OpenAI: só fazem
+                <div className="field" style={{ marginTop: 16 }}>
+                  <label htmlFor="base-url">
+                    {campoBaseUrl.rotulo} <code>{campoBaseUrl.nome}</code>
+                  </label>
+                  <input
+                    id="base-url"
+                    type="text"
+                    disabled={bloqueado}
+                    placeholder={
+                      campoBaseUrl.nome.startsWith('OPENAI_') ? 'http://localhost:11434/v1' : 'https://…'
+                    }
+                    value={envDoAgente[campoBaseUrl.nome] ?? ''}
+                    onChange={(e) => mudarEnv(agenteSelecionado, campoBaseUrl.nome, e.target.value)}
+                  />
+                  {/* Os servidores locais sugeridos falam a API da OpenAI: só fazem
                     sentido para quem lê OPENAI_BASE_URL. */}
-                {campoBaseUrl.nome.startsWith('OPENAI_') && (
-                  <div className="sugestoes">
-                    {ENDPOINTS_SUGERIDOS.map((s) => (
-                      <button
-                        key={s.url}
-                        className="ghost"
-                        disabled={bloqueado}
-                        onClick={() => mudarEnv(agenteSelecionado, campoBaseUrl.nome, s.url)}
-                      >
-                        {s.rotulo}
-                      </button>
-                    ))}
+                  {campoBaseUrl.nome.startsWith('OPENAI_') && (
+                    <div className="sugestoes">
+                      {ENDPOINTS_SUGERIDOS.map((s) => (
+                        <button
+                          key={s.url}
+                          className="ghost"
+                          disabled={bloqueado}
+                          onClick={() => mudarEnv(agenteSelecionado, campoBaseUrl.nome, s.url)}
+                        >
+                          {s.rotulo}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="help help-warn">
+                    ⚠️ Apontar esta URL para um host que você não controla envia a credencial nativa do
+                    CLI para ele. Só use um servidor local ou um destino em que você confia.
                   </div>
-                )}
-                <div className="help help-warn">
-                  ⚠️ Apontar esta URL para um host que você não controla envia a credencial nativa
-                  do CLI para ele. Só use um servidor local ou um destino em que você confia.
                 </div>
-              </div>
               )}
 
               {campoChave && (
-              <div className="field">
-                <label htmlFor="api-key">
-                  {campoChave.rotulo} <code>{campoChave.nome}</code>
-                </label>
-                <div className="budget-input-wrap">
-                  <input
-                    id="api-key"
-                    type={mostrarChaveApi ? 'text' : 'password'}
-                    disabled={bloqueado}
-                    placeholder="ollama"
-                    value={envDoAgente[campoChave.nome] ?? ''}
-                    onChange={(e) => mudarEnv(agenteSelecionado, campoChave.nome, e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={bloqueado}
-                    onClick={() => setMostrarChaveApi((v) => !v)}
-                    title={mostrarChaveApi ? 'Ocultar chave' : 'Mostrar chave'}
-                  >
-                    {mostrarChaveApi ? '🙈' : '👁️'}
-                  </button>
+                <div className="field">
+                  <label htmlFor="api-key">
+                    {campoChave.rotulo} <code>{campoChave.nome}</code>
+                  </label>
+                  <div className="budget-input-wrap">
+                    <input
+                      id="api-key"
+                      type={mostrarChaveApi ? 'text' : 'password'}
+                      disabled={bloqueado}
+                      placeholder="ollama"
+                      value={envDoAgente[campoChave.nome] ?? ''}
+                      onChange={(e) => mudarEnv(agenteSelecionado, campoChave.nome, e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="ghost"
+                      disabled={bloqueado}
+                      onClick={() => setMostrarChaveApi((v) => !v)}
+                      title={mostrarChaveApi ? 'Ocultar chave' : 'Mostrar chave'}
+                    >
+                      {mostrarChaveApi ? '🙈' : '👁️'}
+                    </button>
+                  </div>
+                  <div className="help help-warn">
+                    ⚠️ Fica gravada em <strong>texto puro</strong> no banco do Hub desta máquina (fora do
+                    repositório). Para um servidor local (Ollama, LM Studio) que aceita qualquer valor,
+                    prefira um texto qualquer como <code>ollama</code> — não uma chave de verdade. Se
+                    precisar de uma chave real, prefira o login nativo do CLI ou o ambiente do próprio
+                    daemon em vez de gravar aqui.
+                  </div>
                 </div>
-                <div className="help help-warn">
-                  ⚠️ Fica gravada em <strong>texto puro</strong> no banco do Hub desta máquina
-                  (fora do repositório). Para um servidor local (Ollama, LM Studio) que aceita
-                  qualquer valor, prefira um texto qualquer como <code>ollama</code> — não uma
-                  chave de verdade. Se precisar de uma chave real, prefira o login nativo do CLI
-                  ou o ambiente do próprio daemon em vez de gravar aqui.
-                </div>
-              </div>
               )}
 
               {/* Só aparece quando o CLI aceita modelo por invocação
@@ -522,8 +521,8 @@ export function SettingsView({
                   {campoModelo.viaFlag && (
                     <div className="help">
                       Vai ao CLI como flag de modelo do manifesto
-                      {campoModelo.formato ? <> — formato: {campoModelo.formato}</> : null}. Vazio: o
-                      CLI usa o modelo padrão dele. Não pode começar com <code>-</code>.
+                      {campoModelo.formato ? <> — formato: {campoModelo.formato}</> : null}. Vazio: o CLI
+                      usa o modelo padrão dele. Não pode começar com <code>-</code>.
                     </div>
                   )}
                 </div>
@@ -538,8 +537,8 @@ export function SettingsView({
                       {p}*
                     </code>
                   ))}
-                  . Aceito não quer dizer lido: cada CLI só obedece às variáveis que conhece — as
-                  que o Hub sabe que <strong>{agenteSelecionado}</strong> lê já estão acima.
+                  . Aceito não quer dizer lido: cada CLI só obedece às variáveis que conhece — as que o
+                  Hub sabe que <strong>{agenteSelecionado}</strong> lê já estão acima.
                 </div>
 
                 {extras.length > 0 && (
@@ -550,8 +549,8 @@ export function SettingsView({
                         <span className="valor-env-extra">{valorParaExibir(chave, valor)}</span>
                         {!variavelDocumentadaNoManifesto(chave) && (
                           <span className="aviso-inline">
-                            ⚠️ nada indica que "{agenteSelecionado}" leia esta variável — pode não
-                            ter efeito
+                            ⚠️ nada indica que "{agenteSelecionado}" leia esta variável — pode não ter
+                            efeito
                           </span>
                         )}
                         <button
@@ -591,26 +590,24 @@ export function SettingsView({
                 </div>
                 {novaChave.trim() !== '' && !chaveEhPermitida(novaChave) && (
                   <div className="aviso-inline">
-                    ⚠️ "{novaChave}" não bate com nenhum prefixo permitido — o daemon vai recusar
-                    esta variável ao salvar.
+                    ⚠️ "{novaChave}" não bate com nenhum prefixo permitido — o daemon vai recusar esta
+                    variável ao salvar.
                   </div>
                 )}
                 {novaChave.trim() !== '' && chaveEhBaseUrl(novaChave) && (
                   <div className="help help-warn">
-                    ⚠️ Redirecionar esta URL pode enviar a credencial nativa do CLI (já
-                    autenticado localmente) para um endpoint que você não controla — o atacante
-                    recebe a chave/token de sessão e ainda pode forjar a resposta do modelo. Só
-                    aponte para um servidor local (Ollama, LM Studio, vLLM) ou outro destino em que
-                    você confia.
+                    ⚠️ Redirecionar esta URL pode enviar a credencial nativa do CLI (já autenticado
+                    localmente) para um endpoint que você não controla — o atacante recebe a chave/token
+                    de sessão e ainda pode forjar a resposta do modelo. Só aponte para um servidor local
+                    (Ollama, LM Studio, vLLM) ou outro destino em que você confia.
                   </div>
                 )}
               </div>
 
               <p className="card-nota">
                 Só variáveis de provedor são aceitas. O arquivo do projeto é versionado, então um
-                repositório clonado poderia trazer <code>NODE_OPTIONS</code> ou <code>PATH</code> e
-                virar execução de código na sua máquina — o daemon descarta essas na entrada e ao
-                gravar.
+                repositório clonado poderia trazer <code>NODE_OPTIONS</code> ou <code>PATH</code> e virar
+                execução de código na sua máquina — o daemon descarta essas na entrada e ao gravar.
               </p>
             </div>
           )}
@@ -692,14 +689,16 @@ function ChipsDeAgente(props: {
  * explica em vez de fingir que ajusta.
  */
 function PainelIsolamento({ agents }: { agents: AgentSummary[] }): React.JSX.Element {
-  const comModo = agents.filter((a) => a.caveats?.some((c) => c.includes('sandbox') || c.includes('permission-mode')));
+  const comModo = agents.filter((a) =>
+    a.caveats?.some((c) => c.includes('sandbox') || c.includes('permission-mode')),
+  );
 
   return (
     <div className="settings-card">
       <h3 className="card-title">Isolamento e permissões</h3>
       <p className="card-desc">
-        O isolamento não se configura aqui: ele vem do <strong>modo da sessão</strong>, escolhido
-        quando você a abre. Cada agente traduz esse modo para a política nativa dele.
+        O isolamento não se configura aqui: ele vem do <strong>modo da sessão</strong>, escolhido quando
+        você a abre. Cada agente traduz esse modo para a política nativa dele.
       </p>
 
       <table className="tabela-modos">
@@ -724,8 +723,8 @@ function PainelIsolamento({ agents }: { agents: AgentSummary[] }): React.JSX.Ele
               <code>semi</code>
             </td>
             <td>
-              Escrita limitada ao diretório da sessão — o worktree isolado, ou a pasta do projeto
-              que você escolheu.
+              Escrita limitada ao diretório da sessão — o worktree isolado, ou a pasta do projeto que
+              você escolheu.
             </td>
           </tr>
           <tr>
@@ -738,9 +737,9 @@ function PainelIsolamento({ agents }: { agents: AgentSummary[] }): React.JSX.Ele
       </table>
 
       <p className="card-nota">
-        Hoje {comModo.length} de {agents.length} agentes têm essa tradução declarada no manifesto.
-        Nos demais, o modo do Hub governa a política do Hub — vigilância, orçamento e o portão de
-        delegação — mas não impõe nada ao próprio agente.
+        Hoje {comModo.length} de {agents.length} agentes têm essa tradução declarada no manifesto. Nos
+        demais, o modo do Hub governa a política do Hub — vigilância, orçamento e o portão de delegação —
+        mas não impõe nada ao próprio agente.
       </p>
     </div>
   );

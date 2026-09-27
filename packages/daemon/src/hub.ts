@@ -17,6 +17,7 @@ import { loadConfig, type HubConfig } from './config.js';
 import { AdoptedRootLeases } from './adopted-leases.js';
 import { EventRetentionCompactor } from './event-retention.js';
 import { WorktreeReaper } from './reaper.js';
+import { encerradorDoProcesso } from './safety-net.js';
 import { HubServer } from './server.js';
 import { SessionManager } from './session-manager.js';
 import { WorktreeManager } from './worktree.js';
@@ -194,11 +195,9 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
   };
 
   // O daemon pode ser encerrado pela API (`hub stop`), já que também sabe subir
-  // sozinho quando alguém precisa dele.
-  server.onShutdown = async () => {
-    await hub.shutdown();
-    process.exit(0);
-  };
+  // sozinho quando alguém precisa dele. Sai mesmo que o desligamento rejeite
+  // (antes: rejeição sem dono e daemon meio desligado segurando a porta).
+  server.onShutdown = encerradorDoProcesso(() => hub.shutdown());
 
   return hub;
 }

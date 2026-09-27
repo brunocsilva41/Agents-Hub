@@ -47,9 +47,7 @@ const MASK = '***';
  * painel o nome do parâmetro já diz tudo que o usuário precisa.
  */
 export function redactUrl(value: string): string {
-  return value
-    .replace(/\/\/[^/@\s]*@/, `//${MASK}@`)
-    .replace(/([?&#][^=&#\s]*=)[^&#\s]*/g, `$1${MASK}`);
+  return value.replace(/\/\/[^/@\s]*@/, `//${MASK}@`).replace(/([?&#][^=&#\s]*=)[^&#\s]*/g, `$1${MASK}`);
 }
 
 /** Nome de flag/variável/cabeçalho que costuma carregar credencial. */
@@ -172,7 +170,9 @@ export function looksLikeSecret(text: string): boolean {
 }
 
 function urlHasCredential(value: string): boolean {
-  return /\/\/[^/@\s]+@/.test(value) || /[?&](?:key|token|api_key|apikey|access_token|secret)=/i.test(value);
+  return (
+    /\/\/[^/@\s]+@/.test(value) || /[?&](?:key|token|api_key|apikey|access_token|secret)=/i.test(value)
+  );
 }
 
 // ---------------------------------------------------------------- descoberta
@@ -262,9 +262,7 @@ export class DiscoveryService {
     const out: AgentDiscovery[] = [];
     // Em lotes de 2: mesma razão de `probeAll` (subir vários .exe juntos no Windows).
     for (let i = 0; i < ids.length; i += 2) {
-      out.push(
-        ...(await Promise.all(ids.slice(i, i + 2).map((id) => this.one(id, refresh)))),
-      );
+      out.push(...(await Promise.all(ids.slice(i, i + 2).map((id) => this.one(id, refresh)))));
     }
     return out;
   }
@@ -386,7 +384,10 @@ export class ImportService {
       try {
         if (!statSync(file.path).isFile()) throw new Error('não é arquivo');
         const text = readFileSync(file.path, 'utf8').trim();
-        if (text.length > 0) parts.push(found.instructionFiles.length > 1 ? `# ${path.basename(file.path)}\n\n${text}` : text);
+        if (text.length > 0)
+          parts.push(
+            found.instructionFiles.length > 1 ? `# ${path.basename(file.path)}\n\n${text}` : text,
+          );
       } catch {
         skipped.push({ what: `instructions:${path.basename(file.path)}`, reason: 'arquivo ilegível' });
       }
@@ -465,7 +466,10 @@ export class ImportService {
       // 1) lista de permissão — a MESMA que vale para o config.yaml do projeto
       const { aceitas: ok } = filtrarEnvDeProjeto({ [nome]: valor });
       if (!(nome in ok)) {
-        skipped.push({ what: `env:${nome}`, reason: 'fora da lista de permissão de ambiente do projeto' });
+        skipped.push({
+          what: `env:${nome}`,
+          reason: 'fora da lista de permissão de ambiente do projeto',
+        });
         continue;
       }
       // 2) nunca segredo: o arquivo destino é versionado
@@ -503,7 +507,10 @@ export class ImportService {
   ): void {
     const origem = found.mcpServers.filter((s) => !s.isHub && s.name !== 'agents-hub');
     if (origem.length === 0) {
-      skipped.push({ what: 'mcp', reason: 'nenhum servidor MCP (além do próprio Hub) descoberto na origem' });
+      skipped.push({
+        what: 'mcp',
+        reason: 'nenhum servidor MCP (além do próprio Hub) descoberto na origem',
+      });
       return;
     }
 
@@ -520,7 +527,8 @@ export class ImportService {
       if (!target.verified) {
         skipped.push({
           what: `mcp → ${destino}`,
-          reason: 'caminho/formato de config MCP não confirmado para este agente; não gravamos em palpite',
+          reason:
+            'caminho/formato de config MCP não confirmado para este agente; não gravamos em palpite',
         });
         continue;
       }
@@ -544,7 +552,10 @@ export class ImportService {
         }
         const portavel = toPortable(s);
         if (!portavel) {
-          skipped.push({ what: rotulo, reason: `transporte "${s.transport}" sem comando/url utilizável` });
+          skipped.push({
+            what: rotulo,
+            reason: `transporte "${s.transport}" sem comando/url utilizável`,
+          });
           continue;
         }
         if (portavel.transport === 'sse' && target.format === 'toml-codex') {
@@ -560,7 +571,11 @@ export class ImportService {
             for (const nome of nomesEnv) {
               const v = reais[nome];
               if (typeof v === 'string' && v.length > 0 && v !== MASK) copia[nome] = v;
-              else skipped.push({ what: `${rotulo} env:${nome}`, reason: 'valor não encontrado na origem; não copiado' });
+              else
+                skipped.push({
+                  what: `${rotulo} env:${nome}`,
+                  reason: 'valor não encontrado na origem; não copiado',
+                });
             }
             if (Object.keys(copia).length > 0) {
               portavel.env = copia;
@@ -602,7 +617,9 @@ export class ImportService {
 
 function toPortable(s: AgentDiscovery['mcpServers'][number]): PortableMcpServer | null {
   if (s.transport === 'stdio') {
-    return s.command ? { name: s.name, transport: 'stdio', command: s.command, args: s.args ?? [] } : null;
+    return s.command
+      ? { name: s.name, transport: 'stdio', command: s.command, args: s.args ?? [] }
+      : null;
   }
   if (s.transport === 'http' || s.transport === 'sse') {
     return s.url ? { name: s.name, transport: s.transport, url: s.url } : null;

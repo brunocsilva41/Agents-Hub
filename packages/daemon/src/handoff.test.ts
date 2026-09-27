@@ -87,7 +87,9 @@ defaults:
     await hub.shutdown();
     try {
       rmSync(raiz, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // limpeza de diretório temporário: se falhar, o SO recolhe depois
+    }
   });
 
   test('transfere o controle da sessão para outro agente e emite evento session.handoff', async () => {

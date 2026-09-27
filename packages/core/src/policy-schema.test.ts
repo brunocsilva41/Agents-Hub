@@ -82,7 +82,10 @@ describe('R09-12: faixas e chaves da política', () => {
       ...DEFAULT_POLICY,
       risk: { read: 'allow' } as PolicyDocument['risk'],
     });
-    const filho = pai.intersect({ ...DEFAULT_POLICY, risk: { ...DEFAULT_POLICY.risk, escalate: 'allow' } });
+    const filho = pai.intersect({
+      ...DEFAULT_POLICY,
+      risk: { ...DEFAULT_POLICY.risk, escalate: 'allow' },
+    });
     assert.equal(filho.policy.risk.escalate, 'approve');
     assert.equal(filho.policy.risk.irreversible, 'approve');
   });

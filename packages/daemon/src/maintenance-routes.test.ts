@@ -55,7 +55,10 @@ describe('POST /maintenance/backup', () => {
   const post = (corpo: unknown, token?: string) =>
     fetch(`${base}/maintenance/backup`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(corpo),
     });
 

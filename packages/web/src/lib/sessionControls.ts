@@ -72,7 +72,8 @@ export function deriveControls(input: {
       : off(state === 'paused' ? 'já está pausada' : 'nenhum turno em andamento');
 
   return {
-    interrupt: ocupado ?? (turnoVivo ? on : state === 'paused' ? off('nenhum turno em andamento') : semTurno),
+    interrupt:
+      ocupado ?? (turnoVivo ? on : state === 'paused' ? off('nenhum turno em andamento') : semTurno),
     pause: ocupado ?? (turnoVivo ? on : semTurno),
     handoff: ocupado ?? (hasHandoffTarget ? on : off('nenhum outro agente instalado')),
     cancel: ocupado ?? on,

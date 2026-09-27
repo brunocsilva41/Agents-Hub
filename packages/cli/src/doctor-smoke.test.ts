@@ -120,7 +120,10 @@ function montarDaemonFalso(): { server: Server; sessions: Map<string, SessaoFals
           }
 
           // GET /sessions/:id
-          send(200, { session: sessaoDto(id, fake.agentId, fake.nativeSessionId, fake.taskState), live: true });
+          send(200, {
+            session: sessaoDto(id, fake.agentId, fake.nativeSessionId, fake.taskState),
+            live: true,
+          });
           return;
         }
 

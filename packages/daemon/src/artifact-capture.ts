@@ -1,4 +1,12 @@
-import { newId, nowIso, type Artifact, type EventEnvelope, type Session, type Task, type UnitOfWork } from '@agents-hub/core';
+import {
+  newId,
+  nowIso,
+  type Artifact,
+  type EventEnvelope,
+  type Session,
+  type Task,
+  type UnitOfWork,
+} from '@agents-hub/core';
 import { captureDiff, loadBaseline, persistDiff } from './diff-capture.js';
 
 /** O que `capturarMudancas` precisa do `SessionManager`, sem precisar dele inteiro. */
@@ -34,10 +42,7 @@ export async function capturarMudancas(
   session: Session,
   task: Task,
 ): Promise<string[]> {
-  const capture = await captureDiff(
-    session.workdir,
-    await loadBaseline(deps.artifactRoot, session.id),
-  );
+  const capture = await captureDiff(session.workdir, await loadBaseline(deps.artifactRoot, session.id));
   if (!capture || capture.empty) return [];
 
   const arquivo = await persistDiff(deps.artifactRoot, session.id, capture);

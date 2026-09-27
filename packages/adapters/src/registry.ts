@@ -4,7 +4,12 @@ import { parse as parseYaml } from 'yaml';
 import { HubError } from '@agents-hub/core';
 import { clearBinCache } from './bin-resolver.js';
 import { ProcessAgentAdapter } from './process-adapter.js';
-import { AgentManifestSchema, type AgentAdapter, type AgentManifest, type ProbeResult } from './types.js';
+import {
+  AgentManifestSchema,
+  type AgentAdapter,
+  type AgentManifest,
+  type ProbeResult,
+} from './types.js';
 
 export function loadManifestFile(file: string): AgentManifest {
   const raw = parseYaml(readFileSync(file, 'utf8')) as unknown;
@@ -215,10 +220,7 @@ export class AgentRegistry {
   }
 
   /** Cadeia de fallback efetiva para uma task, já filtrando o agente que falhou. */
-  fallbackFor(
-    agentId: string,
-    capabilities: Record<string, string[]>,
-  ): string[] {
+  fallbackFor(agentId: string, capabilities: Record<string, string[]>): string[] {
     const manifest = this.get(agentId).manifest;
     const chains = manifest.capabilities
       .map((cap) => capabilities[cap] ?? [])

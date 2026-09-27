@@ -11,7 +11,11 @@ import { startCommand } from './start-cmd.js';
  * daemon REAL isolado, com agentes falsos (custo zero).
  */
 
-const args = (positional: string[], flags: Record<string, string | boolean>) => ({ command: 'start', positional, flags });
+const args = (positional: string[], flags: Record<string, string | boolean>) => ({
+  command: 'start',
+  positional,
+  flags,
+});
 
 describe('hub start (CLI)', () => {
   let h: HubDeTeste;
@@ -42,15 +46,27 @@ describe('hub start (CLI)', () => {
   test('flags inválidas são recusadas ANTES de abrir sessão, com os valores válidos', async () => {
     const antes = quantasSessoes();
     const casos: Array<[Record<string, string | boolean>, RegExp]> = [
-      [{ agent: 'ok', mode: 'autonomus', project: h.projeto }, /--mode inválido: "autonomus" \(válidos: supervised, semi, autonomous\)/],
-      [{ agent: 'ok', isolation: 'bogus', project: h.projeto }, /--isolation inválido: "bogus" \(válidos: worktree, none\)/],
-      [{ agent: 'ok', isolation: 'container', project: h.projeto }, /container ainda não está implementado/],
+      [
+        { agent: 'ok', mode: 'autonomus', project: h.projeto },
+        /--mode inválido: "autonomus" \(válidos: supervised, semi, autonomous\)/,
+      ],
+      [
+        { agent: 'ok', isolation: 'bogus', project: h.projeto },
+        /--isolation inválido: "bogus" \(válidos: worktree, none\)/,
+      ],
+      [
+        { agent: 'ok', isolation: 'container', project: h.projeto },
+        /container ainda não está implementado/,
+      ],
       [{ agent: true, project: h.projeto }, /--agent precisa de um valor/],
       [{ agent: 'ok', project: true }, /--project precisa de um valor/],
     ];
     for (const [flags, esperado] of casos) {
       const c = capturar();
-      await startCommand(h.client, args(['objetivo descritivo o bastante'], flags), { log: c.log, logErro: c.logErro });
+      await startCommand(h.client, args(['objetivo descritivo o bastante'], flags), {
+        log: c.log,
+        logErro: c.logErro,
+      });
       assert.match(c.erros.join('\n'), esperado);
       assert.equal(process.exitCode, 1);
       process.exitCode = undefined;
@@ -60,7 +76,10 @@ describe('hub start (CLI)', () => {
 
   test('agente inexistente é o erro mostrado mesmo com objetivo curto, listando os válidos', async () => {
     const c = capturar();
-    await startCommand(h.client, args(['teste'], { agent: 'nope', project: h.projeto }), { log: c.log, logErro: c.logErro });
+    await startCommand(h.client, args(['teste'], { agent: 'nope', project: h.projeto }), {
+      log: c.log,
+      logErro: c.logErro,
+    });
     const erro = c.erros.join('\n');
     assert.match(erro, /agente "nope" não registrado/);
     assert.match(erro, /ok/);
@@ -70,7 +89,10 @@ describe('hub start (CLI)', () => {
 
   test('objetivo curto com agente válido: mensagem diz o mínimo e dá exemplo', async () => {
     const c = capturar();
-    await startCommand(h.client, args(['teste'], { agent: 'ok', project: h.projeto }), { log: c.log, logErro: c.logErro });
+    await startCommand(h.client, args(['teste'], { agent: 'ok', project: h.projeto }), {
+      log: c.log,
+      logErro: c.logErro,
+    });
     assert.match(c.erros.join('\n'), /objetivo curto demais \("teste"\).*pelo menos 8/);
     assert.equal(process.exitCode, 1);
   });
@@ -80,11 +102,15 @@ describe('hub start (CLI)', () => {
     mkdirSync(sub, { recursive: true });
     const c = capturar();
     const d = await comTeto(
-      startCommand(h.client, args(['responda com a palavra OK'], { agent: 'ok', project: sub, isolation: 'none' }), {
-        log: c.log,
-        logErro: c.logErro,
-        pollMs: 50,
-      }),
+      startCommand(
+        h.client,
+        args(['responda com a palavra OK'], { agent: 'ok', project: sub, isolation: 'none' }),
+        {
+          log: c.log,
+          logErro: c.logErro,
+          pollMs: 50,
+        },
+      ),
       15_000,
       'hub start',
     );
@@ -95,11 +121,15 @@ describe('hub start (CLI)', () => {
   test('sessão que FALHA sai com código 1 e diz o desfecho (antes: exit 0)', async () => {
     const c = capturar();
     const d = await comTeto(
-      startCommand(h.client, args(['faça a tarefa impossível'], { agent: 'sozinho', project: h.projeto, isolation: 'none' }), {
-        log: c.log,
-        logErro: c.logErro,
-        pollMs: 50,
-      }),
+      startCommand(
+        h.client,
+        args(['faça a tarefa impossível'], { agent: 'sozinho', project: h.projeto, isolation: 'none' }),
+        {
+          log: c.log,
+          logErro: c.logErro,
+          pollMs: 50,
+        },
+      ),
       15_000,
       'hub start',
     );
@@ -111,11 +141,15 @@ describe('hub start (CLI)', () => {
   test('fallback para outro agente é avisado e acompanhado até o fim (antes: saía calado na 1ª falha)', async () => {
     const c = capturar();
     const d = await comTeto(
-      startCommand(h.client, args(['faça a tarefa com fallback'], { agent: 'flaky', project: h.projeto, isolation: 'none' }), {
-        log: c.log,
-        logErro: c.logErro,
-        pollMs: 50,
-      }),
+      startCommand(
+        h.client,
+        args(['faça a tarefa com fallback'], { agent: 'flaky', project: h.projeto, isolation: 'none' }),
+        {
+          log: c.log,
+          logErro: c.logErro,
+          pollMs: 50,
+        },
+      ),
       20_000,
       'hub start',
     );

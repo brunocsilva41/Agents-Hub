@@ -103,12 +103,16 @@ export function ApprovalHistory({ sessions, projectId, onSelectSession }: Props)
             <li key={i.approvalId} className="sec-item">
               <div className="sec-item-cab">
                 <span className={`sec-badge tom-${i.decisao ? tomDaDecisao(i.decisao) : 'pede'}`}>
-                  {i.decisao ? DECISAO_LABEL[i.decisao] ?? i.decisao : 'pendente'}
+                  {i.decisao ? (DECISAO_LABEL[i.decisao] ?? i.decisao) : 'pendente'}
                 </span>
                 {i.risk && <span className="sec-badge">risco {RISK_LABEL[i.risk] ?? i.risk}</span>}
                 <span className="sec-espaco" />
                 {(i.resolvidoEm ?? i.pedidoEm) && (
-                  <time dateTime={(i.resolvidoEm ?? i.pedidoEm)!} title={(i.resolvidoEm ?? i.pedidoEm)!} className="dim">
+                  <time
+                    dateTime={(i.resolvidoEm ?? i.pedidoEm)!}
+                    title={(i.resolvidoEm ?? i.pedidoEm)!}
+                    className="dim"
+                  >
                     {formatAgo((i.resolvidoEm ?? i.pedidoEm)!)}
                   </time>
                 )}
@@ -122,7 +126,9 @@ export function ApprovalHistory({ sessions, projectId, onSelectSession }: Props)
                 ) : (
                   'sem decisão registrada'
                 )}
-                {i.pedidoPor && <> · pedida por {i.pedidoPor === 'gate' ? 'gate pré-execução' : 'política'}</>}
+                {i.pedidoPor && (
+                  <> · pedida por {i.pedidoPor === 'gate' ? 'gate pré-execução' : 'política'}</>
+                )}
                 {i.sessionId && (
                   <>
                     {' · '}

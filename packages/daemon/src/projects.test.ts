@@ -79,10 +79,7 @@ describe('registro de projeto e pastas', () => {
   test('a pasta principal não pode ser removida', () => {
     const projeto = hub.sessions.registerProject(tmp('principal'), 'p5');
     const [principal] = hub.sessions.listProjectFolders(projeto.id);
-    assert.throws(
-      () => hub.sessions.removeProjectFolder(projeto.id, principal?.id ?? ''),
-      /principal/i,
-    );
+    assert.throws(() => hub.sessions.removeProjectFolder(projeto.id, principal?.id ?? ''), /principal/i);
   });
 
   test('pasta de outro projeto não é removível por aqui', () => {
@@ -91,9 +88,6 @@ describe('registro de projeto e pastas', () => {
     const [pastaDeB] = hub.sessions.listProjectFolders(b.id);
     // Aceitar removeria a pasta de um projeto pelo id de outro — o tipo de
     // brecha que passa despercebida porque o id "existe".
-    assert.throws(
-      () => hub.sessions.removeProjectFolder(a.id, pastaDeB?.id ?? ''),
-      /não pertence/i,
-    );
+    assert.throws(() => hub.sessions.removeProjectFolder(a.id, pastaDeB?.id ?? ''), /não pertence/i);
   });
 });

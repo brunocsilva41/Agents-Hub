@@ -72,8 +72,12 @@ function depsCom(
 ): EffectivePolicyDeps {
   return {
     store: {
-      projects: { get: (id: string) => projects[id] ?? null } as EffectivePolicyDeps['store']['projects'],
-      sessions: { get: (id: string) => sessions[id] ?? null } as EffectivePolicyDeps['store']['sessions'],
+      projects: {
+        get: (id: string) => projects[id] ?? null,
+      } as EffectivePolicyDeps['store']['projects'],
+      sessions: {
+        get: (id: string) => sessions[id] ?? null,
+      } as EffectivePolicyDeps['store']['sessions'],
     },
     globalPolicy: DEFAULT_POLICY,
   };

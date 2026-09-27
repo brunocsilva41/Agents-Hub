@@ -43,11 +43,19 @@ export class EventRetentionCompactor {
 
   start(): void {
     if (this.#timer) return;
-    void this.compact();
-    this.#timer = setInterval(
-      () => void this.compact(),
-      Math.max(1, this.retention.sweepIntervalMinutes) * 60_000,
-    );
+    // Passada do timer: ninguém espera por ela, então a falha (banco ocupado,
+    // disco cheio) é registrada AQUI. Antes era `void this.compact()` — a
+    // rejeição ficava sem dono e caía no `unhandledRejection` genérico, que
+    // culpa "a sessão de origem" por um erro do compactador.
+    const passada = (): void => {
+      this.compact().catch((err: unknown) => {
+        console.error(
+          `[retenção] compactação de eventos falhou: ${(err as Error)?.message ?? String(err)}`,
+        );
+      });
+    };
+    passada();
+    this.#timer = setInterval(passada, Math.max(1, this.retention.sweepIntervalMinutes) * 60_000);
     // Um compactador de banco não pode ser o motivo de o processo não sair.
     this.#timer.unref?.();
   }

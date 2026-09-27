@@ -5,10 +5,7 @@ import { guardRequest } from './guard.js';
 
 const ESPERADO = { host: '127.0.0.1', port: 4747 };
 
-function req(
-  method: string,
-  headers: Record<string, string | undefined>,
-): IncomingMessage {
+function req(method: string, headers: Record<string, string | undefined>): IncomingMessage {
   return { method, headers } as unknown as IncomingMessage;
 }
 

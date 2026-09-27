@@ -27,7 +27,10 @@ describe('validarWorkflowYaml', () => {
     assert.equal(v.valid, true, JSON.stringify(v.errors));
     assert.deepEqual(v.executionOrder, [['plano'], ['execucao']]);
     assert.equal(v.workflow?.name, 'plano-e-execucao');
-    assert.deepEqual(v.workflow?.steps.map((s) => s.dependsOn), [[], ['plano']]);
+    assert.deepEqual(
+      v.workflow?.steps.map((s) => s.dependsOn),
+      [[], ['plano']],
+    );
   });
 
   test('YAML quebrado vira erro legível, não exceção', () => {
@@ -39,7 +42,10 @@ describe('validarWorkflowYaml', () => {
   test('esquema: aponta o campo que falhou', () => {
     const v = validarWorkflowYaml('name: x\nsteps:\n  - id: a\n    agent: claude\n');
     assert.equal(v.valid, false);
-    assert.ok(v.errors.some((e) => e.startsWith('steps.0.objective')), v.errors.join(' | '));
+    assert.ok(
+      v.errors.some((e) => e.startsWith('steps.0.objective')),
+      v.errors.join(' | '),
+    );
   });
 
   test('ciclo e dependência inexistente são recusados', () => {
@@ -116,13 +122,19 @@ describe('WorkflowRunner', () => {
     const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a', budgetUsd: 3 });
 
     assert.equal(run.state, 'running');
-    assert.deepEqual(run.steps.map((s) => s.state), ['pending', 'pending']);
+    assert.deepEqual(
+      run.steps.map((s) => s.state),
+      ['pending', 'pending'],
+    );
     assert.match(run.id, /^wfr_[a-f0-9]{24}$/);
 
     await ate(() => runner.get(run.id).state !== 'running');
     const fim = runner.get(run.id);
     assert.equal(fim.state, 'completed', JSON.stringify(fim));
-    assert.deepEqual(fim.steps.map((s) => s.state), ['completed', 'completed']);
+    assert.deepEqual(
+      fim.steps.map((s) => s.state),
+      ['completed', 'completed'],
+    );
     assert.equal(fim.steps[0]?.summary, 'feito por claude');
     assert.equal(fim.totalUsd, 0.5);
     assert.ok(fim.endedAt);
@@ -130,7 +142,10 @@ describe('WorkflowRunner', () => {
     assert.deepEqual(inicios, ['claude:ses_f1', 'codex:ses_f2']);
     // Teto repartido: o plano leva o saldo inteiro do seu lote.
     assert.equal(fim.steps[0]?.capUsd, 3);
-    assert.deepEqual(runner.list().map((r) => r.id), [run.id]);
+    assert.deepEqual(
+      runner.list().map((r) => r.id),
+      [run.id],
+    );
   });
 
   test('passo dependente em worktree parte do branch hub/<id> da dependência (baseSessionIds)', async () => {

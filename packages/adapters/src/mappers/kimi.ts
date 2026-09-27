@@ -1,3 +1,4 @@
+import { textoDe } from '@agents-hub/core';
 import type { MappedEvent } from '../types.js';
 import { firstString, numberOf } from './generic.js';
 
@@ -81,9 +82,7 @@ export function kimiMapper(line: unknown): MappedEvent[] {
       return [meta(obj, content, line)];
 
     case 'error':
-      return [
-        { type: 'error', payload: { message: content ?? 'erro do Kimi' }, raw: line },
-      ];
+      return [{ type: 'error', payload: { message: content ?? 'erro do Kimi' }, raw: line }];
 
     default: {
       if (firstString(obj['type']) === 'goal.summary') {
@@ -93,7 +92,7 @@ export function kimiMapper(line: unknown): MappedEvent[] {
             payload: {
               kimiType: 'goal.summary',
               status: obj['status'] ?? null,
-              text: `Kimi: objetivo ${String(obj['status'] ?? 'sem status')} (${String(obj['turnsUsed'] ?? '?')} turnos)`,
+              text: `Kimi: objetivo ${textoDe(obj['status'], 'sem status')} (${textoDe(obj['turnsUsed'], '?')} turnos)`,
             },
             raw: line,
           },
@@ -117,7 +116,11 @@ function meta(obj: Record<string, unknown>, content: string | undefined, line: u
     const versao = firstString(obj['version']);
     event = {
       type: 'log',
-      payload: { kimiType: tipo, version: versao ?? null, text: `Kimi ${versao ?? '(versão desconhecida)'}` },
+      payload: {
+        kimiType: tipo,
+        version: versao ?? null,
+        text: `Kimi ${versao ?? '(versão desconhecida)'}`,
+      },
       raw: line,
     };
   } else {

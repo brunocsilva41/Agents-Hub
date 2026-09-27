@@ -15,10 +15,7 @@ const workdir = path.resolve('/tmp/hub/worktree');
 
 describe('resumo da chamada para a fila de aprovações', () => {
   test('shell mostra o comando, que é o que decide a aprovação', () => {
-    assert.equal(
-      resumoDaChamada('Bash', { command: 'git push origin main' }),
-      'git push origin main',
-    );
+    assert.equal(resumoDaChamada('Bash', { command: 'git push origin main' }), 'git push origin main');
   });
 
   test('escrita mostra o caminho', () => {
@@ -155,10 +152,7 @@ describe('o gate concorda com a vigilância reativa', () => {
   const engine = new PolicyEngine(DEFAULT_POLICY);
 
   test('git push é barrado nos dois caminhos', () => {
-    const [acao] = actionsOfToolCall(
-      { toolName: 'Bash', toolInput: { command: 'git push' } },
-      workdir,
-    );
+    const [acao] = actionsOfToolCall({ toolName: 'Bash', toolInput: { command: 'git push' } }, workdir);
     assert.ok(acao);
     const v = engine.decide(acao, { workdir, mode: 'semi' });
     assert.equal(v.risk, 'irreversible');

@@ -119,13 +119,7 @@ export async function imagemDoProcesso(pid: number): Promise<string | null> {
   }
 
   try {
-    const { stdout } = await execFileAsync('tasklist', [
-      '/FI',
-      `PID eq ${pid}`,
-      '/FO',
-      'CSV',
-      '/NH',
-    ]);
+    const { stdout } = await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH']);
     const linha = stdout.trim().split(/\r?\n/)[0] ?? '';
     // Sem processo casando, o `tasklist` imprime "INFO: No tasks..." em vez
     // de CSV — não começa com aspas.
@@ -160,18 +154,12 @@ export async function imagemDoProcesso(pid: number): Promise<string | null> {
  * `bin`), não um "node genérico" — e a checagem de horário de criação do PID
  * em `#matarOrfao` continua valendo por cima.
  */
-export function imagemPareceEsperada(
-  imagem: string,
-  bin: string,
-  executavelSpawnado?: string,
-): boolean {
+export function imagemPareceEsperada(imagem: string, bin: string, executavelSpawnado?: string): boolean {
   const nome = imagem.toLowerCase().replace(/\.exe$/, '');
   const alvo = bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, '');
   if (nome === alvo) return true;
   if (executavelSpawnado) {
-    const spawnado = (executavelSpawnado.split(/[\\/]/).pop() ?? '')
-      .toLowerCase()
-      .replace(/\.exe$/, '');
+    const spawnado = (executavelSpawnado.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.exe$/, '');
     if (nome === spawnado) return true;
   }
   return ['cmd', 'sh', 'bash'].includes(nome);

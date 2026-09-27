@@ -60,7 +60,7 @@ export function useDialog(
 
     // Fundo inerte: tudo que é irmão do backdrop. Toasts ficam de fora — um
     // erro precisa continuar dispensável com o modal aberto.
-    const camada = (dialogo.closest('.modal-backdrop, .cmd-backdrop') as HTMLElement | null) ?? dialogo;
+    const camada = dialogo.closest('.modal-backdrop, .cmd-backdrop') ?? dialogo;
     const inertizados: HTMLElement[] = [];
     for (const irmao of Array.from(camada.parentElement?.children ?? [])) {
       if (irmao === camada || !(irmao instanceof HTMLElement)) continue;

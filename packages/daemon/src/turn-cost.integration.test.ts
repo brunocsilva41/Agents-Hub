@@ -118,7 +118,12 @@ function copilotStream(sessionId: string, nano: number): unknown[] {
       timestamp: '2026-09-25T04:06:47.006Z',
       sessionId,
       exitCode: 0,
-      usage: { premiumRequests: 1, totalApiDurationMs: 9122, sessionDurationMs: 78000, codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] } },
+      usage: {
+        premiumRequests: 1,
+        totalApiDurationMs: 9122,
+        sessionDurationMs: 78000,
+        codeChanges: { linesAdded: 0, linesRemoved: 0, filesModified: [] },
+      },
     },
   ];
 }
@@ -293,8 +298,11 @@ process.stdin.on('end', () => {
       .listEvents(sessionId)
       .find((e) => e.payload['kind'] === 'custo.turno.fechado');
     assert.ok(fechamento, 'o turno sem custo final fecha a conta num evento próprio');
-    assert.ok(Math.abs((fechamento!.cost?.credits ?? 0) - 0.5298219) < 1e-9);
-    assert.equal(hub.store.sessions.get(sessionId)?.nativeSessionId, '3b14c0e2-bab4-4fc0-85e4-5367868c2838');
+    assert.ok(Math.abs((fechamento.cost?.credits ?? 0) - 0.5298219) < 1e-9);
+    assert.equal(
+      hub.store.sessions.get(sessionId)?.nativeSessionId,
+      '3b14c0e2-bab4-4fc0-85e4-5367868c2838',
+    );
 
     const budget = hub.sessions.budget(started.session.rootId);
     assert.ok(Math.abs(budget.consumed.usd - 0.005298219) < 1e-9, `orçamento: ${budget.consumed.usd}`);
@@ -304,7 +312,7 @@ process.stdin.on('end', () => {
     // só os 0,53 novos.
     const sessao = hub.store.sessions.get(sessionId);
     assert.ok(sessao);
-    const base = baseDoAcumulado(hub.store, sessao!);
+    const base = baseDoAcumulado(hub.store, sessao);
     assert.ok(Math.abs(base.usd - 0.005298219) < 1e-9, `base US$ ${base.usd}`);
     const custos = new TurnCostTracker(base);
     for (const linha of copilotStream('3b14c0e2-bab4-4fc0-85e4-5367868c2838', 1059643800)) {

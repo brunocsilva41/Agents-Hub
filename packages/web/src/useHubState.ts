@@ -258,16 +258,19 @@ export function useHubState(): HubState {
       }
       return history.events(sessionId);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `historyVersion` troca a identidade de propósito (ver acima)
     [history, historyVersion],
   );
 
   const eventsFailedFor = useCallback(
     (sessionId: string) => history.history(sessionId).status === 'failed',
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `historyVersion` troca a identidade de propósito (ver acima)
     [history, historyVersion],
   );
 
   const historyOf = useCallback(
     (sessionId: string) => history.history(sessionId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `historyVersion` troca a identidade de propósito (ver acima)
     [history, historyVersion],
   );
 
@@ -275,7 +278,7 @@ export function useHubState(): HubState {
   const retryEvents = useCallback((sessionId: string) => history.retry(sessionId), [history]);
 
   const revisionOf = useCallback(
-    (rootId: string | null) => revision + (rootId ? rootRevisions[rootId] ?? 0 : 0),
+    (rootId: string | null) => revision + (rootId ? (rootRevisions[rootId] ?? 0) : 0),
     [revision, rootRevisions],
   );
 
@@ -515,9 +518,7 @@ export interface TimelineStatus {
  */
 export function timelineStatus(state: HubState, sessionIds: readonly string[]): TimelineStatus {
   const entries = sessionIds.map((id) => [id, state.historyOf(id)] as const);
-  const retries = entries
-    .map(([, h]) => h.nextRetryAt)
-    .filter((t): t is number => t !== null);
+  const retries = entries.map(([, h]) => h.nextRetryAt).filter((t): t is number => t !== null);
   return {
     loading: entries.some(([, h]) => h.status === 'idle' || h.status === 'loading'),
     failed: entries.some(([, h]) => h.status === 'failed'),

@@ -14,7 +14,7 @@ import {
   parseWorkflow,
   runWorkflow,
   validateWorkflow,
-  type UpstreamResult,
+  textoDe,
   type WorkflowRunDeps,
 } from '@agents-hub/core';
 import type { CallerIdentity } from './caller.js';
@@ -133,9 +133,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
     async ({ capability, verbose }): Promise<ToolResult> => {
       try {
         const { agents } = await client.agents();
-        const filtered = capability
-          ? agents.filter((a) => a.capabilities.includes(capability))
-          : agents;
+        const filtered = capability ? agents.filter((a) => a.capabilities.includes(capability)) : agents;
 
         if (filtered.length === 0) {
           return ok(`nenhum agente com a capability "${capability ?? ''}"`);
@@ -180,13 +178,14 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'de forma autossuficiente. Use "cap:<capability>" no lugar do id para deixar o ' +
         'Hub escolher o agente (ex.: "cap:test-writing").',
       inputSchema: {
-        agent: z
-          .string()
-          .describe('id do agente (ex.: "codex", "claude") ou "cap:<capability>"'),
+        agent: z.string().describe('id do agente (ex.: "codex", "claude") ou "cap:<capability>"'),
         objective: z
           .string()
           .min(8)
-          .max(LIMITE_OBJETIVO, `objetivo acima de ${LIMITE_OBJETIVO} caracteres: resuma e aponte arquivos em "artifacts"`)
+          .max(
+            LIMITE_OBJETIVO,
+            `objetivo acima de ${LIMITE_OBJETIVO} caracteres: resuma e aponte arquivos em "artifacts"`,
+          )
           .describe('a tarefa, no imperativo e autossuficiente. Um objetivo por chamada'),
         acceptance_criteria: z
           .array(itemCurto)
@@ -384,7 +383,10 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
             );
           }
           await sleep(
-            Math.min(intervalMs, deadline === Infinity ? intervalMs : Math.max(0, deadline - Date.now())),
+            Math.min(
+              intervalMs,
+              deadline === Infinity ? intervalMs : Math.max(0, deadline - Date.now()),
+            ),
             signal,
           );
           intervalMs = Math.min(intervalMs * 1.4, 10_000);
@@ -583,7 +585,9 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         'O agente anterior é interrompido e o novo agente assume a sessão com todo o histórico acumulado como contexto.',
       inputSchema: {
         session_id: idArg('ses').describe('id da sessão a ser transferida'),
-        target_agent: z.string().describe('id ou capability do agente de destino (ex: "codex" ou "cap:refactor")'),
+        target_agent: z
+          .string()
+          .describe('id ou capability do agente de destino (ex: "codex" ou "cap:refactor")'),
         reason: z.string().optional().describe('motivo da transferência para constar no contexto'),
       },
       annotations: { destructiveHint: true, openWorldHint: true },
@@ -666,10 +670,7 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
         const rootId = root_id ?? (await scope.chamador()).rootId;
         await scope.exigirRaiz(rootId);
 
-        const [{ graph }, { budget }] = await Promise.all([
-          client.graph(rootId),
-          client.budget(rootId),
-        ]);
+        const [{ graph }, { budget }] = await Promise.all([client.graph(rootId), client.budget(rootId)]);
 
         if (graph.length === 0) return ok('fluxo sem sessões registradas');
         return ok(`${formatGraph(graph)}\n\n${formatBudget(budget)}`);
@@ -691,7 +692,9 @@ export function buildMcpServer(client: HubClient, caller: CallerIdentity): McpSe
       inputSchema: {
         ref: z
           .string()
-          .describe('ex.: "session:ses_abc#event:42" ou "session:ses_abc" (os 200 eventos mais recentes)'),
+          .describe(
+            'ex.: "session:ses_abc#event:42" ou "session:ses_abc" (os 200 eventos mais recentes)',
+          ),
       },
       annotations: { readOnlyHint: true },
     },
@@ -1009,8 +1012,7 @@ function explicarWorkflowInvalido(err: unknown, texto: string): string {
   if (e?.name === 'YAMLParseError' || e?.name === 'YAMLError') {
     const codigo = typeof e.code === 'string' ? ` (${e.code})` : '';
     const inicio = Array.isArray(e.pos) && typeof e.pos[0] === 'number' ? e.pos[0] : null;
-    const onde =
-      inicio === null ? '' : ` na linha ${texto.slice(0, inicio).split(NEWLINE).length}`;
+    const onde = inicio === null ? '' : ` na linha ${texto.slice(0, inicio).split(NEWLINE).length}`;
     return `YAML malformado${onde}${codigo}: corrija a sintaxe e tente de novo`;
   }
   const issues = formatIssues(e?.details);
@@ -1045,8 +1047,11 @@ function formatIssues(details: unknown): string {
   const linhas = issues
     .map((issue) => {
       if (!issue || typeof issue !== 'object') return null;
-      const path = String((issue as { path?: unknown }).path ?? '').trim();
-      const message = String((issue as { message?: unknown }).message ?? '').trim();
+      // O daemon manda `path` já unido ("brief.objective"); uma issue crua do
+      // Zod traz o array — unido do mesmo jeito, não como JSON.
+      const bruto = (issue as { path?: unknown }).path;
+      const path = (Array.isArray(bruto) ? bruto.join('.') : textoDe(bruto)).trim();
+      const message = textoDe((issue as { message?: unknown }).message).trim();
       if (!message) return null;
       return path ? `${path}: ${message}` : message;
     })

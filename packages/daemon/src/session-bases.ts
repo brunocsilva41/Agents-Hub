@@ -40,7 +40,9 @@ export async function resolverBases(
     }
     const ref = `hub/${id}`;
     if (!(await branchExiste(project.path, ref))) {
-      avisos.push(`o branch ${ref} da sessão-base não existe mais — este worktree não recebe o trabalho dela`);
+      avisos.push(
+        `o branch ${ref} da sessão-base não existe mais — este worktree não recebe o trabalho dela`,
+      );
       continue;
     }
     refs.push(ref);

@@ -35,10 +35,6 @@ after(() => {
   clearBinCache();
 });
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Escreve `n` linhas em lotes de `batch`, com um `setTimeout(delayMs)` real
  * entre lotes — produtor "vivo e devagar", mais perto de como um CLI de

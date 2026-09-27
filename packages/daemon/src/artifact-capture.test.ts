@@ -5,7 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { after, describe, test } from 'node:test';
-import { parseBrief, type Artifact, type EventEnvelope, type Session, type Task } from '@agents-hub/core';
+import {
+  parseBrief,
+  type Artifact,
+  type EventEnvelope,
+  type Session,
+  type Task,
+} from '@agents-hub/core';
 import { captureBaseline, saveBaseline } from './diff-capture.js';
 import { capturarMudancas, type CapturarMudancasDeps } from './artifact-capture.js';
 

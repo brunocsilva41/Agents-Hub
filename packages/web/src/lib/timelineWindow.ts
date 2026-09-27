@@ -22,7 +22,10 @@ export interface WindowSlice<T> {
   followKey: string;
 }
 
-export function sliceWindow<T extends { id: string }>(visible: readonly T[], size: number): WindowSlice<T> {
+export function sliceWindow<T extends { id: string }>(
+  visible: readonly T[],
+  size: number,
+): WindowSlice<T> {
   const hidden = Math.max(0, visible.length - size);
   const shown = hidden > 0 ? visible.slice(hidden) : [...visible];
   const last = visible[visible.length - 1];

@@ -25,17 +25,11 @@ function attempt(n: number, agentId: string, error: string | null = 'erro'): Tas
 
 describe('classifyOutcome', () => {
   test('saída limpa é sucesso', () => {
-    assert.equal(
-      classifyOutcome({ reason: 'exit', exitCode: 0, error: null }),
-      'success',
-    );
+    assert.equal(classifyOutcome({ reason: 'exit', exitCode: 0, error: null }), 'success');
   });
 
   test('cancelamento nunca vira retry', () => {
-    assert.equal(
-      classifyOutcome({ reason: 'canceled', exitCode: null, error: null }),
-      'canceled',
-    );
+    assert.equal(classifyOutcome({ reason: 'canceled', exitCode: null, error: null }), 'canceled');
   });
 
   test('run travada no heartbeat é transitória', () => {
@@ -63,7 +57,11 @@ describe('classifyOutcome', () => {
 
 describe('nextStep', () => {
   test('primeira falha transitória tenta de novo no mesmo agente', () => {
-    const step = nextStep({ attempts: [attempt(1, 'claude')], currentAgentId: 'claude' }, 'transient', config);
+    const step = nextStep(
+      { attempts: [attempt(1, 'claude')], currentAgentId: 'claude' },
+      'transient',
+      config,
+    );
     assert.equal(step.kind, 'retry');
     assert.equal(step.kind === 'retry' && step.agentId, 'claude');
     assert.equal(step.kind === 'retry' && step.backoffMs, 1000);
@@ -92,7 +90,11 @@ describe('nextStep', () => {
   });
 
   test('falha permanente pula o retry e vai direto ao fallback', () => {
-    const step = nextStep({ attempts: [attempt(1, 'claude')], currentAgentId: 'claude' }, 'permanent', config);
+    const step = nextStep(
+      { attempts: [attempt(1, 'claude')], currentAgentId: 'claude' },
+      'permanent',
+      config,
+    );
     assert.equal(step.kind, 'fallback');
     assert.equal(step.kind === 'fallback' && step.agentId, 'codex');
   });
@@ -120,7 +122,11 @@ describe('nextStep', () => {
   });
 
   test('cancelamento desiste na hora, mesmo com cadeia disponível', () => {
-    const step = nextStep({ attempts: [attempt(1, 'claude')], currentAgentId: 'claude' }, 'canceled', config);
+    const step = nextStep(
+      { attempts: [attempt(1, 'claude')], currentAgentId: 'claude' },
+      'canceled',
+      config,
+    );
     assert.equal(step.kind, 'give_up');
   });
 

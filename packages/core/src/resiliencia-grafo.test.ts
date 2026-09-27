@@ -98,7 +98,10 @@ describe('R09-19: ciclo de parent_id não some com os nós', () => {
     const roots = buildGraph([no('ses_a', 'ses_b', '2026-01-01'), no('ses_b', 'ses_a', '2026-01-02')]);
     assert.equal(roots.length, 1);
     assert.equal(roots[0]?.sessionId, 'ses_a');
-    assert.deepEqual(roots[0]?.children.map((c) => c.sessionId), ['ses_b']);
+    assert.deepEqual(
+      roots[0]?.children.map((c) => c.sessionId),
+      ['ses_b'],
+    );
     assert.deepEqual(roots[0]?.children[0]?.children, []);
   });
 

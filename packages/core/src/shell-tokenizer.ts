@@ -383,7 +383,9 @@ class Parser {
       return;
     }
     // `$nome`, `$env:NOME` (PowerShell), `$1`, `$@`, `$?`...
-    const m = /^\$(env:[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/.exec(s.slice(this.i));
+    const m = /^\$(env:[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])/.exec(
+      s.slice(this.i),
+    );
     if (m) {
       this.appendDynamic(m[0]);
       this.i += m[0].length;

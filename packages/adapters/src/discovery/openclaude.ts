@@ -21,7 +21,8 @@ export function discoverOpenClaude(ctx: Ctx): void {
   const g = ctx.json(globalJson, 'settings');
   if (g && Array.isArray(g.providerProfiles)) {
     const active = str(g.activeProviderProfileId);
-    const prof = g.providerProfiles.find((p) => isObj(p) && p.id === active);
+    const perfis: unknown[] = g.providerProfiles;
+    const prof = perfis.find((p) => isObj(p) && p.id === active);
     if (isObj(prof)) {
       setDefaults(ctx, { model: prof.model, baseUrl: prof.baseUrl, provider: prof.provider });
       if (hasSecretKey(prof)) ctx.configCred('.openclaude.json providerProfiles (perfil ativo)', true);

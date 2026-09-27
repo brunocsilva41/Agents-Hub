@@ -133,10 +133,17 @@ export function limitarEvento(
  * aconteceu, sem o banco crescer sem limite. O aviso sai uma vez só.
  */
 export class TetoDeSaida {
-  readonly #uso = new Map<string, { eventos: number; bytes: number; avisado: boolean; descartados: number }>();
+  readonly #uso = new Map<
+    string,
+    { eventos: number; bytes: number; avisado: boolean; descartados: number }
+  >();
 
   constructor(
-    private readonly limites: { bytesMax: number; eventosMax: number; textoEconomico: number } = LIMITES_DE_SESSAO,
+    private readonly limites: {
+      bytesMax: number;
+      eventosMax: number;
+      textoEconomico: number;
+    } = LIMITES_DE_SESSAO,
   ) {}
 
   /**
@@ -197,11 +204,9 @@ export function limitarPagina(
   let usados = 0;
   return eventos.map((e) => {
     const estourado = usados >= orcamento;
-    const limitado = estourado
-      ? limitarEvento(e, { textoMax: 512, semRaw: true })
-      : limitarEvento(e);
+    const limitado = estourado ? limitarEvento(e, { textoMax: 512, semRaw: true }) : limitarEvento(e);
     usados += limitado.bytes;
     if (!limitado.truncado && limitado.raw === e.raw) return e;
-    return { ...e, payload: limitado.payload, raw: limitado.raw as EventEnvelope['raw'] };
+    return { ...e, payload: limitado.payload, raw: limitado.raw };
   });
 }

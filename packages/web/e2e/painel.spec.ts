@@ -47,8 +47,12 @@ async function irParaSecao(page: Page, nome: string): Promise<void> {
 }
 
 /** Última escrita (PUT/POST) que o painel mandou ao servidor falso para `caminho`. */
-function ultimaEscrita(caminho: string | RegExp): { method: string; path: string; body: unknown } | undefined {
-  return [...ESCRITAS].reverse().find((e) => (typeof caminho === 'string' ? e.path === caminho : caminho.test(e.path)));
+function ultimaEscrita(
+  caminho: string | RegExp,
+): { method: string; path: string; body: unknown } | undefined {
+  return [...ESCRITAS]
+    .reverse()
+    .find((e) => (typeof caminho === 'string' ? e.path === caminho : caminho.test(e.path)));
 }
 
 async function abrir(page: Page): Promise<void> {
@@ -72,7 +76,11 @@ async function esperarParada(page: Page, seletor: string): Promise<void> {
 }
 
 async function ehGaveta(page: Page, seletor: string): Promise<boolean> {
-  return page.locator(seletor).evaluate((el) => getComputedStyle(el).position === 'absolute' || getComputedStyle(el).position === 'fixed');
+  return page
+    .locator(seletor)
+    .evaluate(
+      (el) => getComputedStyle(el).position === 'absolute' || getComputedStyle(el).position === 'fixed',
+    );
 }
 
 async function selecionarSessao(page: Page, texto: string): Promise<void> {
@@ -113,7 +121,9 @@ for (const vp of VIEWPORTS) {
       await expect(page.getByRole('dialog')).toHaveCount(0);
     });
 
-    test('gavetas: uma fecha a outra, fechadas ficam inertes, abertas não são cobertas', async ({ page }) => {
+    test('gavetas: uma fecha a outra, fechadas ficam inertes, abertas não são cobertas', async ({
+      page,
+    }) => {
       await abrir(page);
       await selecionarSessao(page, 'Refatorar');
       const direitaEhGaveta = await ehGaveta(page, '.col-right');
@@ -141,7 +151,9 @@ for (const vp of VIEWPORTS) {
       }
     });
 
-    test('modal Nova Sessão: nome, foco inicial, foco preso, rodapé visível, Esc e foco de volta', async ({ page }) => {
+    test('modal Nova Sessão: nome, foco inicial, foco preso, rodapé visível, Esc e foco de volta', async ({
+      page,
+    }) => {
       await abrir(page);
       await acionarNaTopbar(page, /Nova Sessão/);
       const dialogo = page.getByRole('dialog');
@@ -185,7 +197,9 @@ for (const vp of VIEWPORTS) {
       }
     });
 
-    test('política: revisar mostra que AFROUXA antes de gravar, e gravar pede confirmação', async ({ page }) => {
+    test('política: revisar mostra que AFROUXA antes de gravar, e gravar pede confirmação', async ({
+      page,
+    }) => {
       ESCRITAS.length = 0;
       await abrir(page);
       await abrirSeguranca(page);
@@ -197,7 +211,9 @@ for (const vp of VIEWPORTS) {
       await page.getByRole('button', { name: 'Revisar alterações' }).click();
       await expect(page.locator('.sec-previa')).toContainText('AFROUXA');
       await expect(page.locator('.sec-previa')).toContainText('risk.irreversible');
-      expect(ultimaEscrita('/policy?dryRun=1')?.body).toEqual({ policy: { risk: { irreversible: 'allow' } } });
+      expect(ultimaEscrita('/policy?dryRun=1')?.body).toEqual({
+        policy: { risk: { irreversible: 'allow' } },
+      });
       expect(ultimaEscrita('/policy'), 'revisar não grava').toBeUndefined();
       // Mudou o texto depois de revisar: gravar volta a exigir revisão.
       await editor.fill('{"risk": {"irreversible": "allow"}, "maxDepth": 2}');
@@ -211,7 +227,9 @@ for (const vp of VIEWPORTS) {
       expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
       await dialogo.getByRole('button', { name: 'Afrouxar e gravar' }).click();
       await expect(dialogo).toHaveCount(0);
-      expect(ultimaEscrita('/policy')?.body).toEqual({ policy: { risk: { irreversible: 'allow' }, maxDepth: 2 } });
+      expect(ultimaEscrita('/policy')?.body).toEqual({
+        policy: { risk: { irreversible: 'allow' }, maxDepth: 2 },
+      });
       await expect(page.locator('.sec-previa')).toContainText('Gravado: isto AFROUXA');
     });
 
@@ -228,7 +246,9 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('.columns')).toBeVisible();
     });
 
-    test('confiança: suspensa, mostra o BASE_URL do repo e confiar exige confirmação', async ({ page }) => {
+    test('confiança: suspensa, mostra o BASE_URL do repo e confiar exige confirmação', async ({
+      page,
+    }) => {
       ESCRITAS.length = 0;
       await abrir(page);
       await abrirSeguranca(page);
@@ -245,7 +265,9 @@ for (const vp of VIEWPORTS) {
       expect(ultimaEscrita('/projects/prj_alfa/trust')?.body).toEqual({ trusted: true });
     });
 
-    test('gate e MCP: timeout antigo, prévia com diff, gravar devolve o base da prévia', async ({ page }) => {
+    test('gate e MCP: timeout antigo, prévia com diff, gravar devolve o base da prévia', async ({
+      page,
+    }) => {
       ESCRITAS.length = 0;
       await abrir(page);
       await abrirSeguranca(page);
@@ -257,7 +279,10 @@ for (const vp of VIEWPORTS) {
       await expect(dialogo.locator('.sec-diff-mais')).toContainText('"timeout": 120');
       await expect(dialogo.locator('.sec-diff-menos')).toContainText('"timeout": 10');
       expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
-      expect(ultimaEscrita('/integrations/claude/hook')?.body).toEqual({ dryRun: true, projectId: 'prj_alfa' });
+      expect(ultimaEscrita('/integrations/claude/hook')?.body).toEqual({
+        dryRun: true,
+        projectId: 'prj_alfa',
+      });
       await dialogo.getByRole('button', { name: 'Gravar no arquivo' }).click();
       await expect(dialogo).toHaveCount(0);
       expect(ultimaEscrita('/integrations/claude/hook')?.body).toEqual({
@@ -297,7 +322,10 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator('.timeline-header .session-title')).toContainText('Rodar a suíte');
 
       // Esc fecha e devolve o foco para quem abriu.
-      const botaoBusca = page.locator('.topbar').getByRole('button', { name: /Buscar/ }).filter({ visible: true });
+      const botaoBusca = page
+        .locator('.topbar')
+        .getByRole('button', { name: /Buscar/ })
+        .filter({ visible: true });
       if ((await botaoBusca.count()) > 0) {
         await botaoBusca.first().focus();
         await page.keyboard.press('Control+k');
@@ -347,7 +375,9 @@ test.describe('tema e cores', () => {
       await abrir(page);
       const definidas = await page.evaluate(() =>
         Array.from({ length: 8 }, (_, i) =>
-          getComputedStyle(document.documentElement).getPropertyValue(`--agent-${i + 1}`).trim(),
+          getComputedStyle(document.documentElement)
+            .getPropertyValue(`--agent-${i + 1}`)
+            .trim(),
         ),
       );
       for (const v of definidas) expect(v, 'variável --agent-N definida').not.toBe('');
@@ -430,7 +460,9 @@ test.describe('Segurança e Configurações (1100px)', () => {
     await expect(page.locator('#modelo')).toHaveCount(0);
   });
 
-  test('estados de erro e vazio têm destaque (.settings-erro/.settings-vazio com CSS)', async ({ page }) => {
+  test('estados de erro e vazio têm destaque (.settings-erro/.settings-vazio com CSS)', async ({
+    page,
+  }) => {
     await abrir(page);
     await acionarNaTopbar(page, /^Configurações/);
     await page.getByLabel('Projeto').selectOption('prj_beta');

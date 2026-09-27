@@ -21,20 +21,24 @@ describe('hub restart', () => {
     let antigoRespondiaNaSubida: boolean | null = null;
     try {
       const { out } = await capturar(() =>
-        restartCommand(primeiro.client, { command: 'restart', positional: [], flags: {} }, {
-          pollMs: 25,
-          start: async () => {
-            antigoRespondiaNaSubida = await responde(primeiro.url);
-            novo.hub = await montarHub('restart', { raiz: primeiro.raiz, porta });
+        restartCommand(
+          primeiro.client,
+          { command: 'restart', positional: [], flags: {} },
+          {
+            pollMs: 25,
+            start: async () => {
+              antigoRespondiaNaSubida = await responde(primeiro.url);
+              novo.hub = await montarHub('restart', { raiz: primeiro.raiz, porta });
+            },
           },
-        }),
+        ),
       );
       assert.equal(antigoRespondiaNaSubida, false, 'a subida esperou o antigo parar');
       assert.ok(novo.hub, 'subiu um daemon novo');
       assert.ok(await responde(primeiro.url), 'e ele responde na mesma porta');
       assert.ok(out.some((l) => l.includes('daemon reiniciado')));
       // O encerramento passou pela rota autenticada e ficou na trilha (mesmo banco).
-      const trilha = novo.hub!.hub.audit.list({ kind: 'daemon.shutdown' });
+      const trilha = novo.hub.hub.audit.list({ kind: 'daemon.shutdown' });
       assert.equal(trilha.length, 1);
       assert.match(trilha[0]!.actor, /^cli:/);
     } finally {
@@ -51,11 +55,15 @@ describe('hub restart', () => {
       const semToken = new HubClient(t.url);
       await assert.rejects(
         () =>
-          restartCommand(semToken, { command: 'restart', positional: [], flags: {} }, {
-            start: async () => {
-              subiu = true;
+          restartCommand(
+            semToken,
+            { command: 'restart', positional: [], flags: {} },
+            {
+              start: async () => {
+                subiu = true;
+              },
             },
-          }),
+          ),
         /token de operador/,
       );
       assert.equal(subiu, false);
@@ -76,7 +84,12 @@ describe('hub restart', () => {
       },
     } as unknown as HubClient;
     await assert.rejects(
-      () => restartCommand(falso, { command: 'restart', positional: [], flags: {} }, { start: async () => undefined }),
+      () =>
+        restartCommand(
+          falso,
+          { command: 'restart', positional: [], flags: {} },
+          { start: async () => undefined },
+        ),
       /2 sessão\(ões\) viva\(s\).*--force/,
     );
     assert.equal(encerrou, false);
@@ -94,11 +107,15 @@ describe('hub restart', () => {
       },
     } as unknown as HubClient;
     const { out } = await capturar(() =>
-      restartCommand(falso, { command: 'restart', positional: [], flags: {} }, {
-        start: async () => {
-          vivo = true;
+      restartCommand(
+        falso,
+        { command: 'restart', positional: [], flags: {} },
+        {
+          start: async () => {
+            vivo = true;
+          },
         },
-      }),
+      ),
     );
     assert.ok(out.some((l) => l.includes('não estava rodando')));
     assert.ok(out.some((l) => l.includes('daemon reiniciado')));
