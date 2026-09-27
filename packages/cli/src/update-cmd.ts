@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -16,9 +16,15 @@ export interface UpdateDeps {
 
 export interface UpdateReport {
   version: string;
-  /** `git` = rodando de um clone; `desconhecido` = sem canal de atualização detectável. */
-  method: 'git' | 'desconhecido';
+  /**
+   * `git` = rodando de um clone; `pacote` = instalado pelo tarball
+   * (`npm i -g agents-hub-<versão>.tgz`); `desconhecido` = sem canal detectável.
+   */
+  method: 'git' | 'pacote' | 'desconhecido';
   repo: string | null;
+  /** Instalado pelo tarball: a pasta `agents-hub` e o prefixo do `npm i -g`. */
+  installRoot: string | null;
+  npmPrefix: string | null;
   branch: string | null;
   commit: string | null;
   upstream: string | null;
@@ -41,6 +47,30 @@ function acharRepo(inicio: string): string | null {
   }
 }
 
+/**
+ * Instalação pelo tarball: a CLI mora em
+ * `<prefixo>/[lib/]node_modules/agents-hub/node_modules/@agents-hub/cli`, e a
+ * raiz tem o `package.json` do pacote `agents-hub` (`scripts/pack-dist.mjs`).
+ */
+function acharInstalacao(packageDir: string): { root: string; prefix: string } | null {
+  const cli = path.resolve(packageDir);
+  const escopo = path.dirname(cli);
+  const nm = path.dirname(escopo);
+  if (path.basename(escopo) !== '@agents-hub' || path.basename(nm) !== 'node_modules') return null;
+  const root = path.dirname(nm);
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { name?: unknown };
+    if (pkg.name !== 'agents-hub') return null;
+  } catch {
+    return null;
+  }
+  // `npm i -g --prefix P`: Windows instala em `P/node_modules`, POSIX em `P/lib/node_modules`.
+  const nmGlobal = path.dirname(root);
+  const acima = path.dirname(nmGlobal);
+  const prefix = path.basename(acima) === 'lib' && process.platform !== 'win32' ? path.dirname(acima) : acima;
+  return { root, prefix };
+}
+
 async function git(repo: string, argv: string[]): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', repo, ...argv], { windowsHide: true, timeout: 60_000 });
@@ -54,9 +84,10 @@ async function git(repo: string, argv: string[]): Promise<string | null> {
  * `hub update [--check] [--json]` — como atualizar, dito com honestidade.
  *
  * Hoje NÃO existe canal de atualização publicado: os pacotes são `private`,
- * sem registro npm nem instalador. O Hub roda de um clone git, então
+ * sem registro npm nem instalador. Rodando de um clone git,
  * "atualizar" é `git pull` + build + reiniciar o daemon (que sobrevive ao
- * terminal e continuaria no código antigo). Este comando diz de onde você está
+ * terminal e continuaria no código antigo); instalado pelo tarball, é
+ * reempacotar no clone e `npm i -g` no mesmo prefixo. Este comando diz de onde você está
  * rodando, se o clone tem mudança local que atrapalha o pull e, com
  * `--check`, quantos commits o remoto tem à frente (`git fetch`, sem mexer
  * no seu branch). Não executa a atualização: `pull` num clone com trabalho seu
@@ -64,11 +95,16 @@ async function git(repo: string, argv: string[]): Promise<string | null> {
  */
 export async function updateCommand(args: Args, deps: UpdateDeps = {}): Promise<UpdateReport> {
   const packageDir = deps.packageDir ?? fileURLToPath(new URL('..', import.meta.url));
-  const repo = acharRepo(packageDir);
+  // Tarball antes de git: um prefixo de instalação dentro de um clone qualquer
+  // não faz do Hub instalado um clone.
+  const instalacao = acharInstalacao(packageDir);
+  const repo = instalacao ? null : acharRepo(packageDir);
   const report: UpdateReport = {
     version: cliVersion(),
-    method: repo ? 'git' : 'desconhecido',
+    method: instalacao ? 'pacote' : repo ? 'git' : 'desconhecido',
     repo,
+    installRoot: instalacao?.root ?? null,
+    npmPrefix: instalacao?.prefix ?? null,
     branch: null,
     commit: null,
     upstream: null,
@@ -78,7 +114,13 @@ export async function updateCommand(args: Args, deps: UpdateDeps = {}): Promise<
     steps: [],
   };
 
-  if (repo) {
+  if (instalacao) {
+    report.steps = [
+      'no seu clone do Agents-Hub: git pull --ff-only && npm ci && npm run build && npm run pack:dist',
+      `npm i -g "<clone>/dist-pack/agents-hub-<versão>.tgz" --prefix "${instalacao.prefix}"`,
+      'hub restart',
+    ];
+  } else if (repo) {
     report.branch = await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']);
     report.commit = await git(repo, ['rev-parse', '--short', 'HEAD']);
     report.upstream = await git(repo, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
@@ -119,7 +161,12 @@ export async function updateCommand(args: Args, deps: UpdateDeps = {}): Promise<
     yellow('não há canal de atualização publicado') +
       dim(' (pacotes privados, sem registro npm nem instalador) — atualizar é manual.'),
   );
-  if (repo) {
+  if (instalacao) {
+    console.log(`${dim('instalado pelo pacote (tarball) em:')} ${bold(instalacao.root)}`);
+    console.log(
+      dim('o `npm i -g` da versão nova substitui no mesmo lugar: hooks e MCP gravados nos agentes continuam valendo.'),
+    );
+  } else if (repo) {
     console.log(`${dim('instalado a partir do clone git:')} ${bold(repo)}`);
     console.log(
       dim(

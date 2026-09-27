@@ -57,6 +57,15 @@ describe('hub import — parsing de argumentos', () => {
     assert.ok(parseTargets(true) instanceof Error);
   });
 
+  test('lista vinda do PowerShell (vírgula vira espaço) é aceita', () => {
+    // `hub import claude --kinds instructions,env --to codex,opencode` sem
+    // aspas: o PowerShell lê `a,b` como array e o repassa ao node como
+    // "a b". Visto seguindo o guia de instalação (item 8.4).
+    assert.deepEqual(parseKinds('instructions env mcp'), ['instructions', 'env', 'mcp']);
+    assert.deepEqual(parseTargets('codex opencode'), ['codex', 'opencode']);
+    assert.deepEqual(parseTargets('codex, opencode codex'), ['codex', 'opencode']);
+  });
+
   test('sem --write é dry-run; com --write não é', () => {
     const plano = buildImportRequest(args(['claude']));
     assert.ok(!(plano instanceof Error));
