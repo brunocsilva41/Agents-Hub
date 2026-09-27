@@ -27,6 +27,7 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 - Onda 2 mesclada; verify 1098/1098; e2e 24/24.
 - INCIDENTE (onda 2): o agente de 4.2/4.4 matou por engano um processo brave.exe (PID 15884) ao limpar processos por padrão de porta. Regra 9 adicionada às instruções dos agentes. Informar o usuário.
 - FLAKE operator-auth: resolvido na onda 3 (ver Fase 7). A hipótese de "outro processo na porta" estava errada.
+- Onda 4 concluída: + painel (f99810f: estados de erro/vazio em todas as telas, e2e 93/93) + correções do teste real (388d34f: gate do Claude/OpenClaude injetado por --settings em TODA sessão do Hub, sem tocar no settings.json do usuário; motivo de falha = evento error do agente; quota/rate_limited; deny de orçamento pós-turno = completed; CLI sem ruído, --verbose). verify 1569/1569 (1 skip POSIX). Não corrigido: tokens do Copilot 1.0.88 (o JSONL não traz mais outputTokens; só AI Credits chegam).
 - Onda 4 (retomada após pausa): mesclados CLI BAIXOs (f33a35f), 8.1, 8.2/8.4, 8.3, MCP escopo (22beb13..7696f71), core/store (3e6d2ec..c7a9447); verify 1527/1527 (1 skip POSIX). Mudança de comportamento: config.json global com chave desconhecida em policy agora impede o daemon de subir (aponta o campo) — mais seguro que ignorar typo.
 - Onda 3 mesclada (9 agentes + investigação do flake); verify 1411/1411; e2e 64/64. Integrações feitas pelo coordenador: teto de concorrência (2.7 × 2.10), start/watch extraídos (5.2) + aviso de modo (2.9), canonização de caminhos (5.5) em cost/init e testes, detach idempotente (2.8 × 6.12a), detecção de hook main.js|bin.js movida ao daemon (5.7 × 6.12b), mcpServerEntrypoint relativo ao pacote.
 - Nota de integração: o teste %E0 da 0.6 passou a esperar MALFORMED_URL (código da 1.8); ambos 400.
@@ -85,7 +86,7 @@ Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL co
 
 ## Fase 7 — Testes/CI
 - [x] 7.1 7.3 — merge ab3a0af; listen(port 0) grava a porta real, testes sem portaLivre, esperas por condição, cobertura de reaper/project-registry/hooks-install/workflow-cmd/daemon-control/client/gate composto, npm run coverage (84,7% linhas), npm audit 0 vulnerabilidades, LICENSE MIT
-- [~] 7.2 — CI com permissions: contents: read, job Linux roda verify (informativo), job de cobertura. Falta ESLint (no-floating-promises) e formatador
+- [~] 7.2 — (ESLint + Prettier + deps em andamento, agente único) CI com permissions: contents: read, job Linux roda verify (informativo), job de cobertura. Falta ESLint (no-floating-promises) e formatador
 - [x] 7.4 — e2e Playwright (Edge local) npm run test:e2e, 64 testes
 - Flake do operator-auth: RESOLVIDO (merge 03f4c4d) — era do teste: o token "quase certo" era o certo quando o aleatório terminava em 0 (1/16); o /shutdown autenticado derrubava o processo. Produto sem falha. Nova operator-routes-table.test.ts percorre TODAS as rotas operator:true
 

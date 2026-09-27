@@ -104,11 +104,11 @@ Como a contagem foi feita:
 | R03-09 | MED | Auto-scroll da timeline para depois de 400 eventos | 6.3 | [x] |
 | R03-10 | MED | Falha ao buscar eventos nunca é repetida (mensagem promete retry) | 6.3 | [x] |
 | R03-11 | MED | "Nova Sessão" pré-seleciona o 1º projeto; perde dados; agente não instalado | 6.9 | [x] |
-| R03-12 | MED | ProjectModal: falha parcial não atualiza lista e "tentar de novo" repete trabalho | — | [ ] |
+| R03-12 | MED | ProjectModal: falha parcial não atualiza lista e "tentar de novo" repete trabalho | — | [x] ProjectModal idempotente (f99810f) |
 | R03-13 | MED | Modais sem Esc, sem foco preso, sem nome; clique no fundo descarta formulário | 6.7 | [x] |
 | R03-14 | MED | Gavetas podem abrir juntas e se sobrepor, focáveis fechadas, cobrem aprovações | 6.7 | [x] |
 | R03-15 | MED | Overflow/quebra de layout em <900 px e <600 px (só 2 breakpoints) | 6.1 | [x] |
-| R03-16 | MED | Estados vazios/erro ausentes ou enganosos | — | [ ] |
+| R03-16 | MED | Estados vazios/erro ausentes ou enganosos | — | [x] estados em todas as telas + e2e (f99810f) |
 | R03-17 | MED | Aba "Grafo DAG" sem arestas, sem teclado e ignora filtro de projeto | 6.9 | [x] |
 | R03-18 | MED | Vite dev: `/discovery` fora do proxy; aba "Agentes detectados" quebra | 6.11 | [x] |
 | R03-19 | MED | Configurações: edições somem sem aviso; "Modelos locais" com controles fantasma | 6.5 | [x] |
@@ -116,11 +116,11 @@ Como a contagem foi feita:
 | R03-21 | BAIXO | Abas com ARIA inválido e controles sem nome acessível | — | [x] ARIA/nomes (9979203) |
 | R03-22 | BAIXO | Contraste de `--text-faint` e ausência de `prefers-reduced-motion` | 6.8 | [x] |
 | R03-23 | BAIXO | Fontes via Google Fonts (`@import`) em painel local | 6.8 | [x] |
-| R03-24 | BAIXO | Fluxo selecionado na lista não pode ser recolhido | — | [ ] |
-| R03-25 | BAIXO | Botões com `margin-left:4px` global e `transform` no hover | — | [ ] |
+| R03-24 | BAIXO | Fluxo selecionado na lista não pode ser recolhido | — | [x] fluxo recolhível |
+| R03-25 | BAIXO | Botões com `margin-left:4px` global e `transform` no hover | — | [x] sem transform no hover |
 | R03-26 | BAIXO | Toasts: fila sem teto e sem "dispensar todos" | 6.9 | [x] |
-| R03-27 | BAIXO | Telemetria rasa e inconsistente com o resto | — | [ ] |
-| R03-28 | BAIXO | Código morto/duplicado e atalho "/" global dispara com modal aberto | — | [ ] |
+| R03-27 | BAIXO | Telemetria rasa e inconsistente com o resto | — | [x] telemetria consistente + custo por agente |
+| R03-28 | BAIXO | Código morto/duplicado e atalho "/" global dispara com modal aberto | — | [x] atalho / respeita modal; código morto removido |
 
 ## R04 — 04-web-ao-vivo.md
 
