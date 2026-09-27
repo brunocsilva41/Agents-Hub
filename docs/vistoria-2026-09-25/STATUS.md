@@ -6,7 +6,7 @@
 
 Última atualização: 2026-09-26, por Claude Opus 5.5 (sessão de execução do GOAL).
 
-## PAUSA (2026-09-27, pedida pelo usuário)
+## PAUSA (2026-09-27, pedida pelo usuário) — RETOMADA no mesmo dia: os 8 agentes foram retomados com contexto (SendMessage), cada um do ponto em que parou
 Onda 4 interrompida no meio: 8 agentes parados, NADA dela mesclado na main. Os worktrees ficam em .claude/worktrees/ com o trabalho parcial (podem ter commits ou mudanças não commitadas):
 - 8.1 docs reconciliadas → worktree-agent-a30e0a2e8e1d1a585
 - 8.2/8.4 SECURITY + guia de instalação → worktree-agent-ab29ef9421e9e3906
