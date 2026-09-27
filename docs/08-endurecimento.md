@@ -175,7 +175,20 @@ do consumo, perdendo a reserva ainda não liquidada.
 
 ### 3.7 🟡 Achados operacionais ainda em aberto
 
-Verificados, não corrigidos. Entram como Fase 5 no roadmap.
+Verificados, não corrigidos **em 2026-09-18**. Entram como Fase 5 no roadmap.
+
+> **Estado em 2026-09-26.** O roadmap (Fase 5, "Restante") registra a correção da maior
+> parte da tabela abaixo; não reconferi cada linha de novo. Os quatro que a vistoria de
+> 2026-09-25 apontou como sem registro:
+> - **#11** (autostart sem `--experimental-sqlite`): **corrigido** no item 5.1 do GOAL —
+>   `packages/cli/src/bin.ts` reexecuta o Node com a flag só no 22.5–22.12 (`node-runtime.ts`).
+> - **#13** (corrida no handoff): **corrigido** no item 2.8 — a run antiga é marcada como
+>   substituída antes do cancel (`session-manager.ts`, comentário "Run antiga marcada como
+>   SUBSTITUÍDA").
+> - **#16** (variáveis não documentadas): **corrigido** — [09](09-variaveis-de-ambiente.md).
+> - **#18** (`catch` que engolem): **aberto** — "83 blocos `catch`" segue `[ ]` no roadmap.
+>
+> Números citados neste documento (arquivos de teste, testes) são de 2026-09-18.
 
 | # | Achado | Evidência |
 |---|---|---|

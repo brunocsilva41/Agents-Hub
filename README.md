@@ -13,11 +13,13 @@ Cada agente é ótimo em algo e cego para o resto. Hoje, fazer um chamar o outro
 | Cada CLI fala um dialeto | Um adapter por agente normaliza tudo para um `EventEnvelope` único |
 | Agentes pisam uns nos outros | Um git worktree isolado por sessão |
 | Delegação vira loop caro | Profundidade máxima + detecção de ciclo semântico + orçamento herdado da raiz |
-| Ninguém sabe o que aconteceu | Todo evento persistido com o payload original, grafo ao vivo e custo por nó |
+| Ninguém sabe o que aconteceu | Todo evento persistido (o bruto do agente por 7 dias, configurável), grafo ao vivo, custo por nó e trilha de auditoria |
 
 ## Estado atual
 
-**Fases 1 e 2 rodando e validadas com agentes reais.** Um agente inicia sessão, produz eventos normalizados, roda isolado num worktree, respeita orçamento, passa por portão de validação — e delega para outro agente, pela CLI, pelo painel ou por MCP. Quando falha, o Hub tenta de novo e depois troca de agente.
+**Fases 1 e 2 rodando.** Um agente inicia sessão, produz eventos normalizados, roda isolado num worktree, respeita orçamento, passa pelo portão de validação quando você o configura — e delega para outro agente, pela CLI, pelo painel ou por MCP. Quando falha, o Hub tenta de novo e depois troca de agente.
+
+O que foi exercido com agente **real** (última rodada: vistoria de 2026-09-25, antes das correções de 2026-09-26): Claude Code, Codex e OpenCode completaram turno de ponta a ponta; o gate barrou `git push` com o Claude e com o Codex; toda delegação real até hoje teve o Codex como destino. Copilot e Antigravity rodaram e **falharam** naquela rodada (prompt truncado; flags incompatíveis com o `agy` 1.2.6) — corrigidos e cobertos por teste, sem nova rodada real ainda (Fase 9 do [GOAL](docs/12-goal-mvp-completo.md)). Kimi, MiMo e OpenClaude têm manifesto conferido só contra `--help`/`--version`; o `cursor-agent` não está instalado nesta máquina e o manifesto dele não foi verificado. A suíte e o `npm run demo` usam agentes falsos. Estado item a item: [docs/vistoria-2026-09-25/STATUS.md](docs/vistoria-2026-09-25/STATUS.md).
 
 ```
 cursor [running]  US$ 0.0000 · 0 tok      ← agente externo, adotado como raiz
@@ -93,14 +95,14 @@ Também disponível no painel, em Configurações → "Agentes detectados". Deta
 
 ## Dar aos seus agentes o poder de chamar os outros
 
-O Hub se expõe como **MCP server** — o único protocolo que os oito CLIs já falam. Registrado uma vez, o Cursor pode chamar o Claude, que chama o Codex.
+O Hub se expõe como **MCP server** — o protocolo que a maioria dos CLIs já fala (o Kimi 2.0.0 não tem MCP; o caminho do MiMo não foi confirmado). Registrado uma vez, o Cursor pode chamar o Claude, que chama o Codex.
 
 ```bash
 hub mcp                        # o que está registrado onde
 hub mcp install codex --write  # grava, com backup e merge
 ```
 
-O agente ganha 11 ferramentas: `hub_agent_call` (delega e volta na hora com um `task_id`), `hub_agent_status`, `hub_agent_wait`, `hub_agent_events`, `hub_agent_cancel`, `hub_session_send`, `hub_graph`, `hub_budget` e mais.
+O agente ganha 16 ferramentas: `hub_agent_call` (delega e volta na hora com um `task_id`), `hub_agent_list`, `hub_agent_status`, `hub_agent_wait`, `hub_agent_events`, `hub_agent_cancel`, `hub_session_list`, `hub_session_send`, `hub_session_interrupt`, `hub_session_pause`, `hub_session_handoff`, `hub_session_diff`, `hub_graph`, `hub_budget`, `hub_context_fetch` e `hub_workflow_run`.
 
 Funciona mesmo com o agente rodando **fora** do Hub: nesse caso o MCP server adota uma sessão-raiz na primeira chamada, para o filho ter pai de quem herdar política e raiz onde debitar orçamento. Detalhes em [docs/03-mcp-e-painel.md](docs/03-mcp-e-painel.md).
 
@@ -117,14 +119,16 @@ npm run web:dev   # opcional: Vite com hot reload em :4748, proxy para o daemon
 ## Arquitetura em uma tela
 
 ```
-CLIENTES     CLI · Web UI  ──────── HTTP + SSE (API única) ───────┐
-TRANSPORTS   MCP server · A2A server (fase 3) · REST/SSE          │
-CORE         Orchestrator · SessionManager · CallGraph            │
-             PolicyEngine · BudgetLedger · CapabilityRegistry     │
-ADAPTERS     claude · codex · opencode · copilot · kimi · mimo    │
-             openclaude · cursor · antigravity (por manifesto)     │
-INFRA        SQLite · WorktreeManager · ProcessHost               ┘
+CLIENTES   CLI (hub) · Web UI ── @agents-hub/client ── HTTP + SSE (API única)
+ENTRADAS   MCP server stdio (16 tools) · REST/SSE do daemon (/api/tasks/* é REST, não A2A)
+DAEMON     SessionManager · gate pré-execução · WorktreeManager · retenção · auditoria
+CORE       PolicyEngine · BudgetLedger · grafo (profundidade/ciclo) · resilience · workflow
+ADAPTERS   genérico por manifesto · OpenCode (HTTP) · mappers claude/codex/copilot/kimi/agy
+           claude · codex · opencode · copilot · kimi · mimo · openclaude · cursor · antigravity
+STORE      SQLite (node:sqlite)
 ```
+
+Não há TUI nem servidor A2A.
 
 Dependências apontam só para baixo. O `core` não conhece adapters nem HTTP — recebe portas injetadas, e por isso dá para testar orquestração, política e orçamento sem invocar nenhum agente.
 
@@ -151,7 +155,7 @@ Só se escreve código quando o agente oferece algo que o genérico não cobre �
 
 ## Segurança
 
-O Hub **nunca** toca nas suas credenciais: cada adapter roda com o login que o próprio CLI já tem. O que ele controla é o resto.
+O Hub não lê os arquivos de credencial dos CLIs: cada adapter roda com o login que o próprio CLI já tem. (Variáveis de ambiente que **você** configura por projeto, como uma chave de API de um provedor local, ficam no banco do Hub — ver [SECURITY.md](SECURITY.md).) O que ele controla é o resto.
 
 - Cada sessão roda num git worktree próprio — agentes não pisam uns nos outros nem nas suas mudanças locais
 - Orçamento é do fluxo inteiro, consumido pelos descendentes: o que um gasta, falta para os outros
@@ -160,7 +164,7 @@ O Hub **nunca** toca nas suas credenciais: cada adapter roda com o login que o p
 - `git push`, `rm -rf`, publish e segredos (ler ou escrever `.ssh`, `.env`, chaves, credenciais de CLI) param a sessão e abrem uma aprovação
 - Comando composto não engana a política: `git status && git push` vale como `git push` (cada segmento é classificado, vence o pior)
 
-Detalhes e níveis de risco em [docs/decisoes/03-seguranca-limites.md](docs/decisoes/03-seguranca-limites.md).
+Detalhes e níveis de risco em [docs/04-resiliencia-e-politica.md](docs/04-resiliencia-e-politica.md); a decisão original em [docs/decisoes/03-seguranca-limites.md](docs/decisoes/03-seguranca-limites.md).
 
 **Três níveis de controle, com garantias diferentes** — e é importante não confundi-los:
 
@@ -177,7 +181,7 @@ hub hooks install claude --write   # registra o hook na config do Claude Code
 hub hooks install codex --write    # liga o bypass de confiança que o hook do Codex exige
 ```
 
-Validado com o Claude Code de verdade: mandado a rodar `git push origin main`, o comando foi **barrado antes de executar** e o Hub registrou o evento de auditoria.
+Validado com o Claude Code de verdade: mandado a rodar `git push origin main`, o comando foi **barrado antes de executar** e o Hub registrou o evento de auditoria. O gate hoje é bloqueante (segura a resposta até 55 s esperando sua decisão; sem resposta, nega só aquela chamada) — esse caminho tem teste de integração, mas ainda não foi exercido contra o binário real. Detalhes em [docs/04](docs/04-resiliencia-e-politica.md#o-gate-pré-execução).
 
 O Codex é um caso à parte: ele **ignora hook não confiável em silêncio** — sem
 `--dangerously-bypass-hook-trust` a cada invocação, a ferramenta roda como se
@@ -209,7 +213,11 @@ hub approve <id>     # libera e a sessão continua
 
 ## Quando um agente falha
 
-O Hub não desiste na primeira: **retry** com backoff no mesmo agente (retomando a sessão nativa, que é mais barato), **fallback** pela cadeia `claude → codex → opencode` levando junto o histórico de falhas, e um **portão de validação** que roda o build/testes do projeto antes de aceitar o resultado — porque "terminou sem erro" e "entregou o que foi pedido" são coisas diferentes.
+O Hub não desiste na primeira: **retry** com backoff no mesmo agente (retomando a sessão nativa, que é mais barato), **fallback** por uma cadeia por capability levando junto o histórico de falhas, e um **portão de validação** que roda o build/testes do projeto antes de aceitar o resultado — porque "terminou sem erro" e "entregou o que foi pedido" são coisas diferentes.
+
+A cadeia padrão (`DEFAULT_POLICY.fallback`, `packages/core/src/policy.ts`) é `claude → codex → opencode → openclaude` para `code-edit`/`refactor`/`test-writing`, `claude → codex → openclaude` para `code-review`/`debug`, `claude → codex` para `planning` e `codex → opencode → openclaude` para `shell`. O `openclaude` entrou por dedução e nunca foi exercitado como fallback real.
+
+**O portão de validação e a revisão por segundo agente vêm desligados** (`validation.command: null`, `review.enabled: false`): sem configurar, o resultado é aceito quando o agente termina sem erro.
 
 O substituto entra como irmão no grafo, não como filho: ele não foi chamado por quem falhou, está no lugar dele.
 
@@ -240,10 +248,14 @@ Cada escolha estrutural está registrada como ADR em [docs/decisoes/](docs/decis
 
 ```bash
 npm run verify     # o que o CI roda: build completo + a suíte inteira
-npm test           # só a suíte — 273 testes em 30 arquivos
+npm test           # só a suíte (node:test)
+npm run test:e2e   # painel no navegador (Playwright), fora do npm test
+npm run demo       # fluxo raiz → filho → neto com agentes falsos
 ```
 
-`npm run verify` é o mesmo comando que o CI executa em Windows com Node 22.5 e 24. Se passa na sua máquina e falha lá, é bug do portão e tem prioridade.
+Medido em 2026-09-26 (Windows, Node 24): `npm test` roda **142 arquivos, 1411 testes, 0 falhas**; `npm run test:e2e --list` lista **64 testes em 2 arquivos**. Os números mudam a cada commit — confira rodando.
+
+O CI (`.github/workflows/ci.yml`) roda os mesmos passos de `npm run verify` em Windows com Node 22.5 e 24 (bloqueante), mais Linux, cobertura e `npm audit` como informativos. O e2e não roda no CI. Se passa na sua máquina e falha lá, é bug do portão e tem prioridade.
 
 A descoberta dos arquivos de teste é feita em JavaScript (`scripts/run-tests.mjs`), não por glob de shell — a forma anterior coletava 30 arquivos no PowerShell e **3** no bash, saindo verde nos dois casos. Um portão que protege menos do que diz proteger é pior que nenhum. A história está em [docs/08-endurecimento.md](docs/08-endurecimento.md).
 

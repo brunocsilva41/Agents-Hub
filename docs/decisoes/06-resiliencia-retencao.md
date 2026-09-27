@@ -46,3 +46,27 @@ executa
   └─ tudo esgotado → state = failed + evento de alta prioridade
                      (fluxo NÃO trava esperando humano)
 ```
+
+## Estado atual (nota de 2026-09-26 — a decisão acima não foi reescrita)
+
+Conferido no código para o item 8.1 do [GOAL](../12-goal-mvp-completo.md). **O exemplo de `config.json` acima está superado e não deve ser copiado**: `retention.events` e `retention.rawPayloads` não existem no schema (`packages/daemon/src/config.ts`), e como o nível superior do `config.json` não é `strict`, seriam ignoradas em silêncio.
+
+- **6.2 Cadeia de fallback** — emendada. `DEFAULT_POLICY.fallback` (`packages/core/src/policy.ts`) tem 7 capabilities e inclui `openclaude` (acrescentado por dedução, **nunca exercitado** como fallback real):
+
+  | Capability | Cadeia |
+  |---|---|
+  | `code-edit`, `refactor`, `test-writing` | claude → codex → opencode → openclaude |
+  | `code-review`, `debug` | claude → codex → openclaude |
+  | `planning` | claude → codex |
+  | `shell` | codex → opencode → openclaude |
+
+  A política de projeto só pode encurtar a cadeia (subconjunto, na ordem), nunca acrescentar agente.
+- **6.3 Retenção** — emendada. "Eventos para sempre" vale para o `payload_json`. O `raw_json` (bruto do agente, só para depurar mapper) é **compactado para `NULL`** `rawEventDays` dias depois do fim da sessão (padrão **7**), pelo `EventRetentionCompactor` (`packages/daemon/src/event-retention.ts`), a cada `sweepIntervalMinutes` (padrão 60), sem `VACUUM`. Worktrees seguem por `worktreeDays` (7), branch `hub/<id>` preservado (o recolhimento commita no branch o trabalho não salvo antes de remover o checkout). A trilha de auditoria (`audit_log`) fica fora dessa retenção. Não há comando de expurgo. Chaves reais:
+
+  ```jsonc
+  {
+    "retention": { "worktreeDays": 7, "sweepIntervalMinutes": 60, "rawEventDays": 7 }
+  }
+  ```
+- **6.4 Modelo por agente** — emendada. O padrão continua sendo o default de cada CLI, mas existe modelo opcional por agente/projeto (variável `MODEL` do env do projeto ou o campo "Modelo" do painel), aplicado só onde o manifesto declara `model.supported: true` com a flag conferida no `--help` ([docs/01 §5](../01-arquitetura.md)).
+- **Pipeline:** "critérios de aceite do brief" não são checados por heurística; ver a nota do ADR 04.

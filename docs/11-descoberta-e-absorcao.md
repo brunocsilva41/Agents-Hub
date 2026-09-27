@@ -28,7 +28,7 @@ Sem `--write` nada é gravado; o comando imprime o plano e o que rodar para apli
 |---|---|
 | `GET /discovery[?refresh=1]` | `{ agents: AgentDiscovery[] }` de todos os agentes |
 | `GET /discovery/:agentId[?refresh=1]` | `{ agent: AgentDiscovery }` (404 se o agente não existe) |
-| `POST /projects/:id/import` | `ImportResult` (contrato em `packages/core/src/discovery.ts`) |
+| `POST /projects/:id/import` | `ImportResult` (contrato em `packages/core/src/discovery.ts`). **Exige o token de operador** (`<AGENTS_HUB_HOME>/operator-token`), inclusive no dry-run, porque a prévia expõe o que os CLIs têm; `hub import` lê o token sozinho. Aplicado (não dry-run) vai para a trilha de auditoria como `project.import` |
 
 Descoberta combina o probe do registry (versão/binPath) com `discoverAgent`
 (`packages/adapters/src/discovery`), com cache de 30s por agente.
@@ -67,8 +67,11 @@ Corpo de `POST /projects/:id/import` (`strict`; campo desconhecido = 422):
    ficam) e credenciais embutidas em URL são mascaradas.
 2. **Dry-run não escreve nada** — nem o contexto do projeto no Hub, nem config de outro agente.
 3. **Env do projeto pela lista de permissão.** Instruções e env importados vão para o
-   contexto do projeto no banco do Hub (fora do repositório, item 1.9 do GOAL); mesmo assim
-   só entram nomes aceitos pelo filtro e nunca valores com cara de segredo.
+   contexto do projeto no banco do Hub (fora do repositório, item 1.9 do GOAL, migração 6),
+   e por isso valem **sem** `hub project trust` — a confiança só é exigida para o que vem do
+   `.agents-hub/config.yaml` do repositório. Mesmo assim só entram nomes aceitos pelo filtro
+   e nunca valores com cara de segredo. (Algumas mensagens de recusa no código ainda citam o
+   `config.yaml` como destino; o destino real é o banco.)
 4. **Env de servidor MCP é opt-in.** Sem `includeEnv: true` nenhuma variável é copiada
    (o `skipped` diz quais nomes ficaram de fora). Com `includeEnv`, o valor real é relido
    do arquivo de origem só na hora de gravar, e só se existir ali (a máscara `***` não

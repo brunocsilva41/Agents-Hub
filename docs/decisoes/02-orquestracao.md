@@ -20,3 +20,9 @@
 
 ## Regra de não-escalação
 Uma sessão filha **nunca** recebe permissão maior que a da sessão pai. A política efetiva é a interseção entre a política do agente e a política herdada.
+
+## Estado atual (nota de 2026-09-26 — a decisão acima não foi reescrita)
+
+- **2.1:** os nomes reais são as tools MCP `hub_agent_call`, `hub_agent_status`, `hub_agent_wait` e `hub_agent_events` (não existe `agent.stream`); handoff existe (`hub handoff`, `hub_session_handoff`), mas nunca foi exercido fora do teste.
+- **2.3:** "os 8 agentes" — são 9, e 7 têm caminho de config MCP confirmado (o Kimi 2.0.0 não tem mecanismo de MCP; o do MiMo não foi localizado; `packages/daemon/src/mcp-config.ts`). Não há TUI. ACP segue não iniciado.
+- **2.4:** além do portão e da vigilância, existe o gate pré-execução bloqueante (Claude, Codex), que também abre aprovação — ver [docs/04](../04-resiliencia-e-politica.md). A tabela de riscos acima é rascunho: a tabela vigente (risco × modo) está no README.

@@ -7,6 +7,31 @@
 > Data: 2026-08-28 · commit base `baec236` · build `npx tsc -b` **verde** ·
 > `npm test` **196/196 verdes** (21 arquivos de teste).
 
+> **⚠️ Foto de 2026-08-28 — não é mais a fonte de verdade.** Este documento foi mantido
+> como registro da vistoria daquela data; o texto abaixo do quadro **não** foi reescrito.
+> O estado atual está em [`vistoria-2026-09-25/STATUS.md`](vistoria-2026-09-25/STATUS.md)
+> (execução do GOAL, item a item) e [`vistoria-2026-09-25/INVENTARIO.md`](vistoria-2026-09-25/INVENTARIO.md)
+> (225 achados da vistoria seguinte). Reconciliado em 2026-09-26 (item 8.1 do
+> [GOAL](12-goal-mvp-completo.md)), conferindo cada ponto no código:
+>
+> | Seção | Afirmação de 2026-08-28 | Estado em 2026-09-26 |
+> |---|---|---|
+> | cabeçalho, §1 | 196 testes / 21 arquivos; MCP com 12 tools; CLI com 27 comandos | `npm test`: 1411 testes / 142 arquivos; 16 tools MCP (`packages/mcp/src/server.ts`); 46 comandos de topo em `hub help` |
+> | §1 Fase 2 | `hub mcp` cobre 8 dos 9 (sem `openclaude`) | **corrigido**: `openclaude` está em `mcpTargets` (`daemon/src/mcp-config.ts`); kimi e mimo seguem `verified: false` (sem mecanismo confirmado) |
+> | §2.1 | mapper genérico nunca preenche `nativeSessionId` | **corrigido**: `generic-json` captura o id de sessão (`mappers/generic.ts`); cursor/mimo ainda sem mapper dedicado e sem execução real |
+> | §2.2 | gate emite `approval.requested` sem abrir `Approval` | **corrigido**: o gate abre `Approval` e é bloqueante (espera 55 s, `deny` por tempo, negar não mata a sessão) — ver [04 §1](04-resiliencia-e-politica.md) |
+> | §2.2 | gate desinstalado nesta máquina | não reconferido (estado da máquina do usuário) |
+> | §2.3 | A2A | **corrigido** (já marcado abaixo): REST `/api/tasks/*`, sem `/.well-known/agent-card.json` |
+> | §2.4, §7.1 | workflow valida o DAG e o ignora | **corrigido**: `runWorkflow` em `core/workflow.ts` espera o lote terminar, faz fan-in e reparte `--budget-usd`; o daemon hospeda execuções do painel (`workflow-runs.ts`) |
+> | §2.5 | `modeArgs` só em 2 dos 9 | **parcial**: claude, codex, copilot, kimi, antigravity, openclaude têm `modeArgs`; mimo só em `autonomous` (`--yolo`); opencode aplica o modo por agentes `hub-*` via `OPENCODE_CONFIG_DIR` (não por `modeArgs`); cursor sem nada (manifesto não verificado) |
+> | §2.6 | controle de rede sem onde ser aplicado | **parcial**: além de `WebFetch`/`WebSearch` no gate, `curl`/`wget`/`Invoke-WebRequest` em shell passam por `allowDomains` no classificador de comando; agentes sem gate e sem `command.executed` seguem sem controle |
+> | §2.7 | `openclaude` fora de MCP, hooks e fallback | **corrigido** nos três; o gate do openclaude nunca foi exercido em runtime e ele nunca rodou como fallback real |
+> | §2.8 | `pause` sem comando na CLI; handoff sem checar instalação | `hub pause` e `hub_session_pause` existem; checagem de instalação no handoff não reconferida |
+> | §3.1, §5 | 6 de 9 agentes nunca executados | rodada real de 2026-09-25 ([relatório 11](vistoria-2026-09-25/11-teste-real-clis.md)): Claude, Codex, OpenCode OK; Copilot e Antigravity quebrados (corrigidos depois, sem nova rodada real); Kimi, MiMo, OpenClaude, Cursor não executados |
+> | §5 | "gate instalado: 0", "Fase 3 ~35%" | não recalculado; ver STATUS.md |
+> | §7.2 | fazer o gate abrir `Approval` | feito (ver §2.2 acima) |
+> | §7.3 | rodar uma sessão trivial com cada agente | pendente: Fase 9 do GOAL |
+
 ---
 
 ## Veredito em três linhas

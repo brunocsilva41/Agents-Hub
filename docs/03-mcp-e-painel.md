@@ -4,9 +4,11 @@ Documenta a Fase 2 do [roadmap](02-roadmap.md): as duas superfícies que tiram o
 
 ## 1. MCP server — como qualquer agente vira orquestrador
 
-O Hub se expõe primeiro por **MCP** porque é o único protocolo que os oito agentes do MVP já falam. Registrado uma vez em cada CLI, o Cursor passa a poder chamar o Claude, que chama o Codex, sem que nenhum deles saiba da existência dos outros.
+O Hub se expõe primeiro por **MCP** porque é o protocolo que a maioria dos agentes já fala (7 dos 9 têm caminho de config confirmado; o Kimi 2.0.0 não tem mecanismo de MCP e o do MiMo não foi localizado). Registrado uma vez em cada CLI, o Cursor passa a poder chamar o Claude, que chama o Codex, sem que nenhum deles saiba da existência dos outros.
 
-### As 11 tools
+### As 16 tools
+
+Contadas em `packages/mcp/src/server.ts` (16 chamadas a `server.registerTool`, 2026-09-26).
 
 | Tool | O que faz |
 |---|---|
@@ -17,10 +19,15 @@ O Hub se expõe primeiro por **MCP** porque é o único protocolo que os oito ag
 | `hub_agent_events` | o que o agente delegado está fazendo agora, paginado por `seq` |
 | `hub_agent_cancel` | encerra a delegação e tudo abaixo dela |
 | `hub_session_send` | corrige o rumo de uma sessão sem perder o trabalho feito |
+| `hub_session_interrupt` | para o turno atual; a sessão fica ociosa e retomável |
+| `hub_session_pause` | para o turno e pausa a sessão (retoma com `hub_session_send`) |
+| `hub_session_handoff` | transfere a sessão para outro agente |
+| `hub_session_diff` | o que o agente mudou no código |
 | `hub_session_list` | reencontra uma delegação cujo id se perdeu |
 | `hub_graph` | árvore de quem chamou quem, com custo por nó |
 | `hub_context_fetch` | resolve `session:<id>#event:<seq>` do brief |
 | `hub_budget` | quanto o fluxo já consumiu e quanto resta |
+| `hub_workflow_run` | executa um workflow YAML (DAG de passos) |
 
 ### Descoberta de identidade: quem está me chamando?
 
@@ -52,7 +59,21 @@ hub mcp install codex --write      # grava: merge, backup versionado .bak-YYYYMM
 
 O padrão é **imprimir, não gravar**: são arquivos de configuração de outra ferramenta. Com `--write`, o Hub faz backup e faz merge da própria seção, preservando o que você já tinha ajustado (modelo, sandbox, aprovações).
 
-Caminhos confirmados: Claude Code (`.mcp.json` do projeto), Codex (`~/.codex/config.toml`), Cursor (`~/.cursor/mcp.json`). Os demais são palpite razoável e vêm marcados como não confirmados na saída do comando.
+Caminhos (tabela em `packages/daemon/src/mcp-config.ts`, campo `verified`):
+
+| Agente | Arquivo | Formato | Confirmado |
+|---|---|---|---|
+| Claude Code | `<projeto>/.mcp.json` | `mcpServers` | sim |
+| OpenClaude | `<projeto>/.mcp.json` | `mcpServers` | sim (round-trip com `--scope project`) |
+| Codex | `~/.codex/config.toml` | tabela TOML `[mcp_servers.*]` | sim |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` | marcado `true` no código; o binário não está instalado nesta máquina |
+| OpenCode | `~/.config/opencode/opencode.json` | chave **`mcp`** (não `mcpServers`) | sim (round-trip) |
+| Copilot | `~/.copilot/mcp-config.json` | `mcpServers` | sim |
+| Antigravity | `~/.gemini/config/mcp_config.json` | `mcpServers` | sim (round-trip) |
+| Kimi | — | — | **não**: o binário não tem mecanismo de MCP |
+| MiMo | — | — | **não**: mecanismo real não localizado |
+
+Destino não confirmado aparece marcado na saída do comando e é pulado pelo `hub import --to`.
 
 ### Mensagens de erro são parte do design
 
@@ -71,16 +92,23 @@ Servido pelo próprio daemon em `http://127.0.0.1:4747` (ADR 05.3): um processo 
 
 **O grafo é a navegação, não decoração.** Clicar num nó abre a timeline daquele agente. É assim que se desce de "o fluxo inteiro" para "o que exatamente o Codex fez aqui" sem decorar id nenhum.
 
-Quatro coisas na tela, que são exatamente as quatro decididas no ADR 03.3:
+O núcleo são as quatro coisas decididas no ADR 03.3 — **grafo ao vivo** (lista de fluxos/árvore), **timeline unificada** (os nove agentes no mesmo formato, "só esta sessão" ou "fluxo inteiro"), **painel de custo** (consumo contra o orçamento do fluxo) e **controles ao vivo** (interromper turno, pausar, encerrar, delegar, handoff, falar com a sessão). Em volta delas, abas no topo (`packages/web/src/App.tsx`, 2026-09-26):
 
-1. **Grafo ao vivo** (esquerda) — árvore de quem chamou quem, com estado e custo por nó
-2. **Timeline unificada** (centro) — os oito agentes no mesmo formato, alternando entre "só esta sessão" e "fluxo inteiro"
-3. **Painel de custo** (direita) — consumo contra o orçamento do fluxo, com pressão visual
-4. **Controles ao vivo** — interromper turno, pausar, encerrar, delegar a partir daqui, e um campo para falar com a sessão
+| Aba | O que tem |
+|---|---|
+| Timeline | eventos da sessão/fluxo selecionado, paginados pelo fim |
+| Grafo DAG | o fluxo como grafo, navegável por teclado |
+| Swarm | agentes, instalados e com qual versão |
+| Telemetria | atividade dos agentes e distribuição de sessões por agente |
+| Operação | tarefas, diff, artefatos, orçamento editável, workflow (validar/rodar/acompanhar), pastas do projeto, adopt/detach, saúde, re-sondar agentes, sweep |
+| Configurações | env/prompt/modelo por agente e projeto, agentes detectados (descoberta/importação) |
+| Segurança | política com prévia, confiança do projeto, gate/MCP instalados, histórico de aprovações, auditoria |
+
+Mais a fila de aprovações no topo e a paleta de comandos (Ctrl/⌘+K). O e2e (`npm run test:e2e`, Playwright) percorre o painel em 375/768/1100/1440 px contra um servidor falso.
 
 ### Detalhes que definem o comportamento
 
-- **Um único `EventSource` sem filtro** alimenta tudo. A timeline cresce de forma incremental (barato) e só eventos *estruturais* (`session.*`, `delegation.*`, `turn.completed`, `error`) disparam recarga de grafo e orçamento (caro), com debounce de 400 ms. Recarregar tudo a cada token derrubaria a UI numa sessão falante.
+- **Um único `EventSource` sem filtro** alimenta tudo. A timeline cresce de forma incremental (barato) e só eventos *estruturais* (`isStructural` em `packages/web/src/lib/hubEvents.ts`) disparam recarga de grafo e orçamento (caro), agrupada (`createRefetchScheduler`: 300 ms de espera, no máximo 1,5 s depois do primeiro). Recarregar tudo a cada token derrubaria a UI numa sessão falante.
 - **Auto-scroll só enquanto você está no fim.** Rolou para cima para ler algo, os eventos novos param de arrancar a página de baixo de você.
 - **Deduplicação por `seq`**, porque o `EventSource` reenvia eventos ao reconectar.
 - **Cor estável por agente**, derivada de hash do id: a mesma cor sempre, em qualquer sessão ou reload.
