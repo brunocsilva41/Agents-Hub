@@ -13,6 +13,7 @@ import {
   gravarConfig,
   hookCommand,
   hookInstalado,
+  NOTA_GATE_POR_SESSAO,
   lerConfig,
   lerConfigParaGravar,
   mergeHooks,
@@ -289,6 +290,12 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
       const instalado = hookInstalado(alvoConfig);
       console.log(`${instalado ? green('●') : dim('○')} ${bold(alvo.id)} ${dim(alvo.nome)}`);
       console.log(`   ${dim(alvo.configUsuario)}`);
+      if (alvo.gateNasSessoesDoHub) {
+        // O arquivo não decide mais se as sessões do Hub são gateadas: o hook
+        // vai por sessão em `--settings`. Dizer "○ não instalado" sem isto
+        // levava a crer que a sessão do Hub rodava sem prevenção.
+        console.log(`   ${green('✓')} ${dim(NOTA_GATE_POR_SESSAO)}`);
+      }
       console.log(`   ${dim(alvo.nota)}`);
       const aviso = avisoDeTimeoutDoHook(alvoConfig);
       if (aviso) {

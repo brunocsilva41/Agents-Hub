@@ -1,5 +1,5 @@
 import type { HubClient, TaskStatus } from './client.js';
-import { bold, cyan, dim, formatTokens, green, red, renderEvent, yellow } from './render.js';
+import { bold, cyan, deveExibir, dim, formatTokens, green, red, renderEvent, yellow } from './render.js';
 
 const NEWLINE = String.fromCharCode(10);
 const TERMINAIS = new Set(['completed', 'failed', 'canceled', 'rejected']);
@@ -38,12 +38,18 @@ export async function streamUntilDone(
     let proxima: string | null = null;
 
     for await (const event of client.stream(atual)) {
-      console.log(renderEvent(event, { showAgent }));
+      if (deveExibir(event)) console.log(renderEvent(event, { showAgent }));
 
       if (taskId === undefined && event.taskId && event.sessionId === alvo) taskId = event.taskId;
       const doAlvo = alvo === undefined || event.sessionId === alvo;
+      // `fimDoProcesso`: o daemon fecha a run com log técnico quando o agente
+      // já emitiu o próprio `turn.completed` (um por turno).
       const fimDeTurno =
-        doAlvo && (event.type === 'turn.completed' || event.type === 'error' || event.type === 'session.ended');
+        doAlvo &&
+        (event.type === 'turn.completed' ||
+          event.type === 'error' ||
+          event.type === 'session.ended' ||
+          (event.type === 'log' && event.payload['fimDoProcesso'] === true));
       if (!fimDeTurno || alvo === undefined) continue;
 
       // O turno acabar NÃO quer dizer que a tarefa acabou: ainda faltam o

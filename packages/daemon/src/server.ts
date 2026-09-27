@@ -913,7 +913,9 @@ export class HubServer {
       const verdict = await this.sessions.gateToolCall(body);
       // Trilha de auditoria (item 1.10): toda decisão do gate sobre uma sessão
       // do Hub. Chamada fora de sessão do Hub não tem política aplicada.
-      if (verdict.session) {
+      // Repetida = o segundo hook da mesma chamada (`tool_use_id`): a decisão
+      // já foi registrada uma vez.
+      if (verdict.session && verdict.repetida !== true) {
         this.operator.audit.record({
           actor: 'gate',
           kind: 'gate.decision',

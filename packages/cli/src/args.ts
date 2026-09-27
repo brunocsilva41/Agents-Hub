@@ -16,6 +16,8 @@ export const BOOLEAN_FLAGS = new Set([
   'yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw',
   // R14-14: desliga o alerta de aprovação (bipe + título do terminal).
   'no-bell',
+  // `--verbose` em start/watch/send: mostra deltas e eventos técnicos.
+  'verbose',
 ]);
 
 /**

@@ -66,6 +66,7 @@ ${bold('Sessões')}
       --detach               não acompanha o stream
       --from <sessionId>     continua uma sessão terminada: resumo, contexto e branch dela
       --no-bell              sem bipe/título do terminal quando surge aprovação (vale para watch/send)
+      --verbose              mostra também deltas, eventos técnicos e crus (vale para watch/send)
       --                     fim das flags: o resto é o objetivo, mesmo começando com "-"
       ${dim('saída: 0 concluída · 1 falhou/cancelada/erro · 2 parada esperando aprovação (vale para watch/send)')}
   hub sessions                                lista sessões

@@ -51,6 +51,8 @@ export interface HookInput {
   cwd?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  /** Id da chamada no agente: o daemon reconhece a mesma chamada vinda de dois hooks. */
+  tool_use_id?: string;
 }
 
 interface GateResponse {
@@ -159,6 +161,9 @@ export async function decideToolCall(
         ...(sessionId ? { sessionId } : {}),
         ...(entrada.session_id ? { nativeSessionId: entrada.session_id } : {}),
         ...(entrada.cwd ? { cwd: entrada.cwd } : {}),
+        ...(typeof entrada.tool_use_id === 'string' && entrada.tool_use_id.length > 0 && entrada.tool_use_id.length <= 200
+          ? { toolUseId: entrada.tool_use_id }
+          : {}),
         toolName,
         toolInput,
       }),

@@ -7,6 +7,11 @@ export interface HookStatusSummary {
   modo: 'arquivo' | 'codex-inline' | 'nenhum';
   arquivo: string | null;
   instalado: boolean;
+  /**
+   * Sessões subidas pelo Hub são gateadas mesmo sem o hook no arquivo (hook
+   * injetado por sessão via `--settings`). Ausente em daemon antigo.
+   */
+  sessoesDoHubGateadas?: boolean;
   /** Hook do Hub com timeout antigo: ação que pede aprovação roda sem ela. */
   avisoTimeout: string | null;
   erro: string | null;

@@ -1,6 +1,6 @@
 import { required } from './cmd-util.js';
 import { HubApiError, InvalidHubIdError, type HubClient, type SessionSummary, type TaskSummary } from './client.js';
-import { bold, dim, formatTokens, green, red, renderEvent, renderGraph, yellow } from './render.js';
+import { bold, deveExibir, dim, formatTokens, green, red, renderEvent, renderGraph, yellow } from './render.js';
 import type { GraphSummary } from './client.js';
 import type { EventEnvelope } from '@agents-hub/core';
 import { criarAlertaDeAprovacao } from './approval-alert.js';
@@ -89,6 +89,8 @@ export interface OpcoesDeAcompanhamento {
   log?: Log;
   /** Chamado a cada evento do stream (alerta de aprovação, R14-14). */
   alertar?: (event: EventEnvelope) => void;
+  /** `--verbose`: mostra também deltas, logs técnicos e eventos crus. */
+  verbose?: boolean;
 }
 
 type Avaliacao =
@@ -163,10 +165,15 @@ export async function acompanhar(client: HubClient, opts: OpcoesDeAcompanhamento
     const timer = setInterval(() => void checar(), pollMs);
     try {
       for await (const event of client.stream(filtro, ac.signal) as AsyncGenerator<EventEnvelope>) {
-        log(renderEvent(event, { showAgent: porRaiz }));
+        if (deveExibir(event, { verbose: opts.verbose === true })) log(renderEvent(event, { showAgent: porRaiz }));
         opts.alertar?.(event);
         if (!porRaiz && event.sessionId === alvo) since = event.seq;
-        if (event.sessionId === alvo && FIM_DE_TURNO.has(event.type)) void checar();
+        if (
+          event.sessionId === alvo &&
+          (FIM_DE_TURNO.has(event.type) || (event.type === 'log' && event.payload['fimDoProcesso'] === true))
+        ) {
+          void checar();
+        }
       }
     } catch (err) {
       if (!ac.signal.aborted) throw err;
@@ -408,11 +415,11 @@ export async function watchCommand(client: HubClient, args: Args, o: OpcoesDeCom
       const { graph } = await client.graph(rootId);
       for (const linha of renderGraph(graph)) log(linha);
     }
-    desfecho = await acompanhar(client, { rootId, log, pollMs: o.pollMs, alertar: alertaDe(args, o) });
+    desfecho = await acompanhar(client, { rootId, log, pollMs: o.pollMs, alertar: alertaDe(args, o), verbose: args.flags['verbose'] === true });
   } else {
     const sessionId = required(args.positional[0], 'sessionId');
     await sessaoOuErro(client, sessionId);
-    desfecho = await acompanhar(client, { sessionId, log, pollMs: o.pollMs, alertar: alertaDe(args, o) });
+    desfecho = await acompanhar(client, { sessionId, log, pollMs: o.pollMs, alertar: alertaDe(args, o), verbose: args.flags['verbose'] === true });
   }
   aplicarSaida(desfecho, o);
   return desfecho;
@@ -441,7 +448,7 @@ export async function sendCommand(client: HubClient, args: Args, o: OpcoesDeComa
     replay: 'turno novo (o agente não guarda sessão nativa)',
   };
   log(dim(`${explicacao[mode] ?? mode}${NEWLINE}`));
-  const desfecho = await acompanhar(client, { sessionId, since, log, pollMs: o.pollMs, alertar: alertaDe(args, o) });
+  const desfecho = await acompanhar(client, { sessionId, since, log, pollMs: o.pollMs, alertar: alertaDe(args, o), verbose: args.flags['verbose'] === true });
   aplicarSaida(desfecho, o);
   return desfecho;
 }

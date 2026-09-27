@@ -9,6 +9,7 @@ import {
   hookInstalado,
   hookTargets,
   mergeHooks,
+  NOTA_GATE_POR_SESSAO,
 } from './hooks-config.js';
 import { diffDeLinhas, type LinhaDeDiff } from './line-diff.js';
 import {
@@ -59,6 +60,12 @@ export interface EstadoDoHook {
   modo: 'arquivo' | 'codex-inline' | 'nenhum';
   arquivo: string | null;
   instalado: boolean;
+  /**
+   * Sessões subidas pelo Hub são gateadas mesmo sem o hook no arquivo (o Hub
+   * injeta o hook por sessão). `instalado` passa a dizer só se as sessões
+   * abertas FORA do Hub também são.
+   */
+  sessoesDoHubGateadas: boolean;
   /** Hook do Hub com timeout antigo (ação que pede aprovação roda sem ela). */
   avisoTimeout: string | null;
   /** Config ilegível: o estado mostrado pode estar incompleto. */
@@ -141,6 +148,7 @@ function estadoDoHook(deps: IntegracoesDeps, agentId: string): EstadoDoHook {
       modo: 'codex-inline',
       arquivo: path.join(deps.hubHome, 'config.json'),
       instalado: deps.codexBypassAtivo,
+      sessoesDoHubGateadas: deps.codexBypassAtivo,
       avisoTimeout: null,
       erro: null,
       nota:
@@ -156,6 +164,7 @@ function estadoDoHook(deps: IntegracoesDeps, agentId: string): EstadoDoHook {
       modo: 'nenhum',
       arquivo: null,
       instalado: false,
+      sessoesDoHubGateadas: false,
       avisoTimeout: null,
       erro: null,
       nota: 'sem gate pré-execução: o Hub só vigia os eventos depois que a ferramenta roda',
@@ -174,9 +183,10 @@ function estadoDoHook(deps: IntegracoesDeps, agentId: string): EstadoDoHook {
     modo: 'arquivo',
     arquivo: alvo.configUsuario,
     instalado: hookInstalado(config),
+    sessoesDoHubGateadas: alvo.gateNasSessoesDoHub,
     avisoTimeout: avisoDeTimeoutDoHook(config),
     erro,
-    nota: alvo.nota,
+    nota: alvo.gateNasSessoesDoHub ? `${NOTA_GATE_POR_SESSAO}; ${alvo.nota}` : alvo.nota,
     comando: `hub hooks install ${alvo.id} --write`,
     instalavelPeloPainel: true,
   };

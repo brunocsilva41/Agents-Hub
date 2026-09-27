@@ -102,10 +102,40 @@ export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } 
       return `${time} ${who}${dim(`▪ sessão encerrada (${String(p['reason'] ?? '')})`)}`;
 
     case 'log':
+      // Troca de agente é aviso ANTES de o substituto gastar: tem de saltar
+      // aos olhos, não sumir entre os logs.
+      if (p['kind'] === 'fallback') return `${time} ${who}${yellow(`⚠ ${textOf(p['text'])}`)}`;
       return `${time} ${who}${dim(truncate(textOf(p['text'] ?? compact(p['data'])), 160))}`;
 
     default:
       return `${time} ${who}${dim(event.type)} ${dim(compact(p))}`;
+  }
+}
+
+/**
+ * O evento aparece na saída PADRÃO de `hub start`/`hub watch`?
+ *
+ * Teste real de 2026-09-26: o texto final vinha misturado com linhas vazias
+ * (eventos sem texto do Claude), `rate_limit_event` cru, `message.delta`
+ * (OpenCode/Copilot) repetindo pedaços da resposta e logs técnicos. Tudo
+ * isso continua no banco e aparece com `--verbose`; o padrão mostra o que
+ * uma pessoa lê.
+ */
+export function deveExibir(event: EventEnvelope, opts: { verbose?: boolean } = {}): boolean {
+  if (opts.verbose === true) return true;
+  const p = event.payload;
+  switch (event.type) {
+    case 'message.delta':
+      return false;
+    case 'message':
+    case 'reasoning':
+      return textOf(p['text']).trim().length > 0;
+    case 'log':
+      if (p['kind'] === 'tecnico') return false;
+      // Log sem texto é despejo de evento não mapeado (JSON cru do agente).
+      return typeof p['text'] === 'string' && p['text'].trim().length > 0;
+    default:
+      return true;
   }
 }
 

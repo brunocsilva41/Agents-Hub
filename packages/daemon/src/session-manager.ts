@@ -73,6 +73,8 @@ import type { HubConfig } from './config.js';
 import { cliHookEntrypoint } from './config.js';
 import { juntarErroDoAgente, textoDoErroDoAgente } from './agent-error-text.js';
 import { recusaDeSessaoTerminada } from './session-continuation.js';
+import { apagarSettingsDaSessao, gravarSettingsDaSessao } from './session-settings.js';
+import { DecisoesDoGate } from './gate-idempotencia.js';
 import {
   montarConfigDoGate,
   modoExigeGate,
@@ -105,6 +107,18 @@ import { ProjectRegistry, type RepoConfigStatus } from './project-registry.js';
 import { policyFor as resolvePolicyFor, projectPolicyFor } from './effective-policy.js';
 import { resolverBases } from './session-bases.js';
 import { branchExiste, commitarTrabalho, juntarBranches } from './worktree-commit.js';
+
+/** Resposta do gate pré-execução a uma chamada de ferramenta. */
+export interface VereditoDoGate {
+  decision: Decision;
+  risk: RiskLevel;
+  reason: string;
+  session: Session | null;
+  approvalId?: string;
+  explanation?: string;
+  /** A mesma chamada (`tool_use_id`) já tinha sido decidida — não é outra decisão. */
+  repetida?: boolean;
+}
 
 /** Quebra de linha literal para montar prompt sem brigar com escapes. */
 const NEWLINE_PROMPT = String.fromCharCode(10);
@@ -232,6 +246,20 @@ export class SessionManager {
    * tempo precisa, na verdade, de um modo de supervisão diferente.
    */
   gateWaitMs = ESPERA_DO_GATE_MS;
+
+  /**
+   * `turn.completed` que o PRÓPRIO agente já emitiu na run atual, por sessão.
+   *
+   * Um turno, um `turn.completed` (teste real de 2026-09-26: OpenCode,
+   * Antigravity e Copilot mostravam "✓ turno concluído" 2–3 vezes). O
+   * primeiro do agente vale; os seguintes da mesma run viram `log` técnico, e
+   * o sintético do fechamento (`#settle`) só é emitido quando o agente não
+   * fechou o turno sozinho. Zerado a cada `#launch`.
+   */
+  readonly #fimDeTurnoDoAgente = new Map<string, number>();
+
+  /** Decisões do gate por `(sessão, tool_use_id)` — ver `gate-idempotencia.ts`. */
+  readonly #decisoesDoGate = new DecisoesDoGate<VereditoDoGate>();
 
   readonly #projects: ProjectRegistry;
 
@@ -720,6 +748,8 @@ export class SessionManager {
           payload: { state: 'killed', reason: motivo, reconciled: true },
         });
       });
+      // Arquivo de settings do gate que o daemon anterior não chegou a apagar.
+      await apagarSettingsDaSessao(this.config.home, sessao.id);
 
       encerradas += 1;
     }
@@ -845,14 +875,9 @@ export class SessionManager {
     cwd?: string | undefined;
     toolName: string;
     toolInput?: Record<string, unknown> | undefined;
-  }): Promise<{
-    decision: Decision;
-    risk: RiskLevel;
-    reason: string;
-    session: Session | null;
-    approvalId?: string;
-    explanation?: string;
-  }> {
+    /** `tool_use_id` do agente: reconhece o mesmo pedido vindo de dois hooks. */
+    toolUseId?: string | undefined;
+  }): Promise<VereditoDoGate> {
     const session = this.#localizarSessao(input);
 
     // Sem sessão conhecida o Hub não tem política de quem aplicar. Barrar aqui
@@ -867,6 +892,24 @@ export class SessionManager {
       };
     }
 
+    // Hook do `--settings` da sessão + hook do settings.json do usuário
+    // disparam para a MESMA chamada: uma decisão (e uma aprovação) só — ver
+    // `gate-idempotencia.ts`.
+    const chave = input.toolUseId ? `${session.id}|${input.toolUseId}` : null;
+    const { valor, repetida } = await this.#decisoesDoGate.decidir(chave, () =>
+      this.#decidirChamada(session, input),
+    );
+    return repetida ? { ...valor, repetida: true } : valor;
+  }
+
+  async #decidirChamada(
+    session: Session,
+    input: {
+      cwd?: string | undefined;
+      toolName: string;
+      toolInput?: Record<string, unknown> | undefined;
+    },
+  ): Promise<VereditoDoGate> {
     const workdir = input.cwd ?? session.workdir;
     const engine = this.policyFor(session);
     const actions = actionsOfToolCall(
@@ -1109,6 +1152,19 @@ export class SessionManager {
     const retido = approval.taskId ? this.#desfechoRetido.get(approval.taskId) : undefined;
     if (approval.taskId) this.#desfechoRetido.delete(approval.taskId);
 
+    // Negar a CONTINUAÇÃO depois de o turno já ter concluído (estouro na linha
+    // de custo final) não desfaz o trabalho entregue: a sessão termina
+    // `completed`, não `killed` (teste real de 2026-09-26, Claude).
+    if (
+      decision === 'denied' &&
+      approval.detail['kind'] === 'budget' &&
+      approval.detail['turnCompleted'] === true &&
+      approval.taskId
+    ) {
+      await this.#concluirComOrcamentoNegado(session, approval.taskId, by);
+      return resolved;
+    }
+
     if (decision === 'denied') {
       if (approval.taskId) this.store.tasks.update(approval.taskId, { state: 'rejected' });
       await this.cancel(session.id, `negado por ${by}: ${approval.action}`);
@@ -1216,6 +1272,55 @@ export class SessionManager {
       `A ação "${approval.action}" foi aprovada por ${by}. Continue de onde parou.`,
     );
     return resolved;
+  }
+
+  /**
+   * Estouro de orçamento NEGADO com o turno já concluído: entrega o que foi
+   * feito, sem gastar mais nada.
+   *
+   * Não passa por `#settle`: a revisão por outro agente custa modelo (e o
+   * humano acabou de negar gasto), e uma reprovação ali abriria retry/fallback
+   * — exatamente a continuação negada. O trabalho do turno é registrado
+   * (artefatos, commit no `hub/<id>`) e a tarefa fecha `completed` com a nota.
+   */
+  async #concluirComOrcamentoNegado(session: Session, taskId: string, by: string): Promise<void> {
+    // A run foi encerrada no estouro; se ainda estiver drenando, o pump grava
+    // o desfecho retido e sai — espera isso antes de fechar por cima.
+    const limite = Date.now() + 10_000;
+    while (this.#runs.has(session.id) && Date.now() < limite) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const viva = this.store.sessions.get(session.id);
+    const task = this.store.tasks.get(taskId);
+    if (!viva || isTerminalSessionState(viva.state) || !task || isTerminalTaskState(task.state)) return;
+
+    const retido = this.#desfechoRetido.get(taskId);
+    this.#desfechoRetido.delete(taskId);
+    const nota = `orçamento excedido; continuação negada por ${by}`;
+
+    const artefatos = await this.#capturarMudancas(viva, task);
+    await this.#commitarWorktree(viva, task);
+    this.store.tasks.update(taskId, {
+      state: 'completed',
+      attempts: closeLastAttempt(task.attempts, 'success', null),
+      result: {
+        summary: `[${nota}] ${this.#summarize(viva.id, taskId)}`,
+        artifacts: artefatos,
+        usage: { ...this.store.events.costOf(viva.id), seconds: retido?.elapsedSeconds ?? 0 },
+      },
+    });
+    this.#emit({
+      sessionId: viva.id,
+      taskId,
+      agentId: viva.agentId,
+      type: 'log',
+      payload: {
+        level: 'warn',
+        kind: 'budget.denied',
+        text: `${nota}: o turno já tinha concluído — o trabalho foi entregue e nada mais roda`,
+      },
+    });
+    await this.#concludeSession(viva, this.store.tasks.get(taskId) ?? task, 'completed', null);
   }
 
   /**
@@ -2075,6 +2180,8 @@ export class SessionManager {
         heartbeatSeconds: this.config.policy.heartbeatTimeoutSeconds,
         extraArgs: gate.extraArgs,
       };
+      const settingsFile = await this.#settingsDoGate(session.agentId, session.id);
+      if (settingsFile) ctx.settingsFile = settingsFile;
 
       if (gate.aviso) {
         this.#emit({
@@ -2092,6 +2199,7 @@ export class SessionManager {
       // só silêncio, que é o pior tipo de falha de observabilidade.
       this.bus.registerSession(session.id, session.rootId);
       this.store.sessions.update(session.id, { state: 'running' });
+      this.#fimDeTurnoDoAgente.delete(session.id);
 
       handle = nativeSessionId
         ? await adapter.resume(ctx, nativeSessionId, prompt)
@@ -2269,6 +2377,23 @@ export class SessionManager {
     }
 
     return config.aviso ? { extraArgs: config.args, aviso: config.aviso } : { extraArgs: config.args };
+  }
+
+  /**
+   * Arquivo de settings da sessão com o hook do gate, para os agentes cujo
+   * manifesto declara `gate.settingsArgs` (Claude Code, OpenClaude). Toda
+   * sessão subida pelo Hub é gateada, com ou sem o hook instalado no
+   * settings.json do usuário — ver `session-settings.ts`. Lança se não
+   * conseguir gravar: subir o agente sem o gate seria prometer prevenção e
+   * não entregar.
+   */
+  async #settingsDoGate(agentId: string, sessionId: string): Promise<string | undefined> {
+    const manifest = this.registry.get(agentId).manifest;
+    if (manifest.gate.settingsArgs.length === 0) return undefined;
+    return gravarSettingsDaSessao(this.config.home, sessionId, {
+      nodeBin: process.execPath,
+      cliMain: cliHookEntrypoint(),
+    });
   }
 
   async #pump(session: Session, task: Task, handle: RunHandle): Promise<void> {
@@ -2574,17 +2699,31 @@ export class SessionManager {
     const outcomeClass = classifyOutcome(outcome);
     let attempts = closeLastAttempt(task.attempts, outcomeClass, outcome.error);
 
+    // O agente já fechou o turno com o próprio `turn.completed` (com custo e
+    // resumo): o do processo vira log técnico, senão o turno "conclui" duas vezes.
+    const agenteFechou = (this.#fimDeTurnoDoAgente.get(session.id) ?? 0) > 0;
+    this.#fimDeTurnoDoAgente.delete(session.id);
+    const sucessoJaAnunciado = outcomeClass === 'success' && agenteFechou;
     this.#emit({
       sessionId: session.id,
       taskId: task.id,
       agentId: session.agentId,
-      type: outcomeClass === 'success' ? 'turn.completed' : 'error',
+      type: sucessoJaAnunciado ? 'log' : outcomeClass === 'success' ? 'turn.completed' : 'error',
       payload: {
         reason: outcome.reason,
         exitCode: outcome.exitCode,
         error: outcome.error,
         elapsedSeconds,
         outcomeClass,
+        ...(sucessoJaAnunciado
+          ? {
+              kind: 'tecnico',
+              // Quem acompanha pelo stream (CLI) usa isto como "a run acabou"
+              // — era o papel do `turn.completed` repetido.
+              fimDoProcesso: true,
+              text: `processo do agente encerrado (código ${outcome.exitCode ?? '?'})`,
+            }
+          : {}),
       },
     });
 
@@ -2830,7 +2969,17 @@ export class SessionManager {
       taskId: task.id,
       agentId: session.agentId,
       type: 'log',
-      payload: { level: 'warn', text: `passando a tarefa para ${agentId} — ${reason}` },
+      // Aviso explícito ANTES de o substituto subir (e gastar): quem acompanha
+      // pela CLI ou pelo painel vê quem assume e por quê — inclusive quando o
+      // motivo é cota esgotada, que troca de provedor (e de conta a pagar).
+      payload: {
+        level: 'warn',
+        kind: 'fallback',
+        priority: 'high',
+        fromAgentId: session.agentId,
+        toAgentId: agentId,
+        text: `fallback: ${session.agentId} → ${agentId} — ${reason}. A tarefa vai ser refeita por ${agentId}.`,
+      },
     });
 
     await this.#concludeSession(session, task, 'failed', reason, { silentParent: true });
@@ -3185,13 +3334,26 @@ ${task.brief.objective.slice(0, 500)}`,
       });
     }
     if (!limitado) return;
+    // Um `turn.completed` por turno: o segundo do agente na mesma run (o
+    // Copilot fecha em `assistant.turn_end` E no `result`) vira log técnico —
+    // o custo e o id nativo seguem valendo, só não há outro "✓ concluído".
+    let tipo = mapped.type;
+    let payload = limitado.payload;
+    if (mapped.type === 'turn.completed') {
+      const vistos = this.#fimDeTurnoDoAgente.get(session.id) ?? 0;
+      this.#fimDeTurnoDoAgente.set(session.id, vistos + 1);
+      if (vistos > 0) {
+        tipo = 'log';
+        payload = { ...payload, kind: 'tecnico', text: 'fim de turno repetido pelo agente' };
+      }
+    }
     const event = makeEvent(
       {
         sessionId: session.id,
         taskId: task.id,
         agentId: session.agentId,
-        type: mapped.type,
-        payload: limitado.payload,
+        type: tipo,
+        payload,
         cost: mapped.cost ?? null,
         raw: limitado.raw as MappedEvent['raw'],
       },
@@ -3314,6 +3476,8 @@ ${task.brief.objective.slice(0, 500)}`,
     // que o SO já reciclou para outro processo qualquer.
     this.store.sessions.update(sessionId, { state, endedAt: nowIso(), pid: null });
     this.bus.forgetSession(sessionId);
+    // O hook do gate só vale enquanto a sessão existe (ver `#settingsDoGate`).
+    await apagarSettingsDaSessao(this.config.home, sessionId);
 
     // Nenhuma aprovação pendente pode sobreviver à sessão que a gerou.
     //
@@ -3354,6 +3518,7 @@ ${task.brief.objective.slice(0, 500)}`,
     // `#models` é reposto pelo próximo evento que declare modelo. Descartar é
     // seguro; o que não é seguro é descartar cedo demais.
     this.#seeded.delete(sessionId);
+    this.#fimDeTurnoDoAgente.delete(sessionId);
     this.#models.delete(sessionId);
 
     // `#ledgers` é chaveado pela RAIZ, não pela sessão: o orçamento é do fluxo
@@ -3524,6 +3689,8 @@ ${task.brief.objective.slice(0, 500)}`,
     try {
       const gate = this.#codexGate(revisorId, session.mode, session.id);
       ctx.extraArgs = gate.extraArgs;
+      const settingsFile = await this.#settingsDoGate(revisorId, session.id);
+      if (settingsFile) ctx.settingsFile = settingsFile;
       if (gate.aviso) {
         this.#emit({
           sessionId: session.id,

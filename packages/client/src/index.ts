@@ -413,6 +413,7 @@ export class HubClient {
     cwd?: string;
     toolName: string;
     toolInput: Record<string, unknown>;
+    toolUseId?: string;
   }): Promise<{
     permission: 'allow' | 'deny' | 'ask';
     decision: string;

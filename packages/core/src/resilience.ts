@@ -9,7 +9,19 @@ import type { TaskAttempt } from './domain.js';
  * precisa de processo rodando. Aqui ela é uma função de estado → decisão.
  */
 
-export type OutcomeClass = 'success' | 'transient' | 'permanent' | 'canceled';
+/**
+ * `quota`: a CONTA do agente esgotou o limite de uso/créditos ("You've hit
+ * your usage limit", "insufficient credits"). Não passa em segundos: repetir
+ * com o mesmo agente só queima tempo. `rate_limited`: limite de TAXA (429,
+ * "rate limit") — passa sozinho, vale nova tentativa com backoff.
+ */
+export type OutcomeClass =
+  | 'success'
+  | 'transient'
+  | 'rate_limited'
+  | 'quota'
+  | 'permanent'
+  | 'canceled';
 
 export interface RunOutcomeLike {
   /**
@@ -29,9 +41,24 @@ export interface RunOutcomeLike {
  * conservadora: na dúvida, tratamos como permanente e passamos ao fallback,
  * que ao menos muda alguma variável.
  */
+/**
+ * Cota/limite de uso da conta. Vem ANTES do limite de taxa: "usage limit" não
+ * é "rate limit", e tratá-lo como falha permanente genérica (teste real de
+ * 2026-09-26, Codex) escondia do usuário por que a tarefa trocou de agente.
+ */
+const QUOTA_PATTERNS: RegExp[] = [
+  /usage limit/i,
+  /\bquota\b/i,
+  /insufficient[_ ]quota/i,
+  /insufficient[_ ](credits?|balance|funds)/i,
+  /credit balance is too low/i,
+  /out of credits/i,
+  /limite de uso/i,
+];
+
+const RATE_LIMIT_PATTERNS: RegExp[] = [/rate.?limit/i, /\b429\b/, /too many requests/i];
+
 const TRANSIENT_PATTERNS: RegExp[] = [
-  /rate.?limit/i,
-  /\b429\b/,
   /\b50[234]\b/,
   /overloaded/i,
   /temporarily unavailable/i,
@@ -58,6 +85,8 @@ export function classifyOutcome(outcome: RunOutcomeLike): OutcomeClass {
   if (!failed) return 'success';
 
   const text = outcome.error ?? '';
+  if (QUOTA_PATTERNS.some((re) => re.test(text))) return 'quota';
+  if (RATE_LIMIT_PATTERNS.some((re) => re.test(text))) return 'rate_limited';
   return TRANSIENT_PATTERNS.some((re) => re.test(text)) ? 'transient' : 'permanent';
 }
 
@@ -114,7 +143,10 @@ export function nextStep(
   const tetoDeRetries =
     origem?.reason === 'timeout' ? Math.min(config.maxRetries, 1) : config.maxRetries;
 
-  if (outcome === 'transient' && attemptsHere <= tetoDeRetries) {
+  // Limite de taxa passa sozinho: mesma regra do transitório (backoff
+  // exponencial). Cota NÃO: esperar segundos não devolve o limite da conta.
+  const repetivel = outcome === 'transient' || outcome === 'rate_limited';
+  if (repetivel && attemptsHere <= tetoDeRetries) {
     return {
       kind: 'retry',
       agentId: state.currentAgentId,
@@ -122,9 +154,11 @@ export function nextStep(
       // Exponencial a partir da segunda tentativa deste agente.
       backoffMs: config.backoffMs * 2 ** Math.max(0, attemptsHere - 1),
       reason:
-        attemptsHere === 1
-          ? 'falha transitória na primeira tentativa'
-          : `falha transitória (tentativa ${attemptsHere} deste agente)`,
+        outcome === 'rate_limited'
+          ? `limite de taxa em ${state.currentAgentId} (tentativa ${attemptsHere} deste agente)`
+          : attemptsHere === 1
+            ? 'falha transitória na primeira tentativa'
+            : `falha transitória (tentativa ${attemptsHere} deste agente)`,
     };
   }
 
@@ -137,9 +171,11 @@ export function nextStep(
       agentId: next,
       attempt: nextAttempt,
       reason:
-        outcome === 'permanent'
-          ? `falha permanente em ${state.currentAgentId}`
-          : `${state.currentAgentId} esgotou as tentativas`,
+        outcome === 'quota'
+          ? `cota/limite de uso da conta de ${state.currentAgentId} esgotado`
+          : outcome === 'permanent'
+            ? `falha permanente em ${state.currentAgentId}`
+            : `${state.currentAgentId} esgotou as tentativas`,
     };
   }
 

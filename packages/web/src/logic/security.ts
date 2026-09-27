@@ -285,6 +285,11 @@ export interface RotuloDeEstado {
 export function estadoDoHook(h: HookStatusSummary): RotuloDeEstado {
   if (h.erro) return { texto: 'config ilegível', tom: 'erro' };
   if (h.modo === 'nenhum') return { texto: 'só vigilância', tom: 'neutro' };
+  // Sem o hook no arquivo, as sessões do HUB continuam gateadas (hook por
+  // sessão via --settings); só as abertas fora do Hub ficam sem.
+  if (!h.instalado && h.sessoesDoHubGateadas === true) {
+    return { texto: 'gate ativo nas sessões do Hub', tom: 'ok' };
+  }
   if (!h.instalado) return { texto: 'gate desligado', tom: 'alerta' };
   if (h.avisoTimeout) return { texto: 'timeout antigo', tom: 'alerta' };
   return { texto: 'gate ativo', tom: 'ok' };

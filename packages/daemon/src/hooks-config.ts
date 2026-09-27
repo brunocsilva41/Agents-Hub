@@ -41,7 +41,19 @@ export interface AlvoDeHook {
   /** Config por projeto, quando o agente suporta. */
   configProjeto?: (projectPath: string) => string;
   nota: string;
+  /**
+   * Sessões SUBIDAS PELO HUB já são gateadas sem depender deste arquivo: o Hub
+   * injeta o hook por sessão (`--settings`, ver `session-settings.ts` e
+   * `gate.settingsArgs` no manifesto). O hook no arquivo do usuário só
+   * acrescenta cobertura às sessões abertas FORA do Hub.
+   */
+  gateNasSessoesDoHub: boolean;
 }
+
+/** Frase única para CLI/painel: o que o hook no arquivo muda quando o Hub já injeta o gate. */
+export const NOTA_GATE_POR_SESSAO =
+  'sessões iniciadas pelo Hub são sempre gateadas (hook injetado por --settings a cada sessão); ' +
+  'instalar o hook no arquivo só estende o gate às sessões abertas fora do Hub';
 
 /** Tabela de alvos para um diretório home (injetável, para teste). */
 export function hookTargets(home: string): AlvoDeHook[] {
@@ -52,6 +64,7 @@ export function hookTargets(home: string): AlvoDeHook[] {
       configUsuario: path.join(home, '.claude', 'settings.json'),
       configProjeto: (p) => path.join(p, '.claude', 'settings.json'),
       nota: 'o hook é consultado antes de cada Bash/Write/Edit e pode bloquear a chamada',
+      gateNasSessoesDoHub: true,
     },
     {
       id: 'openclaude',
@@ -70,6 +83,8 @@ export function hookTargets(home: string): AlvoDeHook[] {
       // (`escalate`/`ask`) ou o oposto do Codex (`toCodexHookOutput`) — só o
       // schema estático do arquivo de config foi conferido.
       nota: 'caminho e schema (hooks.PreToolUse) confirmados no disco desta máquina; comportamento em runtime (se o binário consulta o hook e com que dialeto) ainda não foi exercido',
+      // `--settings <file-or-json>` confirmado no `openclaude --help` 0.14.0.
+      gateNasSessoesDoHub: true,
     },
   ];
 }

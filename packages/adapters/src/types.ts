@@ -142,6 +142,30 @@ export const AgentManifestSchema = z.object({
   model: ModelSpecSchema,
 
   /**
+   * Gate pré-execução POR SESSÃO, injetado pelo Hub a cada invocação.
+   *
+   * `settingsArgs` (com `{{settingsFile}}`) só entra quando o daemon grava o
+   * arquivo de settings da sessão (`RunContext.settingsFile`). Existe porque o
+   * gate do Claude Code dependia de o usuário ter instalado o hook no
+   * `~/.claude/settings.json`: sem isso, uma sessão subida pelo Hub rodava sem
+   * prevenção nenhuma (teste real de 2026-09-26). Com `--settings <arquivo>`
+   * o hook vale para a sessão do Hub sem tocar na config do usuário.
+   */
+  gate: z
+    .object({
+      settingsArgs: z.array(z.string()).default([]),
+    })
+    .default({})
+    .superRefine((g, ctx) => {
+      if (g.settingsArgs.length > 0 && !g.settingsArgs.some((a) => a.includes('{{settingsFile}}'))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'gate.settingsArgs exige `{{settingsFile}}`',
+        });
+      }
+    }),
+
+  /**
    * Contra qual versão do binário real este manifesto foi conferido. O
    * `status` é o que o painel mostra; `version` é comparável com o probe
    * (`--version`) para acusar drift.
@@ -217,6 +241,11 @@ export interface RunContext {
    * escolha explícita do usuário e por isso não cabe no manifesto estático.
    */
   extraArgs?: string[];
+  /**
+   * Arquivo de settings da sessão com o hook `PreToolUse` do gate (ver
+   * `manifest.gate`). Gravado e apagado pelo daemon; o adapter só o repassa.
+   */
+  settingsFile?: string;
 }
 
 /** Evento já mapeado pelo adapter, antes de ganhar `seq` e `id` no domínio. */

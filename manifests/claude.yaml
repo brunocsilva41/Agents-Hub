@@ -35,6 +35,18 @@ invoke:
     semi: ["--permission-mode", "acceptEdits"]
     autonomous: ["--permission-mode", "acceptEdits"]
 
+# Gate pré-execução POR SESSÃO. Verificado contra `claude --help` (2.1.283):
+# `--settings <file-or-json>` carrega settings ADICIONAIS. O Hub grava em
+# <AGENTS_HUB_HOME>/run/<sessão>-settings.json o mesmo hook PreToolUse que
+# `hub hooks install` gravaria (comando = bin.js desta instalação, matcher de
+# risco, timeout 120 s) e apaga o arquivo quando a sessão termina. Assim toda
+# sessão subida pelo Hub é gateada, com ou sem o hook no settings.json do
+# usuário — que não é tocado. Se o usuário também tiver o hook instalado, o
+# Claude soma as duas fontes: comando idêntico é deduplicado por ele mesmo, e
+# o daemon responde a mesma decisão para o mesmo tool_use_id (uma aprovação só).
+gate:
+  settingsArgs: ["--settings", "{{settingsFile}}"]
+
 # Verificado contra `claude --help` (2.1.283): `--model <model>` aceita alias
 # (`sonnet`, `opus`) ou nome completo (`claude-sonnet-4-6`).
 model:
