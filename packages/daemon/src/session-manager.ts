@@ -1639,6 +1639,10 @@ export class SessionManager {
       const attempts = closeLastAttempt(task.attempts, 'canceled', `handoff para ${resolvedTarget}`);
       const taskAtualizada = this.store.tasks.update(task.id, {
         attempts: [...attempts, novaTentativa(attempts.length + 1, resolvedTarget)],
+        // Sessão pausada/interrompida: a task esperava instrução
+        // (`input_required`); com o substituto no ar ela volta a trabalhar,
+        // como no `send` — senão quem espera lia "precisa de instrução".
+        ...(task.state === 'input_required' ? { state: 'working' as const } : {}),
       });
 
       this.#emit({

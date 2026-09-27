@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import os from 'node:os';
@@ -222,6 +223,55 @@ steps:
       assert.match(texto, /workflow "workflow-de-um-passo"/);
       assert.match(texto, /1\/1 passos concluídos/);
       assert.match(texto, /unico \(agente-mcp\): ok/);
+    },
+  );
+
+  test(
+    'hub_workflow_run: passo dependente em worktree recebe baseSessionIds da dependência',
+    { timeout: 30_000 },
+    async () => {
+      // Demo ampliada (8.3): o passo seguinte precisa partir do branch
+      // `hub/<id>` do anterior. Espia o que o MCP manda ao daemon.
+      const repo = path.join(raiz, 'repo-workflow');
+      mkdirSync(repo, { recursive: true });
+      const git = (...args: string[]): void => {
+        execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@l', '-c', 'commit.gpgsign=false', ...args], {
+          cwd: repo,
+        });
+      };
+      git('init', '-q');
+      writeFileSync(path.join(repo, 'README.md'), '# repo\n', 'utf8');
+      git('add', '-A');
+      git('commit', '-q', '-m', 'init');
+
+      const enviados: Array<{ baseSessionIds: string[] | undefined; sessao: string }> = [];
+      const original = hubClient.startSession.bind(hubClient);
+      hubClient.startSession = async (body) => {
+        const res = await original(body);
+        enviados.push({ baseSessionIds: body.baseSessionIds, sessao: res.session.id });
+        return res;
+      };
+      try {
+        const yaml = `
+name: dois-passos-worktree
+steps:
+  - id: plano
+    agent: agente-mcp
+    objective: "Escrever o plano de ponta a ponta para o passo seguinte"
+    isolation: worktree
+  - id: execucao
+    agent: agente-mcp
+    objective: "Executar o plano escrito pelo passo anterior, sem desviar"
+    isolation: worktree
+    dependsOn: [plano]
+`;
+        const result = await client.callTool({ name: 'hub_workflow_run', arguments: { yaml, project: repo } });
+        assert.equal(enviados.length, 2, textOf(result));
+        assert.equal(enviados[0]?.baseSessionIds, undefined);
+        assert.deepEqual(enviados[1]?.baseSessionIds, [enviados[0]?.sessao]);
+      } finally {
+        hubClient.startSession = original;
+      }
     },
   );
 
