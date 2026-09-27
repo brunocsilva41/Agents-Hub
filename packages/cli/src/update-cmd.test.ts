@@ -70,6 +70,31 @@ describe('hub update', () => {
     assert.deepEqual(JSON.parse(out.join('\n')), JSON.parse(JSON.stringify(valor)));
   });
 
+  test('instalado pelo tarball: passos de reempacotar e reinstalar no mesmo prefixo', async (t) => {
+    // Layout de `npm i -g agents-hub-<v>.tgz --prefix <pfx>` no Windows.
+    const prefixo = path.join(raiz, 'pfx');
+    const pacote = path.join(prefixo, 'node_modules', 'agents-hub');
+    const cli = path.join(pacote, 'node_modules', '@agents-hub', 'cli');
+    mkdirSync(cli, { recursive: true });
+    writeFileSync(path.join(pacote, 'package.json'), JSON.stringify({ name: 'agents-hub', version: '0.1.0' }));
+    if (process.platform !== 'win32') {
+      t.skip('layout do prefixo global do Windows (POSIX usa <prefixo>/lib/node_modules)');
+      return;
+    }
+    const { out, valor } = await capturar(() =>
+      updateCommand({ command: 'update', positional: [], flags: {} }, { packageDir: cli }),
+    );
+    // Antes: "não achei um clone git" e "npm ci && npm run build" — passos
+    // que não atualizam a instalação global (visto seguindo o guia, item 8.4).
+    assert.equal(valor.method, 'pacote');
+    assert.equal(path.resolve(valor.installRoot!), path.resolve(pacote));
+    assert.equal(path.resolve(valor.npmPrefix!), path.resolve(prefixo));
+    assert.ok(valor.steps.some((p) => p.includes('npm run pack:dist')));
+    assert.ok(valor.steps.some((p) => p.startsWith('npm i -g') && p.includes(prefixo)));
+    assert.ok(valor.steps.includes('hub restart'));
+    assert.ok(!out.some((l) => l.includes('não achei um clone git')));
+  });
+
   test('fora de clone git: diz que não há canal e como atualizar à mão', async (t) => {
     const solto = path.join(raiz, 'solto', 'packages', 'cli');
     mkdirSync(solto, { recursive: true });

@@ -13,12 +13,21 @@ const ALL_KINDS: ImportKind[] = ['instructions', 'env', 'mcp'];
 
 // ------------------------------------------------------------------ parsing
 
+/**
+ * Itens de uma lista `a,b`. Espaço também separa: no PowerShell, `a,b` sem
+ * aspas é um array, e chega ao node como `"a b"` — o guia de instalação
+ * quebrava ali (`kind desconhecido "instructions env mcp"`).
+ */
+function itensDaLista(flag: string): string[] {
+  return flag.split(/[,\s]+/).filter(Boolean);
+}
+
 /** `--kinds a,b`: valida cada item; erro claro em vez de ignorar em silêncio. */
 export function parseKinds(flag: string | boolean | undefined): ImportKind[] | Error | undefined {
   if (flag === undefined) return undefined;
   if (typeof flag === 'boolean') return new Error('--kinds precisa de um valor: instructions,env,mcp');
   const kinds: ImportKind[] = [];
-  for (const raw of flag.split(',').map((s) => s.trim()).filter(Boolean)) {
+  for (const raw of itensDaLista(flag)) {
     if (!(ALL_KINDS as string[]).includes(raw)) {
       return new Error(`kind desconhecido "${raw}" (válidos: ${ALL_KINDS.join(', ')})`);
     }
@@ -31,7 +40,7 @@ export function parseKinds(flag: string | boolean | undefined): ImportKind[] | E
 export function parseTargets(flag: string | boolean | undefined): string[] | Error | undefined {
   if (flag === undefined) return undefined;
   if (typeof flag === 'boolean') return new Error('--to precisa de uma lista: --to codex,cursor');
-  const list = [...new Set(flag.split(',').map((s) => s.trim()).filter(Boolean))];
+  const list = [...new Set(itensDaLista(flag))];
   return list.length > 0 ? list : new Error('--to vazio');
 }
 

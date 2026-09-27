@@ -36,8 +36,14 @@ export async function ensureDaemon(
   // Validada como as outras `AGENTS_HUB_*`: `AGENTS_HUB_NO_AUTOSTART=sim`
   // lança com o nome da variável, em vez de ser lida como "não" em silêncio.
   if (readHubEnv().AGENTS_HUB_NO_AUTOSTART === '1') {
+    // "Rode: hub daemon" sozinho não bastava (vistoria 14, R14-12): ele fica em
+    // primeiro plano e prende o terminal — quem não sabe disso roda no mesmo
+    // terminal e perde o prompt. A mensagem diz as três saídas.
     throw new Error(
-      'daemon não está rodando e AGENTS_HUB_NO_AUTOSTART=1 impede subir sozinho. Rode: hub daemon',
+      'daemon não está rodando e AGENTS_HUB_NO_AUTOSTART=1 impede subir sozinho. ' +
+        'Suba-o num terminal à parte com `hub daemon` (fica em primeiro plano, mostrando o log), ' +
+        'ou tire AGENTS_HUB_NO_AUTOSTART para ele subir sozinho em segundo plano; ' +
+        'para subir no login do Windows: `hub autostart enable`.',
     );
   }
 

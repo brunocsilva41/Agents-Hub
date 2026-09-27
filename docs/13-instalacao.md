@@ -1,7 +1,9 @@
 # Instalação — seção técnica
 
-> O guia de instalação para o usuário final é o item 8.4 do GOAL. Esta página
-> registra **como** o Hub é distribuído e instalado, e por quê.
+> O guia do usuário — requisitos, instalação, `hub init` até a primeira sessão
+> aprovada, atualizar e desinstalar — está em
+> [14-primeiros-passos.md](14-primeiros-passos.md). Esta página registra
+> **como** o Hub é distribuído e instalado, e por quê.
 
 ## Requisitos
 
@@ -67,6 +69,12 @@ substitui no mesmo lugar) e não depende do clone. Rodando a partir do clone
 
 Instalações antigas gravaram `.../main.js" hook`; reinstalar
 (`hub hooks install claude --write`) substitui essa entrada em vez de duplicar.
+
+`hub update` usa o mesmo reconhecimento: instalado pelo tarball
+(`.../node_modules/agents-hub/node_modules/@agents-hub/cli`), mostra os passos
+de reempacotar no clone e `npm i -g` no **mesmo prefixo**; rodando de um clone,
+`git pull` + build. Antes ele só conhecia o clone e, instalado, dizia "não achei
+um clone git" com passos que não atualizavam a instalação global.
 
 ## A entrada `bin.js`
 
@@ -138,6 +146,5 @@ nenhuma chamada a modelo) e encerra com `POST /shutdown` usando o token de
 
 ## Licença
 
-**TODO — decisão do dono do projeto.** Todos os `package.json` declaram
-`"license": "UNLICENSED"` e não há arquivo `LICENSE`: até a decisão, nenhuma
-licença de uso é concedida a terceiros.
+MIT ([LICENSE](../LICENSE)). O `LICENSE` vai dentro do tarball e o
+`package.json` gerado declara `"license": "MIT"`.

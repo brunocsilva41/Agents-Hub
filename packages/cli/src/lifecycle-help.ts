@@ -12,7 +12,7 @@ export const HELP_CICLO_DE_VIDA = `${bold('Primeiro uso, ciclo de vida e manuten
                                      log do daemon autostartado (<home>/logs)
   hub restart [--force]              encerra o daemon (token de operador) e sobe de novo
                                      ${dim('com sessão viva, recusa sem --force (reiniciar encerra as sessões)')}
-  hub update [--check] [--json]      como atualizar (não há canal publicado: é git pull + build)
+  hub update [--check] [--json]      como atualizar (sem canal publicado: reempacotar + npm i -g, ou git pull + build)
   hub version | hub --version [--json]
   hub backup [--out arquivo] [--json]
                                      cópia consistente do banco (VACUUM INTO — inclui o WAL)

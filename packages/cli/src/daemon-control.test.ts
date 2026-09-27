@@ -46,7 +46,11 @@ describe('ensureDaemon', () => {
   test('daemon fora do ar com AGENTS_HUB_NO_AUTOSTART=1: erro claro, sem subir nada', async () => {
     process.env['AGENTS_HUB_NO_AUTOSTART'] = '1';
     const { client, chamadas } = cliente(false);
-    await assert.rejects(ensureDaemon(client, { quiet: true }), /AGENTS_HUB_NO_AUTOSTART=1.*hub daemon/);
+    // R14-12: orienta, em vez de só "Rode: hub daemon" (que prende o terminal).
+    await assert.rejects(
+      ensureDaemon(client, { quiet: true }),
+      /AGENTS_HUB_NO_AUTOSTART=1.*terminal à parte.*`hub daemon`.*primeiro plano.*segundo plano.*hub autostart enable/,
+    );
     assert.equal(chamadas(), 1, 'uma sondagem e para — nenhum laço de espera');
   });
 });
