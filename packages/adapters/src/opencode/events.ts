@@ -242,11 +242,18 @@ export function translateOpenCodeEvent(raw: unknown): MappedEvent[] {
     case 'session.next.step.ended': {
       const files = list(data['files']).filter((f): f is string => typeof f === 'string');
       const changed = files.map((file) => emit('file.changed', { path: file }));
+      // PASSO, não turno: um turno do OpenCode (até `session.idle`) tem um
+      // passo por chamada de modelo. Como `turn.completed`, o "✓ turno
+      // concluído" aparecia a cada passo e de novo no fim do processo (teste
+      // real de 2026-09-26). O fim do turno é o do daemon; aqui fica o custo.
       return [
         ...changed,
         emit(
-          'turn.completed',
+          'log',
           {
+            kind: 'tecnico',
+            opencodeType: type,
+            text: 'OpenCode: passo concluído',
             messageId: text(data, 'assistantMessageID'),
             finish: text(data, 'finish'),
             files,

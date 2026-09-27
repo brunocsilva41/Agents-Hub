@@ -26,6 +26,7 @@ export {
   hookInstalado,
   avisoDeTimeoutDoHook,
   comandoDoHub,
+  NOTA_GATE_POR_SESSAO,
   type AlvoDeHook,
   type EntradaDeHook,
 } from '@agents-hub/daemon';

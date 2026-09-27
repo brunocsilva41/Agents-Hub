@@ -65,7 +65,10 @@ describe('translateOpenCodeEvent', () => {
       }),
     );
 
-    assert.equal(turno?.type, 'turn.completed');
+    // Passo não é turno: o fim do turno é um só, o do daemon (teste real
+    // de 2026-09-26: "✓ turno concluído" 2x no OpenCode).
+    assert.equal(turno?.type, 'log');
+    assert.equal(turno?.payload['kind'], 'tecnico');
     assert.equal(turno?.cost?.usd, 0.0123);
     assert.equal(turno?.cost?.inputTokens, 1200);
     assert.equal(

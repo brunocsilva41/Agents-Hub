@@ -45,10 +45,10 @@ describe('classifyOutcome', () => {
     );
   });
 
-  test('rate limit é transitório', () => {
+  test('rate limit é `rate_limited` (repete com backoff, como o transitório)', () => {
     assert.equal(
       classifyOutcome({ reason: 'error', exitCode: 1, error: 'API error 429: rate limit exceeded' }),
-      'transient',
+      'rate_limited',
     );
   });
 

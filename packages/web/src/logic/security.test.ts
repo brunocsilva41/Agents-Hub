@@ -190,6 +190,11 @@ describe('estado de hook e MCP', () => {
     assert.equal(estadoDoHook({ ...hook, modo: 'nenhum', instalado: false }).texto, 'só vigilância');
     assert.equal(estadoDoHook({ ...hook, erro: 'x' }).tom, 'erro');
   });
+  test('hook fora do arquivo: sessões do Hub continuam gateadas (--settings por sessão)', () => {
+    const r = estadoDoHook({ ...hook, instalado: false, sessoesDoHubGateadas: true });
+    assert.equal(r.texto, 'gate ativo nas sessões do Hub');
+    assert.equal(r.tom, 'ok');
+  });
   const mcp: McpStatusSummary = {
     arquivo: 'x',
     precisaDeProjeto: false,

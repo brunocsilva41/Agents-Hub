@@ -204,6 +204,11 @@ export async function initCommand(client: HubClient, args: Args, deps: InitDeps)
     const estado = estadoHook(alvo.id);
     if (estado === true) {
       console.log(`${green('✓')} gate instalado em ${alvo.id}`);
+    } else if (alvo.gateNasSessoesDoHub) {
+      // Sessões do Hub já são gateadas (hook por sessão em `--settings`); o
+      // hook no arquivo só estende o gate ao uso do agente fora do Hub.
+      console.log(`${green('✓')} ${alvo.id}: sessões do Hub gateadas ${dim('(hook por sessão; instalar no arquivo cobre o uso fora do Hub)')}`);
+      sugestoes.push(`hub hooks install ${alvo.id}`);
     } else {
       sugestoes.push(`hub hooks install ${alvo.id}`);
     }

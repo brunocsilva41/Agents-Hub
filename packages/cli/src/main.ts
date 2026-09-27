@@ -14,6 +14,7 @@ import {
   gravarConfig,
   hookCommand,
   hookInstalado,
+  NOTA_GATE_POR_SESSAO,
   lerConfig,
   lerConfigParaGravar,
   mergeHooks,
@@ -78,6 +79,8 @@ export interface Args {
 const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh']);
 // Item 5.6 (init/logs/open/update/export/cost/merge/restore).
 for (const f of ['yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw']) BOOLEAN_FLAGS.add(f);
+// `--verbose` em start/watch/send: mostra deltas e eventos técnicos.
+BOOLEAN_FLAGS.add('verbose');
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -172,6 +175,7 @@ ${bold('Sessões')}
       --mode <supervised|semi|autonomous>
       --isolation <worktree|none>
       --detach               não acompanha o stream
+      --verbose              mostra também deltas, eventos técnicos e crus (vale para watch/send)
       ${dim('saída: 0 concluída · 1 falhou/cancelada · 2 parada esperando aprovação (vale para watch/send)')}
   hub sessions                                lista sessões
   hub watch <sessionId>                       acompanha uma sessão ao vivo
@@ -410,6 +414,12 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
       const instalado = hookInstalado(alvoConfig);
       console.log(`${instalado ? green('●') : dim('○')} ${bold(alvo.id)} ${dim(alvo.nome)}`);
       console.log(`   ${dim(alvo.configUsuario)}`);
+      if (alvo.gateNasSessoesDoHub) {
+        // O arquivo não decide mais se as sessões do Hub são gateadas: o hook
+        // vai por sessão em `--settings`. Dizer "○ não instalado" sem isto
+        // levava a crer que a sessão do Hub rodava sem prevenção.
+        console.log(`   ${green('✓')} ${dim(NOTA_GATE_POR_SESSAO)}`);
+      }
       console.log(`   ${dim(alvo.nota)}`);
       const aviso = avisoDeTimeoutDoHook(alvoConfig);
       if (aviso) {

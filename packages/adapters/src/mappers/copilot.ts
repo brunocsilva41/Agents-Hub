@@ -149,8 +149,17 @@ export function copilotMapper(line: unknown): MappedEvent[] {
       return content ? [{ type: 'reasoning', payload: { text: content }, raw: line }] : [];
     }
 
+    // `turn_end` fecha uma CHAMADA de modelo (há uma por ferramenta usada);
+    // o fim do turno do Hub é o `result`. Como `turn.completed`, o terminal
+    // mostrava "✓ turno concluído" 2–3 vezes (teste real de 2026-09-26).
     case 'assistant.turn_end':
-      return [{ type: 'turn.completed', payload: { turnId: data['turnId'] }, raw: line }];
+      return [
+        {
+          type: 'log',
+          payload: { kind: 'tecnico', turnId: data['turnId'], text: 'Copilot: chamada de modelo concluída' },
+          raw: line,
+        },
+      ];
 
     /** Evento final da execução: traz o id da sessão e o código de saída. */
     case 'result': {

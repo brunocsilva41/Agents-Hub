@@ -8,6 +8,7 @@ import { lerLinhas } from './line-reader.js';
 import { montarSpawn, resolveBin, type ResolvedBin } from './bin-resolver.js';
 import { resolveMapper } from './mappers/index.js';
 import { killProcessTree } from './process-tree.js';
+import { mensagemDoEventoDeErro, motivoDaFalha } from './failure-reason.js';
 import type {
   AgentAdapter,
   AgentManifest,
@@ -301,6 +302,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
     });
 
     const tail: string[] = [];
+    // Mensagens dos eventos `error` do PRÓPRIO agente: são o motivo real de
+    // uma saída ≠ 0 (ver `failure-reason.ts`), não a primeira linha do stderr.
+    const errosDoAgente: string[] = [];
     let discoveredNativeId: string | null = nativeSessionId;
 
     const handle: InternalHandle = {
@@ -448,6 +452,11 @@ export class ProcessAgentAdapter implements AgentAdapter {
       if (saturada) return;
       handle.touch();
       for (const mapped of this.#mapLine(line)) {
+        const erro = mensagemDoEventoDeErro(mapped);
+        if (erro) {
+          errosDoAgente.push(erro);
+          if (errosDoAgente.length > 20) errosDoAgente.shift();
+        }
         if (mapped.nativeSessionId && !discoveredNativeId) {
           discoveredNativeId = mapped.nativeSessionId;
           handle.nativeSessionId = mapped.nativeSessionId;
@@ -485,7 +494,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
         error:
           code === 0 || handle.canceled || handle.interrupted
             ? null
-            : `processo terminou com código ${code}${tail.length > 0 ? `: ${tail.slice(-5).join(' | ')}` : ''}`,
+            : motivoDaFalha(code, errosDoAgente, tail),
         nativeSessionId: discoveredNativeId,
         tail: tail.join('\n'),
       });
@@ -571,7 +580,7 @@ export interface InvocacaoMontada {
  */
 export function montarInvocacao(
   manifest: AgentManifest,
-  ctx: Pick<RunContext, 'mode' | 'workdir' | 'model' | 'extraArgs'> & {
+  ctx: Pick<RunContext, 'mode' | 'workdir' | 'model' | 'extraArgs' | 'settingsFile'> & {
     env?: Record<string, string>;
   },
   argsTemplate: readonly string[],
@@ -591,6 +600,7 @@ export function montarInvocacao(
     nativeSessionId: nativeSessionId ?? '',
     workdir: ctx.workdir,
     model,
+    settingsFile: ctx.settingsFile ?? '',
   };
 
   // A política nativa do agente vem do modo da sessão: é o que impede o
@@ -608,6 +618,9 @@ export function montarInvocacao(
     ...modeArgs,
     ...manifest.invoke.extraArgs,
     ...(ctx.extraArgs ?? []),
+    // Gate por sessão (`--settings <arquivo>` no Claude): só com o arquivo
+    // gravado — a flag sem valor engoliria o argumento seguinte.
+    ...(ctx.settingsFile ? manifest.gate.settingsArgs : []),
   ]
     .map((arg) => applyTemplate(arg, vars))
     // Um placeholder vazio (ex.: `{{model}}` sem modelo definido) some do

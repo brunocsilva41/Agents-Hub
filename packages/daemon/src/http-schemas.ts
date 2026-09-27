@@ -149,6 +149,8 @@ export const PreToolGateSchema = z
     cwd: z.string().max(4096).optional(),
     toolName: z.string().min(1).max(200),
     toolInput: z.record(z.unknown()).default({}),
+    /** `tool_use_id` do agente: a mesma chamada vinda de dois hooks tem uma decisão só. */
+    toolUseId: z.string().min(1).max(200).optional(),
   })
   .strict();
 

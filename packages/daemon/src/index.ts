@@ -75,9 +75,17 @@ export {
   hookTargets,
   comandoDoHook,
   comandoDoHub,
+  NOTA_GATE_POR_SESSAO,
   type AlvoDeHook,
   type EntradaDeHook,
 } from './hooks-config.js';
+export {
+  caminhoDoSettingsDaSessao,
+  conteudoDoSettingsDaSessao,
+  gravarSettingsDaSessao,
+  apagarSettingsDaSessao,
+} from './session-settings.js';
+export { DecisoesDoGate } from './gate-idempotencia.js';
 export { guardRequest, type GuardVerdict } from './guard.js';
 export { createHub, type Hub, type HubDeps } from './hub.js';
 export { instalarRedeDeSeguranca } from './safety-net.js';

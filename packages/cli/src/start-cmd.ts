@@ -162,6 +162,7 @@ export async function startCommand(client: HubClient, args: Args, o: OpcoesDeSta
     taskId: result.task.id,
     log,
     pollMs: o.pollMs,
+    verbose: args.flags['verbose'] === true,
   });
   relatarDesfecho(desfecho, log, logErro);
   const codigo = codigoDeSaida(desfecho);

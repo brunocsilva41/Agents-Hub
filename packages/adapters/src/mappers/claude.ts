@@ -18,9 +18,13 @@ export function claudeMapper(line: unknown): MappedEvent[] {
 
   switch (type) {
     case 'system': {
+      const init = obj['subtype'] === 'init';
       const event: MappedEvent = {
-        type: obj['subtype'] === 'init' ? 'session.started' : 'log',
-        payload: { subtype: obj['subtype'], tools: obj['tools'], model: obj['model'] },
+        type: init ? 'session.started' : 'log',
+        payload: init
+          ? { subtype: obj['subtype'], tools: obj['tools'], model: obj['model'] }
+          : // Subtipos de bastidor (status, hooks, compactação): técnicos.
+            { kind: 'tecnico', subtype: obj['subtype'], text: `Claude: system/${String(obj['subtype'] ?? '?')}` },
         raw: line,
       };
       if (sessionId) event.nativeSessionId = sessionId;
@@ -40,6 +44,9 @@ export function claudeMapper(line: unknown): MappedEvent[] {
           if (block['text'].trim().length === 0) continue;
           events.push({ type: 'message', payload: { text: block['text'] }, raw: block });
         } else if (block['type'] === 'thinking') {
+          // Raciocínio vazio (bloco aberto, ou só assinatura cifrada) virava
+          // linha em branco no terminal (teste real de 2026-09-26).
+          if (typeof block['thinking'] !== 'string' || block['thinking'].trim().length === 0) continue;
           events.push({
             type: 'reasoning',
             payload: { text: block['thinking'] ?? '' },
@@ -117,6 +124,23 @@ export function claudeMapper(line: unknown): MappedEvent[] {
       };
       if (sessionId) event.nativeSessionId = sessionId;
       return [event];
+    }
+
+    // Estado da cota do provedor, a cada chamada: bastidor, não fala do
+    // agente. Aparecia CRU no `hub start` (teste real de 2026-09-26).
+    case 'rate_limit_event': {
+      const info = (obj['rate_limit_info'] ?? {}) as Record<string, unknown>;
+      return [
+        {
+          type: 'log',
+          payload: {
+            kind: 'tecnico',
+            text: `Claude: limite de taxa ${String(info['status'] ?? '?')}`,
+            rateLimit: info,
+          },
+          raw: line,
+        },
+      ];
     }
 
     default:
