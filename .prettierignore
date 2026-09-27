@@ -1,0 +1,23 @@
+# Gerado ou de terceiros: não é código de ninguém aqui.
+node_modules/
+dist/
+dist-test/
+dist-pack/
+coverage/
+package-lock.json
+*.tsbuildinfo
+
+# Registro fechado da vistoria: o texto é evidência datada, não se reformata.
+docs/vistoria-2026-09-25/
+
+# Cópia da especificação publicada pelo OpenCode: fica byte a byte como veio.
+docs/referencias/opencode-openapi.json
+
+# Markdown fica de fora: o Prettier alinha toda tabela com espaços e troca
+# `*ênfase*` por `_ênfase_` — o oposto do estilo dos documentos (tabelas
+# compactas `|---|`), sem opção para manter. Seriam milhares de linhas de diff
+# em documento que vários agentes editam ao mesmo tempo, sem ganho de leitura.
+*.md
+
+# Worktrees de agentes (cada uma é um checkout inteiro do repositório).
+.claude/

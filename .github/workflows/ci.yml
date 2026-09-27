@@ -93,6 +93,11 @@ jobs:
       - name: Lint (ESLint com informação de tipo)
         run: npm run lint
 
+      # `endOfLine: auto` no `.prettierrc.json`: o checkout do Windows vem com
+      # CRLF (`core.autocrlf`), o do Linux com LF — os dois passam.
+      - name: Formatação (Prettier)
+        run: npm run format:check
+
       # Depois do build, não antes: os testes importam `dist/*.test.js`
       # compilado, não os fontes — rodar isolado do passo de build garante que
       # o veredito de "testes" nunca mascara um build que já tinha falhado.

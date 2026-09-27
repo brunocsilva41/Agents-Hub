@@ -24,7 +24,9 @@
     "build:packages": "tsc -b",
     "web:dev": "npm run dev --workspace @agents-hub/web",
     "lint": "eslint . --max-warnings 0",
-    "verify": "npm run build && npm run lint && npm test",
+    "format": "prettier . --write --log-level warn",
+    "format:check": "prettier . --check --log-level warn",
+    "verify": "npm run build && npm run lint && npm run format:check && npm test",
     "demo": "node scripts/demo-e2e.mjs",
     "pack:dist": "node scripts/pack-dist.mjs",
     "test:install": "node scripts/test-install.mjs"
@@ -39,6 +41,7 @@
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.12.0",
+    "prettier": "^3.9.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "^5.7.2",
