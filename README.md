@@ -25,48 +25,45 @@ cursor [running]  US$ 0.0000 · 0 tok      ← agente externo, adotado como raiz
     Responda apenas com a palavra MCP_OK.
 ```
 
+## Requisitos
+
+- **Windows 10 ou 11** (plataforma validada; Linux roda com CI informativo).
+- **Node.js ≥ 22.5.** Entre 22.5 e 22.12 o `node:sqlite` exige `--experimental-sqlite`: a CLI passa a flag sozinha.
+- **git** no PATH — cada sessão roda num git worktree; o projeto precisa ser um repositório git.
+- O diretório global do npm no PATH (o instalador do Node já faz isso).
+- Pelo menos um CLI de agente **instalado e logado** (Claude Code, Codex, OpenCode...): o Hub usa o login que o próprio CLI já tem.
+
 ## Começando
 
-Requer Node ≥ 22.5 e git. Instalação a partir do clone, como pacote global (não depende do clone depois de instalado):
+Instalação como pacote global, a partir do clone (depois de instalado, não depende do clone):
 
 ```bash
 npm ci && npm run build && npm run pack:dist
 npm i -g ./dist-pack/agents-hub-0.1.0.tgz
 ```
 
-Para desenvolver no próprio Hub, `npm link --workspace @agents-hub/cli` no lugar das duas últimas linhas (aí hooks e MCP gravados nos agentes apontam para o clone). Detalhes, autostart no login (`hub autostart enable`) e o teste de instalação: [docs/13-instalacao.md](docs/13-instalacao.md).
-
-Pronto — `hub` está no PATH. **Não existe passo "suba o daemon"**: ele nasce sozinho quando algum comando precisa e sobrevive ao terminal que você fechar.
+Primeiros passos, dentro do repositório onde os agentes vão trabalhar:
 
 ```bash
-hub status     # agentes disponíveis, sessões vivas, o que espera sua decisão
-hub doctor     # o que está instalado, com versão e caminho
+hub init --yes                      # confere node/git, sobe o daemon, acha os agentes, registra o projeto
+hub doctor                          # quem está pronto, quem precisa de login
+hub hooks install claude --write    # gate pré-execução (sem --write: só a prévia)
+hub open                            # painel em http://127.0.0.1:4747
+hub start --agent claude --budget-usd 0.10 "liste os arquivos de src e resuma cada um"
+hub approvals                       # o que espera sua decisão · hub approve <id>
+hub cost                            # quanto custou
+hub stop                            # encerra o daemon e as sessões
 ```
 
-O painel fica em **http://127.0.0.1:4747**.
+**Não existe passo "suba o daemon"**: ele nasce sozinho quando algum comando precisa e sobrevive ao terminal que você fechar (`hub autostart enable` o sobe no login do Windows). O `--agent` é obrigatório porque **você escolhe o principal a cada vez**.
 
-Abra uma sessão — o `--agent` é obrigatório porque **você escolhe o principal a cada vez**:
+O guia completo — instalar pelo pacote ou pelo clone, `hub discover`/`hub import`, `hub mcp install`, aprovar e negar, atualizar, desinstalar — está em [docs/14-primeiros-passos.md](docs/14-primeiros-passos.md); a distribuição por trás dele, em [docs/13-instalacao.md](docs/13-instalacao.md).
 
-```bash
-hub start --agent claude --budget-usd 2 "refatore o módulo de pagamentos"
-```
-
-Faça um agente chamar outro:
+Faça um agente chamar outro, e veja quem chamou quem e quanto custou:
 
 ```bash
 hub delegate <sessionId> --agent codex --budget-usd 0.5 "escreva os testes do que foi refatorado"
-```
-
-Veja quem chamou quem e quanto custou:
-
-```bash
 hub graph <rootId>
-```
-
-Quando quiser encerrar tudo:
-
-```bash
-hub stop
 ```
 
 `hub help` lista o resto.
