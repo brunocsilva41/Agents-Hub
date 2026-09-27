@@ -7,7 +7,7 @@ import { AsyncQueue } from './async-queue.js';
 import { lerLinhas } from './line-reader.js';
 import { montarSpawn, resolveBin, type ResolvedBin } from './bin-resolver.js';
 import { resolveMapper } from './mappers/index.js';
-import { killProcessTree } from './process-tree.js';
+import { killProcessTree, opcoesDeGrupo } from './process-tree.js';
 import type {
   AgentAdapter,
   AgentManifest,
@@ -254,6 +254,9 @@ export class ProcessAgentAdapter implements AgentAdapter {
       windowsVerbatimArguments: comando.windowsVerbatimArguments,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
+      // POSIX: grupo de processos próprio, para `killTree` levar os filhos do
+      // shim junto (R06-13). No Windows é `{}`.
+      ...opcoesDeGrupo(),
     }) as ChildProcessWithoutNullStreams;
 
     /**

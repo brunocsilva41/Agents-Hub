@@ -183,7 +183,8 @@ export class BudgetLedger {
 
   /**
    * Reserva uma fatia para uma task filha. Se o pedido não couber no saldo,
-   * lança `BUDGET_EXCEEDED` — a task nasce em `input_required` e espera você.
+   * lança `BUDGET_EXCEEDED` e a delegação é recusada ali mesmo: o filho não
+   * nasce e nenhuma aprovação é aberta (quem delegou recebe o erro e decide).
    *
    * Reservar de novo o mesmo `taskId` (retry/fallback movem a task mantendo o
    * id) SUBSTITUI a fatia anterior. Antes somava as duas, e o `release` único

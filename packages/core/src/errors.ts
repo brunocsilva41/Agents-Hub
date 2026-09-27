@@ -18,6 +18,8 @@ export type HubErrorCode =
   /** O arquivo mudou entre a prévia e a confirmação: nada foi gravado. */
   | 'CONFIG_CHANGED'
   | 'FOLDER_NOT_FOUND'
+  /** Aprovação inexistente (id bem formado que não está no banco). */
+  | 'APPROVAL_NOT_FOUND'
   | 'FOLDER_IS_PRIMARY'
   | 'INVALID_BRIEF'
   | 'INVALID_QUERY'

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import {
   killProcessTree,
+  opcoesDeGrupo,
   imagemPareceEsperada,
   pidPareceReciclado,
   TOLERANCIA_RELOGIO_MS,
@@ -14,8 +15,8 @@ import {
 /**
  * Prova que `killProcessTree` mata a árvore inteira, não só o processo raiz.
  *
- * O script "pai" spawna um "neto" (`detached: true`, sem relação de pipe com
- * o pai) que ignora SIGTERM e escreve o próprio PID num arquivo — o mesmo
+ * O script "pai" spawna um "neto" (no Windows `detached: true`, sem relação
+ * de pipe com o pai; no POSIX no mesmo grupo do pai) que ignora SIGTERM e escreve o próprio PID num arquivo — o mesmo
  * padrão usado para provar `killTree`/`killServerTree` antes da extração.
  * Sem `/T`, `taskkill` mataria só o pai (o shim), e o neto sobreviveria
  * reparentado — exatamente o bug que motivou este módulo.
@@ -29,8 +30,11 @@ const path = require('node:path');
 const outDir = process.argv[2];
 const netoScript = path.join(outDir, 'neto.js');
 
+// Windows: \`detached\` desliga o neto do pai (o caso que exige \`/T\`). POSIX:
+// o neto fica no grupo do pai, como o filho real de um shim; um processo que
+// sai do grupo de propósito (setsid) não é alcançável por kill de grupo.
 const neto = spawn(process.execPath, [netoScript, outDir], {
-  detached: true,
+  detached: process.platform === 'win32',
   stdio: 'ignore',
 });
 neto.unref();
@@ -98,6 +102,8 @@ test('killProcessTree mata o processo raiz e o neto que ignora SIGTERM', async (
 
   const parent = spawn(process.execPath, [path.join(dir, 'parent.js'), dir], {
     stdio: 'ignore',
+    // Como os adapters fazem: no POSIX o pai vira líder de grupo.
+    ...opcoesDeGrupo(),
   });
   assert.ok(parent.pid, 'processo pai deveria ter PID');
 
@@ -119,6 +125,73 @@ test('killProcessTree mata o processo raiz e o neto que ignora SIGTERM', async (
     // No Windows, `taskkill /T /F` deveria ter funcionado sem cair no fallback.
     assert.equal(fallbackChamado, false);
   }
+});
+
+/**
+ * R06-13 (vistoria 2026-09-25): em POSIX o kill ia só no PID direto. Só roda
+ * fora do Windows — no Windows quem anda a árvore é o `taskkill /T`, coberto
+ * pelo teste acima.
+ */
+test(
+  'POSIX: kill de grupo derruba o neto que ficou no grupo, mesmo com o pai ignorando SIGTERM',
+  { skip: process.platform === 'win32' ? 'kill de grupo é POSIX; no Windows vale taskkill /T' : false },
+  async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hub-process-grupo-'));
+    dirs.push(dir);
+    writeFileSync(path.join(dir, 'parent.js'), PARENT_SCRIPT, 'utf8');
+    writeFileSync(path.join(dir, 'neto.js'), NETO_SCRIPT, 'utf8');
+    const parent = spawn(process.execPath, [path.join(dir, 'parent.js'), dir], {
+      stdio: 'ignore',
+      ...opcoesDeGrupo(),
+    });
+    const netoPid = Number(await aguardarArquivo(path.join(dir, 'neto.pid')));
+    let fallback = false;
+    // O fallback mata só o pai: se fosse ele a agir, o neto sobreviveria.
+    await killProcessTree(parent.pid!, () => {
+      fallback = true;
+      parent.kill('SIGKILL');
+    });
+    await aguardarMorte(netoPid);
+    assert.equal(fallback, false);
+  },
+);
+
+test('montagem: grupo próprio só fora do Windows', () => {
+  assert.deepEqual(opcoesDeGrupo('win32'), {});
+  assert.deepEqual(opcoesDeGrupo('linux'), { detached: true });
+  assert.deepEqual(opcoesDeGrupo('darwin'), { detached: true });
+});
+
+test('montagem: em POSIX o kill vai para o GRUPO (-pid) com SIGKILL', async () => {
+  const chamadas: Array<[number, string]> = [];
+  let fallback = 0;
+  await killProcessTree(4321, () => (fallback += 1), {
+    platform: 'linux',
+    kill: (p, s) => void chamadas.push([p, s]),
+  });
+  assert.deepEqual(chamadas, [[-4321, 'SIGKILL']]);
+  assert.equal(fallback, 0);
+});
+
+test('montagem: sem grupo (ESRCH) cai no fallback; PID inválido nunca vira kill(-1)/kill(0)', async () => {
+  let fallback = 0;
+  await killProcessTree(4321, () => (fallback += 1), {
+    platform: 'linux',
+    kill: () => {
+      throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+    },
+  });
+  assert.equal(fallback, 1);
+
+  const chamadas: number[] = [];
+  for (const pid of [-1, 0, 1, Number.NaN]) {
+    await killProcessTree(pid, () => (fallback += 1), {
+      platform: 'linux',
+      kill: (p) => void chamadas.push(p),
+    });
+  }
+  assert.deepEqual(chamadas, []);
+  assert.equal(fallback, 5);
 });
 
 test('killProcessTree resolve sem erro para PID inexistente', async () => {

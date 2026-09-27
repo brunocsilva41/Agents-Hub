@@ -39,15 +39,14 @@ import { fromJson, nullableJson, toJson, type Db, type SqlValue } from './db.js'
  * Custo que entra nas somas: estimativas parciais (`cost.provisional`) ficam
  * de fora, porque o custo final do turno já as substitui — somar as duas
  * coisas era a dupla/tripla contagem do Claude (vistoria 2026-09-25).
+ *
+ * A regra mora nas colunas geradas `cost_usd`/`cost_tokens` (migração 9):
+ * `cost_tokens` é NULL para evento sem custo ou provisório, e o índice
+ * `idx_events_custo_soma` guarda os dois valores já calculados. As somas não
+ * abrem mais o JSON de cada evento (R09-08).
  */
-const CUSTO_CONTA = (alias: string): string =>
-  `COALESCE(json_extract(${alias}cost_json, '$.provisional'), 0) = 0`;
-const SOMA_USD = (alias: string): string =>
-  `COALESCE(SUM(CASE WHEN ${CUSTO_CONTA(alias)} THEN json_extract(${alias}cost_json, '$.usd') END), 0)`;
-const SOMA_TOKENS = (alias: string): string =>
-  `COALESCE(SUM(CASE WHEN ${CUSTO_CONTA(alias)} THEN
-     COALESCE(json_extract(${alias}cost_json, '$.inputTokens'), 0) +
-     COALESCE(json_extract(${alias}cost_json, '$.outputTokens'), 0) END), 0)`;
+const SOMA_USD = (alias: string): string => `COALESCE(SUM(${alias}cost_usd), 0)`;
+const SOMA_TOKENS = (alias: string): string => `COALESCE(SUM(${alias}cost_tokens), 0)`;
 
 type Row = Record<string, unknown>;
 
@@ -300,10 +299,10 @@ class SqliteSessionRepository implements SessionRepository {
                 ${SOMA_USD('e.')} AS usd,
                 ${SOMA_TOKENS('e.')} AS tokens
          FROM sessions s
-         -- Só eventos COM custo entram na soma (os demais somariam NULL). O
-         -- filtro no JOIN deixa o SQLite usar o índice parcial
-         -- \`idx_events_custo\` em vez de ler todos os eventos da árvore.
-         LEFT JOIN events e ON e.session_id = s.id AND e.cost_json IS NOT NULL
+         -- Só eventos cujo custo CONTA entram na soma (os demais somariam
+         -- NULL). O filtro no JOIN deixa o SQLite usar o índice parcial
+         -- \`idx_events_custo_soma\` em vez de ler todos os eventos da árvore.
+         LEFT JOIN events e ON e.session_id = s.id AND e.cost_tokens IS NOT NULL
          WHERE s.root_id = ?
          GROUP BY s.id
          ORDER BY s.created_at`,
@@ -502,7 +501,7 @@ class SqliteEventRepository implements EventRepository {
       .prepare(
         `SELECT ${SOMA_USD('')} AS usd,
                 ${SOMA_TOKENS('')} AS tokens
-         FROM events WHERE session_id = ? AND cost_json IS NOT NULL`,
+         FROM events WHERE session_id = ? AND cost_tokens IS NOT NULL`,
       )
       .get(sessionId) as Row | undefined;
     return { usd: num(row?.['usd']), tokens: num(row?.['tokens']), seconds: 0 };
@@ -573,7 +572,7 @@ class SqliteApprovalRepository implements ApprovalRepository {
 
   update(id: string, patch: Partial<Approval>): Approval {
     const current = this.get(id);
-    if (!current) throw new HubError('ILLEGAL_STATE', `Aprovação ${id} não encontrada`, { id });
+    if (!current) throw new HubError('APPROVAL_NOT_FOUND', `Aprovação ${id} não encontrada`, { id });
     const next: Approval = { ...current, ...patch, id };
     this.db
       .prepare('UPDATE approvals SET state = ?, resolved_at = ?, resolved_by = ? WHERE id = ?')
@@ -770,34 +769,61 @@ export class SqliteUnitOfWork implements UnitOfWork {
     this.audit = new SqliteAuditRepository(db);
   }
 
-  /** Transações aninhadas viram uma só — a mais externa comanda. */
+  /**
+   * Transação síncrona. A mais externa é `BEGIN`/`COMMIT`; as aninhadas viram
+   * `SAVEPOINT` (vistoria 2026-09-25, R09-16): antes elas só "entravam" na
+   * externa, e uma interna que falhasse com a exceção engolida por quem a
+   * chamou deixava as escritas parciais dela no COMMIT externo.
+   *
+   * `fn` assíncrona é recusada: o COMMIT sairia antes de a promessa resolver
+   * e o que ela escrevesse depois ficaria fora da transação (ou dentro da de
+   * outro chamador). `node:sqlite` é síncrono; quem precisa de `await` faz o
+   * trabalho assíncrono antes e só a escrita dentro daqui.
+   */
   transaction<T>(fn: () => T): T {
-    if (this.#depth > 0) {
-      this.#depth += 1;
-      try {
-        return fn();
-      } finally {
-        this.#depth -= 1;
-      }
-    }
-
-    this.db.exec('BEGIN');
-    this.#depth = 1;
+    const nivel = this.#depth;
+    const savepoint = `hub_sp_${nivel}`;
+    this.db.exec(nivel === 0 ? 'BEGIN' : `SAVEPOINT ${savepoint}`);
+    this.#depth = nivel + 1;
     try {
       const result = fn();
-      this.db.exec('COMMIT');
+      if (ehThenable(result)) {
+        // Evita "unhandled rejection" da promessa que não vamos esperar.
+        (result as PromiseLike<unknown>).then(undefined, () => undefined);
+        throw new HubError(
+          'ILLEGAL_STATE',
+          'transaction() recebeu uma função assíncrona: a transação é síncrona e seria confirmada ' +
+            'antes de a promessa terminar. Faça o trabalho assíncrono fora e só as escritas aqui dentro.',
+        );
+      }
+      this.db.exec(nivel === 0 ? 'COMMIT' : `RELEASE ${savepoint}`);
       return result;
     } catch (err) {
-      this.db.exec('ROLLBACK');
+      if (nivel === 0) {
+        this.db.exec('ROLLBACK');
+      } else {
+        // Desfaz só o que ESTA transação interna escreveu; a externa segue
+        // válida e decide sozinha se confirma.
+        this.db.exec(`ROLLBACK TO ${savepoint}`);
+        this.db.exec(`RELEASE ${savepoint}`);
+      }
       throw err;
     } finally {
-      this.#depth = 0;
+      this.#depth = nivel;
     }
   }
 
   close(): void {
     this.db.close();
   }
+}
+
+function ehThenable(v: unknown): boolean {
+  return (
+    v !== null &&
+    (typeof v === 'object' || typeof v === 'function') &&
+    typeof (v as { then?: unknown }).then === 'function'
+  );
 }
 
 function mapProject(row: Row): Project {

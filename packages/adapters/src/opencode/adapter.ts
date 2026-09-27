@@ -6,7 +6,7 @@ import { HubError, newId, nowIso, type SessionMode } from '@agents-hub/core';
 import { AsyncQueue } from '../async-queue.js';
 import { montarSpawn, resolveBin } from '../bin-resolver.js';
 import { ProcessAgentAdapter } from '../process-adapter.js';
-import { killProcessTree } from '../process-tree.js';
+import { killProcessTree, opcoesDeGrupo } from '../process-tree.js';
 import type {
   AgentAdapter,
   AgentManifest,
@@ -653,6 +653,8 @@ export class OpenCodeAdapter implements AgentAdapter {
         windowsVerbatimArguments: comando.windowsVerbatimArguments,
         windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
+        // POSIX: grupo próprio, para `killServerTree` matar a árvore (R06-13).
+        ...opcoesDeGrupo(),
         detached: false,
       },
     );

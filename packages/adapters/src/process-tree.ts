@@ -22,13 +22,37 @@ const execFileAsync = promisify(execFile);
  * tratada — por isso cai para `fallbackKill()` (ex.: `SIGKILL` direto no
  * processo, que só derruba o shim, mas é melhor que derrubar o daemon).
  *
+ * Fora do Windows (R06-13): antes caía direto em `fallbackKill()` — só o PID
+ * direto, e os filhos do shim sobreviviam como no Windows sem `/T`. Agora o
+ * filho nasce líder de um grupo de processos (`opcoesDeGrupo()` no `spawn`) e
+ * o kill vai para o GRUPO (`kill(-pid)`), levando a árvore junto. Processo que
+ * não é líder de grupo (spawn sem `detached`) dá `ESRCH` e cai no fallback.
+ *
  * @param pid PID do processo raiz (o shim, tipicamente).
- * @param fallbackKill Chamado quando `taskkill` não está disponível; deve
- *   matar o processo pelo mecanismo do Node (ex.: `child.kill('SIGKILL')`).
+ * @param fallbackKill Chamado quando `taskkill` não está disponível (ou, em
+ *   POSIX, quando não há grupo); deve matar o processo pelo mecanismo do Node
+ *   (ex.: `child.kill('SIGKILL')`).
+ * @param deps Só para teste: plataforma e `process.kill` substituíveis.
  */
-export function killProcessTree(pid: number, fallbackKill: () => void): Promise<void> {
-  if (process.platform !== 'win32') {
-    fallbackKill();
+export function killProcessTree(
+  pid: number,
+  fallbackKill: () => void,
+  deps: { platform?: NodeJS.Platform; kill?: (pid: number, signal: NodeJS.Signals) => void } = {},
+): Promise<void> {
+  const plataforma = deps.platform ?? process.platform;
+  if (plataforma !== 'win32') {
+    // PID inválido (ex.: `child.pid ?? -1`): `-pid` viraria `kill(1)` ou
+    // `kill(0)` — o init ou o PRÓPRIO grupo do daemon. Nunca.
+    if (!Number.isInteger(pid) || pid <= 1) {
+      fallbackKill();
+      return Promise.resolve();
+    }
+    const matar = deps.kill ?? ((p: number, sinal: NodeJS.Signals) => process.kill(p, sinal));
+    try {
+      matar(-pid, 'SIGKILL');
+    } catch {
+      fallbackKill();
+    }
     return Promise.resolve();
   }
 
@@ -54,6 +78,18 @@ export function killProcessTree(pid: number, fallbackKill: () => void): Promise<
     const limite = setTimeout(encerrar, 5_000);
     limite.unref?.();
   });
+}
+
+/**
+ * Opções de `spawn` para o filho poder ser morto com a árvore inteira.
+ *
+ * POSIX: `detached: true` põe o filho num grupo de processos próprio (ele é
+ * o líder, id do grupo = PID dele), que é o que `killProcessTree` mata com
+ * `kill(-pid)`. Windows: nada — lá `detached` abriria um console novo, e a
+ * árvore já é andada por `taskkill /T`.
+ */
+export function opcoesDeGrupo(plataforma: NodeJS.Platform = process.platform): { detached?: true } {
+  return plataforma === 'win32' ? {} : { detached: true };
 }
 
 /**

@@ -24,9 +24,20 @@ export type Decision = 'allow' | 'approve' | 'deny';
 
 const DECISION_RANK: Record<Decision, number> = { allow: 0, approve: 1, deny: 2 };
 
+/**
+ * Decisão desconhecida ou ausente (mapa `risk` incompleto montado sem passar
+ * pelo schema) vale `approve`: pedir humano é o padrão seguro, nunca `allow`
+ * por omissão (R09-12).
+ */
+function decisaoConhecida(d: Decision | undefined): Decision {
+  return d !== undefined && Object.hasOwn(DECISION_RANK, d) ? d : 'approve';
+}
+
 /** A decisão mais restritiva entre duas — base da regra de não-escalação. */
 export function narrowestDecision(a: Decision, b: Decision): Decision {
-  return DECISION_RANK[a] >= DECISION_RANK[b] ? a : b;
+  const x = decisaoConhecida(a);
+  const y = decisaoConhecida(b);
+  return DECISION_RANK[x] >= DECISION_RANK[y] ? x : y;
 }
 
 export interface PolicyDocument {
@@ -121,54 +132,110 @@ export interface WatchPolicy {
 const RiskLevelSchema = z.enum(['read', 'write', 'exec', 'escalate', 'irreversible', 'budget']);
 const DecisionSchema = z.enum(['allow', 'approve', 'deny']);
 
-const BudgetLimitsSchema = z.object({
-  usd: z.number(),
-  tokens: z.number(),
-  seconds: z.number(),
-});
+/*
+ * Faixas (vistoria 2026-09-25, R09-12): antes qualquer `number` passava —
+ * `maxDepth:-1`, `maxConcurrency:0.5`, `taskTimeoutSeconds:0`,
+ * `defaultBudget.usd:-5`, `NaN`/`Infinity` vindos de YAML — e o valor absurdo
+ * só aparecia longe dali, como concorrência zerada ou tarefa morta na hora.
+ * `z.number()` já recusa NaN; `.finite()` recusa Infinity (`.inf` em YAML).
+ *
+ * Os objetos são `.strict()`: chave com erro de digitação (`maxDepht`,
+ * `defaultBudget.uds`) é recusada apontando o campo, em vez de descartada em
+ * silêncio. `deepPartial()` preserva o `.strict()` em cada nível.
+ */
+/** Inteiro >= 0 (profundidade, tentativas). */
+const inteiroNaoNegativo = () => z.number().int().nonnegative();
+/** Inteiro >= 1 (tetos de concorrência: 0 travaria tudo). */
+const inteiroPositivo = () => z.number().int().positive();
+/** Segundos > 0 e finitos (timeout 0 mata a tarefa ao nascer). */
+const segundos = () => z.number().finite().positive();
+/** Limite de orçamento >= 0 e finito (0 = nada permitido, nunca "negativo"). */
+const limite = () => z.number().finite().nonnegative();
 
-const ValidationPolicySchema = z.object({
-  command: z.string().nullable(),
-  commandTimeoutSeconds: z.number(),
-  review: z.object({
-    enabled: z.boolean(),
-    agent: z.string().nullable(),
-  }),
-});
+const BudgetLimitsSchema = z
+  .object({
+    usd: limite(),
+    tokens: limite(),
+    seconds: limite(),
+  })
+  .strict();
 
-const WatchPolicySchema = z.object({
-  pauseOn: z.array(RiskLevelSchema),
-  flagOn: z.array(RiskLevelSchema),
-});
+const ValidationPolicySchema = z
+  .object({
+    command: z.string().nullable(),
+    commandTimeoutSeconds: segundos(),
+    review: z
+      .object({
+        enabled: z.boolean(),
+        agent: z.string().nullable(),
+      })
+      .strict(),
+  })
+  .strict();
 
-export const PolicyDocumentSchema = z.object({
-  maxDepth: z.number(),
-  maxConcurrency: z.number(),
-  maxConcurrencyPerAgent: z.number(),
-  taskTimeoutSeconds: z.number(),
-  sessionTimeoutSeconds: z.number(),
-  heartbeatTimeoutSeconds: z.number(),
-  defaultBudget: BudgetLimitsSchema,
-  risk: z.record(RiskLevelSchema, DecisionSchema),
-  commands: z.object({
-    allow: z.array(z.string()),
-    deny: z.array(z.string()),
-  }),
-  paths: z.object({
-    allowWriteOutsideWorkdir: z.boolean(),
-    denyFragments: z.array(z.string()),
-  }),
-  network: z.object({
-    allowDomains: z.array(z.string()),
-  }),
-  retries: z.object({
-    max: z.number(),
-    backoffMs: z.number(),
-  }),
-  fallback: z.record(z.string(), z.array(z.string())),
-  watch: WatchPolicySchema,
-  validation: ValidationPolicySchema,
-});
+const WatchPolicySchema = z
+  .object({
+    pauseOn: z.array(RiskLevelSchema),
+    flagOn: z.array(RiskLevelSchema),
+  })
+  .strict();
+
+/**
+ * `risk` EXAUSTIVO na política completa: com `z.record` (zod 3) um documento
+ * `{risk:{read:'allow'}}` passava, e o nível ausente chegava a `decide()` como
+ * `undefined` — o overlay do modo virava a única decisão (em autonomous,
+ * `escalate` ausente saía `allow`). Na versão parcial (camadas) as chaves
+ * continuam opcionais, porque o merge completa com a base.
+ */
+const RiskMapSchema = z
+  .object({
+    read: DecisionSchema,
+    write: DecisionSchema,
+    exec: DecisionSchema,
+    escalate: DecisionSchema,
+    irreversible: DecisionSchema,
+    budget: DecisionSchema,
+  })
+  .strict();
+
+export const PolicyDocumentSchema = z
+  .object({
+    maxDepth: inteiroNaoNegativo(),
+    maxConcurrency: inteiroPositivo(),
+    maxConcurrencyPerAgent: inteiroPositivo(),
+    taskTimeoutSeconds: segundos(),
+    sessionTimeoutSeconds: segundos(),
+    heartbeatTimeoutSeconds: segundos(),
+    defaultBudget: BudgetLimitsSchema,
+    risk: RiskMapSchema,
+    commands: z
+      .object({
+        allow: z.array(z.string()),
+        deny: z.array(z.string()),
+      })
+      .strict(),
+    paths: z
+      .object({
+        allowWriteOutsideWorkdir: z.boolean(),
+        denyFragments: z.array(z.string()),
+      })
+      .strict(),
+    network: z
+      .object({
+        allowDomains: z.array(z.string()),
+      })
+      .strict(),
+    retries: z
+      .object({
+        max: inteiroNaoNegativo(),
+        backoffMs: z.number().finite().nonnegative(),
+      })
+      .strict(),
+    fallback: z.record(z.string(), z.array(z.string())),
+    watch: WatchPolicySchema,
+    validation: ValidationPolicySchema,
+  })
+  .strict();
 
 /**
  * Versão parcial, campo a campo (inclusive nos objetos aninhados), para
@@ -365,7 +432,7 @@ function clampLayer(
   // 2026-09-22 — antes `{ ...base.risk, ...layer.risk }` deixava o projeto
   // trocar `irreversible` de `approve` para `allow`). Mesma regra da
   // delegação pai→filho (`intersect()` mais abaixo).
-  const risk = (Object.keys(base.risk) as RiskLevel[]).reduce<Record<RiskLevel, Decision>>(
+  const risk = (Object.keys(RISK_RANK) as RiskLevel[]).reduce<Record<RiskLevel, Decision>>(
     (acc, level) => {
       acc[level] = narrowestDecision(base.risk[level], layer.risk?.[level] ?? base.risk[level]);
       return acc;
@@ -770,7 +837,9 @@ export class PolicyEngine {
     // Deny list é proibição, não pedido de aprovação: nenhum modo e nenhum
     // `policy.risk` a transforma em `approve`/`allow`.
     if (denied) return { risk, decision: 'deny', reason };
-    const base = this.policy.risk[risk];
+    // Nível ausente do mapa (política montada à mão, sem passar pelo schema)
+    // cai em `approve`, nunca no overlay do modo sozinho (R09-12: fail-open).
+    const base = decisaoConhecida(this.policy.risk[risk]);
     const byMode = decisionForMode(risk, ctx.mode);
     return { risk, decision: narrowestDecision(base, byMode), reason };
   }
@@ -782,7 +851,9 @@ export class PolicyEngine {
   intersect(child: PolicyDocument): PolicyEngine {
     const parent = this.policy;
     const risk = {} as Record<RiskLevel, Decision>;
-    for (const level of Object.keys(parent.risk) as RiskLevel[]) {
+    // Todos os níveis, não só os que o pai declara: um nível ausente no pai
+    // não pode sumir do filho (e ausente vale `approve`, ver narrowestDecision).
+    for (const level of Object.keys(RISK_RANK) as RiskLevel[]) {
       risk[level] = narrowestDecision(parent.risk[level], child.risk[level]);
     }
     return new PolicyEngine({

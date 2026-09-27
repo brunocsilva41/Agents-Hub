@@ -196,8 +196,11 @@ export function mcpServerEntrypoint(): string {
  *
  * Sem `.strict()` no nível superior de propósito: um `config.json` gravado por
  * uma versão anterior do Hub pode ter chaves que esta versão não conhece mais,
- * e recusar a subida do daemon por isso quebraria o upgrade. `policy` valida
- * campo a campo via `PartialPolicyDocumentSchema` pelo mesmo motivo.
+ * e recusar a subida do daemon por isso quebraria o upgrade. `policy` é a
+ * exceção: `PartialPolicyDocumentSchema` é estrito em todos os níveis e com
+ * faixas numéricas (vistoria 2026-09-25, R09-12). Política é segurança — um
+ * `maxDepht` digitado errado ou `maxConcurrency: 0` precisa impedir a subida
+ * com o campo apontado, não virar padrão em silêncio.
  */
 const HubConfigOnDiskSchema = z
   .object({
