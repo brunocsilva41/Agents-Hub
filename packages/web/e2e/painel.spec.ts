@@ -376,14 +376,14 @@ test.describe('tema e cores', () => {
   test('alternância de tema persiste e vence o sistema', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' });
     await abrir(page);
-    await page.getByRole('button', { name: /tema/i }).click();
+    await page.getByRole('button', { name: /^Usar tema/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await page.reload();
     await expect(page.locator('.topbar')).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     const [c] = await contrastes(page, [['var(--bg)', '#ffffff']]);
     expect(c!).toBeLessThan(1.5);
-    await page.getByRole('button', { name: /tema/i }).click();
+    await page.getByRole('button', { name: /^Usar tema/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   });
 
