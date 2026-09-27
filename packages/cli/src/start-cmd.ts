@@ -1,4 +1,5 @@
 import type { BriefInput, HubClient } from './client.js';
+import { avisoDeGateDoAgente } from './gate-aviso.js';
 import { resolverProjeto } from './project-resolve.js';
 import { bold, dim, green, red, yellow } from './render.js';
 import { acompanhar, codigoDeSaida, relatarDesfecho, type Desfecho } from './session-follow.js';
@@ -141,6 +142,7 @@ export async function startCommand(client: HubClient, args: Args, o: OpcoesDeSta
     log(yellow(`⚠ pedido "${flags.agent}", rodando em "${agenteReal}"`));
   }
   log(dim(`${brief.isolation === 'none' ? 'pasta' : 'worktree'}: ${result.session.workdir}`));
+  log(dim(`modo: ${result.session.mode}`));
   // O modo nunca passa do padrão do agente: `--mode autonomous` num agente
   // `semi` roda em `semi`. Reduzir é o lado seguro, mas não em silêncio.
   if (brief.supervision !== undefined && result.session.mode !== brief.supervision) {
@@ -150,6 +152,10 @@ export async function startCommand(client: HubClient, args: Args, o: OpcoesDeSta
       ),
     );
   }
+
+  // R14-11: sem o gate pré-execução, o padrão (`semi`, `exec: allow`) só
+  // vigia — dizer isso aqui, onde a pessoa está olhando, e não só no README.
+  for (const linha of await avisoDeGateDoAgente(client, agenteReal)) log(yellow(linha));
 
   if (args.flags['detach'] === true) {
     log(dim(`acompanhe com: hub watch ${result.session.id}`));

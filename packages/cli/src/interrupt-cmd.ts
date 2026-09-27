@@ -1,4 +1,5 @@
 import type { HubClient } from './client.js';
+import { required } from './cmd-util.js';
 import { dim, green, yellow } from './render.js';
 
 interface Args {
@@ -36,9 +37,3 @@ function rotulo(state: string): string {
   return `no estado ${state}`;
 }
 
-function required(value: string | undefined, name: string): string {
-  if (value === undefined || value.length === 0) {
-    throw new Error(`argumento obrigatório ausente: ${name}`);
-  }
-  return value;
-}

@@ -1,5 +1,7 @@
 import path from 'node:path';
 import type { AuditEntrySummary, AuditKindSummary, AuditQuery, HubClient, PolicyDoc } from './client.js';
+import { erroDeUso } from './erro-cli.js';
+import { dataHoraLocal } from './hora.js';
 import { projetoQueContem } from './project-resolve.js';
 import { bold, cyan, dim, green, red, yellow } from './render.js';
 
@@ -257,7 +259,7 @@ export async function auditCommand(client: HubClient, args: Args): Promise<void>
 }
 
 export function formatarEntrada(e: AuditEntrySummary): string {
-  const quando = e.ts.replace('T', ' ').slice(0, 19);
+  const quando = dataHoraLocal(e.ts);
   const decisao = e.decision ? colorirDecisao(e.decision) : dim('-');
   const risco = e.risk ? dim(`[${e.risk}]`) : '';
   const sessao = e.sessionId ? dim(` ${e.sessionId}`) : '';
@@ -279,7 +281,7 @@ async function acharProjeto(client: HubClient, flag: string | boolean): Promise<
 
 function obrigatorio(valor: string | undefined, nome: string): string {
   if (valor === undefined || valor.length === 0) {
-    throw new Error(`argumento obrigatório ausente: ${nome}`);
+    throw erroDeUso(`argumento obrigatório ausente: ${nome}`);
   }
   return valor;
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { dataHoraLocal } from './hora.js';
 import { definirCaminho, formatarEntrada, interpretarValor, removerCaminho } from './policy-cmd.js';
 
 describe('hub policy / hub audit — auxiliares (item 1.10)', () => {
@@ -44,7 +45,11 @@ describe('hub policy / hub audit — auxiliares (item 1.10)', () => {
     });
     // Sem depender das cores do terminal.
     const limpa = linha.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.match(limpa, /2026-09-26 10:00:00 cli:bruno approval\.resolved denied/);
+    // Hora local com o fuso (R07-18), qualquer que seja o fuso da máquina.
+    assert.ok(
+      limpa.startsWith(`${dataHoraLocal('2026-09-26T10:00:00.000Z')} cli:bruno approval.resolved denied`),
+      limpa,
+    );
     assert.match(limpa, /Bash: git push/);
     assert.match(limpa, /não agora/);
   });

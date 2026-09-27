@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { baseUrl, loadConfig, ligarBypassDoGateCodex, modoExigeGate } from '@agents-hub/daemon';
-import { HubApiError, HubClient, type BriefInput } from './client.js';
+import { HubClient, type BriefInput } from './client.js';
 import { ensureDaemon } from './daemon-control.js';
 import { runDaemon } from './daemon-run.js';
 import { runHook } from './hook-run.js';
@@ -29,6 +28,7 @@ import {
 } from './render.js';
 import {
   MCP_TARGETS,
+  estadoDoRegistro,
   mcpEntrypoint,
   renderSnippet,
   resolveConfigPath,
@@ -47,7 +47,6 @@ import { resolveProjectId } from './project-resolve.js';
 import { budgetCommand, graphCommand, sendCommand, watchCommand } from './session-follow.js';
 import { lerBudgetUsd, startCommand } from './start-cmd.js';
 // Item 5.6: comandos de ciclo de vida, exportação e manutenção.
-import { HELP_CICLO_DE_VIDA } from './lifecycle-help.js';
 import { versionCommand } from './version-cmd.js';
 import { JSON_COMMANDS, jsonCommand } from './json-cmd.js';
 import { initCommand, perguntarNoTerminal } from './init-cmd.js';
@@ -59,170 +58,20 @@ import { exportCommand } from './export-cmd.js';
 import { costCommand } from './cost-cmd.js';
 import { mergeCommand } from './merge-cmd.js';
 import { backupCommand, restoreCommand } from './backup-cmd.js';
-import { comErro } from './cmd-util.js';
+import { comErro, required, type Args } from './cmd-util.js';
+// Vistoria 07/14 (R07-07, R07-11, R07-18, R07-20..24, R14-11).
+import { parseArgs } from './args.js';
+import { HELP, ajudaDoComando } from './ajuda.js';
+import { definirComandoAtual, erroDeUso, mostrarErro } from './erro-cli.js';
+import { dataHoraLocal } from './hora.js';
+import { projectEnvCommand } from './project-env-cmd.js';
 
 /** Quebra de linha literal, para não brigar com escapes em template string. */
 const NEWLINE = String.fromCharCode(10);
 
-export interface Args {
-  command: string;
-  positional: string[];
-  flags: Record<string, string | boolean>;
-}
-
-/**
- * Flags sem valor precisam ser declaradas: sem isso, `--detach "objetivo"`
- * consome o objetivo como valor de `--detach` e o comando falha dizendo que
- * faltou o objetivo — que estava lá o tempo todo.
- */
-const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh']);
-// Item 5.6 (init/logs/open/update/export/cost/merge/restore).
-for (const f of ['yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw']) BOOLEAN_FLAGS.add(f);
-
-function parseArgs(argv: string[]): Args {
-  const [command = 'help', ...rest] = argv;
-  const positional: string[] = [];
-  const flags: Record<string, string | boolean> = {};
-
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i] ?? '';
-    if (!token.startsWith('--')) {
-      positional.push(token);
-      continue;
-    }
-
-    // Forma explícita `--chave=valor` sempre vence a heurística.
-    const equals = token.indexOf('=');
-    if (equals > 2) {
-      flags[token.slice(2, equals)] = token.slice(equals + 1);
-      continue;
-    }
-
-    const key = token.slice(2);
-    if (BOOLEAN_FLAGS.has(key)) {
-      flags[key] = true;
-      continue;
-    }
-
-    const next = rest[i + 1];
-    if (next === undefined || next.startsWith('--')) {
-      flags[key] = true;
-    } else {
-      flags[key] = next;
-      i += 1;
-    }
-  }
-
-  return { command, positional, flags };
-}
-
-const HELP = `
-${bold('hub')} — plano de controle do Agents-Hub
-
-${bold('Daemon')} ${dim('(sobe sozinho quando algum comando precisa)')}
-  hub status                        agentes, sessões vivas e o que espera você
-  hub daemon                        roda em primeiro plano, para ver os logs
-  hub stop                          encerra o daemon e as sessões vivas
-  hub health                        resposta crua da API
-  hub autostart [enable|disable|status]  sobe o daemon no login do Windows (desligado por padrão)
-
-${bold('Gate pré-execução')} ${dim('(bloqueia a ferramenta ANTES de ela rodar)')}
-  hub hooks install claude --write   registra o hook PreToolUse no Claude Code
-  hub hooks install codex --write    liga o bypass de confiança que o hook do Codex exige
-  hub hooks                          mostra onde o gate está instalado
-  hub hook [--dialect codex]         uso interno: o agente chama, não você
-
-${bold('Agentes')}
-  hub doctor                        instalado, versão, auth e quem está quebrado (sem gastar nada)
-  hub doctor --smoke [--agent <id>] [--yes]
-                                    sessão real em cada agente, um por vez, teto US$ 0,10 cada, num
-                                    projeto descartável (GASTA TOKENS/CRÉDITOS; pede confirmação)
-  hub agents                        lista agentes, capabilities e limitações
-  hub discover [--agent <id>] [--json] [--refresh]
-                                    o que cada CLI já tem: instalado, versão, auth, modelo padrão,
-                                    servidores MCP e instruções globais (só leitura, nunca mostra segredo)
-  hub import <agente> [--project <caminho>] [--kinds instructions,env,mcp] [--to ag1,ag2] [--write]
-                                    traz o ambiente do agente para o projeto. SEM --write só imprime o plano.
-      --kinds              padrão: instructions,env (mcp entra quando há --to)
-      --to <ag1,ag2>       agentes que receberão os servidores MCP descobertos (merge + backup versionado .bak-<data>)
-      --overwrite          substitui instrução/variável que o projeto já tem
-      --include-env        copia o env dos servidores MCP (valores reais; padrão: só nomes, sem copiar)
-
-${bold('Projetos')}
-  hub projects                      lista projetos registrados
-  hub project add [caminho]         registra um repositório (padrão: diretório atual)
-  hub project env [projeto]                             lista o ambiente configurado por agente
-      --agent <id>                 restringe a listagem a um agente
-  hub project env [projeto] --agent <id> --set CHAVE=VALOR    configura uma variável (ex.: OPENAI_BASE_URL)
-  hub project env [projeto] --agent <id> --unset CHAVE        remove uma variável
-  hub project prompt [projeto] --agent <id>                   mostra a instrução salva para o agente
-  hub project prompt [projeto] --agent <id> --set "texto"     grava a instrução
-  hub project prompt [projeto] --agent <id> --clear           apaga a instrução
-  hub project folders [projeto]                               lista as pastas vinculadas ao projeto
-  hub project folders remove [projeto] <folderId>             desvincula uma pasta
-  hub project trust [projeto]                                 confia no config.yaml do repo (validation.command, revisão, env, prompts, memory)
-                                                              ${dim('se o conteúdo mudar depois, a confiança é suspensa: rode de novo')}
-  hub project untrust [projeto]                               retira a confiança (padrão: não confiável)
-      ${dim('[projeto] aceita id ou caminho; sem ele, usa o diretório atual (registra se preciso).')}
-
-${bold('Sessões')}
-  hub start --agent <id> "objetivo"          abre uma sessão-raiz e acompanha ao vivo
-      --project <caminho>    projeto (padrão: diretório atual; subpasta de projeto usa o projeto)
-      --budget-usd <n>       teto de custo do fluxo inteiro
-      --mode <supervised|semi|autonomous>
-      --isolation <worktree|none>
-      --detach               não acompanha o stream
-      ${dim('saída: 0 concluída · 1 falhou/cancelada · 2 parada esperando aprovação (vale para watch/send)')}
-  hub sessions                                lista sessões
-  hub watch <sessionId>                       acompanha uma sessão ao vivo
-  hub watch --root <rootId>                   acompanha o fluxo inteiro, todos os agentes
-  hub send <sessionId> "texto"                fala com uma sessão
-  hub interrupt <sessionId>                   para o turno atual; a sessão fica ociosa (retome com send)
-  hub pause <sessionId>                       para o turno e pausa a sessão (retome com send)
-  hub cancel <sessionId>                      encerra a sessão e seus filhos
-
-${bold('Delegação e custo')}
-  hub delegate <sessionId> --agent <id> "objetivo"   um agente pede a outro
-  hub handoff <sessionId> --to <id>                  transfere a liderança da sessão
-  hub diff <sessionId>                                o que o agente mudou no código
-  hub artifacts <sessionId>                           artefatos da sessão (diff, log, report, transcript...)
-  hub graph <rootId>                                  árvore de quem chamou quem
-  hub budget <rootId>                                 consumo contra o orçamento
-
-${bold('Aprovações e manutenção')}
-  hub approvals                      o que está esperando sua decisão
-  hub approve <id>                   libera e a sessão continua de onde parou
-  hub deny <id>                      nega e encerra a sessão
-  hub prune                          recolhe worktrees de sessões já expiradas
-  ${dim('approve/deny/prune/stop e as edições abaixo exigem o token de <AGENTS_HUB_HOME>/operator-token (a CLI lê sozinha)')}
-
-${bold('Política e auditoria')}
-  hub policy [show] [--project [p]] [--json]     camadas (global/projeto) e a política efetiva
-  hub policy set <campo> <valor> [--project [p]] ex.: set defaultBudget.usd 2 · set maxDepth 2
-  hub policy unset <campo> [--project [p]]       volta o campo ao nível de baixo
-  hub policy allow|deny add|rm <prefixo> [--project [p]]
-                                                 allow/deny list de comandos (projeto só aperta)
-  hub policy mode <risco> <allow|approve|deny> [--project [p]]
-                                                 decisão por nível: read|write|exec|escalate|irreversible|budget
-  hub audit [sessionId] [--project [p]] [--kind k] [--since 2h|ISO] [--until ISO] [--limit n] [--json]
-                                                 quem decidiu o quê: gate, aprovações, política, confiança
-
-${bold('Workflows (DAG de múltiplos agentes)')}
-  hub workflow validate <arquivo.yaml>       valida sintaxe, dependências e ciclos
-  hub workflow run <arquivo.yaml>            executa o workflow em lotes paralelos
-
-${bold('MCP — dar ao agente o poder de chamar os outros')}
-  hub mcp                            mostra o estado do registro em cada agente
-  hub mcp show <agente>              imprime o trecho de config para colar
-  hub mcp install <agente> --write   grava a config (merge, backup versionado .bak-<data>)
-      --project <caminho>    para agentes com config por projeto (Claude Code)
-
-${HELP_CICLO_DE_VIDA}
-${dim('Alvo do --agent aceita id (codex) ou capability (cap:test-writing).')}
-`;
-
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  definirComandoAtual(args.command);
   // O hook vem antes de `loadConfig`: config inválida lançava aqui, o processo
   // saía com stack trace e código 1 — que o agente trata como erro NÃO
   // bloqueante e roda a ferramenta. O hook lê a config por conta própria e
@@ -239,6 +88,9 @@ async function main(): Promise<void> {
     await versionCommand(args, cliente);
     return;
   }
+  // Ajuda antes de `loadConfig` (R07-07): com config.json inválido, `hub help`
+  // saía com o erro da config e nenhuma ajuda. Agora mostra a ajuda e avisa.
+  if (pedeAjuda(args)) return mostrarAjuda(args);
   const config = loadConfig();
   // Token de operador (item 1.6): lido a cada requisição, do arquivo que o
   // daemon cria — ele pode nascer depois deste cliente (autostart). O hook
@@ -330,7 +182,7 @@ async function main(): Promise<void> {
       return withDaemon(() => auditCommand(client, args));
     case 'mcp':
       // Não exige daemon: registrar a config é offline.
-      return mcpCommand(args, config);
+      return comErro(async () => mcpCommand(args, config));
     case 'diff':
       return withDaemon(() => showDiff(client, args));
     case 'artifacts':
@@ -370,16 +222,44 @@ async function main(): Promise<void> {
       return comErro(() => backupCommand(client, config, args));
     case 'restore':
       return comErro(() => restoreCommand(client, config, args));
-    case 'help':
-    case '--help':
-    case '-h':
-      console.log(HELP);
-      return;
     default:
-      console.error(red(`comando desconhecido: ${args.command}`));
+      console.error(red(`hub: comando desconhecido: ${args.command}`));
       console.log(HELP);
       process.exitCode = 1;
   }
+}
+
+// ---------------------------------------------------------------- ajuda
+
+const COMANDOS_DE_AJUDA = new Set(['help', '--help', '-h']);
+
+/** `hub help [cmd]`, `hub --help`, `hub <cmd> --help` / `-h` (R07-20). */
+function pedeAjuda(args: Args): boolean {
+  if (COMANDOS_DE_AJUDA.has(args.command.toLowerCase())) return true;
+  // O `workflow` tem ajuda própria, mais completa (e que não sobe o daemon).
+  if (args.command === 'workflow') return false;
+  return args.flags['help'] === true || args.positional[0] === '-h';
+}
+
+function mostrarAjuda(args: Args): void {
+  // A ajuda não depende da config; só avisa que ela está quebrada.
+  try {
+    loadConfig();
+  } catch (err) {
+    console.error(yellow('aviso: a configuração não carrega — os outros comandos vão falhar até corrigir:'));
+    console.error(yellow(`  ${(err as Error).message}`));
+  }
+  const alvo = COMANDOS_DE_AJUDA.has(args.command.toLowerCase()) ? args.positional[0] : args.command;
+  const linhas = alvo === undefined ? [] : ajudaDoComando(alvo);
+  if (alvo !== undefined && linhas.length === 0) {
+    console.error(yellow(`sem ajuda específica para "${alvo}" — a ajuda completa:`));
+  }
+  if (linhas.length === 0) {
+    console.log(HELP);
+    return;
+  }
+  console.log(linhas.join(NEWLINE));
+  console.log(NEWLINE + dim('ajuda completa: hub help'));
 }
 
 // ------------------------------------------------------ gate pré-execução
@@ -396,8 +276,7 @@ async function hooksCommandSeguro(args: Args, config: ReturnType<typeof loadConf
   try {
     await hooksCommand(args, config);
   } catch (err) {
-    console.error(red((err as Error).message));
-    process.exitCode = 1;
+    mostrarErro(err);
   }
 }
 
@@ -436,11 +315,7 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
     return;
   }
 
-  if (sub !== 'install') {
-    console.error(red('uso: hub hooks [install <agente> [--write]]'));
-    process.exitCode = 1;
-    return;
-  }
+  if (sub !== 'install') throw erroDeUso(`subcomando desconhecido: "${sub}" (use install)`);
 
   if (alvoId === 'codex') {
     return installCodexGate(args, config);
@@ -448,12 +323,9 @@ async function hooksCommand(args: Args, config: ReturnType<typeof loadConfig>): 
 
   const alvo = HOOK_TARGETS.find((t) => t.id === (alvoId ?? 'claude'));
   if (!alvo) {
-    console.error(
-      red(`agente "${String(alvoId)}" não suporta gate pré-execução`),
-      dim(`(disponíveis: ${HOOK_TARGETS.map((t) => t.id).join(', ')}, codex)`),
+    throw erroDeUso(
+      `agente "${String(alvoId)}" não suporta gate pré-execução (disponíveis: ${HOOK_TARGETS.map((t) => t.id).join(', ')}, codex)`,
     );
-    process.exitCode = 1;
-    return;
   }
 
   const projeto = typeof args.flags['project'] === 'string' ? args.flags['project'] : undefined;
@@ -540,8 +412,7 @@ async function withDaemon(fn: () => Promise<void>): Promise<void> {
   try {
     await ensureDaemon(client);
   } catch (err) {
-    console.error(red((err as Error).message));
-    process.exitCode = 1;
+    mostrarErro(err);
     return;
   }
 
@@ -555,35 +426,10 @@ async function withDaemon(fn: () => Promise<void>): Promise<void> {
       return;
     }
     // O MCP (`describe()`) e a Web (`HubApiError.code`) já mostram o código do
-    // domínio — sem ele aqui, a CLI é a única das três superfícies onde
-    // "BUDGET_EXCEEDED" e "AGENT_NOT_FOUND" viram a mesma frase genérica.
-    console.error(red(err instanceof HubApiError ? `[${err.code}] ${message}` : message));
-    // O client já preserva `details.issues` (caminho + mensagem de cada campo
-    // que falhou), mas até aqui a CLI descartava e só mostrava o código
-    // genérico. Sem isto, "Brief inválido" chegava sem dizer qual campo.
-    if (err instanceof HubApiError) {
-      for (const issue of extractIssues(err.details)) {
-        console.error(`  - ${issue.path || '(raiz)'}: ${issue.message}`);
-      }
-    }
-    process.exitCode = 1;
+    // domínio; `mostrarErro` imprime `[CODIGO] mensagem`, os `details.issues`
+    // (qual campo falhou) e, em erro de uso, a linha de uso do comando.
+    mostrarErro(err);
   }
-}
-
-/** Lê `details.issues` de um `HubApiError` sem confiar no formato — é `unknown`. */
-function extractIssues(details: unknown): Array<{ path: string; message: string }> {
-  if (typeof details !== 'object' || details === null) return [];
-  const issues = (details as { issues?: unknown }).issues;
-  if (!Array.isArray(issues)) return [];
-  const resultado: Array<{ path: string; message: string }> = [];
-  for (const issue of issues) {
-    if (typeof issue !== 'object' || issue === null) continue;
-    const message = (issue as { message?: unknown }).message;
-    if (typeof message !== 'string') continue;
-    const path = (issue as { path?: unknown }).path;
-    resultado.push({ path: typeof path === 'string' ? path : '', message });
-  }
-  return resultado;
 }
 
 // ---------------------------------------------------------------- comandos
@@ -620,7 +466,7 @@ async function projectCommand(client: HubClient, args: Args): Promise<void> {
     case 'add':
       return projectAdd(client, rest[0]);
     case 'env':
-      return projectEnv(client, args, rest[0]);
+      return projectEnvCommand(client, args, rest[0]);
     case 'prompt':
       return projectPrompt(client, args, rest[0]);
     case 'folders':
@@ -630,10 +476,11 @@ async function projectCommand(client: HubClient, args: Args): Promise<void> {
     case 'untrust':
       return projectTrust(client, rest[0], false);
     default:
-      console.error(
-        red('uso: hub project <add|env|prompt|folders|trust|untrust> ...') + '\n' + dim('veja "hub help" para os detalhes de cada um.'),
+      throw erroDeUso(
+        sub === undefined
+          ? 'faltou o subcomando (add, env, prompt, folders, trust ou untrust)'
+          : `subcomando desconhecido: "${sub}" (use add, env, prompt, folders, trust ou untrust)`,
       );
-      process.exitCode = 1;
   }
 }
 
@@ -678,102 +525,16 @@ async function projectTrust(
   }
 }
 
-/**
- * Nomes que sugerem segredo — só para avisar antes de gravar, nunca para
- * bloquear. O daemon já filtra `NODE_OPTIONS`/`PATH`/etc. na entrada
- * (`filtrarEnvDeProjeto`); isto aqui é outra coisa: uma chave de API
- * LEGÍTIMA (aceita pelo filtro) fica gravada em texto puro no banco do Hub.
- */
-function pareceSegredo(chave: string): boolean {
-  const c = chave.toUpperCase();
-  return c.includes('KEY') || c.includes('TOKEN') || c.includes('SECRET');
-}
-
-const AVISO_ARQUIVO_VERSIONADO =
-  'o valor fica em texto puro no banco do Hub (~/.agents-hub), fora do repositório. ' +
-  'Para servidor local (Ollama, LM Studio) um valor qualquer costuma bastar; para chave ' +
-  'de verdade, prefira o login nativo do CLI do agente.';
-
-/** `hub project env` — lista, define ou remove variáveis de ambiente por agente. */
-async function projectEnv(client: HubClient, args: Args, projectRef: string | undefined): Promise<void> {
-  const projectId = await resolveProjectId(client, projectRef);
-  const agentId = typeof args.flags['agent'] === 'string' ? args.flags['agent'] : undefined;
-  const setFlag = typeof args.flags['set'] === 'string' ? args.flags['set'] : undefined;
-  const unsetFlag = typeof args.flags['unset'] === 'string' ? args.flags['unset'] : undefined;
-
-  const { context, repo } = await client.projectContext(projectId);
-
-  if (setFlag === undefined && unsetFlag === undefined) {
-    // O do repositório só vale com confiança — o aviso diz o que está ignorado.
-    if (repo?.warning) console.error(yellow(`aviso: ${repo.warning}`));
-    const env = context.env ?? {};
-    const agentIds = agentId !== undefined ? [agentId] : Object.keys(env);
-    if (agentIds.length === 0) {
-      console.log(dim('nenhuma variável de ambiente configurada neste projeto.'));
-      return;
-    }
-    for (const id of agentIds) {
-      console.log(bold(id));
-      const entries = Object.entries(env[id] ?? {});
-      if (entries.length === 0) console.log(`  ${dim('(nenhuma)')}`);
-      for (const [chave, valor] of entries) console.log(`  ${chave}=${valor}`);
-    }
-    return;
-  }
-
-  if (agentId === undefined) {
-    console.error(red('--agent é obrigatório para configurar (ex.: --agent claude --set MODEL=...)'));
-    process.exitCode = 1;
-    return;
-  }
-
-  const envAtual: Record<string, Record<string, string>> = { ...(context.env ?? {}) };
-  const doAgente: Record<string, string> = { ...(envAtual[agentId] ?? {}) };
-
-  if (setFlag !== undefined) {
-    const posIgual = setFlag.indexOf('=');
-    if (posIgual <= 0) {
-      console.error(red('formato esperado: --set CHAVE=VALOR'));
-      process.exitCode = 1;
-      return;
-    }
-    const chave = setFlag.slice(0, posIgual).trim();
-    const valor = setFlag.slice(posIgual + 1);
-    doAgente[chave] = valor;
-    if (pareceSegredo(chave)) console.error(yellow(`aviso: ${AVISO_ARQUIVO_VERSIONADO}`));
-  }
-  if (unsetFlag !== undefined) delete doAgente[unsetFlag];
-
-  envAtual[agentId] = doAgente;
-  const { context: salvo } = await client.saveProjectContext(projectId, { ...context, env: envAtual });
-
-  const ficou = salvo.env?.[agentId] ?? {};
-  if (setFlag !== undefined) {
-    const chave = setFlag.slice(0, setFlag.indexOf('=')).trim();
-    if (chave in ficou) console.log(`${green('gravado')} ${bold(agentId)} ${chave}=${ficou[chave]}`);
-    else {
-      // O daemon recusou — nome fora da lista de permissão. Silêncio aqui
-      // seria a mesma fachada que este trabalho existe para acabar.
-      console.error(red(`"${chave}" foi recusada pelo daemon (fora da lista de permissão de ambiente).`));
-      process.exitCode = 1;
-    }
-  } else {
-    console.log(`${green('removido')} ${bold(agentId)} ${unsetFlag ?? ''}`);
-  }
-}
-
 /** `hub project prompt` — mostra, grava ou apaga a instrução de um agente. */
 async function projectPrompt(client: HubClient, args: Args, projectRef: string | undefined): Promise<void> {
   const projectId = await resolveProjectId(client, projectRef);
   const agentId = typeof args.flags['agent'] === 'string' ? args.flags['agent'] : undefined;
-  if (agentId === undefined) {
-    console.error(red('--agent é obrigatório: hub project prompt [projeto] --agent <id>'));
-    process.exitCode = 1;
-    return;
-  }
+  if (agentId === undefined) throw erroDeUso('--agent é obrigatório: hub project prompt [projeto] --agent <id>');
 
+  if (args.flags['set'] === true) throw erroDeUso('--set precisa do texto: --set "instrução para o agente"');
   const setFlag = typeof args.flags['set'] === 'string' ? args.flags['set'] : undefined;
   const clearFlag = args.flags['clear'] === true;
+  if (setFlag !== undefined && clearFlag) throw erroDeUso('use --set OU --clear, não os dois');
 
   const { context } = await client.projectContext(projectId);
 
@@ -808,11 +569,7 @@ async function projectFolders(client: HubClient, rest: string[]): Promise<void> 
     const projectRef = argumentos.length >= 2 ? argumentos[0] : undefined;
     const folderId = argumentos.length >= 2 ? argumentos[1] : argumentos[0];
 
-    if (folderId === undefined || folderId.length === 0) {
-      console.error(red('uso: hub project folders remove [projeto] <folderId>'));
-      process.exitCode = 1;
-      return;
-    }
+    if (folderId === undefined || folderId.length === 0) throw erroDeUso('faltou o folderId: hub project folders remove [projeto] <folderId>');
 
     const projectId = await resolveProjectId(client, projectRef);
     await client.removeFolder(projectId, folderId);
@@ -847,7 +604,7 @@ async function listSessions(client: HubClient): Promise<void> {
     const indent = '  '.repeat(session.depth);
     console.log(
       `${indent}${bold(session.id)} ${cyan(session.agentId)} ${stateBadge(session.state)} ${dim(
-        session.createdAt.slice(0, 19).replace('T', ' '),
+        dataHoraLocal(session.createdAt),
       )}`,
     );
     if (session.title) console.log(`${indent}   ${dim(session.title)}`);
@@ -859,18 +616,11 @@ async function delegate(client: HubClient, args: Args): Promise<void> {
   const objective = args.positional.slice(1).join(' ').trim();
   const agent = args.flags['agent'];
 
-  if (typeof agent !== 'string' || objective.length === 0) {
-    console.error(red('uso: hub delegate <sessionId> --agent <id|cap:x> "objetivo"'));
-    process.exitCode = 1;
-    return;
-  }
+  if (typeof agent !== 'string') throw erroDeUso('--agent é obrigatório: hub delegate <sessionId> --agent <id|cap:x> "objetivo"');
+  if (objective.length === 0) throw erroDeUso('faltou o objetivo: hub delegate <sessionId> --agent <id|cap:x> "objetivo"');
 
   const budgetUsd = lerBudgetUsd(args.flags['budget-usd']);
-  if (budgetUsd instanceof Error) {
-    console.error(red(budgetUsd.message));
-    process.exitCode = 1;
-    return;
-  }
+  if (budgetUsd instanceof Error) throw erroDeUso(budgetUsd.message);
 
   const brief: BriefInput = { agent, objective };
   if (budgetUsd !== undefined) brief.budget = { usd: budgetUsd };
@@ -917,7 +667,7 @@ async function showArtifacts(client: HubClient, args: Args): Promise<void> {
   }
   for (const artifact of artifacts) {
     console.log(`${bold(artifact.id)} ${cyan(artifact.kind)} ${dim(artifact.path)}`);
-    console.log(`   ${dim(artifact.createdAt)}`);
+    console.log(`   ${dim(dataHoraLocal(artifact.createdAt))}`);
   }
 }
 
@@ -932,8 +682,7 @@ async function stopDaemon(client: HubClient): Promise<void> {
       console.log(dim('o daemon já não estava rodando.'));
       return;
     }
-    console.error(red(message));
-    process.exitCode = 1;
+    mostrarErro(err);
   }
 }
 
@@ -957,7 +706,7 @@ async function listApprovals(client: HubClient): Promise<void> {
     if (typeof approval.detail['reason'] === 'string') {
       console.log(`   ${dim(String(approval.detail['reason']))}`);
     }
-    console.log(`   ${dim(`sessão ${approval.sessionId} · ${approval.requestedAt.slice(11, 19)}`)}`);
+    console.log(`   ${dim(`sessão ${approval.sessionId} · ${dataHoraLocal(approval.requestedAt)}`)}`);
   }
 
   console.log(`${NEWLINE}${dim('libere com:')} ${bold('hub approve <id>')}  ${dim('ou')}  ${bold('hub deny <id>')}`);
@@ -1004,15 +753,14 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
   );
 
   if (sub === undefined) return mcpStatus(hubUrl, projectPath);
+  if (sub !== 'show' && sub !== 'install') throw erroDeUso(`subcomando desconhecido: "${sub}" (use show ou install)`);
+  if (agentId === undefined || agentId === '') {
+    throw erroDeUso(`faltou o agente (disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')})`);
+  }
 
   const target = MCP_TARGETS.find((t) => t.agentId === agentId);
   if (!target) {
-    console.error(
-      red(`agente "${agentId ?? ''}" desconhecido.`),
-      dim(`disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')}`),
-    );
-    process.exitCode = 1;
-    return;
+    throw erroDeUso(`agente "${agentId}" desconhecido (disponíveis: ${MCP_TARGETS.map((t) => t.agentId).join(', ')})`);
   }
 
   const spec = serverSpec(target.agentId, hubUrl);
@@ -1024,12 +772,6 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
     if (!target.verified) {
       console.log(`\n${yellow('⚠')} ${dim('caminho/formato não confirmado — verifique na doc do agente')}`);
     }
-    return;
-  }
-
-  if (sub !== 'install') {
-    console.error(red('uso: hub mcp [show|install] <agente>'));
-    process.exitCode = 1;
     return;
   }
 
@@ -1062,8 +804,7 @@ function mcpCommand(args: Args, config: { host: string; port: number }): void {
     }
     console.log(`\n${dim('reinicie o agente para ele carregar o MCP server.')}`);
   } catch (err) {
-    console.error(red((err as Error).message));
-    process.exitCode = 1;
+    mostrarErro(err);
   }
 }
 
@@ -1073,9 +814,17 @@ function mcpStatus(hubUrl: string, projectPath: string): void {
 
   for (const target of MCP_TARGETS) {
     const configPath = resolveConfigPath(target, projectPath);
-    const registered = isRegistered(configPath);
-    const icon = registered ? green('✓') : dim('○');
-    const status = registered ? green('registrado') : dim('não registrado');
+    // R07-23: servidor `agents-hub` parseado do JSON/TOML e comparado com o
+    // que `--write` gravaria — não mais "o arquivo contém a string".
+    const registro = estadoDoRegistro(target, configPath, serverSpec(target.agentId, hubUrl));
+    const [icon, status] =
+      registro.estado === 'atualizado'
+        ? [green('✓'), green('registrado')]
+        : registro.estado === 'desatualizado'
+          ? [yellow('⚠'), yellow('registrado com outro caminho/porta — rode install --write de novo')]
+          : registro.estado === 'ilegivel'
+            ? [red('✗'), red(`config ilegível: ${registro.erro}`)]
+            : [dim('○'), dim('não registrado')];
     console.log(`${icon} ${bold(target.agentId.padEnd(12))} ${status}`);
     console.log(`   ${dim(configPath)}`);
     if (target.note) console.log(`   ${dim(target.note)}`);
@@ -1083,21 +832,6 @@ function mcpStatus(hubUrl: string, projectPath: string): void {
   }
 
   console.log(`\n${dim('para registrar:')} ${bold('hub mcp install <agente> --write')}`);
-}
-
-function isRegistered(configPath: string): boolean {
-  try {
-    return readFileSync(configPath, 'utf8').includes('agents-hub');
-  } catch {
-    return false;
-  }
-}
-
-function required(value: string | undefined, name: string): string {
-  if (value === undefined || value.length === 0) {
-    throw new Error(`argumento obrigatório ausente: ${name}`);
-  }
-  return value;
 }
 
 await main();

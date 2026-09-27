@@ -87,6 +87,46 @@ describe('bin.js — entrada do hub', () => {
     assert.doesNotMatch(r.stderr, /\n\s+at /, 'não deveria ter stack trace');
   });
 
+  // R07-07: com config.json quebrado, até `hub help` saía com o erro da config.
+  test('`hub help` com config.json inválido: mostra a ajuda (código 0) e avisa da config', () => {
+    const home = path.join(raiz, 'config-ruim-help');
+    rmSync(home, { recursive: true, force: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(path.join(home, 'config.json'), '{bad json');
+    for (const comando of [['help'], ['--help'], ['start', '--help']]) {
+      const r = hub(comando, { AGENTS_HUB_HOME: home });
+      assert.equal(r.code, 0, `${comando.join(' ')}: ${r.stderr}`);
+      assert.match(r.stdout, /hub start --agent <id>/);
+      assert.match(r.stderr, /aviso: a configuração não carrega/);
+      assert.match(r.stderr, /config\.json/);
+    }
+  });
+
+  // R07-20: `hub start --help` dizia "faltou o objetivo".
+  test('`hub <cmd> --help` mostra o uso daquele comando, sem subir o daemon', () => {
+    const r = hub(['start', '--help'], { AGENTS_HUB_PORT: '1' });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /hub start --agent <id> "objetivo"/);
+    assert.match(r.stdout, /--mode <supervised\|semi\|autonomous>/);
+    assert.doesNotMatch(r.stdout, /hub sessions/, 'só o trecho do comando, não o help inteiro');
+    assert.doesNotMatch(r.stderr, /faltou o objetivo/);
+
+    const ajuda = hub(['help', 'mcp']);
+    assert.equal(ajuda.code, 0, ajuda.stderr);
+    assert.match(ajuda.stdout, /hub mcp install <agente> --write/);
+  });
+
+  // R07-21: `hub mcp show` sem agente dizia `agente "" desconhecido`.
+  test('erro de uso: prefixo hub:, linha de uso do comando e código 1', () => {
+    const r = hub(['mcp', 'show']);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /^hub: faltou o agente/m);
+    assert.match(r.stderr, /^uso:$/m);
+    assert.match(r.stderr, /hub mcp show <agente>/);
+    assert.doesNotMatch(r.stderr, /agente "" desconhecido/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, 'sem stack trace');
+  });
+
   test('AGENTS_HUB_PORT inválida é recusada com o nome da variável, não vira NaN', () => {
     const r = hub(['status'], { AGENTS_HUB_PORT: 'abc' });
     assert.equal(r.code, 1);

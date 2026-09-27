@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 
 import {
   MCP_TARGETS,
+  existingServerNames,
   jsonEntry,
+  planUpsertMcpServer,
   resolveConfigPath,
   tomlSection,
   upsertMcpServer,
@@ -101,4 +103,32 @@ export function writeConfig(
   agora: Date = new Date(),
 ): WriteOutcome {
   return upsertMcpServer(target, configPath, portable(spec), agora);
+}
+
+export type EstadoDoRegistro =
+  | { estado: 'atualizado' }
+  | { estado: 'desatualizado' }
+  | { estado: 'ausente' }
+  | { estado: 'ilegivel'; erro: string };
+
+/**
+ * O Hub está registrado neste arquivo? (`hub mcp`, vistoria 07 R07-23.)
+ *
+ * Antes: `readFileSync(...).includes('agents-hub')` — um comentário, um
+ * caminho de outro projeto ou um servidor de nome parecido contavam como
+ * "registrado". Agora é a mesma detecção estruturada do painel
+ * (`daemon/integrations.ts`): parseia o JSON/TOML, procura o servidor pelo
+ * NOME (`agents-hub`) e compara a entrada com a que `--write` gravaria hoje
+ * (comando = este Node + o nosso entrypoint do MCP, env com a URL do daemon).
+ * Registrado com outro caminho/porta vira "desatualizado", não "registrado".
+ */
+export function estadoDoRegistro(target: McpTarget, configPath: string, spec: ServerSpec): EstadoDoRegistro {
+  try {
+    if (!existingServerNames(target, configPath).has(HUB_SERVER_NAME)) return { estado: 'ausente' };
+    return planUpsertMcpServer(target, configPath, portable(spec)).next === null
+      ? { estado: 'atualizado' }
+      : { estado: 'desatualizado' };
+  } catch (err) {
+    return { estado: 'ilegivel', erro: (err as Error).message };
+  }
 }

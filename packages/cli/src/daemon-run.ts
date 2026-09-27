@@ -3,6 +3,7 @@ import {
   createHub,
   instalarRedeDeSeguranca,
   readHubEnv,
+  type Hub,
   type HubConfig,
   type HubEnv,
 } from '@agents-hub/daemon';
@@ -30,7 +31,7 @@ export async function runDaemon(): Promise<void> {
   // `start()` e não `server.listen()`: ligar a porta é o que impede um segundo
   // daemon de reconciliar o banco e declarar mortas as sessões do primeiro.
   // Este é o caminho que o autostart executa, então é o que mais precisa disto.
-  const { host, port } = await hub.start();
+  const { host, port } = await subirDaemon(hub);
   const url = baseUrl({ host, port });
   console.log(green(`daemon ouvindo em ${url}`));
   console.log(`painel: ${bold(url)}`);
@@ -52,4 +53,60 @@ export async function runDaemon(): Promise<void> {
   process.on('SIGTERM', () => void stop());
 
   instalarRedeDeSeguranca(stop);
+}
+
+/** Há um Hub respondendo em `url`? (GET /health com `ok: true`, teto curto.) */
+export async function haHubEm(url: string, timeoutMs = 1500): Promise<boolean> {
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return false;
+    const corpo = (await res.json()) as { ok?: unknown };
+    return corpo.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Traduz a falha de `listen` (vistoria 07, R07-07). `EADDRINUSE` virava
+ * `Error: listen EADDRINUSE 127.0.0.1:4747` — sem dizer que, quase sempre, o
+ * que ocupa a porta é o próprio daemon (autostart) e que não há nada a fazer
+ * além de usá-lo. Pergunta ao ocupante se ele é um Hub para dar a resposta
+ * certa. Outros erros passam como vieram.
+ */
+export async function explicarFalhaDeListen(
+  err: unknown,
+  url: string,
+  sondar: (url: string) => Promise<boolean> = haHubEm,
+): Promise<unknown> {
+  if ((err as { code?: unknown } | null)?.code !== 'EADDRINUSE') return err;
+  if (await sondar(url)) {
+    return Object.assign(
+      new Error(`já há um daemon em ${url} — veja o estado com: hub status (encerre com: hub stop)`),
+      { code: 'DAEMON_ALREADY_RUNNING' },
+    );
+  }
+  return Object.assign(
+    new Error(
+      `a porta de ${url} já está em uso por outro programa (não é um Agents-Hub) — ` +
+        'escolha outra com AGENTS_HUB_PORT ou "port" no config.json',
+    ),
+    { code: 'PORT_IN_USE' },
+  );
+}
+
+/**
+ * `hub.start()` com a falha de porta explicada. Não chama `hub.shutdown()` na
+ * falha: este processo não reconciliou nada, e encerrar "as sessões vivas"
+ * daqui mexeria no banco do daemon que está de pé.
+ */
+export async function subirDaemon(
+  hub: Hub,
+  sondar?: (url: string) => Promise<boolean>,
+): Promise<{ host: string; port: number }> {
+  try {
+    return await hub.start();
+  } catch (err) {
+    throw await explicarFalhaDeListen(err, baseUrl(hub.config), sondar);
+  }
 }
