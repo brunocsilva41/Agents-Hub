@@ -78,6 +78,8 @@ export interface Args {
 const BOOLEAN_FLAGS = new Set(['detach', 'json', 'force', 'help', 'quiet', 'write', 'smoke', 'clear', 'overwrite', 'include-env', 'refresh']);
 // Item 5.6 (init/logs/open/update/export/cost/merge/restore).
 for (const f of ['yes', 'follow', 'dry-run', 'list', 'print', 'check', 'all', 'raw']) BOOLEAN_FLAGS.add(f);
+// R14-14: desliga o alerta de aprovação (bipe + título do terminal).
+BOOLEAN_FLAGS.add('no-bell');
 
 function parseArgs(argv: string[]): Args {
   const [command = 'help', ...rest] = argv;
@@ -172,11 +174,13 @@ ${bold('Sessões')}
       --mode <supervised|semi|autonomous>
       --isolation <worktree|none>
       --detach               não acompanha o stream
+      --from <sessionId>     continua uma sessão terminada: resumo, contexto e branch dela
+      --no-bell              sem bipe/título do terminal quando surge aprovação (vale para watch/send)
       ${dim('saída: 0 concluída · 1 falhou/cancelada · 2 parada esperando aprovação (vale para watch/send)')}
   hub sessions                                lista sessões
   hub watch <sessionId>                       acompanha uma sessão ao vivo
   hub watch --root <rootId>                   acompanha o fluxo inteiro, todos os agentes
-  hub send <sessionId> "texto"                fala com uma sessão
+  hub send <sessionId> "texto"                fala com uma sessão viva (terminada: hub start --from)
   hub interrupt <sessionId>                   para o turno atual; a sessão fica ociosa (retome com send)
   hub pause <sessionId>                       para o turno e pausa a sessão (retome com send)
   hub cancel <sessionId>                      encerra a sessão e seus filhos

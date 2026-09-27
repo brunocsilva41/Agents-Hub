@@ -1,7 +1,9 @@
 import type { BriefInput, HubClient } from './client.js';
+import { continuacaoDe } from './continue-from.js';
 import { resolverProjeto } from './project-resolve.js';
 import { bold, dim, green, red, yellow } from './render.js';
-import { acompanhar, codigoDeSaida, relatarDesfecho, type Desfecho } from './session-follow.js';
+import { acompanhar, alertaDe, codigoDeSaida, relatarDesfecho, type Desfecho } from './session-follow.js';
+import type { EventEnvelope } from '@agents-hub/core';
 
 /**
  * `hub start` — fora de `main.ts` para ser testável sem disparar `main()`.
@@ -31,6 +33,7 @@ export interface OpcoesDeStart {
   log?: Log;
   logErro?: Log;
   pollMs?: number;
+  alertar?: (event: EventEnvelope) => void;
 }
 
 /**
@@ -130,10 +133,22 @@ export async function startCommand(client: HubClient, args: Args, o: OpcoesDeSta
     );
   }
 
-  const project = await resolverProjeto(client, args.flags['project']);
-  const brief: BriefInput = { agent: flags.agent, objective: flags.objective, ...flags.brief };
+  // `--from <sessão>`: continua o trabalho de uma sessão terminada numa nova
+  // (o projeto vem dela). Ver `continue-from.ts`.
+  const from = args.flags['from'];
+  if (from === true) return falhar('--from precisa do id da sessão anterior: hub start --from ses_... --agent X "objetivo"');
+  const continuacao = typeof from === 'string' ? await continuacaoDe(client, from) : null;
 
-  const result = await client.startSession({ projectId: project.id, brief });
+  const projectId = continuacao && args.flags['project'] === undefined
+    ? continuacao.projectId
+    : (await resolverProjeto(client, args.flags['project'])).id;
+  const brief: BriefInput = { agent: flags.agent, objective: flags.objective, ...flags.brief, ...continuacao?.brief };
+
+  const result = await client.startSession({
+    projectId,
+    brief,
+    ...(continuacao ? { baseSessionIds: continuacao.baseSessionIds } : {}),
+  });
   const agenteReal = result.session.agentId;
   log(`${green('sessão iniciada')} ${bold(result.session.id)} ${dim(`(${agenteReal})`)}`);
   if (agenteReal !== flags.agent && !flags.agent.startsWith('cap:')) {
@@ -162,6 +177,7 @@ export async function startCommand(client: HubClient, args: Args, o: OpcoesDeSta
     taskId: result.task.id,
     log,
     pollMs: o.pollMs,
+    alertar: alertaDe(args, o),
   });
   relatarDesfecho(desfecho, log, logErro);
   const codigo = codigoDeSaida(desfecho);
