@@ -8,8 +8,18 @@ import type {
   ProjectSummary,
   SessionSummary,
 } from '@agents-hub/client';
+import { describeError } from './actions';
 import { hub, isLiveState, mostUrgentState } from './hub';
 import { EventHistory } from './lib/eventHistory';
+import {
+  aplicarTentativas,
+  incluirAgentes,
+  INDICE_INICIAL,
+  resumoDasFalhas,
+  type EstadoDoIndice,
+  type Recurso,
+  type Tentativa,
+} from './lib/indexStatus';
 import type { HistoryState } from './lib/eventMerge';
 import { isStructural, patchSessionsFromEvent } from './lib/hubEvents';
 import { createRefetchScheduler, type RefetchScheduler } from './lib/refetchScheduler';
@@ -60,7 +70,20 @@ export interface HubState {
   revision: number;
   revisionOf: (rootId: string | null) => number;
   refresh: () => Promise<void>;
+  /** Resumo de TODA falha atual do índice, com o nome do recurso (banner). */
   error: string | null;
+  /**
+   * Situação por recurso: o que já carregou e o que falhou. Cada tela pergunta
+   * pelo que usa (`situacaoDaTela`) para não mostrar "vazio" quando falhou.
+   */
+  indice: EstadoDoIndice;
+}
+
+/** Desfecho de uma leitura do índice, com a mensagem que a tela mostra. */
+function tentativa(r: PromiseSettledResult<unknown>): Tentativa {
+  if (r.status === 'fulfilled') return { ok: true };
+  const { title, detail } = describeError(r.reason);
+  return { ok: false, erro: detail ? `${title} (${detail})` : title };
 }
 
 /** Marca de "não sei de que fluxo é" — força recarga geral de grafo/orçamento. */
@@ -90,7 +113,9 @@ export function useHubState(): HubState {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [revision, setRevision] = useState(0);
   const [rootRevisions, setRootRevisions] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
+  const [indice, setIndice] = useState<EstadoDoIndice>(INDICE_INICIAL);
+  const indiceRef = useRef(indice);
+  indiceRef.current = indice;
 
   // Instância única pela vida da página. Sem `dispose` no desmonte: o
   // StrictMode desmonta e remonta em desenvolvimento, e um histórico
@@ -107,43 +132,44 @@ export function useHubState(): HubState {
   sessionsRef.current = sessions;
   const touchedRoots = useRef<Set<string>>(new Set());
 
-  /** Índice completo: carga inicial, reconexão e depois de ações do usuário. */
+  /**
+   * Índice completo: carga inicial, reconexão e depois de ações do usuário.
+   *
+   * Cada recurso por si (`allSettled`): antes um `Promise.all` jogava fora as
+   * sessões porque `/agents` falhou, e toda aba mostrava o seu estado vazio.
+   */
   const loadFull = useCallback(async (withAgents: boolean) => {
-    try {
-      const [{ sessions: list }, { approvals: pending }, { projects: projectList }, agentList] =
-        await Promise.all([
-          hub.sessions(),
-          hub.approvals(),
-          hub.projects(),
-          withAgents ? hub.agents().then((r) => r.agents) : Promise.resolve(null),
-        ]);
-      setSessions(list);
-      setApprovals(pending);
-      setProjects(projectList);
-      if (agentList) setAgents(agentList);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setReady(true);
-    }
+    const comAgentes = incluirAgentes(indiceRef.current, withAgents);
+    const [rSessions, rApprovals, rProjects, rAgents] = await Promise.allSettled([
+      hub.sessions(),
+      hub.approvals(),
+      hub.projects(),
+      comAgentes ? hub.agents() : Promise.resolve(null),
+    ]);
+    if (rSessions.status === 'fulfilled') setSessions(rSessions.value.sessions);
+    if (rApprovals.status === 'fulfilled') setApprovals(rApprovals.value.approvals);
+    if (rProjects.status === 'fulfilled') setProjects(rProjects.value.projects);
+    if (rAgents.status === 'fulfilled' && rAgents.value) setAgents(rAgents.value.agents);
+    const tentativas: Partial<Record<Recurso, Tentativa>> = {
+      sessions: tentativa(rSessions),
+      approvals: tentativa(rApprovals),
+      projects: tentativa(rProjects),
+    };
+    if (comAgentes) tentativas.agents = tentativa(rAgents);
+    setIndice((prev) => aplicarTentativas(prev, tentativas));
+    setReady(true);
   }, []);
 
   /** Recarga barata disparada por eventos: só o que evento de sessão muda. */
   const loadForEvents = useCallback(async () => {
     const roots = [...touchedRoots.current];
     touchedRoots.current.clear();
-    try {
-      const [{ sessions: list }, { approvals: pending }] = await Promise.all([
-        hub.sessions(),
-        hub.approvals(),
-      ]);
-      setSessions(list);
-      setApprovals(pending);
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    }
+    const [rSessions, rApprovals] = await Promise.allSettled([hub.sessions(), hub.approvals()]);
+    if (rSessions.status === 'fulfilled') setSessions(rSessions.value.sessions);
+    if (rApprovals.status === 'fulfilled') setApprovals(rApprovals.value.approvals);
+    setIndice((prev) =>
+      aplicarTentativas(prev, { sessions: tentativa(rSessions), approvals: tentativa(rApprovals) }),
+    );
     if (roots.includes(ANY_ROOT)) setRevision((n) => n + 1);
     const specific = roots.filter((r) => r !== ANY_ROOT);
     if (specific.length > 0) {
@@ -287,6 +313,8 @@ export function useHubState(): HubState {
     );
   }, [sessions]);
 
+  const error = useMemo(() => resumoDasFalhas(indice), [indice]);
+
   // Identidade estável: sem isto o objeto é novo a cada render e invalida todo
   // `useMemo` que o tenha nas dependências — inclusive o cálculo da timeline.
   return useMemo(
@@ -307,6 +335,7 @@ export function useHubState(): HubState {
       revisionOf,
       refresh,
       error,
+      indice,
     }),
     [
       connected,
@@ -325,6 +354,7 @@ export function useHubState(): HubState {
       revisionOf,
       refresh,
       error,
+      indice,
     ],
   );
 }
@@ -338,9 +368,10 @@ export function useHubState(): HubState {
 export function useFlowGraph(
   rootId: string | null,
   revision: number,
-): { graph: GraphSummary[] | null; failed: boolean } {
+): { graph: GraphSummary[] | null; failed: boolean; retry: () => void } {
   const [graph, setGraph] = useState<GraphSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [rodada, setRodada] = useState(0);
 
   useEffect(() => {
     if (!rootId) {
@@ -366,35 +397,72 @@ export function useFlowGraph(
     return () => {
       cancelled = true;
     };
-  }, [rootId, revision]);
+  }, [rootId, revision, rodada]);
 
-  return { graph, failed };
+  const retry = useCallback(() => {
+    setGraph(null);
+    setRodada((n) => n + 1);
+  }, []);
+  return { graph, failed, retry };
 }
 
-/** Orçamento do fluxo selecionado — o único que o painel da direita mostra. */
-export function useBudget(rootId: string | null, revision: number): BudgetSummary | null {
+/** Orçamento do fluxo: o dado, se está carregando, e a falha (com "tentar de novo"). */
+export interface BudgetState {
+  budget: BudgetSummary | null;
+  loading: boolean;
+  error: string | null;
+  retry: () => void;
+}
+
+/**
+ * Orçamento do fluxo selecionado — o único que o painel da direita mostra.
+ *
+ * Antes a falha virava `null` e o bloco de orçamento simplesmente sumia, igual
+ * a "nenhuma sessão selecionada" (vistoria 03, "Estados vazios/erro").
+ */
+export function useBudget(rootId: string | null, revision: number): BudgetState {
   const [budget, setBudget] = useState<BudgetSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rodada, setRodada] = useState(0);
+  const rootAnterior = useRef<string | null>(null);
 
   useEffect(() => {
     if (!rootId) {
       setBudget(null);
+      setLoading(false);
+      setError(null);
+      rootAnterior.current = null;
       return;
     }
+    // Outro fluxo: o orçamento do anterior não pode ficar na tela sob o novo.
+    if (rootAnterior.current !== rootId) setBudget(null);
+    rootAnterior.current = rootId;
     let cancelled = false;
+    setLoading(true);
     hub
       .budget(rootId)
       .then(({ budget: value }) => {
-        if (!cancelled) setBudget(value);
+        if (cancelled) return;
+        setBudget(value);
+        setError(null);
       })
-      .catch(() => {
-        if (!cancelled) setBudget(null);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const { title, detail } = describeError(err);
+        setBudget(null);
+        setError(detail ? `${title} (${detail})` : title);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [rootId, revision]);
+  }, [rootId, revision, rodada]);
 
-  return budget;
+  const retry = useCallback(() => setRodada((n) => n + 1), []);
+  return { budget, loading, error, retry };
 }
 
 /**

@@ -7,14 +7,20 @@ interface Props {
   onSelect: (sessionId: string) => void;
   /** `true` quando a busca do grafo falhou — vazio por erro, não por fluxo sem sessões. */
   failed?: boolean;
+  onRetry?: () => void;
 }
 
-export function FlowTree({ nodes, selectedId, onSelect, failed = false }: Props) {
+export function FlowTree({ nodes, selectedId, onSelect, failed = false, onRetry }: Props) {
   if (nodes.length === 0) {
     if (failed) {
       return (
         <div className="flow-loading" role="alert">
           ⚠️ Falha ao carregar o grafo deste fluxo — não é um fluxo sem sessões, a busca falhou.
+          {onRetry && (
+            <button type="button" className="linkish" onClick={onRetry}>
+              tentar de novo
+            </button>
+          )}
         </div>
       );
     }

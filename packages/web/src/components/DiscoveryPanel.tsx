@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { AgentSummary } from '@agents-hub/client';
 import type { AgentDiscovery, AuthState, ImportKind, ImportResult } from '@agents-hub/core';
 import { describeError, useAction } from '../actions';
-import { agentColor, fetchDiscovery, importFromAgent, refreshDiscovery } from '../hub';
+import { agentColor, hub } from '../hub';
 
 /**
  * Agentes detectados: o que cada CLI já tem na máquina.
@@ -64,7 +64,7 @@ export function DiscoveryPanel({
     setCarregando(true);
     setErro(null);
     try {
-      const { agents: encontrados } = await fetchDiscovery();
+      const { agents: encontrados } = await hub.discovery();
       setLista(encontrados);
     } catch (err) {
       const { title, detail } = describeError(err);
@@ -82,7 +82,7 @@ export function DiscoveryPanel({
     setAtualizando(agentId);
     setErro(null);
     try {
-      const novo = await refreshDiscovery(agentId);
+      const novo = (await hub.discoverAgent(agentId, true)).agent;
       setLista((atual) => (atual ?? []).map((d) => (d.agentId === agentId ? novo : d)));
     } catch (err) {
       const { title, detail } = describeError(err);
@@ -96,7 +96,7 @@ export function DiscoveryPanel({
     setAtualizando('*');
     setErro(null);
     try {
-      const encontrados = await Promise.all((lista ?? []).map((d) => refreshDiscovery(d.agentId)));
+      const encontrados = await Promise.all((lista ?? []).map((d) => hub.discoverAgent(d.agentId, true).then((r) => r.agent)));
       setLista(encontrados);
     } catch (err) {
       const { title, detail } = describeError(err);
@@ -363,7 +363,7 @@ function ImportFlow(props: {
     setAplicado(null);
     setConfirmando(false);
     const ok = await action.run('previa', async () => {
-      setPrevia(await importFromAgent(props.projectId, pedido(true)));
+      setPrevia(await hub.importFromAgent(props.projectId, pedido(true)));
     });
     if (!ok) setPrevia(null);
   };
@@ -372,7 +372,7 @@ function ImportFlow(props: {
     await action.run(
       'aplicar',
       async () => {
-        setAplicado(await importFromAgent(props.projectId, pedido(false)));
+        setAplicado(await hub.importFromAgent(props.projectId, pedido(false)));
         setConfirmando(false);
       },
       `importado de ${d.agentId} para ${props.projectName}`,

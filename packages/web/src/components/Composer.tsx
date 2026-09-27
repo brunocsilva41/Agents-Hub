@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { SessionSummary } from '@agents-hub/client';
 import { describeError, pushToast } from '../actions';
 import { hub, STATE_LABEL } from '../hub';
+import { deveFocarComposer } from '../lib/composerShortcut';
 import { sendFeedback } from '../lib/sessionControls';
+import { haDialogoAberto } from '../useDialog';
 
 interface Props {
   session: SessionSummary;
@@ -32,13 +34,28 @@ export function Composer({ session, encerrada }: Props) {
   }, [session.id]);
 
   // "/" foca o campo, como em toda ferramenta operacional — desde que você não
-  // esteja digitando em outro lugar.
+  // esteja digitando em outro lugar nem haja modal/gaveta na frente
+  // (`lib/composerShortcut`).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
       const active = document.activeElement;
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-      if (active instanceof HTMLSelectElement) return;
+      const focoEmCampo =
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active instanceof HTMLSelectElement ||
+        (active instanceof HTMLElement && active.isContentEditable);
+      const campo = inputRef.current;
+      const ok = deveFocarComposer({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        focoEmCampo,
+        dialogoAberto: haDialogoAberto(),
+        gavetaAberta: document.querySelector('.drawer-backdrop') !== null,
+        campoDesabilitado: !campo || campo.disabled || campo.closest('[inert]') !== null,
+      });
+      if (!ok) return;
       e.preventDefault();
       inputRef.current?.focus();
     };

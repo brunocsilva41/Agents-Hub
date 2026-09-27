@@ -1,13 +1,49 @@
 import React from 'react';
 import type { AgentSummary } from '@agents-hub/client';
 import { agentColor } from '../hub';
+import type { Situacao } from '../lib/indexStatus';
+import { EstadoDaTela } from './EstadoDaTela';
 
 interface Props {
   agents: AgentSummary[];
   onNewSession: (agentId: string) => void;
+  /** Situação de `/agents`: sem resposta não é "0 de 0 agentes". */
+  situacao: Situacao;
+  erro: string | null;
+  onRetry: () => void;
 }
 
-export function AgentSwarmView({ agents, onNewSession }: Props): React.JSX.Element {
+export function AgentSwarmView({ agents, onNewSession, situacao, erro, onRetry }: Props): React.JSX.Element {
+  if (situacao === 'carregando' || situacao === 'erro') {
+    return (
+      <div className="swarm-container">
+        <div className="swarm-header">
+          <h2 className="swarm-title">Swarm de Agentes Conectados</h2>
+        </div>
+        <EstadoDaTela situacao={situacao} oQue="os agentes" erro={erro} onTentar={onRetry} />
+      </div>
+    );
+  }
+  if (situacao === 'vazio') {
+    return (
+      <div className="swarm-container">
+        <div className="swarm-header">
+          <h2 className="swarm-title">Swarm de Agentes Conectados</h2>
+        </div>
+        <div className="empty estado-tela">
+          <div className="empty-title">Nenhum agente registrado no Hub</div>
+          <span className="empty-hint">
+            O daemon não tem manifesto de agente carregado. Rode <code>hub doctor</code> para ver o motivo.
+          </span>
+          <div className="estado-vazio-acoes">
+            <button type="button" onClick={onRetry}>
+              Verificar de novo
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   // Contagem real, calculada da sondagem de instalação de cada agente — o texto
   // antes era fixo ("8 de 9") e ficava errado assim que a lista de agentes ou
   // o que está instalado nesta máquina mudasse.

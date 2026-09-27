@@ -152,6 +152,9 @@ export function AuditTrail({ projects, sessions, projectId }: Props): React.JSX.
       {erro && (
         <div className="settings-erro" role="alert">
           Falha ao ler a auditoria: {erro}
+          <button className="ghost" onClick={() => void buscar(filtros)} disabled={carregando || !sessaoValida}>
+            tentar de novo
+          </button>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EventEnvelope } from '@agents-hub/core';
-import { viewOf } from '../eventView';
+import { viewOf } from '../lib/eventView';
 import { agentColor, timeOf } from '../hub';
 import {
   olderAction,
@@ -21,6 +21,8 @@ interface Props {
   resetKey?: string;
   /** Nenhuma sessão escolhida — não é "sessão sem eventos". */
   unselected?: boolean;
+  /** O Hub não tem sessão nenhuma: não há o que escolher ao lado. */
+  hubVazio?: boolean;
   /** Há eventos mais antigos no daemon, ainda não pedidos. */
   hasMoreBefore?: boolean;
   loadingOlder?: boolean;
@@ -39,6 +41,7 @@ export function Timeline({
   failed = false,
   resetKey,
   unselected = false,
+  hubVazio = false,
   hasMoreBefore = false,
   loadingOlder = false,
   olderFailed = false,
@@ -120,8 +123,12 @@ export function Timeline({
     return (
       <div className="empty timeline-empty-state timeline-unselected-state">
         <div className="empty-icon">🧭</div>
-        <div className="empty-title">Nenhuma sessão selecionada</div>
-        <span className="empty-hint">Escolha um fluxo ao lado para ver a timeline.</span>
+        <div className="empty-title">{hubVazio ? 'Nenhuma sessão no Hub ainda' : 'Nenhuma sessão selecionada'}</div>
+        <span className="empty-hint">
+          {hubVazio
+            ? 'Inicie uma em “Nova Sessão” para acompanhar a timeline aqui.'
+            : 'Escolha um fluxo ao lado para ver a timeline.'}
+        </span>
       </div>
     );
   }

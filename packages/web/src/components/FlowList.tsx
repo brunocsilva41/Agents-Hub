@@ -1,16 +1,27 @@
 import { memo, useCallback, useRef } from 'react';
 import { agentColor, formatAgo, isLiveState, STATE_LABEL } from '../hub';
+import { fluxoAberto, type EstadoDaLista } from '../lib/flowListState';
+import type { Situacao } from '../lib/indexStatus';
 import type { FlowSummary } from '../useHubState';
 import { useFlowGraph } from '../useHubState';
+import { EstadoDaTela } from './EstadoDaTela';
 import { FlowTree } from './FlowTree';
 
 interface Props {
   flows: FlowSummary[];
   selectedId: string | null;
-  /** Raiz do fluxo selecionado — fica sempre aberta. */
+  /** Raiz do fluxo selecionado — abre sozinha, mas pode ser recolhida. */
   selectedRootId: string | null;
-  expanded: ReadonlySet<string>;
+  /** Abertos/recolhidos à mão (`lib/flowListState`). */
+  listState: EstadoDaLista;
   onToggle: (rootId: string) => void;
+  /** Situação das sessões no índice: carregando/erro não é "nenhum fluxo". */
+  situacao: Situacao;
+  erro: string | null;
+  onRetry: () => void;
+  /** Lista vazia por filtro/busca (o Hub tem fluxos): volta a mostrar todos. */
+  onShowAll: () => void;
+  onNewSession: () => void;
   onSelect: (sessionId: string) => void;
   /**
    * Revisão do grafo POR fluxo: sobe só quando chega evento estrutural daquele
@@ -34,10 +45,15 @@ export function FlowList({
   flows,
   selectedId,
   selectedRootId,
-  expanded,
+  listState,
   onToggle,
   onSelect,
   revisionOf,
+  situacao,
+  erro,
+  onRetry,
+  onShowAll,
+  onNewSession,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -54,17 +70,34 @@ export function FlowList({
 
   return (
     <div ref={listRef} onKeyDown={onKeyDown}>
-      {flows.length === 0 && (
+      <EstadoDaTela situacao={situacao} oQue="as sessões" erro={erro} onTentar={onRetry} compacto />
+      {situacao === 'vazio' && (
+        // Hub sem nenhuma sessão: não é filtro, é o começo.
+        <div className="empty flow-list-empty">
+          <span className="empty-hint">Nenhuma sessão no Hub ainda.</span>
+          <div className="estado-vazio-acoes">
+            <button type="button" className="primary" onClick={onNewSession}>
+              Nova sessão
+            </button>
+          </div>
+        </div>
+      )}
+      {situacao === 'ok' && flows.length === 0 && (
         // Barra lateral em branco não diz se é filtro, busca ou Hub vazio.
         <div className="empty flow-list-empty">
-          <span className="empty-hint">Nenhum fluxo com este filtro. Tente “Todos” ou limpe a busca.</span>
+          <span className="empty-hint">Nenhum fluxo com este filtro ou busca.</span>
+          <div className="estado-vazio-acoes">
+            <button type="button" onClick={onShowAll}>
+              Ver todos
+            </button>
+          </div>
         </div>
       )}
       {flows.map((flow) => (
         <FlowItem
           key={flow.rootId}
           flow={flow}
-          open={expanded.has(flow.rootId) || flow.rootId === selectedRootId}
+          open={fluxoAberto(listState, flow.rootId, selectedRootId)}
           selectedId={selectedId}
           onToggle={onToggle}
           onSelect={onSelect}
@@ -90,7 +123,7 @@ const FlowItem = memo(function FlowItem({
   onSelect: (sessionId: string) => void;
   revision: number;
 }) {
-  const { graph, failed: graphFailed } = useFlowGraph(open ? flow.rootId : null, revision);
+  const { graph, failed: graphFailed, retry } = useFlowGraph(open ? flow.rootId : null, revision);
   const contains = flow.sessions.some((s) => s.id === selectedId);
 
   return (
@@ -146,7 +179,7 @@ const FlowItem = memo(function FlowItem({
           </div>
         ) : (
           <div className="flow-tree">
-            <FlowTree nodes={graph} selectedId={selectedId} onSelect={onSelect} failed={graphFailed} />
+            <FlowTree nodes={graph} selectedId={selectedId} onSelect={onSelect} failed={graphFailed} onRetry={retry} />
           </div>
         ))}
     </div>

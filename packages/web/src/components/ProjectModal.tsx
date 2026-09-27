@@ -1,12 +1,22 @@
 import React, { useId, useRef, useState } from 'react';
-import { useAction } from '../actions';
+import { pushToast, useAction } from '../actions';
 import { hub } from '../hub';
 import { erroDeCaminhoDoDaemon, problemaNoCaminhoLocal } from '../logic/project-path';
+import {
+  avisoDeRegistroParcial,
+  PROGRESSO_INICIAL,
+  registrarProjeto,
+  type ProgressoDoRegistro,
+  type ResultadoDoRegistro,
+} from '../logic/project-registration';
 import { useDialog, useFecharPeloFundo } from '../useDialog';
 
 interface Props {
   onClose: () => void;
+  /** Tudo feito: fecha o modal e seleciona o projeto. */
   onCreated: (projectId: string) => void;
+  /** Projeto criado mas com pendências (pasta/diretrizes): atualiza a lista já. */
+  onProjectExists?: (projectId: string) => void;
 }
 
 /** Último segmento do caminho, com barra de qualquer sistema. */
@@ -15,7 +25,7 @@ function nomeDaPasta(caminho: string): string {
   return partes[partes.length - 1] ?? '';
 }
 
-export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
+export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): React.JSX.Element {
   const [name, setName] = useState('');
   const [folderPath, setFolderPath] = useState('');
   const [extraFolders, setExtraFolders] = useState('');
@@ -30,6 +40,13 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
   const tituloId = `${base}-titulo`;
   const descricaoId = `${base}-descricao`;
 
+  // O que já foi feito nesta abertura do modal. "Tentar de novo" depois de uma
+  // falha parcial retoma daqui: não recria o projeto nem reenvia as pastas que
+  // já entraram (`logic/project-registration`).
+  const progressoRef = useRef<ProgressoDoRegistro>(PROGRESSO_INICIAL);
+  const [projetoCriado, setProjetoCriado] = useState(false);
+  const [avisoParcial, setAvisoParcial] = useState<string | null>(null);
+
   /**
    * Cria o projeto, vincula as pastas extras e grava as diretrizes.
    *
@@ -38,14 +55,17 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
    * enxergava) e as pastas extras para lugar nenhum — o campo era preenchido e
    * descartado.
    *
-   * A falha de uma pasta extra NÃO derruba o resto: o projeto já foi criado, e
-   * silenciar quais ficaram de fora seria pior do que relatar.
+   * A falha de uma pasta extra NÃO derruba o resto: o projeto já foi criado, a
+   * lista do painel é atualizada na hora (`onProjectExists`) e o modal fica
+   * aberto só para o que falta.
    */
   const handleCreate = async () => {
-    const problema = problemaNoCaminhoLocal(folderPath);
-    if (problema) {
-      setErroCaminho(problema);
-      return;
+    if (!projetoCriado) {
+      const problema = problemaNoCaminhoLocal(folderPath);
+      if (problema) {
+        setErroCaminho(problema);
+        return;
+      }
     }
     setErroCaminho(null);
 
@@ -55,44 +75,42 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    await action.run(
+    let resultado: ResultadoDoRegistro | null = null;
+    const ok = await action.run(
       'create-project',
       async () => {
-        let project;
         try {
-          ({ project } = await hub.addProject(folderPath.trim(), projectName));
+          resultado = await registrarProjeto(
+            { caminho: folderPath.trim(), nome: projectName, extras, diretrizes: guidelines },
+            progressoRef.current,
+            {
+              criarProjeto: (caminho, nome) => hub.addProject(caminho, nome).then((r) => r.project),
+              vincularPasta: (id, pasta) => hub.addFolder(id, pasta),
+              gravarDiretrizes: (id, texto) => hub.saveProjectContext(id, { memory: texto }),
+            },
+          );
         } catch (err) {
           setErroCaminho(erroDeCaminhoDoDaemon(err));
           throw err;
         }
-
-        const recusadas: string[] = [];
-        for (const pasta of extras) {
-          try {
-            await hub.addFolder(project.id, pasta);
-          } catch (err) {
-            // Sobreposição e caminho relativo são recusas legítimas, e o daemon
-            // explica o motivo. Juntar para mostrar de uma vez, em vez de
-            // abortar na primeira e deixar as outras sem tentativa.
-            recusadas.push(`${pasta} — ${err instanceof Error ? err.message : 'recusada'}`);
-          }
-        }
-
-        if (guidelines.trim()) {
-          await hub.saveProjectContext(project.id, { memory: guidelines.trim() });
-        }
-
-        if (recusadas.length > 0) {
-          throw new Error(
-            `Projeto criado, mas ${recusadas.length} pasta(s) não foram vinculadas: ` +
-              recusadas.join(' | '),
-          );
-        }
-
-        onCreated(project.id);
       },
-      'projeto registrado',
     );
+    const r = resultado as ResultadoDoRegistro | null;
+    if (!ok || !r) return;
+    const novo = progressoRef.current.projectId === null;
+    progressoRef.current = r.progresso;
+    const projectId = r.progresso.projectId!;
+    if (r.completo) {
+      pushToast({ kind: 'ok', title: 'projeto registrado', detail: null });
+      onCreated(projectId);
+      return;
+    }
+    // Parcial: o projeto existe — a lista precisa mostrá-lo já, e não pode
+    // ser criado de novo.
+    setProjetoCriado(true);
+    setAvisoParcial(avisoDeRegistroParcial(r));
+    if (novo) onProjectExists?.(projectId);
+    pushToast({ kind: 'warn', title: 'Projeto criado com pendências', detail: avisoDeRegistroParcial(r) });
   };
 
   const sujo = [folderPath, name, extraFolders, guidelines].some((v) => v.trim() !== '');
@@ -125,6 +143,11 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
               {action.error}
             </div>
           )}
+          {avisoParcial && !action.error && (
+            <div className="error-banner projeto-parcial" role="alert">
+              {avisoParcial}
+            </div>
+          )}
 
           <div className="field">
             <label htmlFor="folder-path">
@@ -135,6 +158,7 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
               type="text"
               placeholder="Ex: C:\Users\SeuUsuario\Projetos\MeuApp ou /var/www/app"
               value={folderPath}
+              readOnly={projetoCriado}
               aria-invalid={erroCaminho !== null}
               aria-describedby={erroCaminho !== null ? 'folder-path-erro' : undefined}
               onChange={(e) => {
@@ -164,6 +188,7 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
               type="text"
               placeholder="Ex: Backend Core API"
               value={name}
+              readOnly={projetoCriado}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
@@ -196,7 +221,7 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
 
         <div className="modal-actions">
           <button type="button" onClick={onClose} disabled={action.busy !== null}>
-            Cancelar
+            {projetoCriado ? 'Fechar' : 'Cancelar'}
           </button>
           <button
             type="button"
@@ -204,7 +229,7 @@ export function ProjectModal({ onClose, onCreated }: Props): React.JSX.Element {
             onClick={handleCreate}
             disabled={!folderPath.trim() || action.busy !== null}
           >
-            {action.busy !== null ? 'Registrando…' : 'Criar & Vincular Projeto'}
+            {action.busy !== null ? 'Registrando…' : projetoCriado ? 'Concluir' : 'Criar & Vincular Projeto'}
           </button>
         </div>
       </div>
