@@ -92,7 +92,7 @@ export function Composer({ session, encerrada }: Props) {
             }}
             placeholder={
               encerrada
-                ? `Sessão ${STATE_LABEL[session.state] ?? session.state} — abra uma nova para continuar`
+                ? `Sessão ${STATE_LABEL[session.state] ?? session.state} — não é reaberta; continue numa nova: hub start --from ${session.id} --agent ${session.agentId} "…"`
                 : session.state === 'paused'
                   ? `Sessão pausada — enviar uma mensagem retoma ${session.agentId}`
                   : `Falar com ${session.agentId}…  (Pressione Enter para enviar, Shift+Enter para nova linha)`
