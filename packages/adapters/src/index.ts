@@ -14,6 +14,7 @@ export {
 } from './bin-resolver.js';
 export {
   killProcessTree,
+  opcoesDeGrupo,
   imagemDoProcesso,
   imagemPareceEsperada,
   horarioDeCriacaoDoProcesso,

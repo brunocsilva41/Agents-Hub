@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { killProcessTree } from '@agents-hub/adapters';
+import { killProcessTree, opcoesDeGrupo } from '@agents-hub/adapters';
 import type { ValidationOutcome, ValidationPolicy } from '@agents-hub/core';
 
 export interface ValidationContext {
@@ -67,6 +67,9 @@ function runCommandCheck(
       shell: true,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // POSIX: o `sh -c` vira líder de grupo e o timeout mata `npm`/`node`
+      // filhos junto, não só o shell (R06-13).
+      ...opcoesDeGrupo(),
     });
 
     const tail: string[] = [];

@@ -2491,6 +2491,7 @@ export class SessionManager {
       }
     }
 
+    if (task) await this.#capturarNoFim(session, task);
     await this.#finish(sessionId, 'killed', motivo);
     this.#ciclo.esquecer(sessionId);
   }
@@ -2600,6 +2601,27 @@ export class SessionManager {
         if (cancelada()) return;
         const revisao = await this.#revisar(session, task, artefatos, signal);
         if (cancelada()) return;
+
+        // Aprovação também deixa rastro (R13-17): antes só a reprovação virava
+        // evento/`validation`, e uma revisão APROVADA só aparecia no custo.
+        if (revisao?.passed) {
+          validation = {
+            passed: validation?.passed ?? true,
+            checks: [...(validation?.checks ?? []), ...revisao.checks],
+          };
+          const check = revisao.checks[0];
+          this.#emit({
+            sessionId: session.id,
+            taskId: task.id,
+            agentId: session.agentId,
+            type: 'log',
+            payload: {
+              level: 'info',
+              kind: 'review.approved',
+              text: `${check?.name ?? 'revisão'}: APROVADO${check?.detail ? ` — ${check.detail}` : ''}`,
+            },
+          });
+        }
 
         if (revisao && !revisao.passed) {
           validation = {
@@ -2945,6 +2967,11 @@ ${task.brief.objective.slice(0, 500)}`,
     // verdadeiro e não pode receber um segundo, contraditório.
     const gravada = this.store.sessions.get(session.id);
     if (gravada && isTerminalSessionState(gravada.state)) return;
+
+    // O que o agente escreveu antes de falhar também é registro do trabalho
+    // (R06-14): antes só o caminho de sucesso gerava o artefato de diff, e o
+    // worktree — única prova — é apagado pelo reaper depois.
+    if (state === 'failed') await this.#capturarNoFim(session, task);
 
     // Numa troca de agente o pai não deve ouvir "falhou": a tarefa dele
     // continua viva, só mudou de mãos.
@@ -3563,6 +3590,24 @@ ${task.brief.objective.slice(0, 500)}`,
       session,
       task,
     );
+  }
+
+  /**
+   * Diff do trabalho numa sessão que acaba em falha ou cancelamento (R06-14).
+   * Melhor esforço: erro de git aqui não pode impedir a sessão de fechar. Se
+   * a task já tem diff (capturado numa tentativa que passou da validação e
+   * reprovou depois), não duplica a linha.
+   */
+  async #capturarNoFim(session: Session, task: Task): Promise<void> {
+    const jaTem = this.store.artifacts
+      .list({ sessionId: session.id, taskId: task.id })
+      .some((a) => a.kind === 'diff');
+    if (jaTem) return;
+    try {
+      await this.#capturarMudancas(session, task);
+    } catch (err) {
+      console.error(`[hub] diff da sessão ${session.id} não capturado: ${(err as Error).message}`);
+    }
   }
 
   listArtifacts(sessionId: string): Artifact[] {
