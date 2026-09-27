@@ -31,7 +31,7 @@ describe('hub cost', () => {
     semearEvento(t.hub, r1, 'turn.completed', {}, { usd: 1, inputTokens: 1000, outputTokens: 0 });
     semearEvento(t.hub, f1, 'turn.completed', {}, { usd: 0.5, inputTokens: 500, outputTokens: 0 });
     // Custo provisório não conta (mesma regra do orçamento).
-    semearEvento(t.hub, r1, 'turn.completed', {}, { usd: 99, provisional: true } as never);
+    semearEvento(t.hub, r1, 'turn.completed', {}, { usd: 99, provisional: true });
 
     // Fluxo recente em beta: codex US$ 0,25.
     const r2 = semearSessao(t.hub, projB, { agentId: 'codex', createdAt: recente });

@@ -36,7 +36,7 @@ describe('hub start --from (continuar sessão terminada)', () => {
       'primeira sessão',
     );
     assert.equal(primeira?.estado, 'completed', c1.texto());
-    const anterior = primeira!.sessionId;
+    const anterior = primeira.sessionId;
 
     const c2 = capturar();
     const segunda = await comTeto(
@@ -46,7 +46,7 @@ describe('hub start --from (continuar sessão terminada)', () => {
     );
     assert.equal(segunda?.estado, 'completed', c2.texto() + c2.erros.join('\n'));
 
-    const nova = h.hub.store.sessions.get(segunda!.sessionId);
+    const nova = h.hub.store.sessions.get(segunda.sessionId);
     assert.ok(nova);
     assert.notEqual(nova.id, anterior);
     assert.equal(nova.projectId, h.hub.store.sessions.get(anterior)?.projectId);
@@ -88,6 +88,7 @@ describe('alerta de aprovação no terminal', () => {
   test('em TTY: BEL e título com o id', () => {
     const s = sinalDeAprovacao(aprovacao, { tty: true, desligado: false });
     assert.ok(s?.startsWith('\u0007'));
+    // eslint-disable-next-line no-control-regex -- a sequência OSC de título é o que se mede
     assert.match(String(s), /\u001b\]0;hub: aprovação pendente apv_abc123\u0007/);
   });
 
@@ -109,6 +110,7 @@ describe('alerta de aprovação no terminal', () => {
   test('id com caracteres de controle não injeta sequência no título', () => {
     const malicioso = { type: 'approval.requested', payload: { approvalId: 'apv_x\u001b]0;pwned\u0007' } } as unknown as EventEnvelope;
     const s = String(sinalDeAprovacao(malicioso, { tty: true, desligado: false }));
+    // eslint-disable-next-line no-control-regex -- conta os ESC: é o que mede a injeção
     assert.equal((s.match(/\u001b/g) ?? []).length, 1);
   });
 });

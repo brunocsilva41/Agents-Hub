@@ -289,7 +289,7 @@ export class WorktreeManager {
         const motivo = (err as Error).message;
         const aviso = `não foi possível ligar "${nome}" em ${worktreePath}: ${motivo}`;
         avisos.push(aviso);
-        // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+        // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
         console.error(`[worktree] ${aviso} — build/testes podem falhar neste worktree`);
       }
     }
@@ -329,7 +329,7 @@ export class WorktreeManager {
     // `node_modules` inteiro para o branch.)
     const recusa = this.#desfazerLinks(params.worktreePath);
     if (recusa !== null) {
-      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
       console.error(`[worktree] remoção de ${params.worktreePath} recusada: ${recusa}`);
       return { removed: false, reason: recusa };
     }
@@ -361,7 +361,7 @@ export class WorktreeManager {
           return this.#apagarOrfao(params.projectPath, params.worktreePath);
         }
         await this.#ligarDependencias(params.projectPath, params.worktreePath);
-        // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+        // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
         console.error(
           `[worktree] trabalho de ${params.worktreePath} não pôde ser commitado: ${falha}`,
         );
@@ -554,7 +554,7 @@ export class WorktreeManager {
       // packages/`), mas o catch silencioso ficava pronto pra esconder um erro
       // real assim que alguém religasse a função. Loga para não repetir aqui o
       // mesmo buraco que `currentRef` tinha.
-      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
       console.error(
         `[worktree] falha ao listar worktrees de ${projectPath}: ${(err as Error).message}`,
       );
@@ -594,7 +594,7 @@ export class WorktreeManager {
     } catch (err) {
       const motivo = (err as Error).message;
       const aviso = `não foi possível resolver HEAD em ${dir}, worktree criado sobre a ref literal "HEAD": ${motivo}`;
-      // eslint-disable-next-line no-console -- persiste em ~/.agents-hub/logs/, não é debug solto
+      // console.error de propósito: persiste em ~/.agents-hub/logs/, não é debug solto
       console.error(`[worktree] ${aviso}`);
       return { ref: 'HEAD', warning: aviso };
     }

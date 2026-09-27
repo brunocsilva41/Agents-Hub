@@ -149,7 +149,7 @@ export function renderExportMarkdown(dados: SessionExport): string {
     l.push('```text');
     for (const e of dados.events) {
       // Data completa na frente: a linha do terminal só traz a hora.
-      l.push(`${dataHoraLocal(e.ts).slice(0, 10)} ${semCor(renderEvent({ ...e, raw: null } as EventEnvelope))}`);
+      l.push(`${dataHoraLocal(e.ts).slice(0, 10)} ${semCor(renderEvent({ ...e, raw: null }))}`);
     }
     l.push('```', '');
   }

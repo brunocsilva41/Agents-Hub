@@ -414,7 +414,7 @@ export function App() {
           // O banner aparece em todas as abas: "ver a sessão" precisa levar à timeline.
           if (setActiveTab('timeline')) selectSession(id);
         }}
-        onResolved={() => state.refresh()}
+        onResolved={() => void state.refresh()}
       />
 
       {/* Primeira execução, sem projeto: guia para registrar e ver agentes. */}
@@ -737,7 +737,7 @@ export function App() {
                   });
                 }
               }}
-              onChanged={() => state.refresh()}
+              onChanged={() => void state.refresh()}
             />
           </aside>
         </div>

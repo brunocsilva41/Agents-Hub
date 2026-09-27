@@ -186,7 +186,7 @@ export class PolicyService {
       }
       const atual = doc.toJS() as unknown;
       if (atual !== null && typeof atual === 'object' && !Array.isArray(atual)) {
-        const chaves = Object.keys(atual as Record<string, unknown>);
+        const chaves = Object.keys(atual);
         // O leitor aceita a política no topo do arquivo quando não há `policy:`.
         // Gravar `policy:` ali mudaria o que vale sem ninguém pedir.
         if (!chaves.includes('policy') && chaves.some((k) => CHAVES_DE_POLITICA.has(k))) {

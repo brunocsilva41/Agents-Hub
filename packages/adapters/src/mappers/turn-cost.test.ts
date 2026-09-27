@@ -156,7 +156,7 @@ describe('custo do turno com streams reais (Fase 3.1)', () => {
     const custos = new TurnCostTracker({ usd: 0.005298219, credits: 0.5298219 });
     const [evento] = copilotMapper({ type: 'session.usage_checkpoint', data: { totalNanoAiu: 1059643800 } });
     assert.ok(evento?.cost);
-    custos.observe(evento!.cost!);
+    custos.observe(evento.cost);
     const aberto = custos.flush();
     assert.ok(Math.abs((aberto?.usd ?? 0) - 0.005298219) < 1e-12, 'só o incremento deste turno');
     assert.ok(Math.abs((aberto?.credits ?? 0) - 0.5298219) < 1e-12);

@@ -84,7 +84,7 @@ export interface JsonParse {
 }
 
 export function parseJsonTolerant(raw: string): JsonParse {
-  const text = raw.replace(/^﻿/, '');
+  const text = raw.replace(/^\uFEFF/, '');
   try {
     return { value: JSON.parse(text) };
   } catch {
@@ -288,7 +288,8 @@ export class Ctx {
     let command: string | undefined;
     let args: string[] | undefined;
     if (Array.isArray(spec.command)) {
-      const [c, ...rest] = spec.command;
+      const lista: unknown[] = spec.command;
+      const [c, ...rest] = lista;
       command = typeof c === 'string' ? c : undefined;
       args = safeArgs(rest);
     } else {

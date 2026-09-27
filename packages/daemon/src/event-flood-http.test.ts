@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY, type EventEnvelope } from '@agents-hub/core';
+import { DEFAULT_POLICY, textoDe, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
 /** Porta livre reservada antes do Hub: a guarda de borda compara o `Host` com ela. */
@@ -180,7 +180,7 @@ defaults:
       assert.ok(bytes < 12 * 1024 * 1024, `resposta de ${bytes} bytes`);
       const { events } = JSON.parse(corpo) as { events: EventEnvelope[] };
       assert.equal(events.length, 5000, 'o teto de bytes não pode mudar a contagem da página');
-      const gigante = events.find((e) => String(e.payload['text'] ?? '').startsWith('zzzz'));
+      const gigante = events.find((e) => textoDe(e.payload['text']).startsWith('zzzz'));
       assert.ok(gigante, 'a linha gigante precisa aparecer (cortada), não sumir');
       assert.match(String(gigante.payload['text']), /\[truncado \d+ bytes\]$/);
       assert.ok(String(gigante.payload['text']).length < 2 * 1024 * 1024);

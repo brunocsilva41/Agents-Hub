@@ -50,7 +50,7 @@ function status(agenteAtual: string, tentativas: Array<[string, string | null]>)
     },
     live: true,
     budget: orcamento,
-  } as TaskStatus;
+  };
 }
 
 /**

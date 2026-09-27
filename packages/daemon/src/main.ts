@@ -2,7 +2,7 @@
 import { baseUrl } from './config.js';
 import { readHubEnv } from './env.js';
 import { createHub } from './hub.js';
-import { instalarRedeDeSeguranca } from './safety-net.js';
+import { encerradorDoProcesso, instalarRedeDeSeguranca } from './safety-net.js';
 
 const env = readHubEnv();
 const hub = createHub(env.AGENTS_HUB_PORT !== undefined ? { port: env.AGENTS_HUB_PORT } : {});
@@ -18,14 +18,11 @@ console.log(`  banco:     ${hub.config.dbFile}`);
 console.log(`  manifests: ${hub.config.manifestsDir}`);
 console.log(`  agentes:   ${hub.registry.ids().join(', ') || '(nenhum manifesto encontrado)'}`);
 
-let shuttingDown = false;
-const shutdown = async (signal: string): Promise<void> => {
-  if (shuttingDown) return;
-  shuttingDown = true;
+// Sai mesmo que `hub.shutdown()` rejeite — ver `encerradorDoProcesso`.
+const shutdown = encerradorDoProcesso(async (signal: string): Promise<void> => {
   console.log(`\n${signal} recebido — encerrando sessões vivas…`);
   await hub.shutdown();
-  process.exit(0);
-};
+});
 
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

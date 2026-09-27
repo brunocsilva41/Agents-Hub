@@ -169,8 +169,8 @@ export function custoNoTempo(nos: readonly NoDeCusto[], periodo: Periodo, agora:
   }
   const passo = Math.max(1, (agora - desde) / n);
   const faixas: FaixaDeCusto[] = Array.from({ length: n }, (_, i) => ({
-    inicio: desde! + i * passo,
-    fim: desde! + (i + 1) * passo,
+    inicio: desde + i * passo,
+    fim: desde + (i + 1) * passo,
     usd: 0,
     tokens: 0,
   }));

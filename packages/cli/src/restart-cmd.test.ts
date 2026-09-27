@@ -34,7 +34,7 @@ describe('hub restart', () => {
       assert.ok(await responde(primeiro.url), 'e ele responde na mesma porta');
       assert.ok(out.some((l) => l.includes('daemon reiniciado')));
       // O encerramento passou pela rota autenticada e ficou na trilha (mesmo banco).
-      const trilha = novo.hub!.hub.audit.list({ kind: 'daemon.shutdown' });
+      const trilha = novo.hub.hub.audit.list({ kind: 'daemon.shutdown' });
       assert.equal(trilha.length, 1);
       assert.match(trilha[0]!.actor, /^cli:/);
     } finally {

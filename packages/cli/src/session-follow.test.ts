@@ -92,7 +92,7 @@ describe('hub watch/budget/graph/send (CLI)', () => {
   });
 
   test('send após pause mostra a resposta NOVA (antes: parava no evento terminal antigo)', async () => {
-    const { session, task } = await h.client.startSession({
+    const { session } = await h.client.startSession({
       projectId,
       brief: { agent: 'dorminhoco', objective: 'faça algo demorado aqui', isolation: 'none' },
     });

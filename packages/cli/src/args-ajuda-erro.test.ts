@@ -96,6 +96,7 @@ describe('saída de erro única (R07-21)', () => {
       console.error = original;
     }
     assert.equal(process.exitCode, 1);
+    // eslint-disable-next-line no-control-regex -- o ESC da cor é justamente o que se mede
     assert.match(saida[0] ?? '', /^(\u001b\[31m)?hub: \[ENOENT\] arquivo sumiu/);
   });
 });

@@ -82,7 +82,7 @@ describe('ambiente que o projeto pode passar ao agente', () => {
   test('valor que não é string é recusado, não convertido', () => {
     // Converter viraria "[object Object]" no ambiente do processo.
     const { aceitas, recusadas } = filtrarEnvDeProjeto({
-      OPENAI_BASE_URL: { url: 'x' } as unknown as string,
+      OPENAI_BASE_URL: { url: 'x' },
     });
     assert.deepEqual(aceitas, {});
     assert.deepEqual(recusadas, ['OPENAI_BASE_URL']);

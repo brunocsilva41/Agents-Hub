@@ -53,11 +53,11 @@ inl = { k = "v", z = true }
 i = 1
 [[arr]]
 i = 2
-`) as Record<string, any>;
+`) as { model: unknown; list: unknown; a: Record<string, Record<string, unknown>>; arr: unknown };
     assert.equal(t.model, 'x');
     assert.deepEqual(t.list, ['a', 'b']);
-    assert.equal(t.a['b c'].n, 3);
-    assert.deepEqual(t.a['b c'].inl, { k: 'v', z: true });
+    assert.equal(t.a['b c']?.['n'], 3);
+    assert.deepEqual(t.a['b c']?.['inl'], { k: 'v', z: true });
     assert.deepEqual(t.arr, [{ i: 1 }, { i: 2 }]);
     assert.throws(() => parseToml('a = "sem fim'));
     assert.throws(() => parseToml('[x\ny=1'));

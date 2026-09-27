@@ -230,7 +230,7 @@ function colorirDecisao(d: string): string {
 export async function auditCommand(client: HubClient, args: Args): Promise<void> {
   const q: AuditQuery = {};
   const texto = (k: string): string | undefined =>
-    typeof args.flags[k] === 'string' ? (args.flags[k] as string) : undefined;
+    typeof args.flags[k] === 'string' ? (args.flags[k]) : undefined;
 
   const sessao = texto('session') ?? args.positional[0];
   if (sessao) q.sessionId = sessao;

@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { chaveDeCaminho } from './project-resolve.js';
 import type { GraphSummary, HubClient, ProjectSummary } from './client.js';
 import { flagOn, flagString, imprimirJson, instanteDe, type Args } from './cmd-util.js';

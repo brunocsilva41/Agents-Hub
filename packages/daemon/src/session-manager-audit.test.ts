@@ -9,7 +9,6 @@ import {
   newId,
   nowIso,
   type Approval,
-  type HubError,
   type Session,
   type Task,
 } from '@agents-hub/core';
@@ -424,9 +423,9 @@ defaults:
 
     for (const r of recusadas) {
       if (r.status === 'rejected') {
-        const err = r.reason;
+        const err: unknown = r.reason;
         assert.ok(isHubError(err), 'recusa por orçamento tem que ser um HubError');
-        assert.equal((err as HubError).code, 'BUDGET_EXCEEDED');
+        assert.equal(err.code, 'BUDGET_EXCEEDED');
       }
     }
 
@@ -595,7 +594,7 @@ describe('auditoria: #fallback cria sessão substituta e reatribui task atomicam
         throw new Error('crash simulado: escrita interrompida no meio da transação de #fallback (achado 2)');
       }
       return originalUpdate(id, patch);
-    }) as typeof hub.store.tasks.update;
+    });
 
     try {
       assert.throws(() => {
@@ -733,7 +732,7 @@ describe('auditoria: reconcileOnStartup fecha sessão + tasks atomicamente (acha
         throw new Error('crash simulado: escrita interrompida no meio de reconcileOnStartup (achado 3)');
       }
       return originalUpdate(id, patch);
-    }) as typeof hub.store.tasks.update;
+    });
 
     try {
       await assert.rejects(

@@ -258,14 +258,14 @@ describe('reconciliação na subida do daemon', () => {
       // `tasklist` rodando antes do PID existir de verdade.
       await aguardarNascimento(filho);
 
-      const { session } = semear('running', false, filho.pid!, 'node-fake');
+      const { session } = semear('running', false, filho.pid, 'node-fake');
 
       const resultado = await hub.sessions.reconcileOnStartup();
       assert.ok(resultado.encerradas >= 1);
       assert.equal(hub.store.sessions.get(session.id)?.state, 'killed');
       assert.equal(hub.store.sessions.get(session.id)?.pid, null);
 
-      await aguardarMorte(filho.pid!);
+      await aguardarMorte(filho.pid);
     });
 
     test('sessão running com PID que já não existe: reconciliação não lança erro', async () => {
@@ -286,13 +286,13 @@ describe('reconciliação na subida do daemon', () => {
       await aguardarNascimento(filho);
 
       try {
-        const { session } = semear('running', false, filho.pid!, 'wrong-bin');
+        const { session } = semear('running', false, filho.pid, 'wrong-bin');
 
         await hub.sessions.reconcileOnStartup();
 
         assert.equal(hub.store.sessions.get(session.id)?.state, 'killed');
         assert.ok(
-          pidVivo(filho.pid!),
+          pidVivo(filho.pid),
           'o processo não deveria ter sido morto: o binário esperado ("totalmente-outro-binario") não bate com o que está de fato vivo no PID ("node")',
         );
       } finally {
@@ -304,10 +304,9 @@ describe('reconciliação na subida do daemon', () => {
     // só faz sentido no Windows, onde `horarioDeCriacaoDoProcesso` de fato
     // consulta o SO — em POSIX ela sempre devolve `null` e a checagem vira
     // no-op (limitação já documentada e assumida).
-    const testeWin32 = process.platform === 'win32' ? test : test.skip;
-
-    testeWin32(
+    test(
       'PID vivo mas processo nasceu DEPOIS do último registro da sessão: reconciliação NÃO mata (provável PID reciclado)',
+      { skip: process.platform !== 'win32' },
       async () => {
         // Sessão gravada como se tivesse sido atualizada pela última vez há uma
         // hora — simula um daemon que crashou há tempo. Um processo real
@@ -323,7 +322,7 @@ describe('reconciliação na subida do daemon', () => {
         await aguardarNascimento(filho);
 
         try {
-          const { session } = semear('running', false, filho.pid!, 'node-fake', umaHoraAtras);
+          const { session } = semear('running', false, filho.pid, 'node-fake', umaHoraAtras);
 
           await hub.sessions.reconcileOnStartup();
 
@@ -333,7 +332,7 @@ describe('reconciliação na subida do daemon', () => {
             'o registro no banco vira killed de qualquer jeito — só o kill do processo é que é abortado',
           );
           assert.ok(
-            pidVivo(filho.pid!),
+            pidVivo(filho.pid),
             'o processo não deveria ter sido morto: ele nasceu bem depois do último registro da sessão, sinal de PID reciclado pelo SO',
           );
         } finally {

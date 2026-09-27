@@ -1,3 +1,4 @@
+import { textoDe } from '@agents-hub/core';
 import type { MappedEvent } from '../types.js';
 import { numberOf } from './generic.js';
 
@@ -24,7 +25,7 @@ export function claudeMapper(line: unknown): MappedEvent[] {
         payload: init
           ? { subtype: obj['subtype'], tools: obj['tools'], model: obj['model'] }
           : // Subtipos de bastidor (status, hooks, compactação): técnicos.
-            { kind: 'tecnico', subtype: obj['subtype'], text: `Claude: system/${String(obj['subtype'] ?? '?')}` },
+            { kind: 'tecnico', subtype: obj['subtype'], text: `Claude: system/${textoDe(obj['subtype'], '?')}` },
         raw: line,
       };
       if (sessionId) event.nativeSessionId = sessionId;
@@ -135,7 +136,7 @@ export function claudeMapper(line: unknown): MappedEvent[] {
           type: 'log',
           payload: {
             kind: 'tecnico',
-            text: `Claude: limite de taxa ${String(info['status'] ?? '?')}`,
+            text: `Claude: limite de taxa ${textoDe(info['status'], '?')}`,
             rateLimit: info,
           },
           raw: line,

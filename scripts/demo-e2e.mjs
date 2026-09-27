@@ -396,6 +396,7 @@ async function main(ctx) {
   // `dorminhoco`: turno longo (gate, cancel, interrupt, pause, handoff).
   // `flaky`/`backup`: cadeia de fallback da capability `instavel`.
   // `obreiro`: faz o trabalho (workflow, custo, prune, confiança).
+  /** @type {Array<[string, Record<string, unknown>]>} */
   const jsonl = [
     ['dorminhoco', { sleepMs: 30_000, capability: 'lento' }],
     ['flaky', { capability: 'instavel', supervision: 'autonomous' }],

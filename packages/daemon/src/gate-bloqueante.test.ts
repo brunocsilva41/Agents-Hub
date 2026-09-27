@@ -250,7 +250,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     assert.doesNotMatch(veredito.explanation, /política do projeto proíbe/i);
     assert.ok(veredito.approvalId);
 
-    const apv = hub.store.approvals.get(veredito.approvalId!);
+    const apv = hub.store.approvals.get(veredito.approvalId);
     assert.equal(apv?.state, 'denied');
     assert.equal(apv?.resolvedBy, 'tempo esgotado');
 

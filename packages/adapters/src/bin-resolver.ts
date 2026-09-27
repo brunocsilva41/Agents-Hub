@@ -53,7 +53,7 @@ export interface LookupDeps {
 }
 
 export const defaultLookupDeps: LookupDeps = {
-  execFileAsync: realExecFileAsync as LookupDeps['execFileAsync'],
+  execFileAsync: realExecFileAsync,
   existsSync,
   isFile: (p) => {
     try {
@@ -124,10 +124,11 @@ async function lookup(bin: string, deps: LookupDeps): Promise<ResolvedBin | null
     // A mesma varredura acha, na pasta do npm, o script sh sem extensão
     // (instalado para o Git Bash) E o shim .cmd. O primeiro o Windows não
     // sabe executar (ENOENT) — por isso a preferência .exe > .cmd/.bat.
+    const [primeiro = bin] = candidates;
     const best =
       candidates.find((c) => /\.exe$/i.test(c)) ??
       candidates.find((c) => /\.(cmd|bat)$/i.test(c)) ??
-      (candidates[0] as string);
+      primeiro;
 
     return comShimDesembrulhado(best, deps);
   }

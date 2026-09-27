@@ -666,9 +666,11 @@ export class OpenCodeAdapter implements AgentAdapter {
     // por exemplo), o ChildProcess emite `'error'` sem `'close'` — sem este
     // listener é exceção não tratada, e sem capturá-lo o loop abaixo só
     // descobriria o problema esperando o timeout inteiro de 60s.
-    let spawnError: string | null = null;
+    // Objeto e não `let`: atribuído no callback, o `let` seria estreitado
+    // pelo TypeScript para `null` no laço abaixo.
+    const partida: { erro: string | null } = { erro: null };
     child.on('error', (err) => {
-      spawnError = err.message;
+      partida.erro = err.message;
     });
 
     // `pipe` sem leitor enche o buffer do SO (~64 KB) e o "opencode serve"
@@ -684,8 +686,8 @@ export class OpenCodeAdapter implements AgentAdapter {
     const limite = Date.now() + SERVER_BOOT_TIMEOUT_MS;
     while (Date.now() < limite) {
       if (await this.#healthy()) return;
-      if (spawnError !== null) {
-        throw new HubError('ADAPTER_FAILURE', `falha ao subir "opencode serve": ${spawnError}`, {
+      if (partida.erro !== null) {
+        throw new HubError('ADAPTER_FAILURE', `falha ao subir "opencode serve": ${partida.erro}`, {
           port: this.#port,
         });
       }

@@ -164,7 +164,7 @@ export async function acompanhar(client: HubClient, opts: OpcoesDeAcompanhamento
 
     const timer = setInterval(() => void checar(), pollMs);
     try {
-      for await (const event of client.stream(filtro, ac.signal) as AsyncGenerator<EventEnvelope>) {
+      for await (const event of client.stream(filtro, ac.signal)) {
         if (deveExibir(event, { verbose: opts.verbose === true })) log(renderEvent(event, { showAgent: porRaiz }));
         opts.alertar?.(event);
         if (!porRaiz && event.sessionId === alvo) since = event.seq;
@@ -181,9 +181,12 @@ export async function acompanhar(client: HubClient, opts: OpcoesDeAcompanhamento
       clearInterval(timer);
       ac.abort();
     }
-    if (emCurso) await emCurso;
+    // `emCurso` é atribuído dentro de `checar`; sem o cast o TypeScript o
+    // estreita para `null` aqui e o `await` pareceria esperar nada.
+    const pendente = emCurso as Promise<void> | null;
+    if (pendente) await pendente;
 
-    let r = saida.r as Avaliacao | null;
+    let r = saida.r;
     if (r === null) {
       // O stream terminou sozinho (daemon encerrando): uma última consulta.
       r = await avaliar(client, alvo, taskId, vigia, 0, log).catch(() => null);

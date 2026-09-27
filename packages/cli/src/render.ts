@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@agents-hub/core';
+import { textoDe, type EventEnvelope } from '@agents-hub/core';
 import type { GraphSummary } from './client.js';
 import { horaLocal } from './hora.js';
 
@@ -45,14 +45,14 @@ export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } 
       return `${time} ${who}${dim(truncate(textOf(p['text']), 220))}`;
 
     case 'tool.call':
-      return `${time} ${who}${blue('⚒')} ${String(p['tool'] ?? 'tool')} ${dim(compact(p['input']))}`;
+      return `${time} ${who}${blue('⚒')} ${textoDe(p['tool'], 'tool')} ${dim(compact(p['input']))}`;
 
     case 'tool.result':
       return `${time} ${who}${p['isError'] === true ? red('⚒ falhou') : dim('⚒ ok')}`;
 
     case 'command.executed':
       return `${time} ${who}${yellow('$')} ${textOf(p['command'])}${
-        p['exitCode'] !== undefined && p['exitCode'] !== null ? dim(` → ${String(p['exitCode'])}`) : ''
+        p['exitCode'] !== undefined && p['exitCode'] !== null ? dim(` → ${textoDe(p['exitCode'])}`) : ''
       }`;
 
     case 'file.changed':
@@ -93,13 +93,13 @@ export function renderEvent(event: EventEnvelope, opts: { showAgent?: boolean } 
         p['message'] ??
           p['error'] ??
           p['text'] ??
-          [p['reason'], p['exitCode'] != null ? `código ${String(p['exitCode'])}` : null]
+          [p['reason'], p['exitCode'] != null ? `código ${textoDe(p['exitCode'])}` : null]
             .filter((x) => x !== undefined && x !== null && x !== '')
             .join(' · '),
       )}`;
 
     case 'session.ended':
-      return `${time} ${who}${dim(`▪ sessão encerrada (${String(p['reason'] ?? '')})`)}`;
+      return `${time} ${who}${dim(`▪ sessão encerrada (${textoDe(p['reason'])})`)}`;
 
     case 'log':
       // Troca de agente é aviso ANTES de o substituto gastar: tem de saltar

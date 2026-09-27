@@ -85,6 +85,14 @@ jobs:
       - name: Compilar Web UI
         run: npm run build --workspace @agents-hub/web
 
+      # Depois do build: as regras de promessa (`no-floating-promises`,
+      # `no-misused-promises`, `await-thenable`) precisam de tipo, e o tipo
+      # de um pacote referenciado vem do `dist/*.d.ts` dele. Foi uma Promise
+      # solta — serializada como `{}` na resposta do gate — que deixou o gate
+      # falhando ABERTO em 2026-09-18 sem que o compilador reclamasse.
+      - name: Lint (ESLint com informação de tipo)
+        run: npm run lint
+
       # Depois do build, não antes: os testes importam `dist/*.test.js`
       # compilado, não os fontes — rodar isolado do passo de build garante que
       # o veredito de "testes" nunca mascara um build que já tinha falhado.

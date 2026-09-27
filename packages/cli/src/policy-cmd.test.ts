@@ -44,6 +44,7 @@ describe('hub policy / hub audit — auxiliares (item 1.10)', () => {
       detail: {},
     });
     // Sem depender das cores do terminal.
+    // eslint-disable-next-line no-control-regex -- tira as cores ANSI (ESC)
     const limpa = linha.replace(/\x1b\[[0-9;]*m/g, '');
     // Hora local com o fuso (R07-18), qualquer que seja o fuso da máquina.
     assert.ok(

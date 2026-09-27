@@ -228,7 +228,7 @@ export function existingServerNames(target: McpTarget, configPath: string): Set<
   const doc = lerJsonDeConfig(configPath).doc;
   const servers = doc[JSON_KEY(target)];
   return new Set(
-    servers !== null && typeof servers === 'object' ? Object.keys(servers as object) : [],
+    servers !== null && typeof servers === 'object' ? Object.keys(servers) : [],
   );
 }
 

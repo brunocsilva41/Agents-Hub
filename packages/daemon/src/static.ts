@@ -90,6 +90,7 @@ export function motivoCaminhoEstaticoInvalido(caminho: string): string | null {
     if (segmento === '') continue;
     if (segmento === '.' || segmento === '..') return 'segmento relativo';
     if (/[. ]$/.test(segmento)) return 'nome terminado em ponto ou espaço';
+    // eslint-disable-next-line no-control-regex -- recusar caractere de controle no caminho é o objetivo
     if (/[<>"|?*\u0000-\u001f]/.test(segmento)) return 'caractere proibido em nome de arquivo';
     if (RESERVADO_WINDOWS.test(segmento)) return 'nome reservado do Windows';
   }

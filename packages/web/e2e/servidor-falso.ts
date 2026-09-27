@@ -286,8 +286,8 @@ const PLANO = {
   diff: [
     { tipo: '@', texto: '… 12 linha(s) iguais' },
     { tipo: ' ', texto: '        "hooks": [' },
-    { tipo: '-', texto: '          { "type": "command", "command": "\"node\" \"C:/hub/cli/main.js\" hook", "timeout": 10 }' },
-    { tipo: '+', texto: '          { "type": "command", "command": "\"node\" \"C:/hub/cli/main.js\" hook", "timeout": 120 }' },
+    { tipo: '-', texto: '          { "type": "command", "command": "\\"node\\" \\"C:/hub/cli/main.js\\" hook", "timeout": 10 }' },
+    { tipo: '+', texto: '          { "type": "command", "command": "\\"node\\" \\"C:/hub/cli/main.js\\" hook", "timeout": 120 }' },
     { tipo: ' ', texto: '        ]' },
   ],
 };

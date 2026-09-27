@@ -14,7 +14,7 @@ import {
   parseWorkflow,
   runWorkflow,
   validateWorkflow,
-  type UpstreamResult,
+  textoDe,
   type WorkflowRunDeps,
 } from '@agents-hub/core';
 import type { CallerIdentity } from './caller.js';
@@ -1045,8 +1045,11 @@ function formatIssues(details: unknown): string {
   const linhas = issues
     .map((issue) => {
       if (!issue || typeof issue !== 'object') return null;
-      const path = String((issue as { path?: unknown }).path ?? '').trim();
-      const message = String((issue as { message?: unknown }).message ?? '').trim();
+      // O daemon manda `path` já unido ("brief.objective"); uma issue crua do
+      // Zod traz o array — unido do mesmo jeito, não como JSON.
+      const bruto = (issue as { path?: unknown }).path;
+      const path = (Array.isArray(bruto) ? bruto.join('.') : textoDe(bruto)).trim();
+      const message = textoDe((issue as { message?: unknown }).message).trim();
       if (!message) return null;
       return path ? `${path}: ${message}` : message;
     })

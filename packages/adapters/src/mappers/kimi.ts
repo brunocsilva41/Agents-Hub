@@ -1,3 +1,4 @@
+import { textoDe } from '@agents-hub/core';
 import type { MappedEvent } from '../types.js';
 import { firstString, numberOf } from './generic.js';
 
@@ -93,7 +94,7 @@ export function kimiMapper(line: unknown): MappedEvent[] {
             payload: {
               kimiType: 'goal.summary',
               status: obj['status'] ?? null,
-              text: `Kimi: objetivo ${String(obj['status'] ?? 'sem status')} (${String(obj['turnsUsed'] ?? '?')} turnos)`,
+              text: `Kimi: objetivo ${textoDe(obj['status'], 'sem status')} (${textoDe(obj['turnsUsed'], '?')} turnos)`,
             },
             raw: line,
           },

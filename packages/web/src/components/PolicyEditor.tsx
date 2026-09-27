@@ -269,7 +269,7 @@ export function PolicyEditor({ projectId, projectName, onSujoChange }: Props): R
           {action.busy === 'revisar' ? 'revisando…' : 'Revisar alterações'}
         </button>
         <button
-          className={revisadoEAtual && previa!.avisos.afrouxa.length > 0 ? 'danger' : 'primary'}
+          className={revisadoEAtual && previa.avisos.afrouxa.length > 0 ? 'danger' : 'primary'}
           onClick={() => setConfirmando(true)}
           disabled={!revisadoEAtual || !sujo || action.busy !== null}
           title={revisadoEAtual ? undefined : 'Revise antes de gravar'}

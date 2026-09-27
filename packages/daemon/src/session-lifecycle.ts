@@ -86,9 +86,13 @@ export class CicloDeVida {
 
   registrarPump(sessionId: string, pump: Promise<void>): void {
     this.#pumps.set(sessionId, pump);
-    void pump.finally(() => {
+    const esquecer = (): void => {
       if (this.#pumps.get(sessionId) === pump) this.#pumps.delete(sessionId);
-    });
+    };
+    // `then(f, f)` e não `finally(f)`: `finally` devolve uma promessa NOVA que
+    // rejeita junto com o pump — e essa ninguém observa, virando
+    // `unhandledRejection`. Quem reporta a falha do pump é quem o criou.
+    pump.then(esquecer, esquecer);
   }
 
   /**

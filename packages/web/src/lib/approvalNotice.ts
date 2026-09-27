@@ -15,11 +15,11 @@ import type { EventEnvelope } from '@agents-hub/core';
 export type PermissaoDeNotificacao = 'default' | 'granted' | 'denied' | 'unsupported';
 
 export interface DepsDeNotificacao {
-  permissao(): PermissaoDeNotificacao;
+  permissao: () => PermissaoDeNotificacao;
   /** A aba está em segundo plano? */
-  oculta(): boolean;
-  notificar(titulo: string, opcoes: { body: string; tag: string }, aoClicar: () => void): void;
-  focar(): void;
+  oculta: () => boolean;
+  notificar: (titulo: string, opcoes: { body: string; tag: string }, aoClicar: () => void) => void;
+  focar: () => void;
 }
 
 export function criarNotificadorDeAprovacao(deps: DepsDeNotificacao): (event: EventEnvelope) => boolean {
@@ -44,7 +44,7 @@ export function criarNotificadorDeAprovacao(deps: DepsDeNotificacao): (event: Ev
 export function depsDoNavegador(): DepsDeNotificacao {
   const N = (globalThis as { Notification?: typeof Notification }).Notification;
   return {
-    permissao: () => (N ? (N.permission as PermissaoDeNotificacao) : 'unsupported'),
+    permissao: () => (N ? (N.permission) : 'unsupported'),
     oculta: () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
     notificar: (titulo, opcoes, aoClicar) => {
       if (!N) return;
@@ -74,8 +74,8 @@ export async function pedirPermissaoDeNotificacao(): Promise<PermissaoDeNotifica
   const N = (globalThis as { Notification?: typeof Notification }).Notification;
   if (!N) return 'unsupported';
   try {
-    return (await N.requestPermission()) as PermissaoDeNotificacao;
+    return (await N.requestPermission());
   } catch {
-    return N.permission as PermissaoDeNotificacao;
+    return N.permission;
   }
 }

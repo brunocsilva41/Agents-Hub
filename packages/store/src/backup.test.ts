@@ -97,8 +97,8 @@ describe('restoreDatabase', () => {
     const r = restoreDatabase(backup, dbFile, new Date(2026, 8, 26, 10, 0, 0));
     assert.equal(r.restored, dbFile);
     assert.ok(r.safetyCopy && existsSync(r.safetyCopy), 'cópia de segurança do atual');
-    assert.match(path.basename(r.safetyCopy!), /^hub\.db\.pre-restore-20260926-100000/);
-    assert.equal(contarProjetos(r.safetyCopy!), 10, 'a cópia de segurança tem o estado de antes');
+    assert.match(path.basename(r.safetyCopy), /^hub\.db\.pre-restore-20260926-100000/);
+    assert.equal(contarProjetos(r.safetyCopy), 10, 'a cópia de segurança tem o estado de antes');
     assert.equal(existsSync(`${dbFile}-wal`), false, 'o -wal velho foi descartado');
     assert.equal(contarProjetos(dbFile), 3, 'o banco agora é o do backup');
     // E abre normalmente pelo caminho do Hub (migra sem erro).

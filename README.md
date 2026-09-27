@@ -244,7 +244,8 @@ Cada escolha estrutural está registrada como ADR em [docs/decisoes/](docs/decis
 ## Testes e portão de qualidade
 
 ```bash
-npm run verify     # o que o CI roda: build completo + a suíte inteira
+npm run verify     # o que o CI roda: build completo + lint + a suíte inteira
+npm run lint       # só o ESLint (depois do build: as regras de promessa usam tipo)
 npm test           # só a suíte (node:test)
 npm run test:e2e   # painel no navegador (Playwright), fora do npm test
 npm run demo       # fluxo raiz → filho → neto com agentes falsos

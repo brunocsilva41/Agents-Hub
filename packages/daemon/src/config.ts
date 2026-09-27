@@ -268,7 +268,7 @@ function readOnDiskConfig(configFile: string): HubConfigOnDisk {
   if (!existsSync(configFile)) return {};
 
   // BOM do Bloco de Notas não é erro de quem escreveu o arquivo.
-  const texto = readFileSync(configFile, 'utf8').replace(/^﻿/, '');
+  const texto = readFileSync(configFile, 'utf8').replace(/^\uFEFF/, '');
   let raw: unknown;
   try {
     raw = JSON.parse(texto);

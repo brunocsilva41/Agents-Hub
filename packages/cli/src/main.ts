@@ -37,7 +37,6 @@ import {
   writeConfig,
 } from './mcp-install.js';
 import { workflowCommand } from './workflow-cmd.js';
-import { streamUntilDone } from './follow-task.js';
 import { pauseCommand } from './pause-cmd.js';
 import { interruptCommand } from './interrupt-cmd.js';
 import { discoverCommand, importCommand } from './discover-cmd.js';

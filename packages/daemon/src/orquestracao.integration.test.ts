@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY, type EventEnvelope } from '@agents-hub/core';
+import { DEFAULT_POLICY, textoDe, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -266,7 +266,7 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
     await terminal(task.id);
     const avisos = hub.sessions
       .listEvents(session.id)
-      .filter((e) => e.type === 'log' && String(e.payload['text'] ?? '').includes('modo "autonomous" pedido'));
+      .filter((e) => e.type === 'log' && textoDe(e.payload['text']).includes('modo "autonomous" pedido'));
     assert.equal(avisos.length, 1);
   });
 
@@ -289,8 +289,8 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
     assert.ok(Date.now() - inicio < 5_000, 'a run deveria ter parado antes do fim natural (6 s)');
     const [pendente] = hub.sessions.pendingApprovals(session.id);
     assert.equal(pendente?.detail['kind'], 'budget');
-    assert.match(pendente!.action, /s de 1s de tempo/);
-    await hub.sessions.resolveApproval(pendente!.id, 'denied', 'teste');
+    assert.match(pendente.action, /s de 1s de tempo/);
+    await hub.sessions.resolveApproval(pendente.id, 'denied', 'teste');
   });
 
   test('aprovar estouro com o turno JÁ concluído não relança o agente: só finaliza', async () => {

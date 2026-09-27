@@ -387,7 +387,7 @@ export function mergePolicyLayer(
     sessionTimeoutSeconds: layer.sessionTimeoutSeconds ?? base.sessionTimeoutSeconds,
     heartbeatTimeoutSeconds: layer.heartbeatTimeoutSeconds ?? base.heartbeatTimeoutSeconds,
     defaultBudget: { ...base.defaultBudget, ...(layer.defaultBudget ?? {}) },
-    risk: { ...base.risk, ...(layer.risk ?? {}) } as Record<RiskLevel, Decision>,
+    risk: { ...base.risk, ...(layer.risk ?? {}) },
     commands: {
       allow: layer.commands?.allow ?? base.commands.allow,
       deny: layer.commands?.deny ?? base.commands.deny,
@@ -401,10 +401,10 @@ export function mergePolicyLayer(
       allowDomains: layer.network?.allowDomains ?? base.network.allowDomains,
     },
     retries: { ...base.retries, ...(layer.retries ?? {}) },
-    fallback: { ...base.fallback, ...(layer.fallback ?? {}) } as Record<string, string[]>,
+    fallback: { ...base.fallback, ...(layer.fallback ?? {}) },
     watch: {
-      pauseOn: (layer.watch?.pauseOn ?? base.watch.pauseOn) as RiskLevel[],
-      flagOn: (layer.watch?.flagOn ?? base.watch.flagOn) as RiskLevel[],
+      pauseOn: (layer.watch?.pauseOn ?? base.watch.pauseOn),
+      flagOn: (layer.watch?.flagOn ?? base.watch.flagOn),
     },
     validation: {
       command:

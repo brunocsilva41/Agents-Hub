@@ -2231,9 +2231,17 @@ export class SessionManager {
     // isto, `store.close()` acontecia com pumps ainda vivos, e a escrita
     // seguinte falhava com "database is not open" — erro que, sem handler de
     // `unhandledRejection`, derrubava o processo em vez de aparecer.
-    const drenando = this.#pump(session, task, handle).finally(() => {
-      this.#pumps.delete(drenando);
-    });
+    //
+    // Uma exceção que escape do pump (ex.: escrita no banco já fechado) é
+    // registrada aqui, com a sessão — antes a promessa rejeitava sem dono e
+    // só aparecia como `unhandledRejection` genérico, sem dizer de quem.
+    const drenando = this.#pump(session, task, handle)
+      .catch((err: unknown) => {
+        console.error(`[sessões] pump da sessão ${session.id} falhou: ${(err as Error)?.message ?? String(err)}`);
+      })
+      .finally(() => {
+        this.#pumps.delete(drenando);
+      });
     this.#pumps.add(drenando);
     this.#ciclo.registrarPump(session.id, drenando);
 
@@ -3355,7 +3363,7 @@ ${task.brief.objective.slice(0, 500)}`,
         type: tipo,
         payload,
         cost: mapped.cost ?? null,
-        raw: limitado.raw as MappedEvent['raw'],
+        raw: limitado.raw,
       },
       this.#nextSeq(session.id),
     );
@@ -3805,7 +3813,7 @@ ${task.brief.objective.slice(0, 500)}`,
     });
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const payload = messages[i]?.payload ?? {};
-      const text = (payload['summary'] ?? payload['text']) as unknown;
+      const text = (payload['summary'] ?? payload['text']);
       if (typeof text === 'string' && text.trim().length > 0) return text.slice(0, 4000);
     }
     return 'sessão concluída sem resumo textual';

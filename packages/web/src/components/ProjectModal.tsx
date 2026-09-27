@@ -226,7 +226,7 @@ export function ProjectModal({ onClose, onCreated, onProjectExists }: Props): Re
           <button
             type="button"
             className="primary"
-            onClick={handleCreate}
+            onClick={() => void handleCreate()}
             disabled={!folderPath.trim() || action.busy !== null}
           >
             {action.busy !== null ? 'Registrando…' : projetoCriado ? 'Concluir' : 'Criar & Vincular Projeto'}

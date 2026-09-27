@@ -37,7 +37,7 @@ describe('HubClient com token de operador', () => {
     await client.audit({ since: '2h', projectId: 'prj_x' });
 
     assert.equal(recebidas[0]?.auth, `Bearer ${'a'.repeat(64)}`);
-    assert.deepEqual(JSON.parse(recebidas[0]!.body), { decision: 'approved' }, 'sem `by` no corpo');
+    assert.deepEqual(JSON.parse(recebidas[0].body), { decision: 'approved' }, 'sem `by` no corpo');
     assert.equal(recebidas[1]?.method, 'PUT');
     assert.equal(recebidas[1]?.url, '/policy');
     assert.equal(recebidas[1]?.auth, `Bearer ${'b'.repeat(64)}`);

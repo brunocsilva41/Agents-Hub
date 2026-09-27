@@ -287,5 +287,5 @@ class Parser {
 }
 
 export function parseToml(text: string): Record<string, unknown> {
-  return new Parser(text.replace(/^﻿/, '')).parse();
+  return new Parser(text.replace(/^\uFEFF/, '')).parse();
 }

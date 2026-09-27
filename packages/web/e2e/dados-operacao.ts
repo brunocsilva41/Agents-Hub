@@ -15,12 +15,12 @@ function json(res: ServerResponse, status: number, corpo: unknown): void {
   res.end(JSON.stringify(corpo));
 }
 
-async function corpoDe(req: IncomingMessage): Promise<Record<string, any>> {
+async function corpoDe(req: IncomingMessage): Promise<Record<string, unknown>> {
   const partes: Buffer[] = [];
   for await (const c of req) partes.push(c as Buffer);
   const texto = Buffer.concat(partes).toString('utf8');
   try {
-    return texto ? (JSON.parse(texto) as Record<string, any>) : {};
+    return texto ? (JSON.parse(texto) as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -138,7 +138,7 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
   }
   if (m === 'PUT' && /^\/budget\/ses_[a-z0-9]+$/i.test(p)) {
     const { limits } = await corpoDe(req);
-    orcamento = { ...orcamento, limits: { ...orcamento.limits, ...(limits ?? {}) } };
+    orcamento = { ...orcamento, limits: { ...orcamento.limits, ...((limits ?? {}) as Partial<typeof orcamento.limits>) } };
     json(res, 200, { budget: orcamento });
     return true;
   }
@@ -149,7 +149,7 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
   }
   if (m === 'POST' && p === '/workflows/validate') {
     const { yaml } = await corpoDe(req);
-    const texto = String(yaml ?? '');
+    const texto = typeof yaml === 'string' ? yaml : '';
     if (texto.includes('dependsOn: [inexistente]')) {
       json(res, 200, { valid: false, errors: ['Step "b" depende de step inexistente: "inexistente"'], workflow: null, executionOrder: [] });
     } else {
@@ -215,7 +215,7 @@ export async function rotearOperacao(req: IncomingMessage, res: ServerResponse, 
     }
     if (m === 'POST') {
       const body = await corpoDe(req);
-      const folder = { id: `pfd_nova${pastas.length}`, projectId: r[1]!, path: String(body['path']), label: body['label'] ?? null, isPrimary: false, createdAt: new Date().toISOString() };
+      const folder = { id: `pfd_nova${pastas.length}`, projectId: r[1]!, path: String(body['path']), label: typeof body['label'] === 'string' ? body['label'] : null, isPrimary: false, createdAt: new Date().toISOString() };
       pastas = [...pastas, folder];
       json(res, 201, { folder });
       return true;

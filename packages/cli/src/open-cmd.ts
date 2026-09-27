@@ -19,7 +19,7 @@ export const abrirNoNavegador: Opener = (url) =>
         : process.platform === 'darwin'
           ? ['open', [url]]
           : ['xdg-open', [url]];
-    const filho = spawn(bin, argv as string[], { detached: true, stdio: 'ignore', windowsHide: true });
+    const filho = spawn(bin, argv, { detached: true, stdio: 'ignore', windowsHide: true });
     filho.once('error', reject);
     filho.once('spawn', () => {
       filho.unref();

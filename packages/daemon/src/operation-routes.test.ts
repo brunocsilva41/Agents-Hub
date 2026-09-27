@@ -31,11 +31,19 @@ function portaLivre(): Promise<number> {
 
 let porta = 0;
 
+/** Corpo JSON das rotas — tipado só nos campos que os testes leem. */
+interface Corpo {
+  budget?: { limits: { usd: number; tokens: number } };
+  session?: { adopted: boolean };
+  run?: Record<string, unknown> & { id: string };
+  [campo: string]: unknown;
+}
+
 function http(
   method: string,
   caminho: string,
   opts: { headers?: Record<string, string>; json?: unknown } = {},
-): Promise<{ status: number; body: string; json: Record<string, any> }> {
+): Promise<{ status: number; body: string; json: Corpo }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = { host: `127.0.0.1:${porta}`, ...(opts.headers ?? {}) };
     const body = opts.json === undefined ? undefined : Buffer.from(JSON.stringify(opts.json));
@@ -48,9 +56,9 @@ function http(
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
         const texto = Buffer.concat(chunks).toString('utf8');
-        let json: Record<string, any> = {};
+        let json: Corpo = {};
         try {
-          json = JSON.parse(texto) as Record<string, any>;
+          json = JSON.parse(texto) as Corpo;
         } catch {
           /* corpo vazio */
         }
@@ -150,17 +158,17 @@ defaults:
 
       const sobe = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: 7.5 } }, headers: operador() });
       assert.equal(sobe.status, 200, sobe.body);
-      assert.equal(sobe.json['budget'].limits.usd, 7.5);
-      assert.equal(sobe.json['budget'].limits.tokens, 1000, 'campo ausente fica como estava');
+      assert.equal(sobe.json.budget?.limits.usd, 7.5);
+      assert.equal(sobe.json.budget?.limits.tokens, 1000, 'campo ausente fica como estava');
 
       // Descer também é editar — `raiseLimits` sozinho descartaria a parcela negativa.
       const desce = await http('PUT', `/budget/${s.id}`, { json: { limits: { usd: 0.5, tokens: 400 } }, headers: operador() });
       assert.equal(desce.status, 200, desce.body);
-      assert.equal(desce.json['budget'].limits.usd, 0.5);
-      assert.equal(desce.json['budget'].limits.tokens, 400);
+      assert.equal(desce.json.budget?.limits.usd, 0.5);
+      assert.equal(desce.json.budget?.limits.tokens, 400);
 
       const lido = await http('GET', `/budget/${s.id}`);
-      assert.equal(lido.json['budget'].limits.usd, 0.5);
+      assert.equal(lido.json.budget?.limits.usd, 0.5);
       assert.equal(hub.store.budgets.get(s.id)?.limits.usd, 0.5, 'persistido no banco');
 
       const eventos = hub.sessions.listEvents(s.id).filter((e) => e.type === 'budget.updated');
@@ -231,7 +239,7 @@ defaults:
       const porId = new Map((lista.json['sessions'] as Array<{ id: string; adopted: boolean }>).map((s) => [s.id, s]));
       assert.equal(porId.get(adotada.id)?.adopted, true);
       assert.equal(porId.get(comum.id)?.adopted, false);
-      assert.equal((await http('GET', `/sessions/${adotada.id}`)).json['session'].adopted, true);
+      assert.equal((await http('GET', `/sessions/${adotada.id}`)).json.session?.adopted, true);
 
       const recusa = await http('POST', `/sessions/${comum.id}/detach`, { json: {} });
       assert.equal(recusa.status, 400, recusa.body);
@@ -281,21 +289,21 @@ defaults:
         },
       });
       assert.equal(r.status, 201, r.body);
-      const id = r.json['run'].id as string;
+      const id = r.json.run?.id ?? '';
 
-      let run: Record<string, any> = r.json['run'];
+      let run: Record<string, unknown> = r.json.run ?? {};
       const limite = Date.now() + 30_000;
       while (run['state'] === 'running' && Date.now() < limite) {
         await new Promise((res) => setTimeout(res, 250));
-        run = (await http('GET', `/workflows/runs/${id}`)).json['run'];
+        run = (await http('GET', `/workflows/runs/${id}`)).json.run ?? {};
       }
       assert.equal(run['state'], 'completed', JSON.stringify(run));
       const [a, b] = run['steps'] as Array<{ state: string; sessionId: string }>;
       assert.equal(a?.state, 'completed');
       assert.equal(b?.state, 'completed');
       // `b` só nasceu depois de `a` terminar.
-      const sa = hub.sessions.getSession(a!.sessionId);
-      const sb = hub.sessions.getSession(b!.sessionId);
+      const sa = hub.sessions.getSession(a.sessionId);
+      const sb = hub.sessions.getSession(b.sessionId);
       assert.ok(sb.createdAt >= (sa.endedAt ?? ''), `${sb.createdAt} >= ${sa.endedAt}`);
 
       const lista = await http('GET', '/workflows/runs');

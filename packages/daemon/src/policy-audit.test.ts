@@ -194,7 +194,7 @@ defaults:
       risk: { exec: 'approve', irreversible: 'allow' }, // exec aperta; irreversible afrouxa
       validation: { command: 'node pwn.cjs' }, // execução: ignorado sem confiança
     });
-    const ef = res.project.effective as typeof DEFAULT_POLICY;
+    const ef = res.project.effective;
     assert.equal(ef.maxDepth, 1);
     assert.equal(ef.defaultBudget.usd, 9, 'projeto não sobe o orçamento acima da global');
     assert.deepEqual(ef.commands.allow, ['git status'], 'allow só encolhe');

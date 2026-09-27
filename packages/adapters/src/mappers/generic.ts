@@ -1,3 +1,4 @@
+import { textoDe } from '@agents-hub/core';
 import type { MappedEvent } from '../types.js';
 
 /**
@@ -8,7 +9,7 @@ import type { MappedEvent } from '../types.js';
  * escrever um mapper dedicado.
  */
 export function genericTextMapper(line: unknown): MappedEvent[] {
-  const text = typeof line === 'string' ? line : String(line ?? '');
+  const text = textoDe(line);
   if (text.trim().length === 0) return [];
 
   const lowered = text.toLowerCase();

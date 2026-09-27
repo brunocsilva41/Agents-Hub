@@ -106,7 +106,7 @@ export function lerJsonDeConfig(file: string): JsonDeConfig {
   const avisos: string[] = [];
   let valor: unknown;
   try {
-    valor = JSON.parse(raw.replace(/^﻿/, ''));
+    valor = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch (estrito) {
     const tolerante = parseJsonTolerant(raw);
     if (tolerante.error !== undefined || tolerante.note !== undefined) {

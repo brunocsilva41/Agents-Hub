@@ -29,6 +29,7 @@ export function viewOf(event: EventEnvelope): EventView {
 const ESC = '\u001B';
 
 /** CSI (`ESC[…m`), OSC (`ESC]…BEL`) e as sequências de dois bytes. */
+// eslint-disable-next-line no-control-regex -- casar ESC/BEL é o objetivo: tirar ANSI do texto
 const ANSI = /\u001B\[[0-?]*[ -/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)|\u001B[@-Z\\-_]/g;
 
 /**
@@ -117,7 +118,7 @@ export function describeEvent(event: EventEnvelope): EventView {
 
     case 'command.executed':
       return {
-        text: `$ ${str(p['command'])}${p['exitCode'] === undefined || p['exitCode'] === null ? '' : ` → ${String(p['exitCode'])}`}`,
+        text: `$ ${str(p['command'])}${p['exitCode'] === undefined || p['exitCode'] === null ? '' : ` → ${str(p['exitCode'])}`}`,
         kind: 'command',
         verbose: false,
       };
@@ -127,7 +128,7 @@ export function describeEvent(event: EventEnvelope): EventView {
 
     case 'delegation.requested':
       return {
-        text: `→ delegou para ${str(p['targetAgent'])} (nível ${String(p['depth'] ?? '?')}): ${str(p['objective'])}`,
+        text: `→ delegou para ${str(p['targetAgent'])} (nível ${str(p['depth']) || '?'}): ${str(p['objective'])}`,
         kind: 'delegation',
         verbose: false,
       };

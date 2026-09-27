@@ -164,8 +164,8 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
     const eventos = hub.sessions.listEvents(session.id);
     const aviso = eventos.find((e) => e.type === 'log' && e.payload['kind'] === 'fallback');
     assert.ok(aviso, 'sem aviso de fallback');
-    assert.equal(aviso!.payload['toAgentId'], 'reserva');
-    assert.match(String(aviso!.payload['text']), /cota/);
+    assert.equal(aviso.payload['toAgentId'], 'reserva');
+    assert.match(String(aviso.payload['text']), /cota/);
   });
 
   test('negar o estouro com o turno JÁ concluído: sessão e tarefa `completed`, com a nota', async () => {
@@ -180,7 +180,7 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
     const [pendente] = hub.sessions.pendingApprovals(session.id);
     assert.equal(pendente?.detail['turnCompleted'], true);
 
-    await hub.sessions.resolveApproval(pendente!.id, 'denied', 'teste');
+    await hub.sessions.resolveApproval(pendente.id, 'denied', 'teste');
     await esperar(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'tarefa terminal');
     await new Promise((r) => setTimeout(r, 300));
 

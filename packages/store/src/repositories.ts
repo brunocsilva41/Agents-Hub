@@ -2,6 +2,7 @@ import {
   HubError,
   newId,
   nowIso,
+  textoDe,
   ZERO_USAGE,
   type Approval,
   type Artifact,
@@ -74,7 +75,7 @@ function one<T extends Row>(
   return (stmt.all(...params) as T[])[0];
 }
 
-const str = (v: unknown): string => (typeof v === 'string' ? v : String(v ?? ''));
+const str = (v: unknown): string => textoDe(v);
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v ?? 0));
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -118,7 +119,7 @@ class SqliteProjectRepository implements ProjectRepository {
     try {
       const parsed: unknown = JSON.parse(bruto);
       return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as ProjectHubContext)
+        ? (parsed)
         : {};
     } catch {
       // Coluna corrompida não derruba o daemon: o contexto só some, como um

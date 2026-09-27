@@ -21,11 +21,12 @@ O que segue é o portão.
 
 ```bash
 npm ci          # exatamente o que está no lockfile, nada de resolver versões
-npm run verify  # build completo (pacotes + Web UI) e a suíte inteira
+npm run verify  # build completo (pacotes + Web UI), lint e a suíte inteira
 ```
 
-`npm run verify` (`npm run build && npm test`) cobre os mesmos passos que o job
-bloqueante do CI roda (`build:packages`, build da Web UI, `npm test`), mais a
+`npm run verify` (`npm run build && npm run lint && npm test`) cobre os mesmos
+passos que o job bloqueante do CI roda (`build:packages`, build da Web UI,
+`npm run lint`, `npm test`), mais a
 checagem de árvore limpa que só o CI faz. Se passa aqui e falha lá, é bug do
 portão e tem prioridade sobre o que você estava fazendo.
 
@@ -35,6 +36,7 @@ portão e tem prioridade sobre o que você estava fazendo.
 |---|---|
 | `npm run build:packages` | só `tsc -b` — o laço rápido |
 | `npm run build` | pacotes + Web UI, que é o que o CI compila |
+| `npm run lint` | ESLint com informação de tipo em todos os pacotes (`eslint.config.mjs`); roda depois do build, porque o tipo de um pacote referenciado vem do `dist/*.d.ts` dele. Promessa solta (`no-floating-promises`) é erro: `void` só com motivo, senão `await`/`.catch` |
 | `npm test` | a suíte inteira (`scripts/run-tests.mjs`; em 2026-09-26: 142 arquivos, 1411 testes — o script imprime a contagem, confira rodando) |
 | `npm run test:e2e` | e2e do painel no navegador (fora do `npm test` e fora do CI, ver abaixo; 64 testes em 2026-09-26) |
 | `npm run coverage` | a suíte com cobertura por pacote (`coverage/lcov.info`) |
@@ -183,8 +185,8 @@ Quando o commit conserta algo, o corpo diz **como aquilo passava despercebido**.
 - [ ] Nenhum item de roadmap marcado `[x]` sem as cinco linhas do critério de pronto
 - [ ] Se mudou comportamento documentado, o documento mudou junto
 
-Não há template de PR, CODEOWNERS, dependabot nem lint/formatador no
-repositório (lint é o item 7.2 do GOAL, pendente): a lista acima é o checklist.
+Não há template de PR, CODEOWNERS nem dependabot no repositório: a lista acima
+é o checklist (o lint entra pelo `npm run verify`).
 
 O CI (`.github/workflows/ci.yml`, `permissions: contents: read`) roda Windows
 (Node 22.5 e 24) como portão, com um job

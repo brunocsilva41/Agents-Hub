@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@agents-hub/core';
+import { textoDe, type EventEnvelope } from '@agents-hub/core';
 
 /**
  * Alerta de aprovação no terminal (vistoria 14, R14-14): quem deixou um
@@ -37,7 +37,7 @@ export function criarAlertaDeAprovacao(o: {
   return (event) => {
     const sinal = sinalDeAprovacao(event, { tty, desligado: o.desligado === true });
     if (!sinal) return;
-    const chave = String(event.payload['approvalId'] ?? '');
+    const chave = textoDe(event.payload['approvalId']);
     if (chave && vistos.has(chave)) return;
     if (chave) vistos.add(chave);
     escrever(sinal);

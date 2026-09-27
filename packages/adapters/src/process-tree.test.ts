@@ -113,12 +113,12 @@ test('killProcessTree mata o processo raiz e o neto que ignora SIGTERM', async (
   assert.ok(pidVivo(netoPid), 'neto deveria estar vivo antes do kill');
 
   let fallbackChamado = false;
-  await killProcessTree(parent.pid!, () => {
+  await killProcessTree(parent.pid, () => {
     fallbackChamado = true;
     parent.kill('SIGKILL');
   });
 
-  await aguardarMorte(parent.pid!);
+  await aguardarMorte(parent.pid);
   await aguardarMorte(netoPid);
 
   if (process.platform === 'win32') {

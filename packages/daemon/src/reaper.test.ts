@@ -65,7 +65,7 @@ describe('WorktreeReaper.sweep — quem é recolhido', () => {
     raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-reaper-'));
     for (const nome of ['expirado', 'recente', 'viva', 'semiso', 'orfa', 'falha']) {
       dirs[nome] = path.join(raiz, nome);
-      mkdirSync(dirs[nome]!);
+      mkdirSync(dirs[nome]);
     }
   });
 

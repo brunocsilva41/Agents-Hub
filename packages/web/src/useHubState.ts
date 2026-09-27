@@ -258,16 +258,19 @@ export function useHubState(): HubState {
       }
       return history.events(sessionId);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `historyVersion` troca a identidade de propósito (ver acima)
     [history, historyVersion],
   );
 
   const eventsFailedFor = useCallback(
     (sessionId: string) => history.history(sessionId).status === 'failed',
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `historyVersion` troca a identidade de propósito (ver acima)
     [history, historyVersion],
   );
 
   const historyOf = useCallback(
     (sessionId: string) => history.history(sessionId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `historyVersion` troca a identidade de propósito (ver acima)
     [history, historyVersion],
   );
 

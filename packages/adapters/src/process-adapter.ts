@@ -258,7 +258,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
       // POSIX: grupo de processos próprio, para `killTree` levar os filhos do
       // shim junto (R06-13). No Windows é `{}`.
       ...opcoesDeGrupo(),
-    }) as ChildProcessWithoutNullStreams;
+    });
 
     /**
      * Mantém o heartbeat vivo enquanto `child.stdout` está pausado por
@@ -492,7 +492,7 @@ export class ProcessAgentAdapter implements AgentAdapter {
     child.on('close', (code, signal) => {
       handle.settle({
         exitCode: code,
-        signal: signal as NodeJS.Signals | null,
+        signal: signal,
         reason: handle.canceled ? 'canceled' : handle.interrupted ? 'interrupted' : 'exit',
         error:
           code === 0 || handle.canceled || handle.interrupted
@@ -668,7 +668,7 @@ export function modeloDaRun(
   return bruto;
 }
 
-// eslint-disable-next-line no-control-regex
+// eslint-disable-next-line no-control-regex -- recusar caractere de controle no argumento é o objetivo
 const CONTROLE = /[\u0000-\u001f\u007f]/;
 
 function applyTemplate(template: string, vars: Record<string, string>): string {

@@ -37,7 +37,7 @@ function camada(caminho: string, valor: number): PartialPolicyDocument {
     atual = atual[parte] as Record<string, unknown>;
   }
   atual[partes[partes.length - 1]!] = valor;
-  return raiz as PartialPolicyDocument;
+  return raiz;
 }
 
 /** TODO campo numérico do `PolicyDocument` — tabela da regra min(base, camada). */

@@ -195,7 +195,7 @@ describe('gate pré-execução do Codex — fim a fim', () => {
       (e) => e.type === 'log' && (e.payload as { stream?: string }).stream === 'gate',
     );
     assert.ok(aviso, 'esperava um log de aviso explicando que o gate não está garantido');
-    assert.match(String((aviso!.payload as { text?: string }).text), /ignorado em silêncio/i);
+    assert.match(String((aviso.payload as { text?: string }).text), /ignorado em silêncio/i);
 
     await esperarTerminal(ambiente.hub, task.id);
   });

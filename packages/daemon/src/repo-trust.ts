@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   filtrarEnvDeProjeto,
+  textoDe,
   type Project,
   type ProjectHubContext,
   type UnitOfWork,
@@ -71,12 +72,12 @@ function conteudoSensivel(projectPath: string): {
   const exec = rawRepoExecFields(projectPath);
   const campos: string[] = [];
 
-  if (exec.command !== undefined) campos.push(`validation.command = ${String(exec.command)}`);
+  if (exec.command !== undefined) campos.push(`validation.command = ${textoDe(exec.command)}`);
   if (exec.reviewEnabled !== undefined) {
-    campos.push(`validation.review.enabled = ${String(exec.reviewEnabled)}`);
+    campos.push(`validation.review.enabled = ${textoDe(exec.reviewEnabled)}`);
   }
   if (exec.reviewAgent !== undefined) {
-    campos.push(`validation.review.agent = ${String(exec.reviewAgent)}`);
+    campos.push(`validation.review.agent = ${textoDe(exec.reviewAgent)}`);
   }
   for (const [agentId, vars] of Object.entries(ctx.env ?? {})) {
     for (const [nome, valor] of Object.entries(vars)) {
@@ -108,7 +109,7 @@ function conteudoSensivel(projectPath: string): {
 function canonico(valor: unknown): string {
   if (Array.isArray(valor)) return `[${valor.map(canonico).join(',')}]`;
   if (valor !== null && typeof valor === 'object') {
-    const chaves = Object.keys(valor as Record<string, unknown>).sort();
+    const chaves = Object.keys(valor).sort();
     return `{${chaves
       .map((k) => `${JSON.stringify(k)}:${canonico((valor as Record<string, unknown>)[k])}`)
       .join(',')}}`;

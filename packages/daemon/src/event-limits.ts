@@ -202,6 +202,6 @@ export function limitarPagina(
       : limitarEvento(e);
     usados += limitado.bytes;
     if (!limitado.truncado && limitado.raw === e.raw) return e;
-    return { ...e, payload: limitado.payload, raw: limitado.raw as EventEnvelope['raw'] };
+    return { ...e, payload: limitado.payload, raw: limitado.raw };
   });
 }

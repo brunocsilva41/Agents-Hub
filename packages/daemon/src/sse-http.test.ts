@@ -166,7 +166,7 @@ defaults:
     const res = await fetch(`${baseUrl}/events?sessionId=${session.id}`, { signal: controller.signal });
     assert.equal(res.status, 200);
 
-    const reader = res.body?.getReader();
+    const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = res.body?.getReader();
     assert.ok(reader, 'stream deveria ter corpo legível');
 
     const decoder = new TextDecoder();
@@ -188,14 +188,14 @@ defaults:
       .split('\n')
       .find((linha) => linha.startsWith('data:') && linha.includes('"truncated":true'));
     assert.ok(linhaComTruncado, 'o aviso deveria vir como um evento data: normal');
-    const parsed = JSON.parse(linhaComTruncado!.slice('data:'.length).trim()) as EventEnvelope;
+    const parsed = JSON.parse(linhaComTruncado.slice('data:'.length).trim()) as EventEnvelope;
     assert.equal(parsed.payload['truncated'], true);
     assert.equal(parsed.payload['sessionId'], session.id);
     assert.equal(parsed.payload['sentCount'], 500);
 
     // O aviso sintético não deveria levar `id:` — ele não tem `seq` real, e
     // reconectar com `Last-Event-ID` igual ao dele perderia eventos de verdade.
-    const idxData = acumulado.indexOf(linhaComTruncado!);
+    const idxData = acumulado.indexOf(linhaComTruncado);
     const antesDoData = acumulado.slice(Math.max(0, idxData - 20), idxData);
     assert.doesNotMatch(antesDoData, /id: 0\n$/);
   });

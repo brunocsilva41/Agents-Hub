@@ -150,7 +150,7 @@ export function loadProjectOverrides(
     console.warn(`[project-config] ${ignoredExecFieldsWarning(projectPath, ignorados)}`);
   }
   return {
-    overrides: withoutExecFields(lido.loaded.overrides) as ProjectPolicyOverrides,
+    overrides: withoutExecFields(lido.loaded.overrides),
     error: lido.loaded.error,
     ignoredExecFields: ignorados,
   };
