@@ -62,12 +62,12 @@ Como a contagem foi feita:
 | R01-03 | ALTO | Fluxo bloqueante do gate sem teste e com 3 defeitos (timeout mata, msg errada, approve) | 1.5 | [x] |
 | R01-04 | ALTO | Política por prefixo: cat/ls/node/python liberam tudo; .ssh/.env não param | 1.1 | [x] |
 | R01-05 | MED | Autostart do daemon sem `--experimental-sqlite` (Node 22.5–22.12) | 5.1 | [x] |
-| R01-06 | MED | Doc 07 "fonte de verdade" defasado em pontos centrais | 8.1 | [ ] |
-| R01-07 | MED | Contagens de tools MCP e de testes divergem entre README, docs e código | 8.1 | [ ] |
-| R01-08 | MED | docs/01 descreve arquitetura não implementada (Orchestrator, TUI, A2A...) | 8.1 | [ ] |
-| R01-09 | MED | docs/04 e docs/03 com afirmações defasadas (gate, caminhos MCP) | 8.1 | [ ] |
-| R01-10 | MED | Roadmap marca `[x]` itens que violam o critério de pronto do CONTRIBUTING | 8.1 | [ ] |
-| R01-11 | BAIXO | Outras divergências pontuais (7 subitens: README, fallback, pré-requisitos, doc 08) | 8.1 | [ ] |
+| R01-06 | MED | Doc 07 "fonte de verdade" defasado em pontos centrais | 8.1 | [x] |
+| R01-07 | MED | Contagens de tools MCP e de testes divergem entre README, docs e código | 8.1 | [x] |
+| R01-08 | MED | docs/01 descreve arquitetura não implementada (Orchestrator, TUI, A2A...) | 8.1 | [x] |
+| R01-09 | MED | docs/04 e docs/03 com afirmações defasadas (gate, caminhos MCP) | 8.1 | [x] |
+| R01-10 | MED | Roadmap marca `[x]` itens que violam o critério de pronto do CONTRIBUTING | 8.1 | [x] |
+| R01-11 | BAIXO | Outras divergências pontuais (7 subitens: README, fallback, pré-requisitos, doc 08) | 8.1 | [x] |
 
 ## R02 — 02-adrs-seguranca-docs.md
 
@@ -79,13 +79,13 @@ Como a contagem foi feita:
 | R02-04 | ALTO | Config de projeto "só aperta" é falsa: orçamento, timeouts, retries, validation.command | 0.7 | [x] |
 | R02-05 | MED | `/discovery` não mascara `args` nem query strings fora da lista | 1.8 | [x] |
 | R02-06 | MED | SECURITY.md omite vetores reais (BASE_URL, prompts/memory, env de projeto) | 1.9 | [x] |
-| R02-07 | MED | Retenção documentada ("para sempre", bruto preservado) não bate com o código | 8.1 | [ ] |
-| R02-08 | MED | ADRs 01/03/06 divergem do código (fallback, 9 agentes, TUI, nomes) | 8.1 | [ ] |
-| R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [~] CI permissions (ab3a0af); CONTRIBUTING → 8.1 |
+| R02-07 | MED | Retenção documentada ("para sempre", bruto preservado) não bate com o código | 8.1 | [x] |
+| R02-08 | MED | ADRs 01/03/06 divergem do código (fallback, 9 agentes, TUI, nomes) | 8.1 | [x] |
+| R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [x] CONTRIBUTING (75afd04) + CI permissions |
 | R02-10 | MED | docs/09: MCP e CLI leem `process.env` cru, `NaN` volta | 5.4 | [x] |
 | R02-11 | BAIXO | JSON malformado devolve 500 INTERNAL com mensagem do parser | 1.8 | [x] |
-| R02-12 | BAIXO | POST sem corpo e sem Content-Type recusado com 415 | — | [ ] |
-| R02-13 | BAIXO | docs/10 e precos-modelos dizem que só o Claude reporta USD (OpenCode também) | 8.1 | [ ] |
+| R02-12 | BAIXO | POST sem corpo e sem Content-Type recusado com 415 | — | [x] POST vazio aceito |
+| R02-13 | BAIXO | docs/10 e precos-modelos dizem que só o Claude reporta USD (OpenCode também) | 8.1 | [x] |
 | R02-14 | BAIXO | Exemplo YAML promete paralelismo que não tem | — | [ ] |
 | R02-15 | BAIXO | Exports de sessão `.txt` soltos na raiz, fora do .gitignore | 8.3 | [x] /*.txt no .gitignore (1a3ce75) |
 
@@ -175,9 +175,9 @@ Como a contagem foi feita:
 | R06-10 | MED | Reconciliação no restart fecha sessões sem evento nem tentativa fechada | 2.8 | [x] |
 | R06-11 | MED | `handoff` conta a mesma sessão duas vezes no teto de concorrência | 2.7 | [x] |
 | R06-12 | BAIXO | Cancel em cascata ignora filhos `paused`/`idle` | — | [x] cascata alcança paused/idle (468ce58) |
-| R06-13 | BAIXO | Kill de árvore em POSIX mata só o filho direto | — | [ ] |
-| R06-14 | BAIXO | Artefato de diff só é capturado no caminho de sucesso | — | [ ] |
-| R06-15 | BAIXO | Escrita fora do worktree não é detectada (docs/04 diz `escalate`) | 8.1 | [ ] |
+| R06-13 | BAIXO | Kill de árvore em POSIX mata só o filho direto | — | [x] grupo de processos POSIX |
+| R06-14 | BAIXO | Artefato de diff só é capturado no caminho de sucesso | — | [x] diff em falha/cancel |
+| R06-15 | BAIXO | Escrita fora do worktree não é detectada (docs/04 diz `escalate`) | 8.1 | [x] |
 
 ## R07 — 07-cli.md
 
@@ -200,13 +200,13 @@ Como a contagem foi feita:
 | R07-15 | BAIXO | Negação/timeout no gate: agente recebe "a política proíbe esta ação" | 1.5 | [x] |
 | R07-16 | BAIXO | `hub interrupt`/`cancel`/`send` sempre dizem sucesso; no Windows interrupt mata | 2.2 | [x] |
 | R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [x] error com mensagem (6f231e2) |
-| R07-18 | BAIXO | Horários exibidos em UTC sem rótulo | — | [ ] |
+| R07-18 | BAIXO | Horários exibidos em UTC sem rótulo | — | [x] hora local com fuso (f33a35f) |
 | R07-19 | BAIXO | Cada invocação carrega daemon/SQLite: ~0,6 s e ExperimentalWarning | 5.6 | [x] |
 | R07-20 | BAIXO | Help x implementação (sem `--help` por comando, `--version`, `--json`, `--`) | 5.6 | [x] |
-| R07-21 | BAIXO | Mensagens e códigos de erro inconsistentes entre comandos | — | [ ] |
-| R07-22 | BAIXO | `hub project env` mostra e ecoa valores com cara de segredo | — | [ ] |
-| R07-23 | BAIXO | `hub mcp` usa `includes('agents-hub')` como critério de "registrado" | — | [ ] |
-| R07-24 | BAIXO | Nome da worktree perde acentos | — | [ ] |
+| R07-21 | BAIXO | Mensagens e códigos de erro inconsistentes entre comandos | — | [x] erro-cli.ts único (f33a35f) |
+| R07-22 | BAIXO | `hub project env` mostra e ecoa valores com cara de segredo | — | [x] env mascarado (f33a35f) |
+| R07-23 | BAIXO | `hub mcp` usa `includes('agents-hub')` como critério de "registrado" | — | [x] detecção estruturada (f33a35f) |
+| R07-24 | BAIXO | Nome da worktree perde acentos | — | [x] transliteração (f33a35f) |
 | R07-25 | BAIXO | `hub hooks` lê só o settings.json real e mostra "não instalado" com JSON inválido | 0.4 | [x] |
 
 ## R08 — 08-mcp-hooks.md
@@ -223,12 +223,12 @@ Como a contagem foi feita:
 | R08-08 | MED | `hub_agent_wait` ignora cancelamento/timeout do cliente e consulta para sempre | 2.8 | [x] |
 | R08-09 | MED | Explicação de "negado por falta de resposta" descartada; `escalate` inválido no hook | 1.5 | [x] |
 | R08-10 | MED | Gate aplica política do Hub ao Claude "normal" do usuário por casamento de `cwd` | — | [x] gate só p/ sessão viva do Hub (4fff125) |
-| R08-11 | MED | Sem limite de tamanho em `hub_agent_call`; failover em cascata sem aviso | — | [ ] |
-| R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [ ] |
+| R08-11 | MED | Sem limite de tamanho em `hub_agent_call`; failover em cascata sem aviso | — | [x] fallback visível + erro do agente na tentativa (22beb13/226860e) |
+| R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [x] smoke MCP isolado com 16 tools (79d8ec2) |
 | R08-13 | MED | Raízes adotadas ficam `running` para sempre se o MCP é morto sem fechar stdin | 2.8 | [x] |
-| R08-14 | MED | Sem escopo por fluxo: agente lê/cancela sessões de outros fluxos e projetos | — | [ ] |
-| R08-15 | BAIXO | `hub_workflow_run`: erro sem motivo e leitura de arquivo arbitrário com eco | — | [ ] |
-| R08-16 | BAIXO | Saídas e mensagens que custam tokens ou confundem o agente | — | [ ] |
+| R08-14 | MED | Sem escopo por fluxo: agente lê/cancela sessões de outros fluxos e projetos | — | [x] escopo por fluxo OUT_OF_FLOW (22beb13) |
+| R08-15 | BAIXO | `hub_workflow_run`: erro sem motivo e leitura de arquivo arbitrário com eco | — | [x] yaml só no projeto, sem eco (22beb13) |
+| R08-16 | BAIXO | Saídas e mensagens que custam tokens ou confundem o agente | — | [x] saídas enxutas (22beb13) |
 | R08-17 | BAIXO | Detalhes de instalação/hook (`.bak`, `includes`, caminho absoluto, fail-open, 0,5 s) | 0.5 | [x] |
 
 ## R09 — 09-store-core.md
@@ -242,18 +242,18 @@ Como a contagem foi feita:
 | R09-05 | MED | "Deny list" não nega: vira `irreversible` e a decisão padrão é `approve` | 1.2 | [x] |
 | R09-06 | MED | Não há backup/restauração do banco; copiar só o `.db` perde dados (WAL) | 5.6 | [x] |
 | R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [x] lotes de 2000 + índice parcial (494f026) |
-| R09-08 | MED | Consultas agregadas por sessão/árvore escalam mal e bloqueiam o processo | — | [ ] |
+| R09-08 | MED | Consultas agregadas por sessão/árvore escalam mal e bloqueiam o processo | — | [x] colunas geradas de custo, 70→6 ms (3e6d2ec) |
 | R09-09 | MED | `mergePolicyLayer(clampToBase)` não trava budget/retries/timeouts/fallback | 0.7 | [x] |
 | R09-10 | MED | Política de arquivos: leitura nunca protegida; lista de escrita sensível incompleta | 1.2 | [x] |
 | R09-11 | MED | BudgetLedger aceita NaN/negativos e vaza reserva em `reserve` duplicado | 3.2 | [x] |
-| R09-12 | BAIXO | Schemas de política aceitam valores sem sentido; risk parcial cai em fail-open | — | [ ] |
-| R09-13 | BAIXO | Brief: validações frouxas (trim, tamanho, Infinity, `..` em artifacts) | — | [ ] |
+| R09-12 | BAIXO | Schemas de política aceitam valores sem sentido; risk parcial cai em fail-open | — | [x] schemas estritos (3e6d2ec) |
+| R09-13 | BAIXO | Brief: validações frouxas (trim, tamanho, Infinity, `..` em artifacts) | — | [x] brief validado (3e6d2ec) |
 | R09-14 | BAIXO | Pricing: variantes casam por prefixo com confiança `model`; itens não modelados | 3.4 | [x] |
 | R09-15 | BAIXO | `combineCostEstimates`: rótulo de confiança incoerente | — | [x] confiança partial (559db1f) |
-| R09-16 | BAIXO | `transaction()` não protege contra fn assíncrona nem usa SAVEPOINT | — | [ ] |
-| R09-17 | BAIXO | Integridade e desempenho: lacunas de schema (FK, is_primary, path, índices) | — | [ ] |
+| R09-16 | BAIXO | `transaction()` não protege contra fn assíncrona nem usa SAVEPOINT | — | [x] SAVEPOINT, async recusado |
+| R09-17 | BAIXO | Integridade e desempenho: lacunas de schema (FK, is_primary, path, índices) | — | [x] 1 pasta primária, trigger, índice (migração 10) |
 | R09-18 | BAIXO | Workflow: teto de orçamento pessimista e sem limite de passos | — | [x] fatias proporcionais + máx 200 passos (4a20fe0) |
-| R09-19 | BAIXO | Resiliência e CallGraph: retry de timeout, `pathKey` literal, ciclo de parent_id | — | [ ] |
+| R09-19 | BAIXO | Resiliência e CallGraph: retry de timeout, `pathKey` literal, ciclo de parent_id | — | [x] retry de timeout, hash, ciclo |
 
 ## R10 — 10-adapters-manifestos.md
 
@@ -285,7 +285,7 @@ Como a contagem foi feita:
 | R11-02 | ALTO | Copilot: prompt multilinha truncado, saída não mapeada, custo/tokens zerados | 0.3, 3.1 | [x] |
 | R11-03 | ALTO | Turno trivial de Claude estoura teto de US$ 0,10; dupla contagem de custo | 3.1 | [x] |
 | R11-04 | MED | Sessão órfã `running` após recusa CODEX_GATE_NOT_GUARANTEED | 2.3 | [x] |
-| R11-05 | MED | Codex supervised recusado; `send` em sessão concluída recusado (resume não validado) | — | [ ] |
+| R11-05 | MED | Codex supervised recusado; `send` em sessão concluída recusado (resume não validado) | — | [x] recusa supervised ensina hooks install codex; send em concluída → hub start --from (226860e/1600d9a) |
 | R11-06 | MED | Supervised do Claude dispara aprovação por gravar plano em ~/.claude/plans | 1.7 | [x] |
 | R11-07 | MED | `send` em sessão bloqueada e `approve` disparam turnos extras e aprovações duplicadas | 2.4, 2.10 | [x] |
 | R11-08 | BAIXO | Saída do CLI/stream: eventos crus, linhas vazias e brief ecoado | 4.2 | [x] |
@@ -303,7 +303,7 @@ Como a contagem foi feita:
 | R12-06 | BAIXO | `npm audit`: 1 vulnerabilidade moderada (qs), transitiva | 7.3 | [x] |
 | R12-07 | BAIXO | Dependências com patch/minor pendentes; majors adiante | — | [ ] |
 | R12-08 | BAIXO | Testes dependem de timers reais (risco latente de flakiness) | 7.3 | [x] |
-| R12-09 | BAIXO | `verify` não roda typecheck da web separado; `typecheck` duplica o build | — | [ ] |
+| R12-09 | BAIXO | `verify` não roda typecheck da web separado; `typecheck` duplica o build | — | [x] verify já checa tipos da web (79d8ec2) |
 
 ## R13 — 13-orquestracao-e2e.md
 
@@ -325,9 +325,9 @@ Como a contagem foi feita:
 | R13-14 | MED | Aprovar estouro de orçamento após turno concluído relança o agente | 2.10 | [x] |
 | R13-15 | MED | Orçamento em `seconds` não aplicado durante a run; mensagem cita só USD | 2.10 | [x] |
 | R13-16 | MED | Workflow bloqueado por aprovação não tem retomada | 2.9 | [x] |
-| R13-17 | BAIXO | Aprovação da revisão por segundo agente não deixa registro | — | [ ] |
+| R13-17 | BAIXO | Aprovação da revisão por segundo agente não deixa registro | — | [x] review.approved registrado |
 | R13-18 | BAIXO | `POST /projects`/folders aceitam caminho inexistente/arquivo; 8.3 duplica projeto | 5.5 | [x] |
-| R13-19 | BAIXO | Códigos de erro imprecisos em aprovações; comentário desatualizado em budget.ts | — | [ ] |
+| R13-19 | BAIXO | Códigos de erro imprecisos em aprovações; comentário desatualizado em budget.ts | — | [x] APPROVAL_NOT_FOUND 404 |
 
 ## R14 — 14-jornada-usuario-completude.md
 
@@ -343,7 +343,7 @@ Como a contagem foi feita:
 | R14-08 | MED | `ExperimentalWarning: SQLite` em todo comando, até `hub help` | 5.6 | [x] |
 | R14-09 | MED | Sem onboarding (`hub init`); doctor, discover e painel não se conversam | 5.6 | [x] |
 | R14-10 | MED | Sem `hub logs`, reinício/atualização nem autostart no login | 5.6 | [x] |
-| R14-11 | MED | Default `semi` + `exec: allow` sem aviso de gate não instalado na 1ª execução | — | [ ] |
-| R14-12 | BAIXO | Aviso de "daemon" não orienta; README sem seção de requisitos | 8.4 | [ ] |
+| R14-11 | MED | Default `semi` + `exec: allow` sem aviso de gate não instalado na 1ª execução | — | [x] aviso de gate ausente no hub start (f33a35f) |
+| R14-12 | BAIXO | Aviso de "daemon" não orienta; README sem seção de requisitos | 8.4 | [x] README Requisitos + aviso do daemon (f46ce0e) |
 | R14-13 | BAIXO | `hub doctor` marca opencode "versão desconhecida"; auth só via `--smoke` | 4.6 | [x] |
-| R14-14 | BAIXO | Aprovação não é visível para quem não está olhando o terminal | — | [ ] |
+| R14-14 | BAIXO | Aprovação não é visível para quem não está olhando o terminal | — | [x] bipe/título na CLI + Notification no painel (1600d9a/7696f71) |
