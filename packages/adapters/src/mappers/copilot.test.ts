@@ -27,6 +27,55 @@ describe('mapper do Copilot', () => {
     assert.equal(mapped?.cost?.outputTokens, 159);
   });
 
+  /*
+   * Formato do 1.0.88 (e desde o 1.0.81): chaves de `data` do
+   * `assistant.message` conferidas no events.jsonl real da versão — nenhuma
+   * traz uso. Os valores aqui são de exemplo; as chaves são as reais.
+   */
+  test('1.0.88: mensagem sem outputTokens não ganha custo nem "0 tokens" inventado', () => {
+    const eventos = copilotMapper({
+      type: 'assistant.message',
+      id: 'evt-1',
+      timestamp: '2026-09-26T23:41:00.000Z',
+      parentId: 'evt-0',
+      data: {
+        messageId: 'msg-1',
+        originatingMessageId: 'msg-0',
+        model: 'gpt-5-mini',
+        content: 'OK',
+        toolRequests: [],
+        interactionId: 'int-1',
+        turnId: '0',
+        reasoningOpaque: 'cifrado',
+        reasoningText: '',
+        encryptedContent: 'cifrado',
+        phase: 'final',
+        rte: 0,
+        apiCallId: 'api-1',
+        serverTools: [],
+        reasoningBlocks: [],
+      },
+    });
+    assert.equal(eventos[0]?.type, 'message');
+    assert.equal(eventos[0]?.cost, undefined);
+  });
+
+  test('1.0.88: créditos do usage_checkpoint viram dinheiro, sem contagem de tokens', () => {
+    const [mapped] = copilotMapper({
+      type: 'session.usage_checkpoint',
+      data: {
+        totalNanoAiu: 370_000_000,
+        totalPremiumRequests: 0,
+        modelCacheState: {},
+        promptCacheBreakState: {},
+      },
+    });
+    assert.equal(mapped?.cost?.credits, 0.37);
+    assert.equal(mapped?.cost?.cumulative, true);
+    assert.equal(mapped?.cost?.inputTokens, undefined);
+    assert.equal(mapped?.cost?.outputTokens, undefined);
+  });
+
   test('pedido de shell dentro da mensagem vira comando, não tool genérica', () => {
     const eventos = copilotMapper({
       type: 'assistant.message',
