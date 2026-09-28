@@ -3,6 +3,7 @@ import type { AgentSummary, BriefInput, ProjectSummary } from '@agents-hub/clien
 import { pushToast, useAction } from '../actions';
 import { agentColor, hub } from '../hub';
 import { delegationFeedback } from '../lib/sessionControls';
+import { estaInstalado, lerTeto, semErros, validarSessao } from '../logic/session-form';
 import { useDialog, useFecharPeloFundo } from '../useDialog';
 
 interface Props {
@@ -13,7 +14,13 @@ interface Props {
   defaultProjectId?: string;
   onClose: () => void;
   onCreated: (sessionId: string) => void;
+  /**
+   * Abre o cadastro de projeto POR CIMA deste modal. Antes o modal se fechava
+   * antes de abrir o outro e o que já estava digitado se perdia (R03-11).
+   */
   onNewProject: () => void;
+  /** Projeto recém-registrado pelo cadastro aberto daqui: recarrega a lista e o seleciona. */
+  projetoRegistradoId?: string;
 }
 
 const TASK_TEMPLATES = [
@@ -39,17 +46,6 @@ const TASK_TEMPLATES = [
   },
 ];
 
-/**
- * O agente está de fato nesta máquina?
- *
- * `probe.installed` vem da sondagem que o daemon faz contra o binário real. Um
- * agente ausente aceito aqui só falha depois, com erro de binário — longe da
- * escolha que o causou.
- */
-function estaInstalado(a: AgentSummary): boolean {
-  return a.probe?.installed !== false;
-}
-
 export function SessionModal({
   agents,
   delegateFrom,
@@ -58,6 +54,7 @@ export function SessionModal({
   onClose,
   onCreated,
   onNewProject,
+  projetoRegistradoId,
 }: Props): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [projectsFailed, setProjectsFailed] = useState(false);
@@ -86,10 +83,14 @@ export function SessionModal({
       .projects()
       .then(({ projects: list }) => {
         setProjects(list);
-        // O pré-selecionado (projeto filtrado) só vale se ainda existir.
-        setProjectId((current) =>
-          current && list.some((p) => p.id === current) ? current : list[0]?.id || '',
-        );
+        // O recém-registrado vence; senão, o pré-selecionado (projeto
+        // filtrado) só vale se ainda existir.
+        setProjectId((current) => {
+          if (projetoRegistradoId && list.some((p) => p.id === projetoRegistradoId)) {
+            return projetoRegistradoId;
+          }
+          return current && list.some((p) => p.id === current) ? current : list[0]?.id || '';
+        });
       })
       .catch(() => {
         // Erro engolido em silêncio mostrava "Nenhum projeto registrado" —
@@ -97,7 +98,7 @@ export function SessionModal({
         // como em SidePanel.tsx (projectContextFailed).
         setProjectsFailed(true);
       });
-  }, [delegateFrom]);
+  }, [delegateFrom, projetoRegistradoId]);
 
   // Instalados primeiro. A ordem alfabética punia quem só queria começar:
   // o primeiro cartão da grade podia ser um agente ausente.
@@ -112,7 +113,21 @@ export function SessionModal({
     setCriteria(tpl.criteria);
   };
 
+  const teto = lerTeto(budgetUsd);
+  const erros = validarSessao({
+    agentId: agent,
+    agentes: agents,
+    objetivo: objective,
+    projectId,
+    delegando: delegateFrom !== null,
+    tetoUsd: budgetUsd,
+  });
+  const isValid = semErros(erros);
+  const erroAgenteId = `${base}-erro-agente`;
+  const erroTetoId = `${base}-erro-teto`;
+
   const submit = async () => {
+    if (!isValid) return;
     // O objetivo vai LIMPO, exatamente como você escreveu.
     //
     // Antes, memória e prompts do `localStorage` eram concatenados aqui. Além
@@ -133,7 +148,7 @@ export function SessionModal({
         .filter((l) => l.length > 0),
       isolation,
       supervision,
-      budget: budgetUsd ? { usd: Number(budgetUsd) } : undefined,
+      budget: teto.ok ? { usd: teto.usd } : undefined,
     };
 
     await action.run(
@@ -153,8 +168,6 @@ export function SessionModal({
       delegateFrom ? undefined : 'Sessão iniciada com sucesso.',
     );
   };
-
-  const isValid = agent.length > 0 && objective.trim().length >= 6 && (delegateFrom || projectId);
 
   const sujo = objective.trim() !== '' || criteria.trim() !== '';
   useDialog(dialogRef, onClose, { focoInicial: objectiveRef });
@@ -198,14 +211,7 @@ export function SessionModal({
             <div className="field">
               <div className="field-label-row">
                 <label htmlFor="modal-project">Projeto & Pasta</label>
-                <button
-                  type="button"
-                  className="linkish"
-                  onClick={() => {
-                    onClose();
-                    onNewProject();
-                  }}
-                >
+                <button type="button" className="linkish" onClick={onNewProject}>
                   + Registrar nova pasta
                 </button>
               </div>
@@ -248,7 +254,12 @@ export function SessionModal({
                 </span>
               )}
             </div>
-            <div className="agent-selection-grid" role="group" aria-labelledby={`${base}-agente`}>
+            <div
+              className="agent-selection-grid"
+              role="group"
+              aria-labelledby={`${base}-agente`}
+              aria-describedby={erros.agente ? erroAgenteId : undefined}
+            >
               {agentesOrdenados.map((a) => {
                 const isSelected = agent === a.id;
                 const color = agentColor(a.id);
@@ -281,6 +292,11 @@ export function SessionModal({
                 );
               })}
             </div>
+            {erros.agente && (
+              <div className="aviso-inline" id={erroAgenteId} role="alert">
+                {erros.agente}
+              </div>
+            )}
           </div>
 
           {/* 3. Templates Rápidos */}
@@ -359,9 +375,16 @@ export function SessionModal({
                   min="0.10"
                   max="50.00"
                   value={budgetUsd}
+                  aria-invalid={erros.teto ? true : undefined}
+                  aria-describedby={erros.teto ? erroTetoId : undefined}
                   onChange={(e) => setBudgetUsd(e.target.value)}
                 />
               </div>
+              {erros.teto && (
+                <div className="aviso-inline" id={erroTetoId} role="alert">
+                  {erros.teto}
+                </div>
+              )}
             </div>
           </div>
 

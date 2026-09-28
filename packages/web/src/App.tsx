@@ -53,6 +53,10 @@ export function App() {
     defaultAgentId?: string;
   } | null>(null);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
+  // Projeto registrado pelo cadastro aberto DE DENTRO do modal de Nova Sessão:
+  // o modal continua aberto por baixo, com o que já foi digitado, e passa a
+  // apontar para o projeto novo (R03-11).
+  const [projetoRegistradoNoModal, setProjetoRegistradoNoModal] = useState<string | undefined>();
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
   const [cmdOpen, setCmdOpen] = useState(false);
   const [activeTab, setAbaAtiva] = useState<ActiveTab>('timeline');
@@ -818,9 +822,13 @@ export function App() {
           delegateFrom={modal.delegateFrom}
           defaultAgentId={modal.defaultAgentId}
           defaultProjectId={selectedProjectId !== 'all' ? selectedProjectId : undefined}
-          onClose={() => setModal(null)}
+          onClose={() => {
+            setModal(null);
+            setProjetoRegistradoNoModal(undefined);
+          }}
           onCreated={(sessionId) => {
             setModal(null);
+            setProjetoRegistradoNoModal(undefined);
             setSelectedId(sessionId);
             setActiveTab('timeline');
             void state.refresh();
@@ -828,6 +836,7 @@ export function App() {
           onNewProject={() => {
             setProjectModalOpen(true);
           }}
+          projetoRegistradoId={projetoRegistradoNoModal}
         />
       )}
 
@@ -837,10 +846,12 @@ export function App() {
           onCreated={(projectId) => {
             setProjectModalOpen(false);
             setSelectedProjectId(projectId);
+            if (modal) setProjetoRegistradoNoModal(projectId);
             void state.refresh();
           }}
           onProjectExists={(projectId) => {
             setSelectedProjectId(projectId);
+            if (modal) setProjetoRegistradoNoModal(projectId);
             void state.refresh();
           }}
         />
