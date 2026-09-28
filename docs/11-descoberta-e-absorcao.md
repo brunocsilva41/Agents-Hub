@@ -70,8 +70,8 @@ Corpo de `POST /projects/:id/import` (`strict`; campo desconhecido = 422):
    contexto do projeto no banco do Hub (fora do repositório, item 1.9 do GOAL, migração 6),
    e por isso valem **sem** `hub project trust` — a confiança só é exigida para o que vem do
    `.agents-hub/config.yaml` do repositório. Mesmo assim só entram nomes aceitos pelo filtro
-   e nunca valores com cara de segredo. (Algumas mensagens de recusa no código ainda citam o
-   `config.yaml` como destino; o destino real é o banco.)
+   e nunca valores com cara de segredo: no banco eles ficam em texto puro e seguem para toda
+   sessão do agente.
 4. **Env de servidor MCP é opt-in.** Sem `includeEnv: true` nenhuma variável é copiada
    (o `skipped` diz quais nomes ficaram de fora). Com `includeEnv`, o valor real é relido
    do arquivo de origem só na hora de gravar, e só se existir ali (a máscara `***` não

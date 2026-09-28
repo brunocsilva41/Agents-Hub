@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { TIMEOUT_DO_HOOK_SEC } from '@agents-hub/daemon';
 import {
   gravarConfig,
@@ -24,6 +34,15 @@ import {
  */
 
 const NOSSO = '"node" "C:/hub/cli/dist/main.js" hook';
+
+/** settings.json com o nosso hook, um comentário e lixo depois do objeto. */
+const settingsComLixo = (): string =>
+  [
+    '// config da pessoa',
+    JSON.stringify(mergeHooks({ model: 'opus' }, NOSSO), null, 2),
+    '}} sobra de um merge mal resolvido',
+    '',
+  ].join('\n');
 
 describe('mergeHooks / hookInstalado', () => {
   test('preserva outras chaves e hooks alheios; a nossa entrada entra uma vez só', () => {
@@ -158,6 +177,56 @@ describe('gravarConfig / leitura — num HOME temporário', () => {
       '{ "model": "opus", ',
       'o arquivo da pessoa não foi tocado',
     );
+  });
+
+  /**
+   * R07-25: o teste acima só prova "não lança" — o código antigo (erro vira
+   * `{}`) também passava, e mostrava "○ não instalado" com o hook lá dentro.
+   * Aqui a asserção é de CONTEÚDO: comentário + lixo no fim, com o hook
+   * instalado, tem de ser lido como instalado para exibir, e recusado para
+   * gravar.
+   */
+  test('comentário + lixo no fim com o hook instalado: exibir diz INSTALADO; gravar recusa', () => {
+    const file = path.join(raiz, 'lixo-no-fim.json');
+    writeFileSync(file, settingsComLixo(), 'utf8');
+
+    const exibido = lerConfig(file);
+    assert.equal(exibido['model'], 'opus', 'o resto da config também é lido');
+    assert.equal(hookInstalado(exibido), true, 'o hook que está no arquivo aparece como instalado');
+
+    assert.throws(() => lerConfigParaGravar(file));
+    assert.equal(readFileSync(file, 'utf8'), settingsComLixo(), 'o arquivo da pessoa não foi tocado');
+  });
+
+  test('`hub hooks` de verdade (HOME temporário) mostra ● claude com esse arquivo', () => {
+    const casa = path.join(raiz, 'casa');
+    mkdirSync(path.join(casa, '.claude'), { recursive: true });
+    writeFileSync(path.join(casa, '.claude', 'settings.json'), settingsComLixo(), 'utf8');
+    const limpo: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of Object.keys(limpo)) {
+      if (/^(AGENTS_HUB_|NODE_OPTIONS$)/.test(k)) delete limpo[k];
+    }
+    // `hub hooks` é offline: não fala com daemon. HOME/USERPROFILE e
+    // AGENTS_HUB_HOME temporários — o ~/.claude real nunca é lido.
+    const r = spawnSync(
+      process.execPath,
+      ['--experimental-sqlite', fileURLToPath(new URL('./main.js', import.meta.url)), 'hooks'],
+      {
+        env: {
+          ...limpo,
+          HOME: casa,
+          USERPROFILE: casa,
+          AGENTS_HUB_HOME: path.join(raiz, 'hub-home'),
+          AGENTS_HUB_NO_AUTOSTART: '1',
+          NO_COLOR: '1',
+        },
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^● claude /m, r.stdout);
+    assert.ok(r.stdout.includes(path.join(casa, '.claude', 'settings.json')));
   });
 
   test('JSONC (comentário) é aceito para gravar, e a config é preservada no merge', () => {

@@ -34,7 +34,7 @@ import { interruptCommand } from './interrupt-cmd.js';
 import { discoverCommand, importCommand } from './discover-cmd.js';
 import { auditCommand, policyCommand } from './policy-cmd.js';
 import { readOperatorToken } from '@agents-hub/client/operator-token';
-import { doctorCommand, statusCommand } from './doctor-cmd.js';
+import { doctorCommand, doctorDaConfig, statusCommand } from './doctor-cmd.js';
 import { resolveProjectId } from './project-resolve.js';
 import { budgetCommand, graphCommand, sendCommand, watchCommand } from './session-follow.js';
 import { lerBudgetUsd, startCommand } from './start-cmd.js';
@@ -83,6 +83,13 @@ async function main(): Promise<void> {
   // Ajuda antes de `loadConfig` (R07-07): com config.json inválido, `hub help`
   // saía com o erro da config e nenhuma ajuda. Agora mostra a ajuda e avisa.
   if (pedeAjuda(args)) return mostrarAjuda(args);
+  // `hub doctor` confere o config.json ANTES do `loadConfig` abaixo: com
+  // chave inválida em `policy`, o `loadConfig` lançaria e o doctor morreria
+  // com stack trace — justo o comando que deveria explicar o problema.
+  if (args.command === 'doctor' && !doctorDaConfig()) {
+    process.exitCode = 1;
+    return;
+  }
   const config = loadConfig();
   // Token de operador (item 1.6): lido a cada requisição, do arquivo que o
   // daemon cria — ele pode nascer depois deste cliente (autostart). O hook

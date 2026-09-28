@@ -407,8 +407,11 @@ export class ImportService {
     if (looksLikeSecret(text)) {
       skipped.push({
         what: 'instructions',
+        // O destino é o contexto do projeto no BANCO do Hub (migração 6), não
+        // o `.agents-hub/config.yaml` versionado — mas lá o texto fica em claro
+        // e entra no prompt de toda sessão do agente, então segredo continua fora.
         reason:
-          'o conteúdo parece conter credencial; .agents-hub/config.yaml é versionado, então não foi importado',
+          'o conteúdo parece conter credencial; a instrução iria em texto puro para o banco do Hub e para o prompt de toda sessão do agente, então não foi importada',
       });
       return false;
     }
@@ -463,7 +466,7 @@ export class ImportService {
     const atual = ctx.env?.[req.agentId] ?? {};
     const aceitas: Record<string, string> = {};
     for (const [nome, valor] of candidates) {
-      // 1) lista de permissão — a MESMA que vale para o config.yaml do projeto
+      // 1) lista de permissão — a MESMA que vale para o env de projeto (banco do Hub e config.yaml)
       const { aceitas: ok } = filtrarEnvDeProjeto({ [nome]: valor });
       if (!(nome in ok)) {
         skipped.push({
@@ -472,9 +475,14 @@ export class ImportService {
         });
         continue;
       }
-      // 2) nunca segredo: o arquivo destino é versionado
+      // 2) nunca segredo: o destino (banco do Hub) guarda em texto puro, e o
+      // valor é repassado a todo processo do agente neste projeto
       if (looksLikeSecret(valor) || urlHasCredential(valor)) {
-        skipped.push({ what: `env:${nome}`, reason: 'o valor parece conter credencial; não importado' });
+        skipped.push({
+          what: `env:${nome}`,
+          reason:
+            'o valor parece conter credencial; o env do projeto fica em texto puro no banco do Hub, então não foi importado',
+        });
         continue;
       }
       // 3) não sobrescreve sem pedir

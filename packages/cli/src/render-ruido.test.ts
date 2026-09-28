@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { stripVTControlCharacters } from 'node:util';
 import type { EventEnvelope } from '@agents-hub/core';
 import { deveExibir, renderEvent } from './render.js';
 
@@ -57,4 +58,25 @@ test('aviso de fallback aparece destacado, com o agente substituto', () => {
     }),
   );
   assert.match(linha, /⚠ fallback: codex → claude/);
+});
+
+/**
+ * R07-17: o daemon emite `error` como `{reason, exitCode, error: null}`
+ * (cancelamento, processo que saiu). Sem o fallback de `render.ts` a linha
+ * saía só "✗ " — o motivo sumia justo no evento que o explica.
+ */
+test('error sem message/error/text cai para reason · código (inclusive código 0)', () => {
+  const linha = (payload: Record<string, unknown>): string =>
+    // Sem cor mesmo se o runner tiver TTY: a asserção é sobre o texto.
+    stripVTControlCharacters(renderEvent(ev('error', payload)));
+
+  assert.match(linha({ reason: 'cancelado', exitCode: 143, error: null }), /✗ cancelado · código 143$/);
+  assert.match(
+    linha({ reason: 'processo saiu', exitCode: 0, error: null }),
+    /✗ processo saiu · código 0$/,
+  );
+  assert.match(linha({ reason: 'timeout', exitCode: null, error: null }), /✗ timeout$/);
+  assert.match(linha({ exitCode: 1, error: null }), /✗ código 1$/);
+  // Com mensagem de verdade, ela vence o fallback.
+  assert.match(linha({ message: 'boom', reason: 'cancelado', exitCode: 1 }), /✗ boom$/);
 });
