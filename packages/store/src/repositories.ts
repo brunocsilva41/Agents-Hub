@@ -743,6 +743,81 @@ class SqliteAuditRepository implements AuditRepository {
   }
 }
 
+/** `PRAGMA auto_vacuum`: 0, 1 e 2 no SQLite. */
+export type ModoAutoVacuum = 'none' | 'full' | 'incremental';
+
+export interface EstadoDoEspaco {
+  autoVacuum: ModoAutoVacuum;
+  pageSize: number;
+  pageCount: number;
+  /** Páginas inteiras livres — as únicas que `incremental_vacuum` devolve. */
+  freelistCount: number;
+}
+
+/**
+ * Devolução de espaço ao sistema de arquivos (vistoria 2026-09-25, R09-07).
+ *
+ * Zerar `raw_json` libera páginas dentro do arquivo, mas o arquivo não
+ * encolhe: sem `auto_vacuum`, só um `VACUUM` completo devolve espaço — e ele
+ * reescreve o banco inteiro travando a conexão (≈26 ms por MB de dado vivo,
+ * medido: 580 MB → 15 s). Com `auto_vacuum = INCREMENTAL`, `incremental_vacuum(N)`
+ * devolve até N páginas livres por chamada, em pedaços curtos o bastante para
+ * o daemon intercalar com HTTP e eventos.
+ */
+export class SqliteEspacoDoBanco {
+  constructor(private readonly db: Db) {}
+
+  estado(): EstadoDoEspaco {
+    const valor = (pragma: string): number =>
+      num(Object.values(this.db.prepare(`PRAGMA ${pragma}`).get() ?? {})[0]);
+    const modo = valor('auto_vacuum');
+    return {
+      autoVacuum: modo === 2 ? 'incremental' : modo === 1 ? 'full' : 'none',
+      pageSize: valor('page_size'),
+      pageCount: valor('page_count'),
+      freelistCount: valor('freelist_count'),
+    };
+  }
+
+  /**
+   * Devolve até `maxPaginas` páginas livres ao SO. Devolve quantas saíram
+   * (0 em banco sem `auto_vacuum = INCREMENTAL`, onde o pragma é inócuo).
+   */
+  devolverPaginasLivres(maxPaginas: number): number {
+    const antes = this.estado().freelistCount;
+    // `.all()` e não `exec`: o pragma é um passo por página, e só consumir o
+    // resultado inteiro garante que todas as N rodaram.
+    this.db.prepare(`PRAGMA incremental_vacuum(${Math.max(1, Math.trunc(maxPaginas))})`).all();
+    return antes - this.estado().freelistCount;
+  }
+
+  /**
+   * Checkpoint que zera o `-wal`. As páginas que o `incremental_vacuum` move
+   * passam pelo WAL; sem isto o espaço tirado do `.db` reaparece no `-wal`,
+   * que só encolhe com `TRUNCATE`. Leitor aberto impede o truncamento — o
+   * SQLite devolve "ocupado" em vez de erro, e a próxima passada tenta de novo.
+   */
+  truncarWal(): void {
+    this.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').all();
+  }
+
+  /**
+   * Liga `auto_vacuum = INCREMENTAL` num banco que nasceu sem ele: só vale
+   * depois de um `VACUUM` completo, que reescreve o arquivo (e já devolve
+   * tudo o que estava livre ou fragmentado). Custo proporcional ao dado vivo —
+   * quem chama decide se pode pagar.
+   *
+   * Em WAL o `VACUUM` escreve o banco reescrito inteiro no `-wal` (medido:
+   * 203 MB de `.db` + 203 MB de `-wal` logo depois); sem o checkpoint no fim
+   * a conversão DOBRAVA o disco até o próximo checkpoint automático.
+   */
+  converterParaIncremental(): void {
+    this.db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
+    this.db.exec('VACUUM;');
+    this.truncarWal();
+  }
+}
+
 export class SqliteUnitOfWork implements UnitOfWork {
   readonly projects: ProjectRepository;
   readonly sessions: SessionRepository;
@@ -752,6 +827,8 @@ export class SqliteUnitOfWork implements UnitOfWork {
   readonly artifacts: ArtifactRepository;
   readonly budgets: BudgetRepository;
   readonly audit: AuditRepository;
+  /** Manutenção do arquivo (R09-07) — fora da `UnitOfWork`: não é domínio. */
+  readonly espaco: SqliteEspacoDoBanco;
 
   #depth = 0;
 
@@ -764,6 +841,7 @@ export class SqliteUnitOfWork implements UnitOfWork {
     this.artifacts = new SqliteArtifactRepository(db);
     this.budgets = new SqliteBudgetRepository(db);
     this.audit = new SqliteAuditRepository(db);
+    this.espaco = new SqliteEspacoDoBanco(db);
   }
 
   /**

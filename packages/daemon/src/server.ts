@@ -1141,7 +1141,11 @@ export function statusFor(code: string): number {
     case 'TASK_NOT_FOUND':
     case 'PROJECT_NOT_FOUND':
     case 'APPROVAL_NOT_FOUND':
+    case 'FOLDER_NOT_FOUND':
       // Aprovação inexistente era ILLEGAL_STATE/400 (vistoria 2026-09-25, R13-19).
+      // Pasta fora do projeto caía no `default` 400, como se o id estivesse
+      // malformado — mas ele passou `FolderIdSchema`; é o recurso que não
+      // existe (pendência D(2) do fechamento do MVP).
       return 404;
     case 'INVALID_BRIEF':
       return 422;

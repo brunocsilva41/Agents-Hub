@@ -72,39 +72,49 @@ steps:
   });
 });
 
-/** Host falso: cada sessão conclui depois de `ticks` consultas. */
-function hostFalso(opts: { ticks?: number; bloquear?: string } = {}) {
-  const tarefas = new Map<string, { agente: string; consultas: number }>();
+/**
+ * Host falso: cada tarefa conclui depois de `ticks` consultas. Com `fallback`,
+ * a tarefa daquele agente troca de sessão na primeira consulta — o que o
+ * `#fallback` do SessionManager faz ao reatribuí-la ao substituto.
+ */
+function hostFalso(opts: { ticks?: number; bloquear?: string; fallback?: string } = {}) {
+  const tarefas = new Map<string, { agente: string; sessionId: string; consultas: number }>();
   const inicios: string[] = [];
   const bases = new Map<string, string[] | undefined>();
+  const aprovacoesPedidas: string[] = [];
   let n = 0;
   const host: WorkflowHost = {
     async start(input) {
       n += 1;
       const id = `ses_f${n}`;
       bases.set(String(input.brief['agent']), input.baseSessionIds);
-      tarefas.set(id, { agente: String(input.brief['agent']), consultas: 0 });
+      tarefas.set(`tsk_f${n}`, { agente: String(input.brief['agent']), sessionId: id, consultas: 0 });
       inicios.push(`${String(input.brief['agent'])}:${id}`);
       return { session: { id }, task: { id: `tsk_f${n}` } };
     },
-    listTasks(sessionId) {
-      const t = tarefas.get(sessionId)!;
+    getTask(taskId) {
+      const t = tarefas.get(taskId)!;
       t.consultas += 1;
-      if (opts.bloquear === t.agente) return [{ state: 'input_required', attempts: [], result: null }];
+      if (opts.fallback === t.agente && t.consultas === 1) t.sessionId = `${t.sessionId}_sub`;
+      const base = { sessionId: t.sessionId, attempts: [] };
+      if (opts.bloquear === t.agente) return { ...base, state: 'input_required', result: null };
       const pronto = t.consultas > (opts.ticks ?? 1);
-      return [
-        {
-          state: pronto ? 'completed' : 'working',
-          attempts: [],
-          result: pronto ? { summary: `feito por ${t.agente}` } : null,
-        },
-      ];
+      return {
+        ...base,
+        state: pronto ? 'completed' : 'working',
+        result: pronto ? { summary: `feito por ${t.agente}` } : null,
+      };
     },
-    pendingApprovals: () => [{ id: 'apv_x', action: 'Bash: rm -rf build' }],
+    // Substituto de fallback herda o `rootId` do original.
+    getSession: (sessionId) => ({ rootId: sessionId.replace(/_sub$/, '') }),
+    pendingApprovals: (sessionId) => {
+      aprovacoesPedidas.push(sessionId ?? '');
+      return [{ id: 'apv_x', action: 'Bash: rm -rf build' }];
+    },
     budget: () => ({ consumed: { usd: 0.25 } }),
     getProject: () => ({}),
   };
-  return { host, inicios, bases };
+  return { host, inicios, bases, aprovacoesPedidas };
 }
 
 async function ate(cond: () => boolean, ms = 3000): Promise<void> {
@@ -171,6 +181,34 @@ describe('WorkflowRunner', () => {
     assert.equal(fim.steps[0]?.state, 'blocked');
     assert.match(fim.steps[0]?.detail ?? '', /rm -rf build/);
     assert.equal(fim.steps[1]?.state, 'skipped');
+  });
+
+  // Pendência D(1) do fechamento do MVP: o runner seguia a SESSÃO original.
+  // Depois do fallback a task mora na sessão do substituto, `listTasks` da
+  // original vinha vazio e o passo era dado como falho ("a sessão não tem
+  // tarefa") — o dependente era pulado enquanto o substituto concluía.
+  test('fallback: segue a task até a sessão do substituto e o dependente parte dela', async () => {
+    const { host, bases } = hostFalso({ fallback: 'claude', ticks: 2 });
+    const runner = new WorkflowRunner(host, { intervaloMs: 1 });
+    const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' });
+    await ate(() => runner.get(run.id).state !== 'running');
+
+    const fim = runner.get(run.id);
+    assert.equal(fim.state, 'completed', JSON.stringify(fim.steps));
+    assert.equal(fim.steps[0]?.state, 'completed');
+    assert.equal(fim.steps[0]?.taskId, 'tsk_f1');
+    assert.equal(fim.steps[0]?.sessionId, 'ses_f1_sub', 'o passo terminou no substituto');
+    assert.equal(fim.steps[1]?.state, 'completed');
+    assert.deepEqual(bases.get('codex'), ['ses_f1_sub'], 'o dependente parte do trabalho do substituto');
+  });
+
+  test('aprovação pendente é procurada na sessão ATUAL da task, não na original', async () => {
+    const { host, aprovacoesPedidas } = hostFalso({ fallback: 'claude', bloquear: 'claude' });
+    const runner = new WorkflowRunner(host, { intervaloMs: 1 });
+    const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' });
+    await ate(() => runner.get(run.id).state !== 'running');
+    assert.equal(runner.get(run.id).steps[0]?.state, 'blocked');
+    assert.deepEqual(aprovacoesPedidas, ['ses_f1_sub']);
   });
 
   test('YAML inválido não registra execução nenhuma', () => {

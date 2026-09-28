@@ -141,14 +141,20 @@ export interface WorkflowHost {
     /** Sessões de cujo branch `hub/<id>` o worktree do passo nasce. */
     baseSessionIds?: string[];
   }): Promise<{ session: { id: string }; task: { id: string } }>;
-  listTasks(sessionId: string): Array<{
+  /**
+   * A tarefa pelo id — lança `TASK_NOT_FOUND` se ela sumiu. `sessionId` é a
+   * sessão ATUAL dela: num fallback a task é reatribuída ao substituto.
+   */
+  getTask(taskId: string): {
+    sessionId: string;
     state: string;
     attempts: Array<{ error: string | null }>;
     result: {
       summary?: string;
       validation?: { checks: Array<{ name: string; passed: boolean }> };
     } | null;
-  }>;
+  };
+  getSession(sessionId: string): { rootId: string };
   pendingApprovals(sessionId?: string): Array<{ id: string; action: string }>;
   budget(rootId: string): { consumed: { usd: number } };
   getProject(projectId: string): unknown;
@@ -293,7 +299,7 @@ export class WorkflowRunner {
             });
             return { sessionId: res.session.id, taskId: res.task.id };
           },
-          settle: ({ sessionId }) => this.#aguardar(sessionId),
+          settle: ({ sessionId, taskId }) => this.#aguardar(taskId, sessionId),
           report: (ev: WorkflowRunEvent) => {
             switch (ev.kind) {
               case 'batch':
@@ -334,17 +340,32 @@ export class WorkflowRunner {
     }
   }
 
-  /** Espera a tarefa do passo chegar a um desfecho (mesma regra da CLI). */
-  async #aguardar(sessionId: string): Promise<{
+  /**
+   * Espera a tarefa do passo chegar a um desfecho (mesma regra da CLI).
+   *
+   * Acompanha pela TASK, não pela sessão: num fallback a task é reatribuída à
+   * sessão do substituto, e `listTasks(sessãoOriginal)` vinha vazio — o passo
+   * era dado como falho ("a sessão não tem tarefa") enquanto o substituto o
+   * concluía, e o dependente era pulado. `sessionId` na resposta é onde a task
+   * terminou: é do branch dela que o passo seguinte deve partir.
+   */
+  async #aguardar(
+    taskId: string,
+    sessaoInicial: string,
+  ): Promise<{
     state: 'completed' | 'failed' | 'blocked' | 'timeout';
     summary: string | null;
     detail: string | null;
     usd: number;
+    sessionId: string;
   }> {
     const limite = Date.now() + this.#esperaMaxMs;
+    let sessionId = sessaoInicial;
+    // O substituto herda o `rootId` do original (troca de executor, não novo
+    // nível), então o orçamento da árvore soma as duas tentativas.
     const gasto = (): number => {
       try {
-        return this.host.budget(sessionId).consumed.usd;
+        return this.host.budget(this.host.getSession(sessionId).rootId).consumed.usd;
       } catch {
         return 0;
       }
@@ -357,10 +378,23 @@ export class WorkflowRunner {
           summary: null,
           detail: `acompanhamento interrompido: o daemon encerrou — a sessão ${sessionId} não é mais seguida por este workflow`,
           usd: gasto(),
+          sessionId,
         };
       }
-      const task = this.host.listTasks(sessionId)[0];
-      if (!task) return { state: 'failed', summary: null, detail: 'a sessão não tem tarefa', usd: 0 };
+      let task: ReturnType<WorkflowHost['getTask']>;
+      try {
+        task = this.host.getTask(taskId);
+      } catch (err) {
+        if (!isHubError(err) || err.code !== 'TASK_NOT_FOUND') throw err;
+        return {
+          state: 'failed',
+          summary: null,
+          detail: `a tarefa ${taskId} não existe mais`,
+          usd: 0,
+          sessionId,
+        };
+      }
+      sessionId = task.sessionId;
 
       if (task.state === 'input_required') {
         const pendente = this.host.pendingApprovals(sessionId)[0];
@@ -371,13 +405,20 @@ export class WorkflowRunner {
             ? `esperando aprovação: ${pendente.action}`
             : 'esperando decisão humana (veja as aprovações)',
           usd: gasto(),
+          sessionId,
         };
       }
 
       if (isTerminalTaskState(task.state as Parameters<typeof isTerminalTaskState>[0])) {
         const usd = gasto();
         if (task.state === 'completed') {
-          return { state: 'completed', summary: task.result?.summary ?? null, detail: null, usd };
+          return {
+            state: 'completed',
+            summary: task.result?.summary ?? null,
+            detail: null,
+            usd,
+            sessionId,
+          };
         }
         const ultima = task.attempts[task.attempts.length - 1];
         const reprovada = task.result?.validation?.checks.find((c) => !c.passed);
@@ -388,6 +429,7 @@ export class WorkflowRunner {
             ultima?.error ??
             (reprovada ? `validação reprovou: ${reprovada.name}` : `tarefa terminou em ${task.state}`),
           usd,
+          sessionId,
         };
       }
 
@@ -399,6 +441,7 @@ export class WorkflowRunner {
       summary: null,
       detail: `passou de ${Math.round(this.#esperaMaxMs / 60000)} min — a sessão ${sessionId} continua viva no daemon`,
       usd: gasto(),
+      sessionId,
     };
   }
 

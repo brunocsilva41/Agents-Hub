@@ -19,6 +19,10 @@ describe('statusFor', () => {
     assert.equal(statusFor('ADAPTER_FAILURE'), 502);
   });
 
+  test('FOLDER_NOT_FOUND mapeia para 404 (recurso inexistente), não 400', () => {
+    assert.equal(statusFor('FOLDER_NOT_FOUND'), 404);
+  });
+
   test('códigos desconhecidos continuam caindo no default 400', () => {
     assert.equal(statusFor('ALGO_QUE_NAO_EXISTE'), 400);
   });

@@ -20,6 +20,14 @@ export function openDatabase(file: string): Db {
 
   const db = new DatabaseSync(file);
 
+  // Antes de qualquer tabela: banco novo nasce podendo devolver espaço ao SO
+  // em pedaços (`incremental_vacuum`) — sem isto a compactação de `raw_json`
+  // libera páginas que o arquivo nunca devolve (vistoria 2026-09-25, R09-07).
+  // Num banco que já tem tabelas o pragma só fica pendente até um `VACUUM`
+  // (o disco continua dizendo `none`): converter o antigo é decisão do daemon,
+  // que mede o custo antes (`SqliteEspacoDoBanco.converterParaIncremental`).
+  db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
+
   // WAL: o daemon escreve eventos enquanto CLI/TUI/Web leem — sem isso, leitor
   // e escritor se bloqueiam mutuamente o tempo todo.
   db.exec('PRAGMA journal_mode = WAL;');
