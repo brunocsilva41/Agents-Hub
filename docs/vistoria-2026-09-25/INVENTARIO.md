@@ -199,7 +199,7 @@ Como a contagem foi feita:
 | R07-14 | MED | Ids sem `encodeURIComponent` no client; budget/graph de id errado dão zeros/crash | 0.6 | [x] |
 | R07-15 | BAIXO | Negação/timeout no gate: agente recebe "a política proíbe esta ação" | 1.5 | [x] |
 | R07-16 | BAIXO | `hub interrupt`/`cancel`/`send` sempre dizem sucesso; no Windows interrupt mata | 2.2 | [x] |
-| R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [ ] REABERTO (auditoria): sem teste do fallback reason/exitCode — na Task do worker CLI  |
+| R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [x] teste do fallback reason/exitCode (0fcb39a, merge cli-pendencias) |
 | R07-18 | BAIXO | Horários exibidos em UTC sem rótulo | — | [x] hora local com fuso (f33a35f) |
 | R07-19 | BAIXO | Cada invocação carrega daemon/SQLite: ~0,6 s e ExperimentalWarning | 5.6 | [x] |
 | R07-20 | BAIXO | Help x implementação (sem `--help` por comando, `--version`, `--json`, `--`) | 5.6 | [x] |
@@ -207,7 +207,7 @@ Como a contagem foi feita:
 | R07-22 | BAIXO | `hub project env` mostra e ecoa valores com cara de segredo | — | [x] env mascarado (f33a35f) |
 | R07-23 | BAIXO | `hub mcp` usa `includes('agents-hub')` como critério de "registrado" | — | [x] detecção estruturada (f33a35f) |
 | R07-24 | BAIXO | Nome da worktree perde acentos | — | [x] transliteração (f33a35f) |
-| R07-25 | BAIXO | `hub hooks` lê só o settings.json real e mostra "não instalado" com JSON inválido | 0.4 | [ ] REABERTO (auditoria): teste fraco (doesNotThrow) — na Task do worker CLI |
+| R07-25 | BAIXO | `hub hooks` lê só o settings.json real e mostra "não instalado" com JSON inválido | 0.4 | [x] teste asserta hook instalado com JSONC/lixo (3d59db6, merge cli-pendencias) |
 
 ## R08 — 08-mcp-hooks.md
 
@@ -224,7 +224,7 @@ Como a contagem foi feita:
 | R08-09 | MED | Explicação de "negado por falta de resposta" descartada; `escalate` inválido no hook | 1.5 | [x] |
 | R08-10 | MED | Gate aplica política do Hub ao Claude "normal" do usuário por casamento de `cwd` | — | [x] gate só p/ sessão viva do Hub (4fff125) |
 | R08-11 | MED | Sem limite de tamanho em `hub_agent_call`; failover em cascata sem aviso | — | [x] fallback visível + erro do agente na tentativa (22beb13/226860e) |
-| R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [ ] REABERTO (auditoria): smoke não roda no CI — na Task do worker Linux/CI  |
+| R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [x] smoke MCP roda no job Linux do CI (merge 117e214) |
 | R08-13 | MED | Raízes adotadas ficam `running` para sempre se o MCP é morto sem fechar stdin | 2.8 | [x] |
 | R08-14 | MED | Sem escopo por fluxo: agente lê/cancela sessões de outros fluxos e projetos | — | [x] escopo por fluxo OUT_OF_FLOW (22beb13) |
 | R08-15 | BAIXO | `hub_workflow_run`: erro sem motivo e leitura de arquivo arbitrário com eco | — | [x] yaml só no projeto, sem eco (22beb13) |
@@ -241,7 +241,7 @@ Como a contagem foi feita:
 | R09-04 | MED | Padrões de "irreversível" e allow list com lacunas e falsos positivos | 1.1 | [x] |
 | R09-05 | MED | "Deny list" não nega: vira `irreversible` e a decisão padrão é `approve` | 1.2 | [x] |
 | R09-06 | MED | Não há backup/restauração do banco; copiar só o `.db` perde dados (WAL) | 5.6 | [x] |
-| R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [ ] REABERTO parcial (auditoria): espaço não devolvido (sem VACUUM) — na Task do worker daemon  |
+| R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [x] auto_vacuum incremental + conversão medida na subida; 203→112 MB (merge de daemon-pendencias) |
 | R09-08 | MED | Consultas agregadas por sessão/árvore escalam mal e bloqueiam o processo | — | [x] colunas geradas de custo, 70→6 ms (3e6d2ec) |
 | R09-09 | MED | `mergePolicyLayer(clampToBase)` não trava budget/retries/timeouts/fallback | 0.7 | [x] |
 | R09-10 | MED | Política de arquivos: leitura nunca protegida; lista de escrita sensível incompleta | 1.2 | [x] |

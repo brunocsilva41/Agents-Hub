@@ -31,10 +31,40 @@ A pedido do usuário, a continuação passa para um chat orquestrador que usa a 
   D2=CLI (flake merge-cmd ECONNRESET com causa raiz, doctor detecta policy inválida do config.json global,
   absorption.ts sem citar config.yaml, testes R07-17/R07-25); D3=web (aba Segurança segue projeto corrente)
   + Copilot 1.0.88 tokens (corrigir ou rejeitar com evidência do JSONL).
-- Onda 3 (planejada, após merges da onda 2): R05-03 (gate contra loopback do daemon + teste negativo +
-  SECURITY.md), R05-07, R05-10, R13-02 (+ decidir destino do follow-task.ts), R13-13, R10-07, R10-16,
-  pacote web parcial (R03-06/R04-12/R03-11/R03-15/R03-21/R04-14), limpeza (R02-09 resíduos, R02-10
-  HEARTBEAT_MS cru, R05-05 tools mcp__*/Task sem classificação, R12-08 esperas fixas). Depois: Fase 9.
+- Onda 2 MESCLADA (todas as 5 entregas revisadas com diff completo + prova de mutação reproduzida
+  pelo coordenador; verify na main após cada merge):
+  - C gate-read (merge da revisao/gate-read): Read|Grep no MATCHER_DE_RISCO (injetado E instalado),
+    Glob fora com justificativa; leitura comum liberada no próprio hook (caminho rápido antes da
+    config, ~125 ms p50 vs ~275 ms indo ao daemon; tabela em SECURITY.md); Grep com glob .env* é
+    segredo; doctor/hooks acusam matcher antigo; fail-closed nega leitura de segredo. verify 1588.
+  - D1 daemon (6a041ba..275aab5): WorkflowRunner segue a TASK (sobrevive a fallback, herda branch
+    do substituto); FOLDER_NOT_FOUND 404; validação/revisão ocupam vaga no teto (exceção: fallback);
+    shutdown idempotente (SIGINT×POST /shutdown); R09-07 auto_vacuum incremental com conversão
+    medida na subida (teto de tamanho) — 203,1→112,5 MB. verify 1607.
+  - D2 cli (08826ce..3d59db6): flake merge-cmd com CAUSA RAIZ (git síncrono do teste travava o event
+    loop além do keep-alive de 5s do daemon no MESMO processo → RST no socket reusado; 20/60 falhas
+    sob carga antes, 0/60 depois); hub doctor valida config.json antes do loadConfig e sugere a chave
+    certa (distância de edição); absorption.ts cita o destino real (banco); testes R07-17/R07-25.
+    verify 1615.
+  - D3 web/adapters (250c112..39ad1d5): aba Segurança segue o projeto do filtro a cada abertura
+    (preserva edição suja com pergunta); tokens do Copilot 1.0.88 REJEITADO com evidência (JSONL sem
+    outputTokens desde 1.0.81; chaves listadas no teste copilot.test.ts); tokens desconhecidos não
+    aparecem como "0" (CLI e painel). verify 1630; e2e 94/94.
+  - B linux-ci (a016437..5f4a497 + integração 117e214): 3 bugs Linux reais em adapters
+    (killProcessTree POSIX, imagemDoProcesso órfão, consumidor travado com stdout pausado);
+    job `verificar-linux` BLOQUEANTE no portão rodando npm run verify + smoke MCP isolado (R12-05,
+    R08-12). O branch partiu de base antiga: o coordenador refez a integração (process-tree combina
+    kill de grupo R06-13 + varredura PID→PPID + espera de morte; mcp-smoke da main mantido; passo de
+    CI simplificado — o manual lia `home` do /health, removido pela 1.8). verify 1631; smoke local
+    21/21 PASS; suíte no container node:24-bookworm contra a main integrada em validação.
+  - Pendência do B para a onda 3: checagem POSIX de PID reciclado na reconciliação (depende de
+    session-manager.ts, fora do escopo dele).
+- Onda 3 (em despacho): W3A segurança (R05-03 defesa em camadas + teste negativo + SECURITY.md,
+  R05-07 import sem segredo cru, R05-10 raízes proibidas, R05-05 tools mcp__*/Task), W3B daemon resto
+  (R13-13 Last-Event-ID, R02-10 HEARTBEAT_MS, PID reciclado POSIX), W3C cli/adapters (R13-02 watch
+  fallback real + destino do follow-task.ts, R10-07 providerID OpenCode, R10-16 teste da flag do
+  Codex), W3D web (R03-06/R03-11/R03-15/R03-21/R04-12/R04-14), W3E limpeza (R12-08 esperas fixas,
+  R02-09 resíduos). Depois: Fase 9.
 
 ## Inventário
 Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL contou só grafias acentuadas) em [INVENTARIO.md](INVENTARIO.md), com ID R<nn>-<seq> e item do GOAL. Estado marcado a partir dos itens concluídos. Placar atual: CRÍT 3/3, ALTO 16/52, MÉD 11/104, BAIXO 7/66.
