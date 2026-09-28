@@ -125,6 +125,14 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
     leases,
   );
 
+  // Desligamento em curso (ou concluído). Sinal (`main.ts`) e `POST /shutdown`
+  // têm cada um o seu `encerradorDoProcesso`, com guardas independentes: um
+  // Ctrl-C no meio do `hub stop` rodava tudo abaixo duas vezes em paralelo, e
+  // a segunda passada fechava o banco que a primeira ainda usava ("database is
+  // not open", saída 1). Guardar a promessa torna a segunda entrada uma espera
+  // pela primeira, em vez de um segundo desligamento.
+  let desligamento: Promise<void> | null = null;
+
   const hub: Hub = {
     config,
     store,
@@ -181,16 +189,19 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
       return endereco;
     },
 
-    async shutdown() {
-      leases.stop();
-      eventRetention.stop();
-      reaper.stop();
-      await sessions.shutdown();
-      // Derruba o `opencode serve` que o Hub subiu — nunca um que já existia.
-      if (opencode) await opencode.close();
-      await server.close();
-      audit.stop();
-      store.close();
+    shutdown() {
+      desligamento ??= (async () => {
+        leases.stop();
+        eventRetention.stop();
+        reaper.stop();
+        await sessions.shutdown();
+        // Derruba o `opencode serve` que o Hub subiu — nunca um que já existia.
+        if (opencode) await opencode.close();
+        await server.close();
+        audit.stop();
+        store.close();
+      })();
+      return desligamento;
     },
   };
 
