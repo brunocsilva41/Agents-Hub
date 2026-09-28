@@ -1,14 +1,22 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { after, afterEach, before, describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import type { AgentDiscovery } from '@agents-hub/core';
 import { HubClient, type AgentSummary, type ProbeSummary } from './client.js';
-import { avaliarAgentes, doctorCommand, statusCommand } from './doctor-cmd.js';
-import { capturar, montarHubDeTeste, type HubDeTeste } from './hub-de-teste.js';
+import {
+  avaliarAgentes,
+  diagnosticarConfig,
+  doctorCommand,
+  doctorDaConfig,
+  statusCommand,
+} from './doctor-cmd.js';
+import { capturar, montarHubDeTeste, portaLivre, type HubDeTeste } from './hub-de-teste.js';
 
 /**
  * Item 4.6 do GOAL (vistoria 2026-09-25, 11 e 14): `doctor`/`status` usam a
@@ -231,5 +239,112 @@ describe('hub doctor --smoke (daemon real, agentes FALSOS)', () => {
     assert.match(log, /commit inicial/);
     assert.match(c.texto(), /2 de 2 agentes completaram/);
     assert.equal(process.exitCode, undefined);
+  });
+});
+
+/**
+ * Pendência D do fechamento: chave desconhecida em `policy` no config.json
+ * GLOBAL impede o daemon de subir (intencional, R09-12). O `hub doctor` tem
+ * de apontar arquivo e campo ANTES — e antes ele morria com stack trace no
+ * `loadConfig` do `main`. Tudo em HOME/AGENTS_HUB_HOME temporários: o
+ * ~/.agents-hub real nunca é lido nem tocado.
+ */
+describe('hub doctor × config.json global inválido', () => {
+  let raiz: string;
+  let hubHome: string;
+
+  before(() => {
+    raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-doctor-config-'));
+    hubHome = path.join(raiz, 'hub');
+    mkdirSync(hubHome, { recursive: true });
+  });
+
+  after(() => {
+    rmSync(raiz, { recursive: true, force: true });
+  });
+
+  const gravar = (conteudo: unknown): void =>
+    writeFileSync(
+      path.join(hubHome, 'config.json'),
+      typeof conteudo === 'string' ? conteudo : JSON.stringify(conteudo),
+    );
+  const env = (): NodeJS.ProcessEnv => ({ AGENTS_HUB_HOME: hubHome });
+
+  test('aponta arquivo e campo, sugere a chave certa e diz que o daemon não sobe', () => {
+    gravar({ policy: { maxDepht: 3, validation: { review: { agnt: 'x' } } } });
+    const d = diagnosticarConfig(env());
+    assert.equal(d.arquivo, path.join(hubHome, 'config.json'));
+    assert.deepEqual(d.problemas.map((p) => [p.campo, p.problema, p.dica]).sort(), [
+      ['policy.maxDepht', 'chave desconhecida', 'você quis dizer "policy.maxDepth"?'],
+      [
+        'policy.validation.review.agnt',
+        'chave desconhecida',
+        'você quis dizer "policy.validation.review.agent"?',
+      ],
+    ]);
+
+    const c = capturar();
+    assert.equal(doctorDaConfig({ log: c.log, env: env() }), false);
+    assert.match(c.texto(), /config\.json global inválido/);
+    assert.match(c.texto(), /o daemon NÃO sobe/);
+    assert.ok(c.texto().includes(path.join(hubHome, 'config.json')));
+    assert.match(c.texto(), /policy\.maxDepht: chave desconhecida/);
+  });
+
+  test('chave sem parecida lista as aceitas; erro fora de policy e JSON quebrado também são apontados', () => {
+    gravar({ port: 70000, policy: { commands: { permitir: [] } } });
+    const d = diagnosticarConfig(env());
+    const porCampo = new Map(d.problemas.map((p) => [p.campo, p]));
+    assert.equal(
+      porCampo.get('policy.commands.permitir')?.dica,
+      'chaves aceitas em policy.commands: allow, deny',
+    );
+    assert.match(porCampo.get('port')?.problema ?? '', /65535/);
+
+    gravar('{ "policy": { "maxDepth": 3, } }');
+    const quebrado = diagnosticarConfig(env());
+    assert.equal(quebrado.problemas[0]?.campo, '(arquivo)');
+    assert.match(quebrado.problemas[0]?.problema ?? '', /não é JSON válido/);
+  });
+
+  test('config válida (ou ausente) passa com ✓', () => {
+    gravar({ policy: { maxDepth: 2 } });
+    const c = capturar();
+    assert.equal(doctorDaConfig({ log: c.log, env: env() }), true);
+    assert.match(c.texto(), /✓ config\.json/);
+  });
+
+  test('`hub doctor` de verdade: explica e sai 1, sem stack trace e sem falar com daemon', async () => {
+    gravar({ policy: { maxDepht: 3 } });
+    const casa = path.join(raiz, 'casa');
+    mkdirSync(casa, { recursive: true });
+    const limpo: NodeJS.ProcessEnv = { ...process.env };
+    for (const k of Object.keys(limpo)) {
+      if (/^(AGENTS_HUB_|NODE_OPTIONS$)/.test(k)) delete limpo[k];
+    }
+    const r = spawnSync(
+      process.execPath,
+      ['--experimental-sqlite', fileURLToPath(new URL('./main.js', import.meta.url)), 'doctor'],
+      {
+        env: {
+          ...limpo,
+          HOME: casa,
+          USERPROFILE: casa,
+          AGENTS_HUB_HOME: hubHome,
+          // Porta livre e sem autostart: se o doctor tentasse o daemon, falharia
+          // aqui — nunca na 4747 do usuário.
+          AGENTS_HUB_PORT: String(await portaLivre()),
+          AGENTS_HUB_NO_AUTOSTART: '1',
+          NO_COLOR: '1',
+        },
+        encoding: 'utf8',
+        timeout: 60_000,
+      },
+    );
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stdout, /policy\.maxDepht: chave desconhecida/);
+    assert.match(r.stdout, /você quis dizer "policy\.maxDepth"\?/);
+    assert.doesNotMatch(r.stderr, /at loadConfig|HubError:/);
+    assert.doesNotMatch(r.stdout, /checando agentes/);
   });
 });

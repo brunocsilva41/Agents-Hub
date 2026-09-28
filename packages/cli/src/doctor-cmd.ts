@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import type { AgentDiscovery } from '@agents-hub/core';
+import { isHubError, PartialPolicyDocumentSchema, type AgentDiscovery } from '@agents-hub/core';
+import { loadConfig } from '@agents-hub/daemon';
 import type { AgentSummary, HubClient, ProbeSummary } from './client.js';
 import { avisoDeTimeoutDoHook, HOOK_TARGETS, lerConfig } from './hooks-install.js';
 import { bold, cyan, dim, green, red, stateBadge, yellow } from './render.js';
@@ -144,6 +145,172 @@ async function descobrir(client: HubClient, refresh: boolean): Promise<AgentDisc
   } catch {
     return [];
   }
+}
+
+export interface ProblemaDeConfig {
+  /** Caminho do campo com pontos (`policy.maxDepht`), ou `(arquivo)` para JSON quebrado. */
+  campo: string;
+  problema: string;
+  dica: string | null;
+}
+
+export interface DiagnosticoDeConfig {
+  arquivo: string;
+  /** Vazio quando o arquivo é válido (ou não existe: valem os padrões). */
+  problemas: ProblemaDeConfig[];
+}
+
+/** Distância de edição — só para sugerir a chave certa num erro de digitação. */
+function distancia(a: string, b: string): number {
+  let anterior = Array.from({ length: b.length + 1 }, (_v, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const atual = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const custo = a[i - 1]!.toLowerCase() === b[j - 1]!.toLowerCase() ? 0 : 1;
+      atual[j] = Math.min(atual[j - 1]! + 1, anterior[j]! + 1, anterior[j - 1]! + custo);
+    }
+    anterior = atual;
+  }
+  return anterior[b.length]!;
+}
+
+/**
+ * Chaves que o schema da política aceita em `caminho` (relativo a `policy`).
+ * Anda pelo schema do zod por duck typing (`shape`, `unwrap`, `innerType`)
+ * porque a CLI não depende do zod diretamente; o schema é a fonte da verdade
+ * e o `DEFAULT_POLICY` não serve, porque omite os campos opcionais.
+ */
+function chavesAceitas(caminho: readonly (string | number)[]): string[] {
+  const desembrulhar = (no: unknown): unknown => {
+    for (;;) {
+      const s = no as { unwrap?: () => unknown; innerType?: () => unknown } | null | undefined;
+      if (typeof s?.unwrap === 'function') no = s.unwrap();
+      else if (typeof s?.innerType === 'function') no = s.innerType();
+      else return no;
+    }
+  };
+  const forma = (no: unknown): Record<string, unknown> | undefined =>
+    (desembrulhar(no) as { shape?: Record<string, unknown> } | null | undefined)?.shape;
+  let no: unknown = PartialPolicyDocumentSchema;
+  for (const parte of caminho) no = forma(no)?.[String(parte)];
+  return Object.keys(forma(no) ?? {});
+}
+
+/** Traduz o erro de validação em campo + problema + como corrigir. */
+function problemasDaConfig(arquivo: string, issuesDoDaemon: unknown): ProblemaDeConfig[] {
+  let bruto: unknown;
+  try {
+    bruto = JSON.parse(readFileSync(arquivo, 'utf8').replace(/^\uFEFF/, ''));
+  } catch (err) {
+    return [
+      {
+        campo: '(arquivo)',
+        problema: `não é JSON válido — ${(err as Error).message}`,
+        dica: 'corrija a sintaxe (vírgula sobrando, aspas, chave sem fechar) e rode hub doctor de novo',
+      },
+    ];
+  }
+
+  const problemas: ProblemaDeConfig[] = [];
+  const policy = (bruto as { policy?: unknown } | null)?.policy;
+  if (policy !== undefined) {
+    // Revalida `policy` aqui só para ter os issues ESTRUTURADOS (caminho e
+    // chaves), que o daemon achata em texto no HubError.
+    const r = PartialPolicyDocumentSchema.safeParse(policy);
+    for (const issue of r.success ? [] : r.error.issues) {
+      const base = ['policy', ...issue.path.map(String)];
+      if (issue.code !== 'unrecognized_keys') {
+        problemas.push({ campo: base.join('.'), problema: issue.message, dica: null });
+        continue;
+      }
+      const aceitas = chavesAceitas(issue.path);
+      for (const chave of issue.keys) {
+        const parecida = aceitas
+          .map((c) => ({ c, d: distancia(chave, c) }))
+          .filter(({ d }) => d <= 2)
+          .sort((a, b) => a.d - b.d)[0]?.c;
+        problemas.push({
+          campo: [...base, chave].join('.'),
+          problema: 'chave desconhecida',
+          dica: parecida
+            ? `você quis dizer "${[...base, parecida].join('.')}"?`
+            : `chaves aceitas em ${base.join('.')}: ${aceitas.join(', ')}`,
+        });
+      }
+    }
+  }
+
+  // O resto (porta fora da faixa, caminho vazio...) vem pronto do daemon,
+  // como "campo: mensagem"; `policy` já foi detalhado acima.
+  const issues = Array.isArray(issuesDoDaemon) ? issuesDoDaemon : [];
+  for (const linha of issues) {
+    if (typeof linha !== 'string' || /^policy(\.|:)/.test(linha)) continue;
+    const corte = linha.indexOf(': ');
+    problemas.push({
+      campo: corte > 0 ? linha.slice(0, corte) : '(raiz)',
+      problema: corte > 0 ? linha.slice(corte + 2) : linha,
+      dica: null,
+    });
+  }
+  return problemas;
+}
+
+/**
+ * Valida o `config.json` global do Hub do jeito que o daemon vai validar ao
+ * subir (`loadConfig`), sem falar com o daemon.
+ *
+ * Existe porque, desde R09-12, chave desconhecida em `policy` impede o daemon
+ * de subir — de propósito: política é segurança, e um `maxDepht` digitado
+ * errado não pode virar o padrão em silêncio. O custo era o usuário descobrir
+ * isso só no crash do daemon (ou num stack trace do próprio `hub doctor`, que
+ * também chamava `loadConfig` sem tratar). Outros erros (variável de ambiente
+ * malformada, por exemplo) seguem lançando: não são do arquivo.
+ */
+export function diagnosticarConfig(env: NodeJS.ProcessEnv = process.env): DiagnosticoDeConfig {
+  try {
+    const config = loadConfig({}, env);
+    return { arquivo: path.join(config.home, 'config.json'), problemas: [] };
+  } catch (err) {
+    if (!isHubError(err) || err.code !== 'HUB_CONFIG_INVALID') throw err;
+    const arquivo = typeof err.details['path'] === 'string' ? err.details['path'] : 'config.json';
+    const problemas = problemasDaConfig(arquivo, err.details['issues']);
+    // Nunca devolver "inválido" sem dizer o quê: se a tradução não achou
+    // nada, a mensagem do daemon vai inteira.
+    if (problemas.length === 0)
+      problemas.push({ campo: '(arquivo)', problema: err.message, dica: null });
+    return { arquivo, problemas };
+  }
+}
+
+/**
+ * Primeira seção do `hub doctor`. Devolve `false` com a config inválida: aí
+ * o doctor para, porque o daemon não subiria para responder o resto.
+ */
+export function doctorDaConfig(o: { log?: Log; env?: NodeJS.ProcessEnv } = {}): boolean {
+  const log = o.log ?? ((l: string) => console.log(l));
+  const d = diagnosticarConfig(o.env);
+  if (d.problemas.length === 0) {
+    log(
+      `${green('✓')} ${bold('config.json')} ${dim(existsSync(d.arquivo) ? d.arquivo : `${d.arquivo} (ausente: valem os padrões)`)}`,
+    );
+    return true;
+  }
+  log(
+    `${red('✗')} ${bold('config.json global inválido')} ${red('— o daemon NÃO sobe com este arquivo')}`,
+  );
+  log(`   ${dim(d.arquivo)}`);
+  for (const p of d.problemas) {
+    log(`   ${red(p.campo)}: ${p.problema}`);
+    if (p.dica) log(`     ${dim(p.dica)}`);
+  }
+  log(
+    dim(
+      `${NEWLINE}"policy" é validada campo a campo: um limite digitado errado não pode virar o padrão em silêncio. ` +
+        'Corrija ou remova o campo e rode hub doctor de novo. Um daemon que já está no ar segue com a config ' +
+        'que leu ao subir; o próximo start/restart falharia.',
+    ),
+  );
+  return false;
 }
 
 export interface OpcoesDeDoctor {
