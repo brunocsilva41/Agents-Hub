@@ -39,8 +39,9 @@ jobs:
   # Windows é a plataforma onde este projeto foi desenvolvido e validado contra
   # os binários reais dos agentes, e onde moram as partes que mais dependem do
   # sistema (junction em vez de symlink, `taskkill` para matar árvore de
-  # processo, quoting de linha de comando do `cmd.exe`). É por isso que ele é
-  # o job bloqueante, e por isso as duas versões de Node rodam em paralelo,
+  # processo, quoting de linha de comando do `cmd.exe`). É por isso que é aqui
+  # que as duas versões de Node declaradas rodam (o Linux, abaixo, roda só a
+  # 24), em paralelo,
   # sem `fail-fast`: uma quebrar não deve esconder o resultado da outra.
   verificar:
     name: build + testes (Windows, Node ${{ matrix.node }})
@@ -98,30 +99,76 @@ jobs:
             exit 1
           fi
 
-  # ------------------------------------------------------- informativo, ainda
-  # O Hub nunca foi executado no Linux. Este job existe para descobrir o que
-  # falta, não para bloquear quem trabalha — por isso `continue-on-error` e
-  # por isso ele NÃO entra na lista de checks que `portao-de-qualidade` exige.
-  #
-  # Ele deixa de ser informativo no dia em que passar de forma consistente:
-  # aí `continue-on-error` sai daqui, ele entra em `needs` do portão, e o
-  # Linux vira plataforma suportada de verdade. Marcar como suportado antes
-  # disso seria promessa sem lastro.
-  explorar-linux:
-    name: build + testes (Linux, informativo)
+  # ------------------------------------------------------------ portão Linux
+  # Até 2026-09-28 este job era informativo (`continue-on-error`): o Hub nunca
+  # tinha rodado no Linux e ninguém sabia o que faltava. A primeira execução
+  # completa (container node:24-bookworm) achou três bugs REAIS, não de teste:
+  # `killProcessTree` matava só a raiz (neto `detached` sobrevivia),
+  # `imagemDoProcesso` nunca reconhecia um órfão (a reconciliação não matava
+  # nada fora do Windows) e um consumidor travado com o stdout pausado deixava
+  # a run pendurada para sempre. Corrigidos, a suíte passa inteira — e a partir
+  # daí um job que não bloqueia só serve para acumular regressão em silêncio.
+  # Por isso agora ele entra em `needs` do portão como qualquer outro.
+  verificar-linux:
+    name: build + testes (Linux, Node 24)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
+      - name: Instalar dependências
+        run: npm ci
+      - name: Compilar pacotes e Web UI
+        run: npm run build
+      - name: Testes
+        run: npm test
 
-  # --------------------------------------------------- informativo, de novo
+      # R08-12: o smoke do MCP fala JSON-RPC de verdade com `packages/mcp`, que
+      # por sua vez fala HTTP com um daemon — o único teste que atravessa as
+      # três peças como um agente hospedeiro (Claude Code, Codex, Cursor) faz.
+      # Roda contra um daemon ISOLADO: HOME próprio em `runner.temp` e porta
+      # 4799, nunca a 4747 do dia a dia. Só leitura (sem `--delegate`): nenhuma
+      # chamada a modelo, custo zero.
+      - name: Smoke do MCP contra daemon isolado
+        env:
+          AGENTS_HUB_HOME: ${{ runner.temp }}/hub-home
+          AGENTS_HUB_PORT: '4799'
+          AGENTS_HUB_URL: http://127.0.0.1:4799
+        run: |
+          log="$RUNNER_TEMP/daemon.log"
+          node --experimental-sqlite packages/daemon/dist/main.js > "$log" 2>&1 &
+          daemon_pid=$!
+          # Encerra só o daemon que este passo criou, pelo PID, aconteça o que
+          # acontecer com o smoke.
+          trap 'kill "$daemon_pid" 2>/dev/null || true' EXIT
+          falhar() { echo "::error::$1"; cat "$log"; exit 1; }
+
+          for _ in $(seq 1 60); do
+            curl -fsS "$AGENTS_HUB_URL/health" > "$RUNNER_TEMP/health.json" 2>/dev/null && break
+            kill -0 "$daemon_pid" 2>/dev/null || falhar "o daemon morreu na subida"
+            sleep 1
+          done
+          [ -s "$RUNNER_TEMP/health.json" ] || falhar "o daemon não respondeu /health em 60s"
+          # Prova de isolamento: o daemon que respondeu é o que usa o HOME
+          # temporário, não um que já estivesse de pé na máquina.
+          home_daemon="$(node -p 'require(process.argv[1]).home' "$RUNNER_TEMP/health.json")"
+          [ "$home_daemon" = "$AGENTS_HUB_HOME" ] \
+            || falhar "o daemon em $AGENTS_HUB_URL usa home '$home_daemon', não o isolado"
+
+          python3 scripts/mcp-smoke.py || falhar "smoke do MCP falhou"
+
+      - name: Checkout continua limpo depois do build, dos testes e do smoke
+        run: |
+          sujeira="$(git status --porcelain)"
+          if [ -n "$sujeira" ]; then
+            echo "::error::build/test/smoke alterou arquivos rastreados pelo git"
+            echo "$sujeira"
+            exit 1
+          fi
+
+  # ------------------------------------------------------------ informativo
   # Dependência transitiva com CVE conhecido é dívida que se acumula em
   # silêncio se ninguém olhar. Não bloqueia: subir a severidade para
   # bloqueante exige decidir uma política (que CVE aceita esperar, qual não)
@@ -149,20 +196,24 @@ jobs:
   # lembrar de reconfigurar `Settings > Branches`.
   #
   # Este job resolve isso: é o ÚNICO check que a proteção de branch precisa
-  # exigir. Ele espera a matriz inteira (`needs: verificar`, que no GitHub
-  # Actions significa TODAS as combinações, não uma) e falha se qualquer uma
-  # falhou — `explorar-linux` e `auditoria-dependencias` ficam de fora de
-  # propósito, porque são informativos, não bloqueantes.
+  # exigir. Ele espera a matriz inteira do Windows (`needs: verificar`, que no
+  # GitHub Actions significa TODAS as combinações, não uma) e o job Linux, e
+  # falha se qualquer um falhou — só `auditoria-dependencias` fica de fora de
+  # propósito, porque é informativo, não bloqueante.
   portao-de-qualidade:
     name: portão de qualidade
     if: always()
-    needs: [verificar]
+    needs: [verificar, verificar-linux]
     runs-on: ubuntu-latest
     steps:
-      - name: Falhar se alguma combinação de "verificar" falhou
+      - name: Falhar se Windows (qualquer Node) ou Linux falhou
         run: |
           if [ "${{ needs.verificar.result }}" != "success" ]; then
-            echo "::error::build+testes falhou em pelo menos uma combinação de Node — ver o job 'verificar' acima"
+            echo "::error::build+testes falhou em pelo menos uma combinação de Node no Windows — ver o job 'verificar' acima"
             exit 1
           fi
-          echo "todas as combinações de build+testes passaram"
+          if [ "${{ needs.verificar-linux.result }}" != "success" ]; then
+            echo "::error::build+testes ou smoke do MCP falhou no Linux — ver o job 'verificar-linux' acima"
+            exit 1
+          fi
+          echo "Windows (todas as combinações de Node) e Linux passaram"
