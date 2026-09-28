@@ -73,7 +73,32 @@ export function actionsOfToolCall(call: ToolCall, workdir: string): GuardedActio
     return url ? [{ kind: 'network', url }] : [];
   }
 
+  // R05-05: ferramenta de servidor MCP é desconhecida por definição (cada
+  // servidor inventa as suas), então segue a regra acima — sem ação, a
+  // permissão do agente decide — EXCETO quando o input carrega um caminho de
+  // segredo: `mcp__filesystem__read_file {path: ~/.ssh/id_rsa}` é o `cat` do
+  // mesmo arquivo por outra porta. Só valor com cara de caminho (sem espaço
+  // nem quebra de linha) conta: texto livre que MENCIONA `.env` não é leitura.
+  if (nome.startsWith('mcp__')) {
+    return caminhosDeSegredo(input).map((p) => ({ kind: 'file.read', path: path.resolve(workdir, p) }));
+  }
+
   return [];
+}
+
+/** Valores do input (1º nível e listas) que parecem caminho e casam segredo. */
+function caminhosDeSegredo(input: Record<string, unknown>): string[] {
+  const valores = Object.values(input).flatMap((v): unknown[] =>
+    Array.isArray(v) ? (v as unknown[]) : [v],
+  );
+  return valores.filter(
+    (v): v is string =>
+      typeof v === 'string' &&
+      v.length > 0 &&
+      v.length <= 1024 &&
+      !/\s/.test(v) &&
+      matchSecretPath(v) !== null,
+  );
 }
 
 const FERRAMENTAS_DE_LEITURA = new Set(['read', 'glob', 'grep']);
