@@ -98,22 +98,22 @@ Como a contagem foi feita:
 | R03-03 | ALTO | Configurações: falha ao carregar projeto mantém config do anterior e permite gravá-la | 6.6 | [x] |
 | R03-04 | ALTO | Topbar sem regra responsiva: abaixo de ~1100 px ações inalcançáveis | 6.1 | [x] |
 | R03-05 | MED | Pausar torna a sessão impossível de encerrar/interromper/transferir | 6.4 | [x] |
-| R03-06 | MED | "ver a sessão" (Aprovações) não troca para a aba Timeline | 6.9 | [x] |
+| R03-06 | MED | "ver a sessão" (Aprovações) não troca para a aba Timeline | 6.9 | [ ] REABERTO (auditoria): correção sem teste (nada clica em "ver a sessão") |
 | R03-07 | MED | Toasts de sucesso enganosos (interromper sem turno, delegação retida) | 6.9 | [x] |
 | R03-08 | MED | Mensagem enviada pelo usuário nunca aparece na timeline | 6.3 | [x] |
 | R03-09 | MED | Auto-scroll da timeline para depois de 400 eventos | 6.3 | [x] |
 | R03-10 | MED | Falha ao buscar eventos nunca é repetida (mensagem promete retry) | 6.3 | [x] |
-| R03-11 | MED | "Nova Sessão" pré-seleciona o 1º projeto; perde dados; agente não instalado | 6.9 | [x] |
+| R03-11 | MED | "Nova Sessão" pré-seleciona o 1º projeto; perde dados; agente não instalado | 6.9 | [ ] REABERTO parcial (auditoria): "+ Registrar nova pasta" descarta o formulário; agente não instalado aceito; orçamento sem faixa; sem teste |
 | R03-12 | MED | ProjectModal: falha parcial não atualiza lista e "tentar de novo" repete trabalho | — | [x] ProjectModal idempotente (f99810f) |
 | R03-13 | MED | Modais sem Esc, sem foco preso, sem nome; clique no fundo descarta formulário | 6.7 | [x] |
 | R03-14 | MED | Gavetas podem abrir juntas e se sobrepor, focáveis fechadas, cobrem aprovações | 6.7 | [x] |
-| R03-15 | MED | Overflow/quebra de layout em <900 px e <600 px (só 2 breakpoints) | 6.1 | [x] |
+| R03-15 | MED | Overflow/quebra de layout em <900 px e <600 px (só 2 breakpoints) | 6.1 | [ ] REABERTO parcial (auditoria): .swarm-grid/.metrics-grid/.disc-dl seguem estourando em 375 px |
 | R03-16 | MED | Estados vazios/erro ausentes ou enganosos | — | [x] estados em todas as telas + e2e (f99810f) |
 | R03-17 | MED | Aba "Grafo DAG" sem arestas, sem teclado e ignora filtro de projeto | 6.9 | [x] |
 | R03-18 | MED | Vite dev: `/discovery` fora do proxy; aba "Agentes detectados" quebra | 6.11 | [x] |
 | R03-19 | MED | Configurações: edições somem sem aviso; "Modelos locais" com controles fantasma | 6.5 | [x] |
 | R03-20 | MED | Cobertura do painel vs. sistema: faltam superfícies (seção F, 16 itens) | 6.12 | [x] |
-| R03-21 | BAIXO | Abas com ARIA inválido e controles sem nome acessível | — | [x] ARIA/nomes (9979203) |
+| R03-21 | BAIXO | Abas com ARIA inválido e controles sem nome acessível | — | [ ] REABERTO parcial (auditoria): cabeçalho Memória & Contexto sem role/tabIndex; role=tab sem tabpanel; sem teste ARIA  |
 | R03-22 | BAIXO | Contraste de `--text-faint` e ausência de `prefers-reduced-motion` | 6.8 | [x] |
 | R03-23 | BAIXO | Fontes via Google Fonts (`@import`) em painel local | 6.8 | [x] |
 | R03-24 | BAIXO | Fluxo selecionado na lista não pode ser recolhido | — | [x] fluxo recolhível |
@@ -137,9 +137,9 @@ Como a contagem foi feita:
 | R04-09 | MED | Fan-out: cada evento refaz 4 GETs duas vezes + `/graph` por fluxo | 6.10 | [x] |
 | R04-10 | BAIXO | Config salva sem `policy:` gera aviso falso de "configuração inválida" | 6.6 | [x] |
 | R04-11 | BAIXO | "Interromper" em agente one-shot marca a sessão como FALHOU | 6.4 | [x] |
-| R04-12 | BAIXO | "Encerrar" destrutivo, de um clique, sem confirmação | 6.4 | [x] |
+| R04-12 | BAIXO | "Encerrar" destrutivo, de um clique, sem confirmação | 6.4 | [ ] REABERTO (auditoria): confirmação existe, sem teste |
 | R04-13 | BAIXO | Toasts de erro nunca somem e se empilham cobrindo painel e "Enviar" | 6.9 | [x] |
-| R04-14 | BAIXO | Modal "Nova Sessão": rodapé sem sticky e selects truncados | 6.7 | [x] |
+| R04-14 | BAIXO | Modal "Nova Sessão": rodapé sem sticky e selects truncados | 6.7 | [ ] REABERTO parcial (auditoria): selects continuam truncados em 580 px |
 | R04-15 | BAIXO | Mobile: gaveta sob o compositor, dica sobreposta, cabeçalho cortado, sem backdrop | 6.7 | [x] |
 | R04-16 | BAIXO | Rótulos em inglês cru, "Desconectado" errado, plural, sem tema claro | 6.2, 6.8 | [x] |
 
@@ -149,14 +149,14 @@ Como a contagem foi feita:
 |---|---|---|---|---|
 | R05-01 | ALTO | `validation.command` do config.yaml do repo executa com shell, fora do gate | 0.7 | [x] |
 | R05-02 | ALTO | Env do config.yaml do repo redireciona tráfego/credenciais (`*_BASE_URL`) | 1.9 | [x] |
-| R05-03 | ALTO | Qualquer processo local, inclusive o agente, aprova as próprias aprovações | 1.6 | [x] |
+| R05-03 | ALTO | Qualquer processo local, inclusive o agente, aprova as próprias aprovações | 1.6 | [ ] REABERTO (auditoria 2026-09-28): cookie de operador sai para qualquer GET / com Sec-Fetch forjado; falta camada contra loopback + teste negativo |
 | R05-04 | ALTO | Timeout do hook menor que a espera do gate: aprovação vira falha aberta | 1.3 | [x] |
 | R05-05 | ALTO | Política por prefixo: comando composto passa como allow list e vira exec livre | 1.1 | [x] |
 | R05-06 | MED | CSRF residual: `Origin: null` aceito e POST sem corpo dispensa content-type | 1.8 | [x] |
-| R05-07 | MED | `GET /discovery` e importação vazam segredos em `args` de MCP | 1.8 | [x] |
+| R05-07 | MED | `GET /discovery` e importação vazam segredos em `args` de MCP | 1.8 | [ ] REABERTO (auditoria): /discovery ok; a IMPORTAÇÃO ainda grava args crus (segredos) no .mcp.json do projeto |
 | R05-08 | MED | Rota com `%` malformado deixa a conexão pendurada | 1.8 | [x] |
 | R05-09 | BAIXO | JSON malformado devolve 500 INTERNAL, e corpo > 5 MB também | 1.8 | [x] |
-| R05-10 | BAIXO | Projetos/pastas aceitam qualquer caminho (sem existência nem raízes proibidas) | 1.8 | [x] |
+| R05-10 | BAIXO | Projetos/pastas aceitam qualquer caminho (sem existência nem raízes proibidas) | 1.8 | [ ] REABERTO (auditoria): sem recusa de raízes proibidas (C:\Windows, raiz de unidade, home inteira) |
 | R05-11 | BAIXO | Estático serve `index.html::$DATA` e `/health` expõe `home` | 1.8 | [x] |
 
 ## R06 — 06-daemon-nucleo.md
@@ -199,7 +199,7 @@ Como a contagem foi feita:
 | R07-14 | MED | Ids sem `encodeURIComponent` no client; budget/graph de id errado dão zeros/crash | 0.6 | [x] |
 | R07-15 | BAIXO | Negação/timeout no gate: agente recebe "a política proíbe esta ação" | 1.5 | [x] |
 | R07-16 | BAIXO | `hub interrupt`/`cancel`/`send` sempre dizem sucesso; no Windows interrupt mata | 2.2 | [x] |
-| R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [x] error com mensagem (6f231e2) |
+| R07-17 | BAIXO | Eventos `error` aparecem como `✗` vazio | — | [ ] REABERTO (auditoria): sem teste do fallback reason/exitCode — na Task do worker CLI  |
 | R07-18 | BAIXO | Horários exibidos em UTC sem rótulo | — | [x] hora local com fuso (f33a35f) |
 | R07-19 | BAIXO | Cada invocação carrega daemon/SQLite: ~0,6 s e ExperimentalWarning | 5.6 | [x] |
 | R07-20 | BAIXO | Help x implementação (sem `--help` por comando, `--version`, `--json`, `--`) | 5.6 | [x] |
@@ -207,7 +207,7 @@ Como a contagem foi feita:
 | R07-22 | BAIXO | `hub project env` mostra e ecoa valores com cara de segredo | — | [x] env mascarado (f33a35f) |
 | R07-23 | BAIXO | `hub mcp` usa `includes('agents-hub')` como critério de "registrado" | — | [x] detecção estruturada (f33a35f) |
 | R07-24 | BAIXO | Nome da worktree perde acentos | — | [x] transliteração (f33a35f) |
-| R07-25 | BAIXO | `hub hooks` lê só o settings.json real e mostra "não instalado" com JSON inválido | 0.4 | [x] |
+| R07-25 | BAIXO | `hub hooks` lê só o settings.json real e mostra "não instalado" com JSON inválido | 0.4 | [ ] REABERTO (auditoria): teste fraco (doesNotThrow) — na Task do worker CLI |
 
 ## R08 — 08-mcp-hooks.md
 
@@ -224,7 +224,7 @@ Como a contagem foi feita:
 | R08-09 | MED | Explicação de "negado por falta de resposta" descartada; `escalate` inválido no hook | 1.5 | [x] |
 | R08-10 | MED | Gate aplica política do Hub ao Claude "normal" do usuário por casamento de `cwd` | — | [x] gate só p/ sessão viva do Hub (4fff125) |
 | R08-11 | MED | Sem limite de tamanho em `hub_agent_call`; failover em cascata sem aviso | — | [x] fallback visível + erro do agente na tentativa (22beb13/226860e) |
-| R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [x] smoke MCP isolado com 16 tools (79d8ec2) |
+| R08-12 | MED | `scripts/mcp-smoke.py` sempre aponta para 4747 e valida só 4 das 16 tools | — | [ ] REABERTO (auditoria): smoke não roda no CI — na Task do worker Linux/CI  |
 | R08-13 | MED | Raízes adotadas ficam `running` para sempre se o MCP é morto sem fechar stdin | 2.8 | [x] |
 | R08-14 | MED | Sem escopo por fluxo: agente lê/cancela sessões de outros fluxos e projetos | — | [x] escopo por fluxo OUT_OF_FLOW (22beb13) |
 | R08-15 | BAIXO | `hub_workflow_run`: erro sem motivo e leitura de arquivo arbitrário com eco | — | [x] yaml só no projeto, sem eco (22beb13) |
@@ -241,7 +241,7 @@ Como a contagem foi feita:
 | R09-04 | MED | Padrões de "irreversível" e allow list com lacunas e falsos positivos | 1.1 | [x] |
 | R09-05 | MED | "Deny list" não nega: vira `irreversible` e a decisão padrão é `approve` | 1.2 | [x] |
 | R09-06 | MED | Não há backup/restauração do banco; copiar só o `.db` perde dados (WAL) | 5.6 | [x] |
-| R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [x] lotes de 2000 + índice parcial (494f026) |
+| R09-07 | MED | Compactação de `raw_json` sem lotes, passada vazia O(N), espaço não devolvido | — | [ ] REABERTO parcial (auditoria): espaço não devolvido (sem VACUUM) — na Task do worker daemon  |
 | R09-08 | MED | Consultas agregadas por sessão/árvore escalam mal e bloqueiam o processo | — | [x] colunas geradas de custo, 70→6 ms (3e6d2ec) |
 | R09-09 | MED | `mergePolicyLayer(clampToBase)` não trava budget/retries/timeouts/fallback | 0.7 | [x] |
 | R09-10 | MED | Política de arquivos: leitura nunca protegida; lista de escrita sensível incompleta | 1.2 | [x] |
@@ -265,7 +265,7 @@ Como a contagem foi feita:
 | R10-04 | ALTO | `resolveBin` corrompe caminhos com acento (saída do `where` lida como UTF-8) | 4.1 | [x] |
 | R10-05 | ALTO | Custo contado 2–3x (Claude, OpenClaude, Antigravity) | 3.1 | [x] |
 | R10-06 | ALTO | OpenCode: modo do Hub não restringe nada; agente padrão com `allow *` | 4.2 | [x] |
-| R10-07 | MED | `ctx.model` ignorado por 8 dos 9 agentes; providerID fixo no OpenCode | 4.3 | [x] |
+| R10-07 | MED | `ctx.model` ignorado por 8 dos 9 agentes; providerID fixo no OpenCode | 4.3 | [ ] REABERTO parcial (auditoria): providerID fixo 'opencode' no adapter HTTP; manifesto promete provider/model |
 | R10-08 | MED | Kimi 2.0.0: mapper do formato antigo; supervised pode travar; existe `--plan` | 4.4 | [x] |
 | R10-09 | MED | `resolveBin` cacheia `null` para sempre | 4.1 | [x] |
 | R10-10 | MED | Mapper `generic-json` (mimo, cursor) não extrai texto, sessão nem custo | 4.4 | [x] |
@@ -274,7 +274,7 @@ Como a contagem foi feita:
 | R10-13 | MED | Cursor: manifesto 100% não verificado e binário ausente | 4.5 | [x] |
 | R10-14 | BAIXO | OpenCode: `probe()` não devolve versão e afirma `authenticated:true` | — | [x] probe com --version, auth null (3fdc4a4) |
 | R10-15 | BAIXO | Manifesto do Copilot cita duas versões que não batem com a instalada | 4.5 | [x] |
-| R10-16 | BAIXO | Codex falha em diretório não-git (falta `--skip-git-repo-check`) | — | [x] --skip-git-repo-check (f88df96) |
+| R10-16 | BAIXO | Codex falha em diretório não-git (falta `--skip-git-repo-check`) | — | [ ] REABERTO (auditoria): correção só no manifesto, sem teste da flag |
 | R10-17 | BAIXO | Ruído `DEP0190` do Node; settings.json do Claude com conteúdo extra | 0.3 | [x] |
 
 ## R11 — 11-teste-real-clis.md
@@ -298,11 +298,11 @@ Como a contagem foi feita:
 | R12-01 | MED | Sem LICENSE e sem campo `license` nos package.json | 7.3 | [x] |
 | R12-02 | MED | Módulos relevantes sem teste (reaper, project-registry, hooks-install, client, web) | 7.1 | [x] |
 | R12-03 | MED | Não há medição nem gate de cobertura | 7.2 | [x] npm run coverage + job CI (ab3a0af) |
-| R12-04 | MED | Sem lint nem formatador | 7.2 | [ ] |
+| R12-04 | MED | Sem lint nem formatador | 7.2 | [x] ESLint (no-floating-promises) + Prettier + verify (merge 8f75671) |
 | R12-05 | MED | Job Linux informativo (continue-on-error); portão só exige Windows | 7.2 | [ ] |
 | R12-06 | BAIXO | `npm audit`: 1 vulnerabilidade moderada (qs), transitiva | 7.3 | [x] |
-| R12-07 | BAIXO | Dependências com patch/minor pendentes; majors adiante | — | [ ] |
-| R12-08 | BAIXO | Testes dependem de timers reais (risco latente de flakiness) | 7.3 | [x] |
+| R12-07 | BAIXO | Dependências com patch/minor pendentes; majors adiante | — | [x] patch/minor atualizados (67ff177, merge 8f75671) |
+| R12-08 | BAIXO | Testes dependem de timers reais (risco latente de flakiness) | 7.3 | [ ] REABERTO parcial (auditoria): esperas fixas seguem em ~37 arquivos de teste |
 | R12-09 | BAIXO | `verify` não roda typecheck da web separado; `typecheck` duplica o build | — | [x] verify já checa tipos da web (79d8ec2) |
 
 ## R13 — 13-orquestracao-e2e.md
@@ -310,7 +310,7 @@ Como a contagem foi feita:
 | ID | Sev | Título | Item do GOAL | Estado |
 |---|---|---|---|---|
 | R13-01 | ALTO | Workflow + fallback: passo reportado falho embora o substituto conclua | 2.9 | [x] |
-| R13-02 | ALTO | `hub start`/`hub watch` terminam em silêncio quando a tarefa sofre fallback | 5.3 | [x] |
+| R13-02 | ALTO | `hub start`/`hub watch` terminam em silêncio quando a tarefa sofre fallback | 5.3 | [ ] REABERTO (auditoria): teste do hub watch usa follow-task.ts, que a produção não importa; caminho real sem teste |
 | R13-03 | ALTO | Retry de CONCURRENCY_EXCEEDED do workflow nunca dispara via CLI (`instanceof`) | 2.9 | [x] |
 | R13-04 | ALTO | Workflow em worktree não entrega o código do passo anterior, só o resumo | 2.9 | [x] |
 | R13-05 | ALTO | Handoff nunca persiste o novo agente (`agent_id` fora do UPDATE) | 2.7 | [x] |
@@ -321,7 +321,7 @@ Como a contagem foi feita:
 | R13-10 | MED | Config de projeto sem `policy:` gera aviso falso de "configuração inválida" | 5.5 | [x] |
 | R13-11 | MED | Overrides de projeto (retries, fallback, watch, maxConcurrency) ignorados | 2.10 | [x] |
 | R13-12 | MED | `--mode autonomous` da CLI limitado em silêncio ao padrão do manifesto | 2.10 | [x] |
-| R13-13 | MED | `/api/tasks/:id/events` não segue o fallback, nunca fecha, ignora Last-Event-ID | 2.10 | [x] |
+| R13-13 | MED | `/api/tasks/:id/events` não segue o fallback, nunca fecha, ignora Last-Event-ID | 2.10 | [ ] REABERTO parcial (auditoria): Last-Event-ID segue ignorado (reconexão reenvia tudo) |
 | R13-14 | MED | Aprovar estouro de orçamento após turno concluído relança o agente | 2.10 | [x] |
 | R13-15 | MED | Orçamento em `seconds` não aplicado durante a run; mensagem cita só USD | 2.10 | [x] |
 | R13-16 | MED | Workflow bloqueado por aprovação não tem retomada | 2.9 | [x] |

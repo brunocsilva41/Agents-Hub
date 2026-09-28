@@ -21,8 +21,46 @@ Ao retomar: ver o que cada worktree já tem (git -C <wt> log main..HEAD; git -C 
 ## Passagem para o orquestrador Orca (2026-09-28)
 A pedido do usuário, a continuação passa para um chat orquestrador que usa a skill `orchestration` do Orca. O prompt autocontido está em docs/15-prompt-orquestrador-orca.md. Estado na passagem: main em 8f75671 (+ este commit), merge do lint SEM verify pós-merge confirmado (primeira tarefa do orquestrador). Faltam: R12-05 (job Linux bloqueante), Read no matcher do gate, pendências D do prompt, auditoria do inventário, Fase 9.
 
+## Execução do orquestrador (2026-09-28, run Orca run_81daa95a2983)
+- **A (prioridade zero) FEITO**: `npm ci && npm run verify` na main @ 9448acf → verde: 1578 testes,
+  1577 pass, 0 fail, 1 skip (POSIX), build+lint+format ok. O merge do lint está são.
+- Onda de auditoria (3 workers só-leitura) concluída — ver seção "Auditoria independente" acima.
+- Onda 2 (editores em worktree próprio, em andamento): B=Linux/CI bloqueante+smoke MCP no CI;
+  C=Read/Grep/Glob no matcher do gate (injetado e instalado) + latência medida; D1=daemon (WorkflowRunner
+  segue task, FOLDER_NOT_FOUND 404, teto p/ validação-revisão, SIGINT×shutdown idempotente, R09-07 vacuum);
+  D2=CLI (flake merge-cmd ECONNRESET com causa raiz, doctor detecta policy inválida do config.json global,
+  absorption.ts sem citar config.yaml, testes R07-17/R07-25); D3=web (aba Segurança segue projeto corrente)
+  + Copilot 1.0.88 tokens (corrigir ou rejeitar com evidência do JSONL).
+- Onda 3 (planejada, após merges da onda 2): R05-03 (gate contra loopback do daemon + teste negativo +
+  SECURITY.md), R05-07, R05-10, R13-02 (+ decidir destino do follow-task.ts), R13-13, R10-07, R10-16,
+  pacote web parcial (R03-06/R04-12/R03-11/R03-15/R03-21/R04-14), limpeza (R02-09 resíduos, R02-10
+  HEARTBEAT_MS cru, R05-05 tools mcp__*/Task sem classificação, R12-08 esperas fixas). Depois: Fase 9.
+
 ## Inventário
 Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL contou só grafias acentuadas) em [INVENTARIO.md](INVENTARIO.md), com ID R<nn>-<seq> e item do GOAL. Estado marcado a partir dos itens concluídos. Placar atual: CRÍT 3/3, ALTO 16/52, MÉD 11/104, BAIXO 7/66.
+
+## Auditoria independente do inventário (2026-09-28, orquestrador Orca)
+Três workers SÓ-DE-LEITURA conferiram, achado a achado, correção no código + teste que a cobre
+(relatórios completos no scratchpad da sessão do orquestrador; método e evidência arquivo:linha por item).
+Resultado: 186 CONFIRMADO, 36 NAO-SUSTENTADO, 3 itens `[ ]`. O coordenador revisou por amostragem
+(22 conferências diretas no código, 100% batendo, cobrindo evidências repetidas em ~30 linhas do inventário).
+Triagem do coordenador sobre os 36 não sustentados:
+- **REABERTOS no INVENTARIO (viram trabalho)**: R05-03 (ALTO — cookie de operador via Sec-Fetch forjado),
+  R05-07 (importação grava segredo cru no .mcp.json), R05-10 (raízes proibidas), R13-02 (teste do watch usa
+  módulo morto follow-task.ts), R13-13 (Last-Event-ID), R10-07 (providerID fixo OpenCode), R10-16 (sem teste
+  da flag do Codex), R07-17/R07-25 (na Task do worker CLI), R08-12 (na Task do worker Linux/CI), R09-07 (na
+  Task do worker daemon), R03-06/R04-12 (sem teste), R03-11/R03-15/R03-21/R04-14 (web parcial), R12-08 (esperas fixas).
+- **Mantidos [x] por decisão (correção documental: teste automatizado não se aplica a prosa)**: R01-06..R01-11,
+  R02-07, R02-08, R02-13, R02-14, R02-15, R12-01 (metadado de licença). Resíduos do R02-09 (run-tests.mjs
+  cita "29 arquivos"; cancel-in-progress na main) vão para a onda de limpeza.
+- **Decisões explícitas (MÉDIOs, regra 4 do GOAL)**: R06-15 — o item do GOAL era reconciliar a doc (8.1) e ela
+  foi reconciliada; a detecção de escrita fora do worktree fica como limitação documentada (docs/04:76-83,
+  SECURITY.md:314). R13-08 — pause não cascateia: decisão documentada em docs/01:90. R14-06 — min(8) do
+  objetivo mantido de propósito (a mensagem explica e dá exemplo). R03-20 — as superfícies 12–15 da seção F
+  (contexto por ref, busca/export de eventos na UI, eventos por fluxo, renomear sessão) ficam de fora do MVP:
+  todas têm equivalente na CLI (hub export/cost/watch); registrado aqui como decisão. R10-13 — Cursor segue
+  não verificado por falta do binário (autorizado pelo GOAL: cobrir só com agentes falsos e --help).
+- Marcados como resolvidos (faltava marcar): R12-04 e R12-07 (merge 8f75671).
 
 ## Log da execução
 - 2026-09-26 onda 1 disparada (agentes em worktree): 0.1 | 0.2+0.3 | 0.4+0.5 | 0.6 | 0.7 | 1.1+1.2+1.7 | 1.8. Onda 1 mesclada; verify 880/880.
