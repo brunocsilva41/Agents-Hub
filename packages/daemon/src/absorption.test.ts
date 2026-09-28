@@ -251,7 +251,7 @@ describe('ImportService', () => {
 
   const tudo = (r: ImportResult): string => JSON.stringify(r);
 
-  test('dryRun não escreve NADA: nem config.yaml (setContext), nem config MCP de outro agente', async () => {
+  test('dryRun não escreve NADA: nem o contexto do projeto no banco (setContext), nem config MCP de outro agente', async () => {
     const c = cenario(comServidores);
     const r = await c.svc.run(c.access, req());
     assert.equal(r.dryRun, true);
@@ -279,7 +279,7 @@ describe('ImportService', () => {
     assert.equal(c.getCtx().prompts?.['claude'], 'Sempre explique a decisão antes de aplicar.');
   });
 
-  test('instructions com credencial dentro NÃO são importadas (arquivo do projeto é versionado)', async () => {
+  test('instructions com credencial dentro NÃO são importadas (o destino é o banco do Hub, em texto puro)', async () => {
     const c = cenario((dir) => {
       const f = path.join(dir, 'AGENTS.md');
       writeFileSync(f, `use esta chave: ${SEGREDO_MODELO}`);
@@ -288,6 +288,10 @@ describe('ImportService', () => {
     const r = await c.svc.run(c.access, req({ kinds: ['instructions'], dryRun: false }));
     assert.equal(c.gravacoes.length, 0);
     assert.match(r.skipped[0]?.reason ?? '', /credencial/);
+    // Pendência D: a mensagem dizia que o destino era o config.yaml versionado;
+    // o destino real é o banco do Hub.
+    assert.match(r.skipped[0]?.reason ?? '', /banco do Hub/);
+    assert.doesNotMatch(r.skipped[0]?.reason ?? '', /config.yaml|versionad/);
     assert.ok(!tudo(r).includes(SEGREDO_MODELO));
   });
 
@@ -332,6 +336,10 @@ describe('ImportService', () => {
     const r = await c.svc.run(c.access, req({ kinds: ['env'], dryRun: false }));
     assert.equal(c.gravacoes.length, 0);
     assert.equal(r.skipped.length, 2);
+    for (const s of r.skipped) {
+      assert.match(s.reason, /credencial.*banco do Hub/);
+      assert.doesNotMatch(s.reason, /config.yaml|versionad/);
+    }
     const texto = tudo(r);
     assert.ok(!texto.includes(SEGREDO_MODELO));
     assert.ok(!texto.includes('senha-xyz'));
