@@ -59,12 +59,58 @@ A pedido do usuário, a continuação passa para um chat orquestrador que usa a 
     21/21 PASS; suíte no container node:24-bookworm contra a main integrada em validação.
   - Pendência do B para a onda 3: checagem POSIX de PID reciclado na reconciliação (depende de
     session-manager.ts, fora do escopo dele).
-- Onda 3 (em despacho): W3A segurança (R05-03 defesa em camadas + teste negativo + SECURITY.md,
-  R05-07 import sem segredo cru, R05-10 raízes proibidas, R05-05 tools mcp__*/Task), W3B daemon resto
-  (R13-13 Last-Event-ID, R02-10 HEARTBEAT_MS, PID reciclado POSIX), W3C cli/adapters (R13-02 watch
-  fallback real + destino do follow-task.ts, R10-07 providerID OpenCode, R10-16 teste da flag do
-  Codex), W3D web (R03-06/R03-11/R03-15/R03-21/R04-12/R04-14), W3E limpeza (R12-08 esperas fixas,
-  R02-09 resíduos). Depois: Fase 9.
+- Onda 3 (parcial, a pedido do usuário — encerrar e passar o bastão): W3A, W3C e W3D despachados,
+  entregues, revisados (diff + mutação reproduzida pelo coordenador) e MESCLADOS; W3B e W3E NÃO
+  foram despachados (ver "Passagem 2" abaixo).
+  - W3A segurança (b10bcb4..ddb257b): gate trata HTTP a loopback na porta REAL do daemon
+    (curl/wget/iwr/fetch inline/WebFetch) e `hub approve/deny/policy/trust/stop/hooks` rodados pelo
+    agente como leitura do token = irreversible em todo modo; allowDomains com localhost não libera o
+    Hub; importação MCP pula servidor com segredo (skipped, nunca grava em claro); raízes proibidas
+    como projeto (raiz de unidade, home, sistema, UNC admin, junction/8.3); mcp__* com caminho de
+    segredo vira leitura; SECURITY.md "processo local não é fronteira" + rejeição fundamentada do
+    bilhete de uso único. Mutação: 24 vermelhos sem alvoDoDaemon, 41/41 com. verify 1731.
+  - W3C cli/adapters (3f43d8d..480c8c0): watch×fallback testado pelo caminho real e follow-task.ts
+    REMOVIDO (código morto); OpenCode separa provider/model; teste exige --skip-git-repo-check.
+    Mutação: mutante que não segue a troca trava o watch; 2/2 com o código real. verify 1635.
+  - W3D web (48dd69e..3cdff02): Nova Sessão preserva o formulário ao registrar pasta, valida agente
+    instalado e teto 0.10–50 (aceita vírgula); e2e de "ver a sessão" e da confirmação do Encerrar;
+    ARIA (memória=botão, chips=radiogroup); 375px medido com cartões reais; selects sem truncar.
+    Mutação: 14 vermelhos sem a validação, 16/16 com. verify 1747; e2e 101/101.
+  - Correção do coordenador: bin.test não herda FORCE_COLOR (falha só ambiental).
+
+## Passagem 2 — para o próximo chat orquestrador (2026-09-28, fim desta sessão)
+Estado ao encerrar: main local com TODAS as entregas mescladas, verify verde no Windows
+(1747 testes, 0 falhas, 1 skip POSIX), e2e 101/101, smoke MCP isolado 21/21, worker-list do run
+run_81daa95a2983 vazio (todos liberados). Prompt autocontido de continuação em
+docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
+1. **Linux VERMELHO (prioridade zero)**: o job `verificar-linux` do ci.yml agora é BLOQUEANTE, e a
+   suíte no container node:24-bookworm contra a main de então (2 commits antes de W3A/W3C/W3D)
+   teve **7 falhas** — corrigir SEM enfraquecer teste antes de qualquer push. As 6 capturadas
+   (a 7ª não coube na janela; rodar de novo para listar):
+   - bin-resolver-lookup.test: "positivo: binário removido do disco é procurado de novo",
+     "negativo expira: agente instalado depois do boot é achado após o TTL",
+     "clearBinCache(bin) esquece só aquele binário" (usam caminhos estilo Windows no Linux);
+   - session-follow.test: "send após pause mostra a resposta NOVA" (estourou 15 s);
+   - config.test: "pacote instalado: a raiz é o próprio agents-hub/";
+   - event-flood-http.test: "GET /health responde em menos de 500 ms durante a rajada" (67 s no
+     container — investigar se é limite de recurso do container ou regressão real no Linux).
+   Receita do container: `git archive HEAD | docker run --rm -i --init node:24-bookworm bash -c
+   "mkdir /app && tar -x -C /app && cd /app && git init -q && git config user.email ci@local &&
+   git config user.name ci && git add -A -f && git commit -qm base && npm ci && npm run verify"`.
+2. W3B daemon: R13-13 (Last-Event-ID de /api/tasks/:id/events reaberto), R02-10 resíduo
+   (AGENTS_HUB_MCP_HEARTBEAT_MS com Number cru em packages/mcp/src/main.ts:43), PID reciclado
+   POSIX na reconciliação (resíduo apontado pelo worker Linux; depende de session-manager.ts).
+3. W3E limpeza: R12-08 reaberto (esperas fixas em ~37 arquivos de teste — logs-cmd.test.ts:73,
+   orquestracao.integration.test.ts:333, gate-por-sessao.test.ts:246, caller-wait.test.ts:142,
+   process-tree.test.ts:77 e afins), resíduos do R02-09 (scripts/run-tests.mjs ainda diz
+   "29 arquivos"; decidir cancel-in-progress na main do ci.yml).
+4. Alinhamento pequeno: OBJETIVO_MINIMO=6 no web (session-form.ts) vs min(8) do core/brief.ts —
+   alinhar para 8 para o formulário não aceitar o que o daemon recusa.
+5. Fase 9 completa (docs/12 §Fase 9 e docs/15 §2F): clone limpo + verify 3x sem flake (Windows E
+   Linux), demo, e2e, painel no navegador em 4 viewports com daemon isolado e build real, teste
+   real rodada 2 (orçamento da §4 do doc 15: gate do Claude com negar, retomada, Codex se houver
+   cota, OpenCode, Antigravity, Copilot), instalação limpa só pelo doc 14, STATUS/roadmap/doc 07
+   finais com antes/depois.
 
 ## Inventário
 Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL contou só grafias acentuadas) em [INVENTARIO.md](INVENTARIO.md), com ID R<nn>-<seq> e item do GOAL. Estado marcado a partir dos itens concluídos. Placar atual: CRÍT 3/3, ALTO 16/52, MÉD 11/104, BAIXO 7/66.
