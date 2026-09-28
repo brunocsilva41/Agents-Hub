@@ -51,6 +51,8 @@ export interface CommandPolicyView {
   classifyWrite(absPath: string): CommandVerdict;
   /** Classifica leitura num caminho ABSOLUTO (segredo = irreversible). */
   classifyRead(absPath: string): CommandVerdict;
+  /** Portas do daemon do Hub (R05-03); ausente = `DEFAULT_HUB_PORT`. Ver `alvoDoDaemon`. */
+  hubPorts?: readonly number[] | undefined;
 }
 
 const RANK: Record<RiskLevel, number> = {
@@ -570,6 +572,16 @@ function classifySpecific(
   if (irr) return v('irreversible', `comando com efeito irreversível (${irr.label})`);
 
   switch (name) {
+    case 'hub':
+    case 'agents-hub': {
+      const op = comandoDeOperador(args);
+      if (op)
+        return v(
+          'irreversible',
+          `comando de operador do Hub (hub ${op}) — a CLI usa o token de operador`,
+        );
+      break;
+    }
     case 'sudo':
     case 'doas':
     case 'gsudo':
@@ -1061,6 +1073,10 @@ function classifyInlineCode(
   for (const lit of literals) {
     const secret = matchSecretPath(lit);
     if (secret) return v('irreversible', `código inline (${name}) acessa segredo (${secret.label})`);
+    // `fetch('http://127.0.0.1:4747/')` é o mesmo `curl` ao daemon (R05-03).
+    if (alvoDoDaemon(lit, view.hubPorts)) {
+      return v('irreversible', `código inline (${name}) fala com o daemon do Hub (${lit})`);
+    }
   }
   if (PROCESS_API.test(code)) {
     for (const lit of literals) {
@@ -1497,6 +1513,13 @@ function classifyWriteCommand(
 function classifyNetwork(name: string, args: Arg[], view: CommandPolicyView): CommandVerdict {
   const hosts: string[] = [];
   let r: CommandVerdict = v('exec', `${name}`);
+  // R05-03: o daemon entrega o token de operador (cookie) a quem imitar um
+  // navegador, e aprova o que o token pedir. Falar HTTP com ele é, na prática,
+  // ler `operator-token` — vale antes da allow list de domínios, que existe
+  // para liberar servidores de dev em `localhost`, não o próprio Hub.
+  const daemon = args.find((a) => alvoDoDaemon(a.t, view.hubPorts));
+  if (daemon)
+    return v('irreversible', `${name} ao daemon do Hub (${daemon.t}) expõe o token de operador`);
   for (let k = 0; k < args.length; k++) {
     const a = args[k]!;
     const t = a.t;
@@ -1527,6 +1550,70 @@ function classifyNetwork(name: string, args: Arg[], view: CommandPolicyView): Co
   );
   if (blocked) return worstVerdict(r, v('escalate', `rede: domínio não liberado (${blocked})`));
   return worstVerdict(r, v('exec', `rede: domínio liberado (${hosts.join(', ')})`));
+}
+
+/** Porta padrão do daemon (`config.ts`), usada quando o contexto não traz a real. */
+export const DEFAULT_HUB_PORT = 4747;
+
+/**
+ * O texto aponta para o daemon do Hub nesta máquina? (R05-03)
+ *
+ * Critério, conservador de propósito no HOST e estreito na PORTA:
+ * - host loopback em qualquer grafia que o SO aceite: `localhost`,
+ *   `*.localhost`, `127.0.0.0/8` (o `URL` já normaliza `127.1`,
+ *   `0x7f000001`, `2130706433`), `0.0.0.0` (conecta no próprio host), `::1`,
+ *   `::` e `::ffff:127.x`;
+ * - porta efetiva (explícita ou a padrão do esquema) entre `hubPorts`
+ *   (padrão: 4747). A porta é o que separa o Hub de um servidor de dev do
+ *   projeto — travar TODO loopback faria `curl localhost:3000` pedir
+ *   aprovação em toda sessão, e a pessoa acabaria liberando no automático.
+ *
+ * Aceita URL com esquema ou `host:porta/caminho` sem esquema (como o `curl`
+ * aceita). O que não dá para reconhecer (`curl $URL`) já cai em `escalate`
+ * pela regra de rede.
+ */
+export function alvoDoDaemon(texto: string, hubPorts?: readonly number[]): boolean {
+  const t = texto.trim();
+  let candidato: string | null = null;
+  if (/^(https?|wss?):\/\//i.test(t)) candidato = t;
+  else if (/^(\[[0-9a-f:.]+\]|[\w.-]+):\d+(\/.*)?$/i.test(t)) candidato = `http://${t}`;
+  if (candidato === null) return false;
+  let url: URL;
+  try {
+    url = new URL(candidato);
+  } catch {
+    return false;
+  }
+  if (!hostLoopback(url.hostname.toLowerCase())) return false;
+  const seguro = url.protocol === 'https:' || url.protocol === 'wss:';
+  const porta = url.port !== '' ? Number(url.port) : seguro ? 443 : 80;
+  return (hubPorts ?? [DEFAULT_HUB_PORT]).includes(porta);
+}
+
+function hostLoopback(h: string): boolean {
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) || h === '0.0.0.0') return true;
+  // IPv6 sai entre colchetes do `URL`; `::ffff:127.0.0.1` vira `::ffff:7f00:1`.
+  return h === '[::1]' || h === '[::]' || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(h);
+}
+
+/**
+ * Subcomando da CLI do Hub que age COMO OPERADOR (R05-03). A CLI lê
+ * `operator-token` sozinha, então `hub approve` rodado pelo agente é
+ * autoaprovação que nunca passa pelo `Read` do arquivo. Afrouxar política,
+ * confiar no repo, derrubar o daemon e mexer no hook do gate entram pelo
+ * mesmo motivo: desligam a proteção que está julgando o comando. Consulta
+ * (`hub approvals`, `hub policy show`) segue a regra normal.
+ */
+function comandoDeOperador(args: Arg[]): string | null {
+  const pos = args.filter((a) => !isFlag(a)).map((a) => a.t.toLowerCase());
+  const [sub, acao] = pos;
+  if (sub === undefined) return null;
+  if (['approve', 'deny', 'stop', 'restart'].includes(sub)) return sub;
+  if (sub === 'policy' && acao !== undefined && acao !== 'show') return `policy ${acao}`;
+  if (sub === 'project' && acao === 'trust') return 'project trust';
+  if (sub === 'hooks' && acao !== undefined && acao !== 'status') return `hooks ${acao}`;
+  return null;
 }
 
 function hostOf(t: string): string | null {

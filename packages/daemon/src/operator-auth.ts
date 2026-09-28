@@ -198,7 +198,14 @@ export function operatorOf(req: IncomingMessage): OperatorIdentity | null {
  * outra página não recebe; um `curl` sem esses cabeçalhos também não. Não é
  * fronteira contra processo local (que forja cabeçalho), é só para o cookie
  * não sair em toda resposta estática — a fronteira contra processo local é o
- * arquivo só do usuário, e o gate que trata o arquivo como segredo.
+ * arquivo só do usuário, e o gate que trata o arquivo E a requisição HTTP ao
+ * daemon (`alvoDoDaemon`) como segredo (R05-03).
+ *
+ * Bilhete de uso único (`hub open` → `/?ticket=`) no lugar destes cabeçalhos
+ * foi avaliado e REJEITADO: tiraria o painel de quem digita o endereço, e não
+ * fecharia nada — o processo que conseguiria o bilhete (rodando a CLI ou um
+ * script fora do olhar do classificador) lê o próprio `operator-token` do
+ * mesmo jeito. Ver SECURITY.md.
  */
 export function shouldIssueOperatorCookie(req: IncomingMessage): boolean {
   if (req.method !== 'GET') return false;

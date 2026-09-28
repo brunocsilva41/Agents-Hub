@@ -25,9 +25,12 @@ import type { IncomingMessage } from 'node:http';
  *    formulário.
  *
  * Cliente fora do navegador (CLI, MCP server, curl) não manda `Origin` nem
- * `Sec-Fetch-Site` e passa. Isso é proposital: um processo local já roda como
- * você e não ganharia nada atacando o Hub — quem precisa ser barrado é a página
- * remota.
+ * `Sec-Fetch-Site` e passa. Isso é proposital: esta guarda barra a página
+ * remota, não processo local. Processo local do mesmo usuário NÃO é fronteira
+ * aqui (R05-03): ele forja qualquer cabeçalho. O que o separa das rotas de
+ * operador é o token (arquivo só do usuário) e, para o agente, o gate — que
+ * trata HTTP ao próprio daemon como leitura do token (`alvoDoDaemon`, no
+ * core). Ver SECURITY.md, "Processo local do mesmo usuário não é fronteira".
  */
 
 export interface GuardVerdict {
