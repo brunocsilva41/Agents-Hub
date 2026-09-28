@@ -171,3 +171,69 @@ test.describe('R04-12: confirmação do "Encerrar"', () => {
     await expect(confirmacao).toHaveCount(0);
   });
 });
+
+test.describe('R03-21: ARIA', () => {
+  test('cabeçalho "Memória & Contexto": alcançável pelo Tab, Enter e Espaço alternam, aria-expanded diz', async ({
+    page,
+  }) => {
+    await abrir(page);
+    await page.locator('.flow-head', { hasText: 'Refatorar' }).first().click();
+    const painel = page.locator('.col-right');
+    const cabecalho = painel.getByRole('button', { name: 'Memória & Contexto', exact: true });
+    // O emoji é decorativo: fora do nome acessível.
+    await expect(cabecalho).toHaveAccessibleName('Memória & Contexto');
+    await expect(cabecalho).toHaveAttribute('aria-expanded', 'true');
+    const corpo = painel.locator('.memory-body');
+    await expect(corpo).toBeVisible();
+    await expect(cabecalho).toHaveAttribute('aria-controls', (await corpo.getAttribute('id')) ?? '');
+
+    // Só teclado: do primeiro controle do painel, Tab até o cabeçalho.
+    await painel.getByRole('button').first().focus();
+    let chegou = false;
+    for (let i = 0; i < 40 && !chegou; i += 1) {
+      await page.keyboard.press('Tab');
+      chegou = await cabecalho.evaluate((el) => el === document.activeElement);
+    }
+    expect(chegou, 'o cabeçalho de memória precisa entrar na ordem do Tab').toBe(true);
+
+    await page.keyboard.press('Enter');
+    await expect(cabecalho).toHaveAttribute('aria-expanded', 'false');
+    await expect(corpo).toHaveCount(0);
+    await page.keyboard.press('Space');
+    await expect(cabecalho).toHaveAttribute('aria-expanded', 'true');
+    await expect(painel.locator('.memory-body')).toBeVisible();
+  });
+
+  test('chips de agente das Configurações: radiogroup com um só marcado e setas trocam', async ({
+    page,
+  }) => {
+    await abrir(page);
+    await acionarNaTopbar(page, /^Configurações/);
+    await page.getByRole('button', { name: /Prompts por agente/ }).click();
+    const grupo = page.getByRole('radiogroup', { name: 'Agente' });
+    await expect(grupo).toBeVisible();
+    const radios = grupo.getByRole('radio');
+    await expect(radios).toHaveCount(5);
+    await expect(grupo.getByRole('radio', { checked: true })).toHaveCount(1);
+    // Nenhuma "aba" órfã: todo role=tab na tela controla um tabpanel que existe.
+    const orfas = await page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll('[role="tab"]')).filter((t) => {
+          const alvo = t.getAttribute('aria-controls');
+          return !alvo || document.getElementById(alvo)?.getAttribute('role') !== 'tabpanel';
+        }).length,
+    );
+    expect(orfas).toBe(0);
+
+    const marcado = grupo.getByRole('radio', { checked: true });
+    const antes = await marcado.innerText();
+    await marcado.focus();
+    await page.keyboard.press('ArrowRight');
+    const depois = grupo.getByRole('radio', { checked: true });
+    await expect(depois).not.toHaveText(antes);
+    await expect(depois).toBeFocused();
+    // Só o marcado entra no Tab (tabindex itinerante).
+    await expect(grupo.locator('[role="radio"][tabindex="0"]')).toHaveCount(1);
+    await expect(page.getByLabel(/Instruções para/)).toBeVisible();
+  });
+});

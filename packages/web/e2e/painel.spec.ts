@@ -472,10 +472,10 @@ test.describe('Segurança e Configurações (1100px)', () => {
     await abrir(page);
     await acionarNaTopbar(page, /^Configurações/);
     await page.getByRole('button', { name: /Modelos locais/ }).click();
-    await page.getByRole('tab', { name: 'OpenCode' }).click();
+    await page.getByRole('radio', { name: 'OpenCode' }).click();
     await expect(page.locator('#modelo')).toBeVisible();
     await expect(page.locator('label[for="modelo"]')).toContainText('MODEL');
-    await page.getByRole('tab', { name: 'Cursor Agent' }).click();
+    await page.getByRole('radio', { name: 'Cursor Agent' }).click();
     await expect(page.locator('#modelo')).toHaveCount(0);
   });
 

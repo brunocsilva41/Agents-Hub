@@ -3464,6 +3464,22 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
+/* Cabeçalho recolhível da memória: um botão que se parece com o título. */
+button.memory-toggle {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+}
+
+button.memory-toggle:hover:not(:disabled) {
+  background: none;
+  border: none;
+}
+
 .memory-body {
   display: flex;
   flex-direction: column;
