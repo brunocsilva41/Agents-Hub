@@ -449,6 +449,25 @@ test.describe('Segurança e Configurações (1100px)', () => {
     await expect(page.locator('.sec-item')).toContainText('cli:bruno');
   });
 
+  test('Segurança abre no projeto filtrado a cada abertura, não só na primeira', async ({ page }) => {
+    await abrir(page);
+    await acionarNaTopbar(page, /^Telemetria/);
+    await page.getByLabel('Projeto').selectOption('prj_beta');
+    await abrirSeguranca(page);
+    await expect(page.getByLabel('Projeto')).toHaveValue('prj_beta');
+
+    // Reabrir com outro projeto filtrado acompanha (antes ficava no primeiro).
+    await acionarNaTopbar(page, /^Telemetria/);
+    await page.getByLabel('Projeto').selectOption('prj_alfa');
+    await abrirSeguranca(page);
+    await expect(page.getByLabel('Projeto')).toHaveValue('prj_alfa');
+
+    // E a escolha feita na Segurança vira o filtro das outras abas.
+    await page.getByLabel('Projeto').selectOption('prj_beta');
+    await acionarNaTopbar(page, /^Telemetria/);
+    await expect(page.getByLabel('Projeto')).toHaveValue('prj_beta');
+  });
+
   test('campo de modelo só para agente com model.supported', async ({ page }) => {
     await abrir(page);
     await acionarNaTopbar(page, /^Configurações/);

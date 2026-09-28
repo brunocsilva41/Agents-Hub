@@ -503,6 +503,8 @@ export function App() {
           <SecurityView
             agents={state.agents}
             projects={state.projects}
+            projectIdCorrente={selectedProjectId}
+            onProjectChange={setSelectedProjectId}
             sessions={state.sessions}
             onSujoChange={marcarSujoSeguranca}
             onSelectSession={(id) => {

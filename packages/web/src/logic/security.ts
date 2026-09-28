@@ -324,3 +324,34 @@ export function podeTrocarDeAba(
   if (!haEdicaoNaoSalva(sujos)) return true;
   return confirmar();
 }
+
+// ------------------------------------------------ projeto corrente
+
+/**
+ * Projeto que a aba Segurança mostra para o filtro de projeto do painel (o
+ * mesmo da Timeline, do DAG e da Telemetria; `'all'` = todos). Antes a aba
+ * escolhia `projects[0]` por conta própria e ignorava o filtro: quem filtrava
+ * o projeto B e abria Segurança editava a política do projeto A. Filtro em
+ * "todos" (ou num projeto que sumiu) cai no primeiro projeto, como antes; sem
+ * projeto carregado, só a camada global — e a aba segue quando a lista chega.
+ */
+export function projetoDaSeguranca(filtro: string, projetos: ReadonlyArray<{ id: string }>): string {
+  if (filtro !== 'all' && projetos.some((p) => p.id === filtro)) return filtro;
+  return projetos[0]?.id ?? '';
+}
+
+/**
+ * A aba segue o projeto corrente (`alvo`)? Com edição não salva na política,
+ * trocar de projeto descartaria o texto: pergunta antes, como a troca de aba
+ * (`podeTrocarDeAba`), e "não" mantém o projeto da edição.
+ */
+export function seguirProjetoCorrente(o: {
+  atual: string;
+  alvo: string;
+  sujo: boolean;
+  confirmar: () => boolean;
+}): string {
+  if (o.alvo === o.atual) return o.atual;
+  if (o.sujo && !o.confirmar()) return o.atual;
+  return o.alvo;
+}
