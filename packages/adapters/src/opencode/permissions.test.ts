@@ -199,6 +199,32 @@ describe('OpenCode: modo do Hub → agente com permissão real', () => {
     assert.ok(troca < prompt, 'a troca de agente tem de vir antes do prompt');
   });
 
+  // R10-07: o manifesto promete `provider/model`, mas o providerID ia fixo
+  // em 'opencode' — `-m zai-coding-plan/glm-4.6` virava um modelo inexistente.
+  for (const [pedido, esperado] of [
+    ['zai-coding-plan/glm-4.6', { providerID: 'zai-coding-plan', id: 'glm-4.6' }],
+    ['openrouter/anthropic/claude-x', { providerID: 'openrouter', id: 'anthropic/claude-x' }],
+    ['glm-4.6', { providerID: 'opencode', id: 'glm-4.6' }],
+  ] as const) {
+    test(`modelo "${pedido}" vai ao servidor como ${esperado.providerID} + ${esperado.id} (start e resume)`, async () => {
+      servidor.agentes = ['hub-semi'];
+      servidor.aposPrompt = (sessionID) => [{ type: 'session.idle', data: { sessionID } }];
+      const comModelo = { ...ctx('semi'), model: pedido };
+
+      servidor.requests.length = 0;
+      await drenar((await adapter.start(comModelo, 'oi')).events);
+      const criou = servidor.requests.find((r) => r.method === 'POST' && r.url === '/api/session');
+      assert.deepEqual((criou?.body as Record<string, unknown>)['model'], esperado);
+
+      servidor.requests.length = 0;
+      await drenar((await adapter.resume(comModelo, 'ses_falsa', 'de novo')).events);
+      const trocou = servidor.requests.find(
+        (r) => r.method === 'POST' && r.url === '/api/session/ses_falsa/model',
+      );
+      assert.deepEqual(trocou?.body, { model: esperado });
+    });
+  }
+
   test('pedido de permissão pendente é recusado na hora (não trava o turno) e não vira aprovação fantasma', async () => {
     servidor.agentes = ['build', 'plan'];
     servidor.requests.length = 0;
