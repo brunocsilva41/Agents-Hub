@@ -1,4 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -22,14 +24,21 @@ const execFileAsync = promisify(execFile);
  * tratada — por isso cai para `fallbackKill()` (ex.: `SIGKILL` direto no
  * processo, que só derruba o shim, mas é melhor que derrubar o daemon).
  *
+ * No POSIX não existe `taskkill /T`, e `fallbackKill()` sozinho repetia o
+ * bug original: matava só a raiz, e um neto `detached` (sessão própria, fora
+ * do grupo de processos da raiz) sobrevivia reparentado ao init — achado
+ * rodando a suíte no Linux pela primeira vez. Aqui a árvore é levantada pela
+ * relação PID→PPID ANTES de a raiz morrer (depois dela o elo some) e cada
+ * descendente leva `SIGKILL`.
+ *
  * @param pid PID do processo raiz (o shim, tipicamente).
- * @param fallbackKill Chamado quando `taskkill` não está disponível; deve
- *   matar o processo pelo mecanismo do Node (ex.: `child.kill('SIGKILL')`).
+ * @param fallbackKill Chamado quando `taskkill` não está disponível (e sempre
+ *   no POSIX, para a raiz); deve matar o processo pelo mecanismo do Node
+ *   (ex.: `child.kill('SIGKILL')`).
  */
 export function killProcessTree(pid: number, fallbackKill: () => void): Promise<void> {
   if (process.platform !== 'win32') {
-    fallbackKill();
-    return Promise.resolve();
+    return matarArvorePosix(pid, fallbackKill);
   }
 
   return new Promise((resolve) => {
@@ -56,6 +65,110 @@ export function killProcessTree(pid: number, fallbackKill: () => void): Promise<
   });
 }
 
+async function matarArvorePosix(pid: number, fallbackKill: () => void): Promise<void> {
+  // Levantada ANTES do kill da raiz: morto o pai, os filhos passam a ter o
+  // init como PPID e deixam de ser alcançáveis a partir de `pid`. Resta uma
+  // janela (a raiz pode spawnar entre a leitura e o kill) que só um
+  // `SIGSTOP` prévio fecharia — mas um `fallbackKill` com `SIGTERM` num
+  // processo parado fica pendente para sempre, o que é pior que a janela.
+  const descendentes = descendentesDe(pid, await paresPidPpid());
+  fallbackKill();
+  for (const alvo of descendentes) {
+    try {
+      process.kill(alvo, 'SIGKILL');
+    } catch {
+      // Já morreu sozinho entre a leitura da árvore e agora — é o que queríamos.
+    }
+  }
+
+  // `kill()` só ENVIA o sinal; a promessa desta função é devolver a árvore
+  // morta (quem chama libera o worktree logo em seguida). Espera cada PID
+  // sumir da tabela, com o mesmo teto de 5s do `taskkill` — um zumbi que
+  // ninguém colhe (container sem init) não pode prender quem espera.
+  const limite = Date.now() + 5_000;
+  let vivos = [pid, ...descendentes];
+  while (Date.now() < limite) {
+    vivos = vivos.filter(existe);
+    if (vivos.length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+function existe(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: existe, só não é nosso — continua contando como vivo.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Todos os descendentes de `raiz` (filhos, netos...), em largura. */
+function descendentesDe(raiz: number, pares: ReadonlyArray<[number, number]>): number[] {
+  const filhosPorPai = new Map<number, number[]>();
+  for (const [pid, ppid] of pares) {
+    const irmaos = filhosPorPai.get(ppid);
+    if (irmaos) irmaos.push(pid);
+    else filhosPorPai.set(ppid, [pid]);
+  }
+  const visitados = [raiz];
+  // `for...of` sobre array visita também o que for anexado durante a volta:
+  // é a própria fila da busca em largura.
+  for (const atual of visitados) {
+    for (const filho of filhosPorPai.get(atual) ?? []) {
+      // PID não se repete numa foto da tabela, mas o guarda evita laço
+      // infinito se o SO devolver algo inconsistente no meio da leitura.
+      if (!visitados.includes(filho)) visitados.push(filho);
+    }
+  }
+  return visitados.slice(1);
+}
+
+/**
+ * Foto da tabela de processos como pares [pid, ppid].
+ *
+ * No Linux lê `/proc` direto (não depende de `procps`, ausente em imagens de
+ * container enxutas); nos demais POSIX usa `ps`, que lá é parte do sistema
+ * base. Falha vira lista vazia: sem a foto, o melhor que dá é matar a raiz.
+ */
+async function paresPidPpid(): Promise<Array<[number, number]>> {
+  if (process.platform === 'linux') {
+    const pares: Array<[number, number]> = [];
+    let entradas: string[];
+    try {
+      entradas = await readdir('/proc');
+    } catch {
+      return [];
+    }
+    for (const nome of entradas) {
+      if (!/^\d+$/.test(nome)) continue;
+      try {
+        const stat = await readFile(`/proc/${nome}/stat`, 'utf8');
+        // O 2º campo (comm) vem entre parênteses e pode conter espaço e `)`;
+        // o PPID é o 2º campo depois do ÚLTIMO `)`.
+        const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+        if (Number.isInteger(ppid)) pares.push([Number(nome), ppid]);
+      } catch {
+        // Processo terminou entre o `readdir` e a leitura — fora da foto.
+      }
+    }
+    return pares;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=']);
+    return stdout
+      .split('\n')
+      .map((linha) => linha.trim().split(/\s+/).map(Number))
+      .filter((campos): campos is [number, number] =>
+        campos.length === 2 && campos.every((n) => Number.isInteger(n) && n > 0),
+      );
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Nome da imagem do processo vivo num PID, ou `null` se ele não existe mais.
  *
@@ -70,17 +183,7 @@ export function killProcessTree(pid: number, fallbackKill: () => void): Promise<
  * ciclo de vida de processo no SO), não porque algo do domínio mudou.
  */
 export async function imagemDoProcesso(pid: number): Promise<string | null> {
-  if (process.platform !== 'win32') {
-    try {
-      process.kill(pid, 0);
-      // POSIX não tem um equivalente de baixo custo ao `tasklist` aqui; a
-      // checagem de nome fica só para o Windows, que é a plataforma suportada
-      // hoje (ver decisão "Linux: informativo até provar" no roadmap).
-      return 'desconhecido';
-    } catch {
-      return null;
-    }
-  }
+  if (process.platform !== 'win32') return imagemDoProcessoPosix(pid);
 
   try {
     const { stdout } = await execFileAsync('tasklist', [
@@ -97,6 +200,39 @@ export async function imagemDoProcesso(pid: number): Promise<string | null> {
     const primeiroCampo = linha.split('","')[0]?.replace(/^"/, '') ?? '';
     return primeiroCampo.length > 0 ? primeiroCampo : null;
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Equivalente POSIX do `tasklist`: o nome do executável vivo no PID.
+ *
+ * Antes devolvia a constante `'desconhecido'` para todo PID vivo, o que fazia
+ * `imagemPareceEsperada` recusar sempre e a reconciliação NUNCA matar órfão
+ * fora do Windows — seguro, mas o órfão sobrevivia ao reinício do daemon
+ * (teste de reconciliação vermelho no Linux).
+ *
+ * No Linux vem do `argv[0]` em `/proc/<pid>/cmdline`, não de
+ * `/proc/<pid>/comm`: o Node renomeia a própria thread principal para
+ * `MainThread`, então `comm` de um `node` nunca diria `node`. Um zumbi tem
+ * `cmdline` vazio — já morreu, só não foi colhido — e conta como inexistente.
+ */
+async function imagemDoProcessoPosix(pid: number): Promise<string | null> {
+  if (process.platform === 'linux') {
+    try {
+      const argv0 = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0')[0] ?? '';
+      return argv0.length > 0 ? path.posix.basename(argv0) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'comm=']);
+    const comando = stdout.trim();
+    return comando.length > 0 ? path.posix.basename(comando) : null;
+  } catch {
+    // `ps -p` sai com código != 0 quando o PID não existe.
     return null;
   }
 }
@@ -144,9 +280,9 @@ export const TOLERANCIA_RELOGIO_MS = 5_000;
  */
 export async function horarioDeCriacaoDoProcesso(pid: number): Promise<Date | null> {
   if (process.platform !== 'win32') {
-    // Mesma limitação documentada em `imagemDoProcesso`: sem um equivalente
-    // barato ao `tasklist`/`Get-Process` no POSIX, a reconciliação segue sem
-    // cobertura de identidade (nome OU horário) fora do Windows.
+    // Fora do Windows a reconciliação confere só o NOME da imagem
+    // (`imagemDoProcessoPosix`); a checagem de horário de criação ainda não
+    // tem implementação POSIX — `session-manager.ts` só a consulta no win32.
     return null;
   }
 
