@@ -70,9 +70,22 @@ describe('bin.js — entrada do hub', () => {
   });
 
   test('`hub hook` responde sem daemon e sem aviso no stderr', () => {
-    const r = hub(['hook'], { AGENTS_HUB_PORT: '1' }, '{"tool_name":"Read","tool_input":{}}');
+    // `Bash`, não `Read`: leitura comum nem tenta o daemon (caminho rápido,
+    // teste abaixo), e aqui o que se prova é a ida ao daemon que não atende.
+    const r = hub(
+      ['hook'],
+      { AGENTS_HUB_PORT: '1' },
+      '{"tool_name":"Bash","tool_input":{"command":"ls"}}',
+    );
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /permissionDecision/);
+    assert.equal(r.stderr, '');
+  });
+
+  test('`hub hook` com leitura comum responde silêncio, sem config nem daemon', () => {
+    const r = hub(['hook'], { AGENTS_HUB_PORT: '1' }, '{"tool_name":"Read","tool_input":{}}');
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, '');
     assert.equal(r.stderr, '');
   });
 

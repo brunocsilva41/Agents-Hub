@@ -127,6 +127,22 @@ export function chamadaDeRisco(toolName: string, toolInput: unknown, cwd?: strin
 
 const ID_DE_SESSAO = /^ses_[a-z0-9]+$/i;
 
+/**
+ * Leitura que não toca segredo: sai no próprio hook, sem ida ao daemon — a
+ * política a liberaria de qualquer jeito, e é o caminho mais quente do agente.
+ * A resposta é SILÊNCIO nos dois dialetos (sem `allow`): o gate não tem nada a
+ * dizer, então não atropela a permissão do próprio agente — ler fora do
+ * projeto continua pedindo o que o agente já pedia antes de `Read` entrar no
+ * matcher. `hook-run.ts` consulta isto ANTES de carregar a config (que puxa o
+ * zod), para o caminho rápido não pagar esse import.
+ */
+export function leituraComumDoHook(entrada: HookInput): boolean {
+  const { tool_name: toolName, tool_input: toolInput } = entrada;
+  if (typeof toolName !== 'string' || toolName.length === 0) return false;
+  if (typeof toolInput !== 'object' || toolInput === null || Array.isArray(toolInput)) return false;
+  return leituraComum({ toolName, toolInput, cwd: entrada.cwd }, entrada.cwd ?? process.cwd());
+}
+
 export async function decideToolCall(
   entrada: HookInput,
   baseUrl: string,
@@ -138,20 +154,7 @@ export async function decideToolCall(
     return { saida: permitir('chamada sem nome de ferramenta', dialeto), codigo: 0 };
   }
 
-  // Leitura que não toca segredo nem vai ao daemon: a política a liberaria de
-  // qualquer jeito, e é o caminho mais quente do agente. A resposta é SILÊNCIO
-  // nos dois dialetos (sem `allow`): o gate não tem nada a dizer, então não
-  // atropela a permissão do próprio agente — ler fora do projeto continua
-  // pedindo o que o agente já pedia antes de `Read` entrar no matcher.
-  const toolInputBruto = entrada.tool_input;
-  if (
-    typeof toolInputBruto === 'object' &&
-    toolInputBruto !== null &&
-    !Array.isArray(toolInputBruto) &&
-    leituraComum({ toolName, toolInput: toolInputBruto, cwd: entrada.cwd }, entrada.cwd ?? process.cwd())
-  ) {
-    return { saida: '', codigo: 0 };
-  }
+  if (leituraComumDoHook(entrada)) return { saida: '', codigo: 0 };
 
   // Só conta como sessão do Hub se o id tiver o formato esperado: a validação
   // da borda recusa qualquer outra coisa, e aí a chamada inteira falharia.
