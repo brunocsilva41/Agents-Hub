@@ -53,6 +53,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
   #closed = false;
   /** Início da sequência atual de entregas síncronas (sem ceder o loop). */
   #fatiaDesde: number | null = null;
+  #consumed = 0;
 
   constructor(options: AsyncQueueOptions = {}) {
     this.#highWaterMark = options.highWaterMark ?? DEFAULT_HIGH_WATER_MARK;
@@ -66,6 +67,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
     if (waiter) {
       // Entregue direto a quem já esperava: nunca passou por `#items`, então
       // não pode empurrar a fila para cima do teto sozinho.
+      this.#consumed += 1;
       waiter({ value: item, done: false });
       return;
     }
@@ -94,6 +96,17 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
 
   get pending(): number {
     return this.#items.length;
+  }
+
+  /**
+   * Quantos itens o consumidor já retirou da fila, desde a criação.
+   *
+   * `pending` sozinho não distingue "consumidor lento" de "consumidor
+   * travado" enquanto o produtor ainda empurra algo (stderr não é pausado):
+   * só um contador monotônico diz se houve progresso entre duas amostras.
+   */
+  get consumed(): number {
+    return this.#consumed;
   }
 
   /**
@@ -128,6 +141,7 @@ export class AsyncQueue<T> implements AsyncIterable<T> {
       next: (): Promise<IteratorResult<T>> => {
         const item = this.#items.shift();
         if (item !== undefined) {
+          this.#consumed += 1;
           this.#afterConsume();
           const agora = Date.now();
           if (this.#fatiaDesde === null) this.#fatiaDesde = agora;

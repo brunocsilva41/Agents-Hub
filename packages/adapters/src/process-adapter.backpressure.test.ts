@@ -80,6 +80,32 @@ function scriptDeEscritaEmLotes(n: number, batch: number, delayMs: number): stri
   );
 }
 
+/**
+ * Como `scriptDeEscritaEmLotes`, mas cada linha com ~`largura` bytes. Linha
+ * longa quer dizer poucas linhas por `chunk` do pipe (64 KiB), então o que o
+ * `readline` ainda entrega depois do `pause()` é pouco — a fila para perto do
+ * `highWaterMark` e o teto duro fica fora de alcance, de forma determinística.
+ *
+ * Depois do último lote o processo NÃO sai: fica vivo como um agente real
+ * esperando a próxima coisa. Sair fecharia o pipe e a run acabaria por `exit`,
+ * que é outro cenário — aqui o que importa é o agente vivo e bloqueado.
+ */
+function scriptDeLinhasLongas(n: number, batch: number, delayMs: number, largura: number): string {
+  return (
+    `const n=${n}, batch=${batch}, delayMs=${delayMs}, pad="x".repeat(${largura});` +
+    'let i = 0;' +
+    'function proximoLote() {' +
+    '  let out = "";' +
+    '  const fim = Math.min(i + batch, n);' +
+    '  for (; i < fim; i++) out += "linha " + i + " " + pad + "\\n";' +
+    '  process.stdout.write(out);' +
+    '  if (i < n) setTimeout(proximoLote, delayMs);' +
+    '  else setInterval(() => {}, 60000);' +
+    '}' +
+    'proximoLote();'
+  );
+}
+
 function manifestDoAgenteFalso() {
   return AgentManifestSchema.parse({
     id: 'fake-fast-agent',
@@ -314,5 +340,62 @@ test(
       `a run não podia terminar por heartbeat durante uma pausa saudável (motivo real: ${outcome.reason} — ${outcome.error ?? ''})`,
     );
     assert.equal(recebidos, N, 'zero perda também neste cenário');
+  },
+);
+
+test(
+  'consumidor que trava no meio com o stdout já pausado: a run cai por saturação em vez de ficar viva para sempre',
+  { timeout: 30_000 },
+  async () => {
+    // Regressão achada no Linux: quando o `pause()` chega a tempo, a fila para
+    // perto do `highWaterMark` e o teto duro nunca é atingido. O keep-alive
+    // de backpressure rearmava heartbeat e teto geral indefinidamente, então
+    // um consumidor morto deixava a run (e o processo do agente) pendurada
+    // até alguém matar o daemon. Linhas longas para que seja a PAUSA, e não
+    // o teto duro, quem segura a fila — o cenário que nada cobria.
+    const heartbeatSeconds = 2;
+    const adapter = new ProcessAgentAdapter(manifestDoAgenteFalso());
+
+    const handle = await adapter.start(
+      {
+        sessionId: 'ses-consumidor-travado-teste',
+        taskId: null,
+        agentId: 'fake-fast-agent',
+        workdir: process.cwd(),
+        mode: 'autonomous',
+        env: {},
+        timeoutSeconds: 25,
+        heartbeatSeconds,
+      },
+      scriptDeLinhasLongas(20_000, 200, 1, 400),
+    );
+
+    const queue = handle.events as AsyncQueue<MappedEvent>;
+
+    // Iterador manual de propósito: `break` num `for await` chamaria
+    // `return()` e FECHARIA a fila — isso é desistir, não travar.
+    const iterador = queue[Symbol.asyncIterator]();
+    const consumidos = 10;
+    for (let i = 0; i < consumidos; i++) await iterador.next();
+
+    const inicio = Date.now();
+    const outcome = await handle.done;
+    const duracaoMs = Date.now() - inicio;
+
+    console.log(
+      `[consumidor-travado] consumidos=${consumidos} pendingNoFim=${queue.pending} ` +
+        `duracaoMs=${duracaoMs} outcome=${outcome.reason} erro=${outcome.error ?? ''}`,
+    );
+
+    assert.ok(
+      queue.pending < QUEUE_HARD_CAP,
+      `pending chegou a ${queue.pending}: foi o teto duro que agiu, o cenário de pausa-sem-teto não foi exercitado`,
+    );
+    assert.equal(outcome.reason, 'error', 'consumidor parado tem que encerrar a run');
+    assert.match(outcome.error ?? '', /satur/i);
+    assert.ok(
+      duracaoMs < 25_000,
+      `a run só terminou depois de ${duracaoMs}ms — quem encerrou foi o teto geral, não a detecção de consumidor parado`,
+    );
   },
 );

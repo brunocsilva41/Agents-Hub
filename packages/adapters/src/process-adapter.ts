@@ -293,7 +293,26 @@ export class ProcessAgentAdapter implements AgentAdapter {
           if (!child.stdout.isPaused()) child.stdout.pause();
           if (!backpressureKeepAlive) {
             const intervalMs = Math.max(250, Math.floor((ctx.heartbeatSeconds * 1000) / 3));
-            backpressureKeepAlive = setInterval(() => handle.touch(), intervalMs);
+            // O sinal de vida só vale enquanto o CONSUMIDOR anda. Tocar
+            // incondicionalmente mantinha para sempre uma run cujo consumidor
+            // travou de vez: com o stdout pausado a fila para abaixo do teto
+            // duro, e o `touch()` rearmava heartbeat e teto geral a cada
+            // volta — nenhuma guarda disparava nunca (achado no Linux, onde
+            // a pausa chega a tempo e o teto duro não é atingido). Sem
+            // progresso por `heartbeatSeconds`, a run cai como saturação: o
+            // agente está vivo, quem não acompanha é o consumidor.
+            let consumidosNaAmostra = queue.consumed;
+            let ultimoProgresso = Date.now();
+            backpressureKeepAlive = setInterval(() => {
+              if (queue.consumed !== consumidosNaAmostra) {
+                consumidosNaAmostra = queue.consumed;
+                ultimoProgresso = Date.now();
+              } else if (Date.now() - ultimoProgresso >= ctx.heartbeatSeconds * 1000) {
+                saturar();
+                return;
+              }
+              handle.touch();
+            }, intervalMs);
             backpressureKeepAlive.unref?.();
           }
         } else {
@@ -436,19 +455,25 @@ export class ProcessAgentAdapter implements AgentAdapter {
      * chama para de processar a linha atual.
      */
     let saturada = false;
+    // Um só desfecho para os dois jeitos de saturar: teto duro estourado
+    // (aqui) ou consumidor parado com o stdout pausado (keep-alive acima).
+    function saturar(): void {
+      if (saturada) return;
+      saturada = true;
+      handle.settle({
+        exitCode: null,
+        signal: null,
+        reason: 'error',
+        error: 'fila de eventos saturada — consumidor não acompanhou o agente',
+        nativeSessionId: discoveredNativeId,
+        tail: tail.join('\n'),
+      });
+      void killTree(child);
+    }
     const pushComTeto = (mapped: MappedEvent): boolean => {
       if (saturada) return false;
       if (queue.pending >= QUEUE_HARD_CAP) {
-        saturada = true;
-        handle.settle({
-          exitCode: null,
-          signal: null,
-          reason: 'error',
-          error: 'fila de eventos saturada — consumidor não acompanhou o agente',
-          nativeSessionId: discoveredNativeId,
-          tail: tail.join('\n'),
-        });
-        void killTree(child);
+        saturar();
         return false;
       }
       queue.push(mapped);
