@@ -10,6 +10,10 @@
     "./agent-env": {
       "types": "./dist/agent-env.d.ts",
       "default": "./dist/agent-env.js"
+    },
+    "./sensitive-paths": {
+      "types": "./dist/sensitive-paths.d.ts",
+      "default": "./dist/sensitive-paths.js"
     }
   },
   "types": "./dist/index.d.ts",

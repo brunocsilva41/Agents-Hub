@@ -6,6 +6,7 @@ import {
   actionsOfToolCall,
   combineVerdicts,
   explainToAgent,
+  leituraComum,
   resumoDaChamada,
   toCodexHookOutput,
   toHookPermission,
@@ -210,5 +211,76 @@ describe('dialeto do hook do Codex', () => {
     // humano, senão ele tenta outro caminho para o mesmo efeito.
     assert.equal(saida.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(saida.hookSpecificOutput.permissionDecisionReason, /aprovação humana/i);
+  });
+});
+
+describe('leitura no gate (Read/Grep no matcher)', () => {
+  const engine = new PolicyEngine(DEFAULT_POLICY);
+  const ctx = { workdir, mode: 'supervised' as const };
+  const pior = (toolName: string, toolInput: Record<string, unknown>): string =>
+    combineVerdicts(
+      actionsOfToolCall({ toolName, toolInput }, workdir).map((a) => engine.decide(a, ctx)),
+    ).decision;
+
+  const COMUNS: Array<[string, Record<string, unknown>]> = [
+    ['Read', { file_path: 'src/app.ts' }],
+    ['Read', { file_path: '.env.example' }],
+    ['Read', { file_path: 'docs/environment.md' }],
+    ['Read', { file_path: path.join(workdir, 'package.json') }],
+    ['Grep', { pattern: 'x', path: 'src', glob: '*.ts' }],
+    ['Grep', { pattern: 'x' }],
+    ['Glob', { pattern: '**/*.ts', path: 'src' }],
+  ];
+  const SEGREDOS: Array<[string, Record<string, unknown>]> = [
+    ['Read', { file_path: '~/.ssh/id_rsa' }],
+    ['Read', { file_path: '/home/u/.ssh/id_ed25519' }],
+    ['Read', { file_path: '.env' }],
+    ['Read', { file_path: 'config/.env.production' }],
+    ['Read', { file_path: 'C:\\Users\\u\\.aws\\credentials' }],
+    ['Read', { file_path: 'certs/server.pem' }],
+    ['Grep', { pattern: 'KEY', path: '.env' }],
+    ['Grep', { pattern: 'KEY', path: '.', glob: '.env*' }],
+  ];
+
+  test('leitura comum sai no hook, e o daemon a liberaria (mesmo em supervised)', () => {
+    for (const [t, i] of COMUNS) {
+      assert.equal(
+        leituraComum({ toolName: t, toolInput: i }, workdir),
+        true,
+        `${t} ${JSON.stringify(i)}`,
+      );
+      assert.equal(pior(t, i), 'allow', `${t} ${JSON.stringify(i)}`);
+    }
+  });
+
+  test('leitura de segredo NÃO sai no hook, e o daemon pede aprovação (irreversible)', () => {
+    for (const [t, i] of SEGREDOS) {
+      assert.equal(
+        leituraComum({ toolName: t, toolInput: i }, workdir),
+        false,
+        `${t} ${JSON.stringify(i)}`,
+      );
+      // Em autonomous também: segredo lido é `irreversible`, pede aprovação em todo modo.
+      const acoes = actionsOfToolCall({ toolName: t, toolInput: i }, workdir);
+      const v = combineVerdicts(acoes.map((a) => engine.decide(a, { workdir, mode: 'autonomous' })));
+      assert.equal(v.decision, 'approve', `${t} ${JSON.stringify(i)}`);
+      assert.equal(v.risk, 'irreversible');
+    }
+  });
+
+  test('ferramenta que não é de leitura nunca sai pelo caminho rápido', () => {
+    assert.equal(leituraComum({ toolName: 'Bash', toolInput: { command: 'ls' } }, workdir), false);
+    assert.equal(leituraComum({ toolName: 'Write', toolInput: { file_path: 'a.txt' } }, workdir), false);
+  });
+
+  test('Grep com filtro de arquivo vira leitura do que o filtro alcança', () => {
+    const acoes = actionsOfToolCall(
+      { toolName: 'Grep', toolInput: { pattern: 'x', path: 'src', glob: '*.ts' } },
+      workdir,
+    );
+    assert.deepEqual(
+      acoes.map((a) => (a.kind === 'file.read' ? a.path : a.kind)),
+      [path.resolve(workdir, 'src'), path.resolve(workdir, 'src', '*.ts')],
+    );
   });
 });

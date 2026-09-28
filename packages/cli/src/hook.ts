@@ -1,7 +1,7 @@
 import { HubClient } from '@agents-hub/client';
 // Subcaminho, não o índice do daemon: o hook roda a cada Bash/Edit/Write do
 // agente, e o índice arrasta store/`node:sqlite`, adapters e o servidor HTTP.
-import { actionsOfToolCall, TETO_HTTP_DO_HOOK_MS } from '@agents-hub/daemon/pretool-gate';
+import { actionsOfToolCall, leituraComum, TETO_HTTP_DO_HOOK_MS } from '@agents-hub/daemon/pretool-gate';
 
 /**
  * Ponte entre o hook `PreToolUse` do agente e a política do Hub.
@@ -109,22 +109,39 @@ export function modoDeFalhaEfetivo(
 /**
  * A chamada tem risco a barrar quando o gate falha fechado?
  *
- * Mesmo critério do daemon (`actionsOfToolCall`): shell, escrita e rede têm;
- * leitura e ferramenta desconhecida não. Negar leitura no modo fechado só
- * cegaria o agente sem proteger nada.
+ * Mesmo critério do daemon (`actionsOfToolCall`): shell, escrita, rede e
+ * leitura de SEGREDO têm; leitura comum e ferramenta desconhecida não. Negar
+ * leitura comum no modo fechado só cegaria o agente sem proteger nada — mas
+ * ler `~/.ssh/id_rsa` é justamente o que o daemon pararia, e o silêncio dele
+ * não pode virar permissão para isso.
  */
 export function chamadaDeRisco(toolName: string, toolInput: unknown, cwd?: string): boolean {
   // Entrada que não é objeto é anômala (o agente sempre manda objeto): sem
   // como classificar, o lado seguro é tratá-la como risco.
   if (typeof toolInput !== 'object' || toolInput === null || Array.isArray(toolInput)) return true;
-  const acoes = actionsOfToolCall(
-    { toolName, toolInput: toolInput as Record<string, unknown>, cwd },
-    cwd ?? process.cwd(),
-  );
-  return acoes.some((a) => a.kind !== 'file.read');
+  const call = { toolName, toolInput: toolInput as Record<string, unknown>, cwd };
+  const workdir = cwd ?? process.cwd();
+  const acoes = actionsOfToolCall(call, workdir);
+  return acoes.some((a) => a.kind !== 'file.read') || (acoes.length > 0 && !leituraComum(call, workdir));
 }
 
 const ID_DE_SESSAO = /^ses_[a-z0-9]+$/i;
+
+/**
+ * Leitura que não toca segredo: sai no próprio hook, sem ida ao daemon — a
+ * política a liberaria de qualquer jeito, e é o caminho mais quente do agente.
+ * A resposta é SILÊNCIO nos dois dialetos (sem `allow`): o gate não tem nada a
+ * dizer, então não atropela a permissão do próprio agente — ler fora do
+ * projeto continua pedindo o que o agente já pedia antes de `Read` entrar no
+ * matcher. `hook-run.ts` consulta isto ANTES de carregar a config (que puxa o
+ * zod), para o caminho rápido não pagar esse import.
+ */
+export function leituraComumDoHook(entrada: HookInput): boolean {
+  const { tool_name: toolName, tool_input: toolInput } = entrada;
+  if (typeof toolName !== 'string' || toolName.length === 0) return false;
+  if (typeof toolInput !== 'object' || toolInput === null || Array.isArray(toolInput)) return false;
+  return leituraComum({ toolName, toolInput, cwd: entrada.cwd }, entrada.cwd ?? process.cwd());
+}
 
 export async function decideToolCall(
   entrada: HookInput,
@@ -136,6 +153,8 @@ export async function decideToolCall(
   if (typeof toolName !== 'string' || toolName.length === 0) {
     return { saida: permitir('chamada sem nome de ferramenta', dialeto), codigo: 0 };
   }
+
+  if (leituraComumDoHook(entrada)) return { saida: '', codigo: 0 };
 
   // Só conta como sessão do Hub se o id tiver o formato esperado: a validação
   // da borda recusa qualquer outra coisa, e aí a chamada inteira falharia.

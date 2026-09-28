@@ -122,13 +122,52 @@ ferramenta desconhecida não vira ação (`actionsOfToolCall`,
 `packages/daemon/src/pretool-gate.ts`). Várias ações na mesma chamada: vence a
 pior (`combineVerdicts`).
 
-Quais ferramentas chegam ao gate depende do agente. No **Claude Code** o hook é
-instalado com `matcher` `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch`
-(`MATCHER_DE_RISCO`, `packages/daemon/src/hooks-config.ts`): a ferramenta
-`Read` **não** consulta o gate, então ler um segredo pela ferramenta de leitura
-só é visto pela vigilância; pelo shell (`cat .env`, `type operator-token`) é
-barrado antes. No **Codex** o hook vai com `matcher="*"`
-(`packages/daemon/src/codex-gate.ts`).
+Quais ferramentas chegam ao gate depende do agente. No **Claude Code** o hook —
+o injetado por sessão (`--settings`, `packages/daemon/src/session-settings.ts`)
+e o instalado por `hub hooks install claude --write` — vai com `matcher`
+`Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Read|Grep`
+(`MATCHER_DE_RISCO`, `packages/daemon/src/hooks-config.ts`). No **Codex** o hook
+vai com `matcher="*"` (`packages/daemon/src/codex-gate.ts`).
+
+**Leitura no gate (desde 2026-09-28).** `Read` e `Grep` entraram no matcher:
+antes, ler `~/.ssh/id_rsa` ou `.env` pela ferramenta de leitura do Claude nem
+chamava o hook (só a vigilância via), enquanto o mesmo `cat` pelo shell parava.
+Agora a leitura de segredo (`matchSecretPath`, `packages/core/src/sensitive-paths.ts`
+— a mesma regra de `#classifyRead`) vai ao daemon, é `irreversible` e pede
+aprovação em todos os modos; no modo de falha fechado, é negada. A leitura
+**comum** sai no próprio hook (`leituraComum`, `packages/daemon/src/pretool-gate.ts`):
+sem ida ao daemon, sem aprovação, e com **silêncio** na resposta — o gate não
+emite `allow` para leitura, então não atropela a permissão do próprio agente.
+A checagem local é conservadora (testa o caminho absoluto e o texto cru; errar
+só manda uma leitura a mais ao daemon). `Grep` com filtro (`glob: ".env*"`)
+conta como leitura do que o filtro alcança.
+
+- `Glob` fica **de fora**: devolve só nomes de arquivo; o conteúdo de qualquer
+  achado passa por `Read`, que é gateado.
+- Limite aceito: a checagem local não lê a política, então um `risk.read`
+  endurecido além de `allow` não vale para leitura comum pela ferramenta (antes
+  desta mudança nenhuma leitura chegava ao gate).
+- Instalação antiga (matcher sem `Read`/`Grep`) é acusada por `hub hooks` e
+  `hub doctor` (`avisoDeTimeoutDoHook`, mesmo aviso do timeout antigo);
+  reinstale com `hub hooks install claude --write`. Sessões subidas pelo Hub já
+  recebem o matcher novo pelo `--settings`, sem reinstalar.
+
+**Custo medido por chamada** (hook completo: processo `node` + `bin.js hook`,
+stdin → stdout; loop local intercalado, n=100 por caso, Node 24.14, Windows 10,
+Xeon E5-2650 v4, daemon falso que responde na hora):
+
+| Caso | p50 | p95 |
+|---|---|---|
+| `node -e ""` (piso do processo) | 75 ms | 90 ms |
+| `Read` comum (caminho rápido, sem daemon) | 124 ms | 139 ms |
+| `Read` de segredo (vai ao daemon) | 276 ms | 309 ms |
+| `Bash ls` (vai ao daemon; referência) | 275 ms | 306 ms |
+
+Ou seja: cada `Read` comum passa a custar ~125 ms (≈50 ms acima do piso de
+subir um `node`), metade do que custaria mandar toda leitura ao daemon. O
+caminho rápido responde antes de carregar a config (que puxa o zod). Leitura de
+segredo custa o mesmo que qualquer chamada de shell — e, em seguida, a espera
+pela decisão humana.
 
 Desfecho (`SessionManager.gateToolCall`, `packages/daemon/src/session-manager.ts`):
 `allow` passa; `deny` nega sem perguntar a ninguém (e registra na timeline);
@@ -169,7 +208,7 @@ sessão válido (ambiente ou `--session`).
 
 | `~/.agents-hub/config.json` | Sessão do Hub | Fora do Hub |
 |---|---|---|
-| `gate.failMode` ausente (**padrão**) | **fechado**: nega shell, escrita e rede; leitura passa | aberto |
+| `gate.failMode` ausente (**padrão**) | **fechado**: nega shell, escrita, rede e leitura de segredo; leitura comum passa | aberto |
 | `"gate": { "failMode": "closed" }` | fechado | fechado |
 | `"gate": { "failMode": "open" }` | aberto | aberto |
 
@@ -217,8 +256,8 @@ própria ação, afrouxar política, confiar num repositório ou derrubar o daem
 - **Fora do alcance do agente**: o token não é variável de ambiente do daemon,
   então não chega ao ambiente do agente (há teste); o MCP server e o hook não o
   têm; o arquivo é segredo para o classificador — agente com gate que tenta
-  lê-lo pelo shell cai em aprovação (pela ferramenta `Read` do Claude, que não
-  passa pelo hook, só a vigilância vê).
+  lê-lo pelo shell ou pela ferramenta `Read`/`Grep` do Claude cai em aprovação
+  (`operator-token` é nome de segredo; ver "Leitura no gate").
 
 **Limites, sem rodeio.** Um **processo do seu usuário que leia o arquivo por
 fora do gate** (agente sem hook, script qualquer) tem o token; sem sandbox de

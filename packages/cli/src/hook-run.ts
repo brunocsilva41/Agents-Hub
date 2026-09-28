@@ -1,5 +1,4 @@
-import { baseUrl, loadConfig } from '@agents-hub/daemon/config';
-import { decideToolCall, lerStdin, type HookInput } from './hook.js';
+import { decideToolCall, leituraComumDoHook, lerStdin, type HookInput } from './hook.js';
 
 /**
  * `hub hook`: a resposta ao hook `PreToolUse` do agente.
@@ -9,7 +8,8 @@ import { decideToolCall, lerStdin, type HookInput } from './hook.js';
  * adapters, servidor HTTP). O hook roda a cada Bash/Edit/Write do agente, e
  * esse import custava ~0,5 s por chamada e um `ExperimentalWarning` no stderr.
  * Aqui entram só a config (`@agents-hub/daemon/config`), o cliente HTTP e a
- * tradução de ferramenta em ação (`@agents-hub/daemon/pretool-gate`).
+ * tradução de ferramenta em ação (`@agents-hub/daemon/pretool-gate`) — e a
+ * config só depois de a leitura comum ter saído pelo caminho rápido.
  */
 
 /** Só as flags que o hook entende; `--chave valor` e `--chave=valor`. */
@@ -54,6 +54,14 @@ export async function runHook(args: { flags: Record<string, string | boolean> })
     entrada = {};
   }
 
+  // Leitura comum responde antes de carregar a config: o módulo dela puxa o
+  // zod, e isso era a maior parte do custo do hook medido para `Read`.
+  if (leituraComumDoHook(entrada)) {
+    process.stdout.write('', () => process.exit(0));
+    return;
+  }
+
+  const { baseUrl, loadConfig } = await import('@agents-hub/daemon/config');
   // Config ilegível não derruba o hook: cai no endereço padrão, e o modo de
   // falha (fechado numa sessão do Hub) decide se o daemon não atender.
   let url = 'http://127.0.0.1:4747';
