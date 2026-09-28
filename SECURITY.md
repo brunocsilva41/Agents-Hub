@@ -31,7 +31,7 @@ não fechar relato sem explicação.
 | **O agente** que o Hub roda (modelo confuso ou sob prompt injection) | rodar comando destrutivo, ler segredo, escrever fora do worktree, aprovar a própria ação pela API, afrouxar a política, derrubar o daemon para passar sem gate | gate pré-execução (onde existe), política, token de operador, orçamento |
 | **Repositório hostil** que você clona | `.agents-hub/config.yaml` que executa comando, desvia o tráfego do agente ou injeta instruções | confiança por hash (TOFU) nos campos sensíveis |
 | **Outro usuário** do sistema operacional | ler o token de operador | arquivo só do seu usuário |
-| **Processo local do seu usuário** decidido a atacar | qualquer coisa | **nenhuma** — fora de escopo (ver o fim) |
+| **Processo local do seu usuário** decidido a atacar | qualquer coisa, inclusive obter o token de operador | **nenhuma** — não é fronteira; ver "Processo local do mesmo usuário não é fronteira" |
 
 ---
 
@@ -119,8 +119,22 @@ ferramenta. Shell (`Bash`, `PowerShell`), escrita (`Write`, `Edit`,
 `MultiEdit`, `NotebookEdit`) e rede (`WebFetch`, `WebSearch`) viram ações
 classificadas, assim como leitura (`Read`, `Glob`, `Grep`), para pegar segredo;
 ferramenta desconhecida não vira ação (`actionsOfToolCall`,
-`packages/daemon/src/pretool-gate.ts`). Várias ações na mesma chamada: vence a
+`packages/daemon/src/pretool-gate.ts`) — com uma exceção: ferramenta de
+servidor MCP (`mcp__*`) cujo input traz caminho de segredo vira leitura dele
+(ver "Ferramenta desconhecida no gate"). Várias ações na mesma chamada: vence a
 pior (`combineVerdicts`).
+
+Requisição HTTP ao **próprio daemon** — `curl`/`wget`/`Invoke-WebRequest`/
+`Invoke-RestMethod`, `fetch`/`urlopen` em código inline, ou `WebFetch` para
+`localhost`, `127.0.0.0/8`, `0.0.0.0` ou `::1` na porta do daemon — é
+`irreversible`, como ler `operator-token`, e `network.allowDomains` com
+`localhost` não a libera. Outra porta local segue a regra de rede de sempre
+(um servidor de dev do projeto não pede aprovação a cada `curl`). Idem para a
+CLI de operador rodada pelo agente: `hub approve|deny|stop|restart`,
+`hub policy <qualquer coisa além de show>`, `hub project trust` e
+`hub hooks <install…>` (`alvoDoDaemon` e `comandoDeOperador`,
+`packages/core/src/command-classifier.ts`; a porta real chega por
+`SessionManager.hubPorts`).
 
 Quais ferramentas chegam ao gate depende do agente. No **Claude Code** o hook —
 o injetado por sessão (`--settings`, `packages/daemon/src/session-settings.ts`)
@@ -261,10 +275,37 @@ própria ação, afrouxar política, confiar num repositório ou derrubar o daem
 
 **Limites, sem rodeio.** Um **processo do seu usuário que leia o arquivo por
 fora do gate** (agente sem hook, script qualquer) tem o token; sem sandbox de
-sistema, nada no espaço do usuário fecha isso. Criar, delegar, cancelar e
+sistema, nada no espaço do usuário fecha isso. O mesmo vale para o cookie:
+`GET /` com `Sec-Fetch-Dest: document`, `Sec-Fetch-Mode: navigate` e
+`Sec-Fetch-Site: none` devolve o token em `Set-Cookie`, e esses cabeçalhos o
+`curl` forja — não há cabeçalho que separe navegador de processo local (ver
+"Processo local do mesmo usuário não é fronteira"). Criar, delegar, cancelar e
 mandar mensagem a sessões **não** exige token — é o que o MCP do agente usa. E
 cookie não isola por porta: outro servidor local em `127.0.0.1` recebe o cookie
 do painel se você o abrir no mesmo navegador.
+
+### Importação de config de agente e registro de projeto
+
+- **Importação MCP não grava segredo em claro** (`packages/daemon/src/absorption.ts`).
+  A importação lê a descoberta **crua** (precisa do comando real), então
+  mascarar `/discovery` não bastava: `--api-key sk-...` ia parar no `.mcp.json`
+  do projeto, que é versionado. Servidor com segredo em args ou URL (mesmo
+  critério de `redactArgs`/`redactUrl`) vai para `skipped`, com motivo, também
+  no dry-run. **Pular, não mascarar**: `--api-key ***` gravado seria um
+  servidor que sobe e falha na autenticação — um arquivo quebrado com cara de
+  certo. A credencial tem caminho próprio: `env` do servidor com `includeEnv`.
+- **Pasta de projeto não pode ser raiz nem sistema**
+  (`packages/daemon/src/project-path.ts`, `raizProibida`). Projeto é o
+  `workdir` contra o qual o gate decide "escrita dentro do diretório da
+  sessão"; registrar `C:\Windows` transformava `System32` em "dentro do
+  projeto". `POST /projects` (e pastas vinculadas) responde 400 para: raiz de
+  unidade/filesystem e de compartilhamento UNC, o próprio home, `%WINDIR%`,
+  Program Files (x64/x86), ProgramData, compartilhamento administrativo
+  (`\\host\C$`, `ADMIN$`, `IPC$`) e, no POSIX, `/etc /bin /sbin /boot /proc
+  /sys /dev /usr/{bin,sbin,lib}` com tudo abaixo e `/usr`, `/var`, `/root`,
+  `/home` só exatos (`/var/folders` é o tmpdir do macOS, `/var/www` guarda
+  projeto). A checagem roda no texto (antes do `stat`, para UNC não esperar a
+  rede) e de novo na grafia canônica (junction, nome 8.3).
 
 ### Vetores do repositório (`<repo>/.agents-hub/config.yaml`)
 
@@ -343,6 +384,65 @@ O modo de falha não cobre: um agente que apaga ou reescreve o próprio hook
 roda o comando fora do agente gateado, ou processo local que fala direto com a
 API do daemon.
 
+### Processo local do mesmo usuário não é fronteira
+
+Qualquer processo que roda com o seu usuário consegue o token de operador — e
+com ele aprovar, afrouxar a política, confiar num repositório ou derrubar o
+daemon. Há três caminhos e nenhum fecha no espaço do usuário: ler
+`operator-token`; rodar a CLI (`hub approve`), que lê o arquivo sozinha; e
+pedir `GET /` ao daemon imitando um navegador (os `Sec-Fetch-*` são proibidos
+para uma **página**, não para o `curl`).
+
+As camadas que existem, e o que cada uma segura:
+
+| Camada | Segura | Não segura |
+|---|---|---|
+| ACL do arquivo (0600 / `icacls` só do usuário) | outro usuário do SO | o seu usuário |
+| Gate: `operator-token` é segredo no `Read`/`Grep` e no shell | agente **com gate** lendo o arquivo | script em arquivo (`node x.js`): o classificador não lê o conteúdo |
+| Gate: HTTP ao daemon e CLI de operador são `irreversible` | agente **com gate** fazendo `curl` forjado, `fetch` inline, `WebFetch` ou `hub approve` — para em todo modo, inclusive `autonomous` | o mesmo pedido de dentro de um script em arquivo; alvo que só se resolve em tempo de execução (`curl $URL` cai na regra de rede, não nesta) |
+| Aprovação para rede não liberada | `supervised`/`semi` param em `curl` para host fora de `allowDomains` | `autonomous` libera `escalate` |
+
+O que **não** é defendido: agente **sem gate** (openclaude, copilot, kimi,
+cursor, mimo e qualquer um sem `hub hooks install`), inclusive em
+`autonomous` — lá só há vigilância, que vê o fato consumado; e qualquer
+processo seu fora do Hub. Em `vite dev` o proxy injeta o token em toda
+requisição: o servidor de dev é, ele mesmo, uma porta sem token.
+
+**Decisão registrada (R05-03, bilhete de uso único).** Avaliamos trocar os
+`Sec-Fetch-*` por um bilhete de uso único (`hub open` pede ao daemon, com o
+token, um bilhete curto; o navegador abre `/?ticket=…` e só então recebe o
+cookie). **Rejeitado**: (1) não fecha nada — o processo que conseguiria o
+bilhete é o que roda a CLI ou um script, e esse lê `operator-token` do mesmo
+jeito; o bilhete troca um caminho sem token por outro que exige o arquivo,
+que esse processo já tem; (2) quebra o painel para quem digita o endereço ou
+usa favorito — o cookie morre com o navegador, então cada reinício pediria
+`hub open`, e o painel precisaria de um estado novo "sem credencial". Custo
+certo por um ganho que não existe contra o atacante real deste cenário. Se um
+dia houver sandbox de SO para o agente (arquivo fora do alcance dele), o
+bilhete passa a valer e esta decisão deve ser revista.
+
+### Ferramenta desconhecida no gate
+
+Ferramenta que o gate não sabe classificar (`Task`, ferramenta nova do agente,
+`mcp__*` em geral) **não vira ação**: o gate não tem opinião e a permissão do
+próprio agente decide. É a opção conservadora de verdade: negar o que não se
+entende faria cada ferramenta nova virar um bloqueio misterioso, e a resposta
+de quem usa é desligar o hook inteiro — o que tira também a proteção do shell e
+da escrita. Na prática:
+
+- **Claude Code**: o hook só é chamado para `MATCHER_DE_RISCO`
+  (`packages/daemon/src/hooks-config.ts`); ferramentas fora dele nunca chegam
+  ao Hub e seguem as regras de permissão do Claude. **Não alargue o matcher à
+  mão** (ex.: `.*`): para ferramenta sem ação o daemon responde `allow`, e no
+  Claude um `allow` explícito pula a pergunta de permissão do próprio agente.
+- **Codex**: o hook vai com `matcher="*"`, e `allow` é silêncio — a
+  permissão do Codex decide.
+- **Exceção**: ferramenta `mcp__*` cujo input traz, num valor com cara de
+  caminho (sem espaço), um caminho de segredo vira leitura desse caminho —
+  `mcp__filesystem__read_file {path: ~/.ssh/id_rsa}` é o `cat` do mesmo
+  arquivo. Texto livre que só menciona `.env` não conta. Onde o hook não é
+  chamado para `mcp__*` (Claude, pelo matcher), a exceção não tem efeito.
+
 ### O classificador é análise estática, não sandbox
 
 Ele lê o texto do comando; não vê o conteúdo de um script em arquivo
@@ -392,7 +492,8 @@ expurgo de sessão. `hub backup` copia o banco inteiro, com tudo isso dentro.
 
 - Falhas dos CLIs dos agentes (reporte ao projeto do agente).
 - Um processo local malicioso rodando com o seu usuário — nesse ponto a máquina
-  já está comprometida e o Hub não é a fronteira.
+  já está comprometida e o Hub não é a fronteira (ver "Processo local do mesmo
+  usuário não é fronteira" para o que as camadas seguram mesmo assim).
 - Falta de authn nas rotas que não são de operador, no daemon loopback —
   decisão declarada acima. Um relato de "o daemon não pede senha para abrir
   sessão" será fechado com um link para esta seção; um relato de "consegui
