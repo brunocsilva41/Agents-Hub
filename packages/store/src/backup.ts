@@ -68,6 +68,12 @@ export function backupDatabase(dbFile: string, outFile: string): BackupResult {
   const origem = new DatabaseSync(dbFile);
   try {
     origem.exec('PRAGMA busy_timeout = 5000;');
+    // Só nesta conexão, e só pendente: a origem não muda (sem `VACUUM` nela),
+    // mas o `VACUUM INTO` grava a cópia já com `auto_vacuum = INCREMENTAL`.
+    // É o caminho de conversão do banco antigo grande demais para o daemon
+    // converter na subida: `hub backup` + `hub restore` devolve um banco que
+    // passa a devolver espaço ao SO (R09-07).
+    origem.exec('PRAGMA auto_vacuum = INCREMENTAL;');
     // O caminho vai como parâmetro, não interpolado: aspas no nome do
     // arquivo não viram SQL.
     origem.prepare('VACUUM INTO ?').run(destino);

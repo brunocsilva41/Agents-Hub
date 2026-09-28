@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,6 +35,15 @@ function inserirProjetos(db: DatabaseSync, n: number, prefixo: string): void {
       path.join(raiz, `${prefixo}-${i}`),
       new Date().toISOString(),
     );
+  }
+}
+
+function autoVacuum(file: string): number {
+  const db = new DatabaseSync(file);
+  try {
+    return Number(Object.values(db.prepare('PRAGMA auto_vacuum').get() ?? {})[0]);
+  } finally {
+    db.close();
   }
 }
 
@@ -77,6 +94,22 @@ describe('backupDatabase — consistente com WAL', () => {
     writeFileSync(out, 'conteúdo que não pode sumir');
     assert.throws(() => backupDatabase(dbFile, out), /já existe/);
     assert.equal(statSync(out).size, Buffer.byteLength('conteúdo que não pode sumir'));
+  });
+
+  // R09-07: é o caminho de conversão do banco antigo grande demais para o
+  // daemon converter na subida — `hub backup` + `hub restore`.
+  test('backup de banco antigo (sem auto_vacuum) sai com auto_vacuum = INCREMENTAL; a origem não muda', () => {
+    const dbFile = path.join(raiz, 'av', 'hub.db');
+    mkdirSync(path.dirname(dbFile), { recursive: true });
+    const legado = new DatabaseSync(dbFile);
+    legado.exec('CREATE TABLE legado_marcador (x INTEGER);');
+    legado.close();
+    openDatabase(dbFile).close();
+
+    const out = path.join(raiz, 'av', 'hub-backup.db');
+    backupDatabase(dbFile, out);
+    assert.equal(autoVacuum(out), 2, 'a cópia nasce incremental');
+    assert.equal(autoVacuum(dbFile), 0, 'backup não altera o banco de origem');
   });
 
   test('banco inexistente é erro claro', () => {

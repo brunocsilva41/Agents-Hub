@@ -15,7 +15,7 @@ import { PolicyService } from './policy-service.js';
 import { InMemoryEventBus } from './bus.js';
 import { loadConfig, type HubConfig } from './config.js';
 import { AdoptedRootLeases } from './adopted-leases.js';
-import { EventRetentionCompactor } from './event-retention.js';
+import { COMPACTION_BATCH, converterBancoAntigo, EventRetentionCompactor } from './event-retention.js';
 import { WorktreeReaper } from './reaper.js';
 import { encerradorDoProcesso } from './safety-net.js';
 import { HubServer } from './server.js';
@@ -92,7 +92,12 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
   const worktrees = new WorktreeManager(config.worktreeRoot);
   const sessions = new SessionManager(config, store, registry, bus, worktrees);
   const reaper = new WorktreeReaper(store, worktrees, config.retention);
-  const eventRetention = new EventRetentionCompactor(store, config.retention);
+  const eventRetention = new EventRetentionCompactor(
+    store,
+    config.retention,
+    COMPACTION_BATCH,
+    store.espaco,
+  );
   const homeDir = deps.homeDir ?? os.homedir();
   const discovery = new DiscoveryService(registry, deps.discoverAgent ?? discoverAgent, {
     home: homeDir,
@@ -167,6 +172,27 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
      */
     async start() {
       const endereco = await server.listen();
+
+      // Banco de antes do R09-07 (sem `auto_vacuum`): a compactação libera
+      // páginas que ele nunca devolve ao SO. Converter é um `VACUUM` completo,
+      // síncrono — por isso aqui, com a porta já nossa e nenhuma sessão
+      // rodando, e só até o teto medido (ver `CONVERSAO_AUTOMATICA_MAX_BYTES`).
+      try {
+        const conversao = converterBancoAntigo(store.espaco);
+        const mb = (conversao.bytesVivos / 1048576).toFixed(1);
+        if (conversao.converter) {
+          console.error(
+            `banco: convertido para auto_vacuum incremental em ${conversao.ms} ms (${mb} MB de dados)`,
+          );
+        } else if (conversao.motivo === 'grande-demais') {
+          console.error(
+            `banco: ${mb} MB de dados, grande demais para converter na subida — o espaço liberado ` +
+              'pela retenção não volta ao disco até um `hub backup` + `hub restore` com o daemon parado',
+          );
+        }
+      } catch (err) {
+        console.error(`banco: conversão para auto_vacuum incremental falhou: ${(err as Error).message}`);
+      }
 
       const reconciliado = await sessions.reconcileOnStartup();
       if (reconciliado.encerradas > 0) {

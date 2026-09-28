@@ -3,7 +3,12 @@ import { after, before, describe, test } from 'node:test';
 import type { EventEnvelope, Session, UnitOfWork } from '@agents-hub/core';
 import { createStore } from '@agents-hub/store';
 import { DEFAULT_RETENTION } from './config.js';
-import { EventRetentionCompactor } from './event-retention.js';
+import {
+  CONVERSAO_AUTOMATICA_MAX_BYTES,
+  converterBancoAntigo,
+  decidirConversao,
+  EventRetentionCompactor,
+} from './event-retention.js';
 
 /**
  * Passada periódica de compactação de `raw_json` (achado §3.7 do doc 08).
@@ -140,6 +145,65 @@ describe('EventRetentionCompactor', () => {
       assert.doesNotThrow(() => store.projects.list());
     } finally {
       compactor.stop();
+    }
+  });
+});
+
+describe('decidirConversao (R09-07)', () => {
+  const MB = 1024 * 1024;
+  const estado = (autoVacuum: 'none' | 'incremental', paginas: number, livres = 0) => ({
+    autoVacuum,
+    pageSize: 4096,
+    pageCount: paginas,
+    freelistCount: livres,
+  });
+
+  test('banco já incremental não é convertido', () => {
+    assert.deepEqual(decidirConversao(estado('incremental', 10)), {
+      converter: false,
+      motivo: 'ja-incremental',
+      bytesVivos: 10 * 4096,
+    });
+  });
+
+  test('banco antigo pequeno converte; o teto conta só o dado vivo, não as páginas livres', () => {
+    // 100 MB de arquivo, 90 MB livres: o VACUUM copia os 10 MB vivos.
+    const d = decidirConversao(estado('none', (100 * MB) / 4096, (90 * MB) / 4096), 64 * MB);
+    assert.deepEqual(d, { converter: true, bytesVivos: 10 * MB });
+  });
+
+  test('banco antigo acima do teto não converte na subida', () => {
+    const d = decidirConversao(estado('none', (65 * MB) / 4096), 64 * MB);
+    assert.deepEqual(d, { converter: false, motivo: 'grande-demais', bytesVivos: 65 * MB });
+    assert.equal(CONVERSAO_AUTOMATICA_MAX_BYTES, 64 * MB);
+  });
+});
+
+describe('converterBancoAntigo (R09-07)', () => {
+  test('acima do teto não chama o VACUUM', () => {
+    let vacuos = 0;
+    const r = converterBancoAntigo(
+      {
+        estado: () => ({ autoVacuum: 'none', pageSize: 4096, pageCount: 1000, freelistCount: 0 }),
+        converterParaIncremental: () => {
+          vacuos += 1;
+        },
+      },
+      1000,
+    );
+    assert.equal(r.converter, false);
+    assert.equal(vacuos, 0);
+  });
+
+  test('banco novo já nasce incremental: a subida não paga VACUUM nenhum', () => {
+    const store = createStore(':memory:');
+    try {
+      assert.equal(store.espaco.estado().autoVacuum, 'incremental');
+      const r = converterBancoAntigo(store.espaco);
+      assert.equal(r.converter, false);
+      assert.equal(r.ms, 0);
+    } finally {
+      store.close();
     }
   });
 });
