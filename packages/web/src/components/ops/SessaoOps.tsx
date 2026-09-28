@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import type { SessionSummary } from '@agents-hub/client';
 import { formatDuration, formatTokens, formatUsd, hub, STATE_LABEL } from '../../hub';
+import { rotuloDeTokens } from '../../lib/tokens';
 import {
   formDoOrcamento,
   lerFormOrcamento,
@@ -147,7 +148,8 @@ function Tarefas({ sessionId, revisao }: { sessionId: string; revisao: string })
                   <p className="ops-item-text">
                     {t.result.summary || '(sem resumo)'}{' '}
                     <span className="ops-muted">
-                      · {formatUsd(t.result.usage.usd)} · {formatTokens(t.result.usage.tokens)} tokens ·{' '}
+                      · {formatUsd(t.result.usage.usd)} ·{' '}
+                      {rotuloDeTokens(t.result.usage.tokens, t.result.usage.usd)} ·{' '}
                       {formatDuration(t.result.usage.seconds)}
                     </span>
                   </p>

@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react';
 import type { ProjectSummary, SessionSummary } from '@agents-hub/client';
 import type { FlowSummary } from '../useHubState';
-import { agentColor, STATE_LABEL, formatAgo, formatTokens, formatUsdShort } from '../hub';
+import { agentColor, STATE_LABEL, formatAgo, formatUsdShort } from '../hub';
+import { rotuloDeTokens } from '../lib/tokens';
 import { custoPorSessao } from '../lib/flowGraphs';
 import { buildFlowTree, treeKeyTarget, type EdgeKind, type TreeRow } from '../lib/flowTree';
 import type { Situacao } from '../lib/indexStatus';
@@ -231,7 +232,7 @@ function FlowGraph({
           ))}
           <span className="dag-cost-badge">
             {flow.sessions.length} {flow.sessions.length === 1 ? 'sessão' : 'sessões'}
-            {total && ` · ${formatUsdShort(total.usd)} · ${formatTokens(total.tokens)} tokens`}
+            {total && ` · ${formatUsdShort(total.usd)} · ${rotuloDeTokens(total.tokens, total.usd)}`}
           </span>
         </div>
       </div>
@@ -327,7 +328,7 @@ function DagNode({
           <span>{formatAgo(session.updatedAt)}</span>
           {custo.estado === 'ok' ? (
             <span className="dag-node-cost" title={session.id}>
-              {formatUsdShort(custo.usd)} · {formatTokens(custo.tokens)} tokens
+              {formatUsdShort(custo.usd)} · {rotuloDeTokens(custo.tokens, custo.usd)}
             </span>
           ) : custo.estado === 'erro' ? (
             <span className="dag-custo-falhou">custo indisponível</span>

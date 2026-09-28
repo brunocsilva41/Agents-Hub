@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import type { GraphSummary, ProjectSummary, SessionSummary } from '@agents-hub/client';
 import type { FlowSummary } from '../useHubState';
-import { agentColor, formatTokens, formatUsdShort } from '../hub';
+import { agentColor, formatUsdShort } from '../hub';
+import { rotuloDeTokens, tokensCompactos } from '../lib/tokens';
 import type { Situacao } from '../lib/indexStatus';
 import {
   custoNoTempo,
@@ -162,7 +163,7 @@ export function TelemetryView({
             {custoCompleto ? formatUsdShort(totalUsd) : '…'}
           </div>
           <div className="kpi-sub">
-            {formatTokens(totalTokens)} tokens · {fluxosComCusto.length}{' '}
+            {rotuloDeTokens(totalTokens, totalUsd)} · {fluxosComCusto.length}{' '}
             {fluxosComCusto.length === 1 ? 'fluxo' : 'fluxos'}
           </div>
         </div>
@@ -214,7 +215,7 @@ export function TelemetryView({
                       <td>
                         <code className="mono">{formatUsdShort(a.usd)}</code>
                       </td>
-                      <td>{formatTokens(a.tokens)}</td>
+                      <td>{tokensCompactos(a.tokens, a.usd)}</td>
                       <td>
                         <div className="pct-bar-wrap">
                           <div
@@ -251,7 +252,7 @@ export function TelemetryView({
                       ? `${Math.max(2, (f.usd / maiorFaixa) * 100)}%`
                       : undefined,
                 }}
-                title={`${new Date(f.inicio).toLocaleString('pt-BR')}: ${formatUsdShort(f.usd)} · ${formatTokens(f.tokens)} tokens`}
+                title={`${new Date(f.inicio).toLocaleString('pt-BR')}: ${formatUsdShort(f.usd)} · ${rotuloDeTokens(f.tokens, f.usd)}`}
               />
             ))}
           </div>

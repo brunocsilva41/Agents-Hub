@@ -150,7 +150,7 @@ export function renderGraph(nodes: GraphSummary[], prefix = '', isRoot = true): 
 
     lines.push(
       `${prefix}${branch}${bold(node.agentId)} ${stateBadge(node.state)} ${dim(
-        `US$ ${node.usd.toFixed(4)} · ${formatTokens(node.tokens)} tok`,
+        `US$ ${node.usd.toFixed(4)} · ${rotuloDeTokens(node.tokens, node.usd, 'tok')}`,
       )}`,
     );
     lines.push(`${childPrefix}${dim(node.title ?? node.sessionId)}`);
@@ -186,6 +186,28 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+/**
+ * Houve gasto e nenhum token contado? Nenhum modelo cobra por zero tokens: é o
+ * agente que não informa. O Copilot >= 1.0.81 só entrega AI Credits no JSONL
+ * (sem `outputTokens`), e a CLI mostrava "0 tok" ao lado do custo — número
+ * falso, não ausência.
+ */
+export function tokensDesconhecidos(tokens: number, usd: number): boolean {
+  return tokens === 0 && usd > 0;
+}
+
+/** "12.3k tokens", ou a ausência dita com todas as letras. */
+export function rotuloDeTokens(tokens: number, usd: number, unidade = 'tokens'): string {
+  return tokensDesconhecidos(tokens, usd)
+    ? 'sem contagem de tokens'
+    : `${formatTokens(tokens)} ${unidade}`;
+}
+
+/** Para coluna de largura fixa, com a unidade ao lado: "—" é ausência. */
+export function tokensCompactos(tokens: number, usd: number): string {
+  return tokensDesconhecidos(tokens, usd) ? '—' : formatTokens(tokens);
 }
 
 function textOf(value: unknown): string {
