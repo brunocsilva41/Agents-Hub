@@ -172,6 +172,8 @@ export function createHub(overrides: Partial<HubConfig> = {}, deps: HubDeps = {}
      */
     async start() {
       const endereco = await server.listen();
+      // O gate precisa saber a porta REAL para reconhecer `curl` ao daemon.
+      if (!sessions.hubPorts.includes(endereco.port)) sessions.hubPorts.push(endereco.port);
 
       // Banco de antes do R09-07 (sem `auto_vacuum`): a compactação libera
       // páginas que ele nunca devolve ao SO. Converter é um `VACUUM` completo,

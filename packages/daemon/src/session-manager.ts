@@ -248,6 +248,14 @@ export class SessionManager {
   gateWaitMs = ESPERA_DO_GATE_MS;
 
   /**
+   * Portas em que ESTE daemon escuta (R05-03): o gate trata HTTP a elas como
+   * leitura do token de operador (`alvoDoDaemon`). Nasce com a porta da
+   * config e `hub.start` acrescenta a real depois do `listen` — com porta 0
+   * (testes) só ela diz onde o daemon está.
+   */
+  hubPorts: number[];
+
+  /**
    * `turn.completed` que o PRÓPRIO agente já emitiu na run atual, por sessão.
    *
    * Um turno, um `turn.completed` (teste real de 2026-09-26: OpenCode,
@@ -272,6 +280,7 @@ export class SessionManager {
   ) {
     this.#seq = new SequenceCounter();
     this.#projects = new ProjectRegistry(store);
+    this.hubPorts = config.port > 0 ? [config.port] : [];
   }
 
   // ---------------------------------------------------------------- projetos
@@ -917,6 +926,7 @@ export class SessionManager {
         workdir: session.workdir,
         mode: session.mode,
         agentDirs: this.#agentDirs(session),
+        ...(this.hubPorts.length > 0 ? { hubPorts: this.hubPorts } : {}),
       });
       return { decision: v.decision, risk: v.risk, reason: v.reason };
     });

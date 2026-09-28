@@ -2,7 +2,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { BudgetLimits } from './budget.js';
 import { type SessionMode, MODE_RANK, narrowestMode } from './domain.js';
-import { type CommandPolicyView, classifyCommand } from './command-classifier.js';
+import { type CommandPolicyView, alvoDoDaemon, classifyCommand } from './command-classifier.js';
 import { fragmentMatches, matchSecretPath, matchSensitivePath } from './sensitive-paths.js';
 
 /**
@@ -744,6 +744,12 @@ export interface PolicyContext {
    * projeto nem sistema. Ver `agentOwnDirs`.
    */
   agentDirs?: readonly string[];
+  /**
+   * Portas em que o daemon do Hub escuta (R05-03). Requisição HTTP a loopback
+   * numa delas é tratada como leitura do token de operador — ver
+   * `alvoDoDaemon`. Ausente = porta padrão (`DEFAULT_HUB_PORT`).
+   */
+  hubPorts?: readonly number[];
 }
 
 export class PolicyEngine {
@@ -770,11 +776,20 @@ export class PolicyEngine {
           allowDomains: this.policy.network.allowDomains,
           classifyWrite: (abs) => this.#classifyWrite(abs, ctx),
           classifyRead: (abs) => this.#classifyRead(abs, ctx),
+          hubPorts: ctx.hubPorts,
         };
         return classifyCommand(action.command, view);
       }
 
       case 'network': {
+        // WebFetch ao próprio daemon = ler o token de operador (R05-03); vem
+        // antes de `allowDomains`, como no `curl` (`classifyNetwork`).
+        if (alvoDoDaemon(action.url, ctx.hubPorts)) {
+          return {
+            risk: 'irreversible',
+            reason: 'requisição ao daemon do Hub expõe o token de operador',
+          };
+        }
         const host = safeHost(action.url);
         if (host === null) return { risk: 'escalate', reason: 'URL não reconhecida' };
         const ok = this.policy.network.allowDomains.some((d) => host === d || host.endsWith(`.${d}`));

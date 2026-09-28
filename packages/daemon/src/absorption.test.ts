@@ -391,6 +391,86 @@ describe('ImportService', () => {
     assert.equal(readFileSync(cursorFile, 'utf8'), antes);
   });
 
+  // R05-07: `/discovery` já mascarava args, mas a IMPORTAÇÃO lia a descoberta
+  // crua e copiava `--api-key sk-...` para o `.mcp.json` do projeto — arquivo
+  // versionável. Servidor com segredo em args/URL é PULADO (com motivo), não
+  // gravado mascarado: `--api-key ***` gera um servidor que sobe e falha na
+  // autenticação, um `.mcp.json` quebrado que parece certo.
+  function comSegredoNosArgs(dir: string): AgentDiscovery {
+    const origem = path.join(dir, 'origem.json');
+    writeFileSync(origem, '{}');
+    return base('cursor', {
+      mcpServers: [
+        {
+          name: 'busca',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', 'busca-mcp', '--api-key', SEGREDO_MODELO],
+          source: origem,
+          isHub: false,
+        },
+        {
+          name: 'remoto',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['mcp-remote', 'https://x.dev/mcp', '--header', 'Authorization: Bearer abc123def456'],
+          source: origem,
+          isHub: false,
+        },
+        {
+          name: 'porurl',
+          transport: 'http',
+          url: 'https://mcp.exemplo.dev/mcp?token=SEGREDO-URL-9876543210',
+          source: origem,
+          isHub: false,
+        },
+        {
+          name: 'limpo',
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', 'limpo-mcp', '--root', '.'],
+          source: origem,
+          isHub: false,
+        },
+      ],
+    });
+  }
+
+  test('mcp (R05-07): import com --api-key sk-... NÃO deixa o segredo no .mcp.json do projeto', async () => {
+    const c = cenario(comSegredoNosArgs);
+    const r = await c.svc.run(
+      c.access,
+      req({ agentId: 'cursor', kinds: ['mcp'], targetAgents: ['claude'], dryRun: false }),
+    );
+    const arquivo = path.join(c.projeto, '.mcp.json');
+    const texto = readFileSync(arquivo, 'utf8');
+    assert.ok(!texto.includes(SEGREDO_MODELO), 'chave de API não pode ir para arquivo versionável');
+    assert.ok(!texto.includes('abc123def456'), 'cabeçalho de autorização também não');
+    assert.ok(!texto.includes('SEGREDO-URL'), 'nem segredo em query de URL');
+    assert.ok(!texto.includes('***'), 'nada gravado mascarado (servidor quebrado)');
+
+    const doc = JSON.parse(texto) as { mcpServers: Record<string, unknown> };
+    assert.deepEqual(Object.keys(doc.mcpServers), ['limpo'], 'o servidor sem segredo entra');
+    for (const nome of ['busca', 'remoto', 'porurl']) {
+      const pulo = r.skipped.find((s) => s.what === `mcp:${nome} → claude`);
+      assert.ok(pulo, `${nome} vai em skipped`);
+      assert.match(pulo.reason, /segredo/);
+    }
+    assert.ok(!tudo(r).includes(SEGREDO_MODELO), 'a resposta também não carrega o segredo');
+  });
+
+  test('mcp (R05-07): o dry-run prevê o mesmo pulo que a gravação faria', async () => {
+    const c = cenario(comSegredoNosArgs);
+    const r = await c.svc.run(
+      c.access,
+      req({ agentId: 'cursor', kinds: ['mcp'], targetAgents: ['claude'], dryRun: true }),
+    );
+    assert.ok(r.skipped.some((s) => s.what === 'mcp:busca → claude' && /segredo/.test(s.reason)));
+    assert.match(r.items[0]?.description ?? '', /limpo/);
+    assert.doesNotMatch(r.items[0]?.description ?? '', /busca/);
+    assert.ok(!existsSync(path.join(c.projeto, '.mcp.json')));
+  });
+
   test('mcp: Codex (TOML) recebe seções ao final, sem tocar no que existe, com .bak', async () => {
     const c = cenario(comServidores);
     const tomlFile = path.join(c.home, '.codex', 'config.toml');
