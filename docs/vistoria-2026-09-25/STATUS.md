@@ -18,6 +18,9 @@ Onda 4 interrompida no meio: 8 agentes parados, NADA dela mesclado na main. Os w
 - Correções do teste real (gate do Claude por --settings [ALTO], motivo de erro/quota, deny de orçamento pós-turno, ruído da CLI, tokens do Copilot) → worktree-agent-a552bbd98674e83c4
 Ao retomar: ver o que cada worktree já tem (git -C <wt> log main..HEAD; git -C <wt> status) e relançar/terminar; depois 7.2 (ESLint/formatador), rodada 2 de teste real (gate Claude + retomada), instalação limpa, verify 3x.
 
+## Passagem para o orquestrador Orca (2026-09-28)
+A pedido do usuário, a continuação passa para um chat orquestrador que usa a skill `orchestration` do Orca. O prompt autocontido está em docs/15-prompt-orquestrador-orca.md. Estado na passagem: main em 8f75671 (+ este commit), merge do lint SEM verify pós-merge confirmado (primeira tarefa do orquestrador). Faltam: R12-05 (job Linux bloqueante), Read no matcher do gate, pendências D do prompt, auditoria do inventário, Fase 9.
+
 ## Inventário
 Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL contou só grafias acentuadas) em [INVENTARIO.md](INVENTARIO.md), com ID R<nn>-<seq> e item do GOAL. Estado marcado a partir dos itens concluídos. Placar atual: CRÍT 3/3, ALTO 16/52, MÉD 11/104, BAIXO 7/66.
 
