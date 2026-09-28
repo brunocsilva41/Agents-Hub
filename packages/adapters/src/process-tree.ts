@@ -194,8 +194,9 @@ async function paresPidPpid(): Promise<Array<[number, number]>> {
     return stdout
       .split('\n')
       .map((linha) => linha.trim().split(/\s+/).map(Number))
-      .filter((campos): campos is [number, number] =>
-        campos.length === 2 && campos.every((n) => Number.isInteger(n) && n > 0),
+      .filter(
+        (campos): campos is [number, number] =>
+          campos.length === 2 && campos.every((n) => Number.isInteger(n) && n > 0),
       );
   } catch {
     return [];
