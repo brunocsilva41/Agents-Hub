@@ -122,3 +122,52 @@ test.describe('R03-11: modal Nova Sessão', () => {
     expect(corpo.brief?.budget).toEqual({ usd: 3 });
   });
 });
+
+test.describe('R03-06: banner de aprovações', () => {
+  test('"ver a sessão" de outra aba leva à Timeline com a sessão parada aberta', async ({ page }) => {
+    await abrir(page);
+    await acionarNaTopbar(page, /^Swarm/);
+    await expect(page.locator('main.tab-view-container')).toBeVisible();
+    await page.locator('.approval').first().getByRole('button', { name: 'ver a sessão' }).click();
+    const secoes = page.getByRole('navigation', { name: 'Seções' });
+    await expect(secoes.getByRole('button', { name: 'Timeline' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    await expect(page.locator('.columns')).toBeVisible();
+    await expect(page.locator('.timeline-header .session-title')).toContainText(
+      'Rodar a suíte de migração do banco',
+    );
+  });
+});
+
+test.describe('R04-12: confirmação do "Encerrar"', () => {
+  test('Encerrar abre a confirmação; "Manter rodando" não encerra; confirmar encerra', async ({
+    page,
+  }) => {
+    await abrir(page);
+    await page.locator('.flow-head', { hasText: 'Refatorar' }).first().click();
+    const painel = page.locator('.col-right');
+    const encerrar = painel.getByRole('button', { name: 'Encerrar', exact: true });
+    const cancelamentos = (): number =>
+      ESCRITAS.filter((e) => e.path === '/sessions/ses_raiz1/cancel').length;
+    const antes = cancelamentos();
+
+    await encerrar.click();
+    const confirmacao = painel.getByRole('alertdialog', { name: 'Confirmar encerramento' });
+    await expect(confirmacao).toBeVisible();
+    await expect(encerrar).toHaveAttribute('aria-expanded', 'true');
+    // Abrir a confirmação, por si só, não manda nada ao Hub.
+    expect(cancelamentos()).toBe(antes);
+
+    await confirmacao.getByRole('button', { name: 'Manter rodando' }).click();
+    await expect(confirmacao).toHaveCount(0);
+    await expect(encerrar).toBeEnabled();
+    expect(cancelamentos(), '"Manter rodando" não pode encerrar').toBe(antes);
+
+    await encerrar.click();
+    await confirmacao.getByRole('button', { name: 'Encerrar sessão' }).click();
+    await expect.poll(cancelamentos).toBe(antes + 1);
+    await expect(confirmacao).toHaveCount(0);
+  });
+});
