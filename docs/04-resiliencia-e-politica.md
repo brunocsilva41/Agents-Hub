@@ -46,9 +46,9 @@ Contrato confirmado contra o binário, não deduzido da documentação:
 
 Quem desiste primeiro é sempre o daemon, e a desistência dele é `deny`. Instalações antigas gravaram `timeout: 10`, o que fazia a ação pendente rodar sem aprovação depois de 10 s; `hub doctor`/`hub hooks` acusam o timeout antigo, e reinstalar corrige.
 
-**Modo de falha (`gate.failMode` no `config.json` global).** Se o daemon não responder (fora do ar, erro, teto HTTP): padrão **fechado** em sessão do Hub (shell, escrita e rede negadas; leitura passa) e **aberto** fora dela, onde o Hub não está envolvido e bloquear transformaria o daemon numa dependência do editor. `gate.failMode: "open" | "closed"` força um dos dois. Detalhes e modelo de ameaça em [SECURITY.md](../SECURITY.md).
+**Modo de falha (`gate.failMode` no `config.json` global).** Se o daemon não responder (fora do ar, erro, teto HTTP): padrão **fechado** em sessão do Hub (shell, escrita, rede e leitura de segredo negadas; leitura comum passa) e **aberto** fora dela, onde o Hub não está envolvido e bloquear transformaria o daemon numa dependência do editor. `gate.failMode: "open" | "closed"` força um dos dois. Detalhes e modelo de ameaça em [SECURITY.md](../SECURITY.md).
 
-O matcher cobre só `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch` (`MATCHER_DE_RISCO`). Cada chamada gateada custa um processo Node novo; incluir `Read`, `Glob` e `Grep` colocaria esse custo no caminho quente de toda leitura. Consequência: leitura de segredo pela ferramenta `Read` não passa pelo gate; por `cat`/`type`/`Get-Content` em shell, passa (e é `irreversible`).
+O matcher cobre `Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Read|Grep` (`MATCHER_DE_RISCO`). `Read`/`Grep` entraram em 2026-09-28 para que ler segredo pela ferramenta de leitura pare no gate como para `cat` pelo shell; a leitura comum é liberada no próprio hook, sem ida ao daemon (~125 ms por chamada, medido — ver [SECURITY.md](../SECURITY.md)). `Glob` fica de fora: só devolve nomes.
 
 ```bash
 hub hooks install claude --write
