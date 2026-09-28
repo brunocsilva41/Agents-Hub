@@ -46,6 +46,26 @@ const TASK_TEMPLATES = [
   },
 ];
 
+/*
+  Opções de Supervisão e Isolamento: rótulo curto no select e a explicação da
+  escolhida numa linha de ajuda embaixo. O parêntese dentro da opção
+  ("Semi-Autônomo (Pausa em irreversíveis)") pedia ~290 px e o select tem
+  ~150–200 px na linha de três campos: o rótulo saía truncado justamente na
+  parte que explica o modo (R04-14). Quebrar a linha em duas colunas ainda
+  truncava em 580 px; rótulo curto + ajuda cabe em qualquer largura e deixa a
+  explicação sempre visível, não só com a lista aberta.
+*/
+const SUPERVISAO = {
+  semi: { rotulo: 'Semi-autônomo', ajuda: 'Pausa antes de ações irreversíveis.' },
+  supervised: { rotulo: 'Supervisionado', ajuda: 'Pede aprovação a todo comando.' },
+  autonomous: { rotulo: 'Autônomo', ajuda: 'Sem pausas para aprovação.' },
+} as const;
+
+const ISOLAMENTO = {
+  worktree: { rotulo: 'Git worktree', ajuda: 'Cópia isolada do repositório: seguro.' },
+  none: { rotulo: 'Pasta principal', ajuda: 'Trabalha direto no diretório do projeto.' },
+} as const;
+
 export function SessionModal({
   agents,
   delegateFrom,
@@ -345,12 +365,18 @@ export function SessionModal({
               <select
                 id={`${base}-supervisao`}
                 value={supervision}
+                aria-describedby={`${base}-supervisao-ajuda`}
                 onChange={(e) => setSupervision(e.target.value as typeof supervision)}
               >
-                <option value="semi">Semi-Autônomo (Pausa em irreversíveis)</option>
-                <option value="supervised">Supervisionado (Aprova todo comando)</option>
-                <option value="autonomous">Autônomo (Sem atrito)</option>
+                {(Object.keys(SUPERVISAO) as Array<keyof typeof SUPERVISAO>).map((modo) => (
+                  <option key={modo} value={modo}>
+                    {SUPERVISAO[modo].rotulo}
+                  </option>
+                ))}
               </select>
+              <div className="help" id={`${base}-supervisao-ajuda`}>
+                {SUPERVISAO[supervision].ajuda}
+              </div>
             </div>
 
             <div className="field">
@@ -358,11 +384,18 @@ export function SessionModal({
               <select
                 id={`${base}-isolamento`}
                 value={isolation}
+                aria-describedby={`${base}-isolamento-ajuda`}
                 onChange={(e) => setIsolation(e.target.value as typeof isolation)}
               >
-                <option value="worktree">Git Worktree (Seguro e isolado)</option>
-                <option value="none">Direto no diretório principal</option>
+                {(Object.keys(ISOLAMENTO) as Array<keyof typeof ISOLAMENTO>).map((modo) => (
+                  <option key={modo} value={modo}>
+                    {ISOLAMENTO[modo].rotulo}
+                  </option>
+                ))}
               </select>
+              <div className="help" id={`${base}-isolamento-ajuda`}>
+                {ISOLAMENTO[isolation].ajuda}
+              </div>
             </div>
 
             <div className="field">

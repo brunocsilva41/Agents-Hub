@@ -12,7 +12,7 @@
  * sem daemon e sem agentes reais.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { acionarNaTopbar, problemasDeLayout, transbordos, VIEWPORTS } from './medir';
+import { acionarNaTopbar, problemasDeLayout, selectsTruncados, transbordos, VIEWPORTS } from './medir';
 import {
   CONSULTAS_DE_AUDITORIA,
   ESCRITAS,
@@ -213,6 +213,14 @@ for (const vp of VIEWPORTS) {
         expect(await dialogo.evaluate((d) => d.contains(document.activeElement))).toBe(true);
       }
       expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
+      // Nenhuma opção de Supervisão/Isolamento/Projeto truncada (R04-14):
+      // nesta largura e na de 580 px da vistoria.
+      expect(await selectsTruncados(page, '[role="dialog"]')).toEqual([]);
+      if (vp.largura > 580) {
+        await page.setViewportSize({ width: 580, height: vp.altura });
+        expect(await selectsTruncados(page, '[role="dialog"]'), '580px').toEqual([]);
+        await page.setViewportSize({ width: vp.largura, height: vp.altura });
+      }
       await page.keyboard.press('Escape');
       await expect(dialogo).toHaveCount(0);
       // O foco volta a quem abriu (o botão da topbar, ou o menu compacto).

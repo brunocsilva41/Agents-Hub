@@ -127,6 +127,35 @@ export async function transbordos(page: Page, seletor: string): Promise<string[]
   }, seletor);
 }
 
+/**
+ * Selects de `escopo` cujo rótulo mais longo não cabe na caixa: um clone
+ * invisível com `width: max-content` mede a largura que o select pediria para
+ * mostrar a opção mais comprida inteira, com a seta e o padding do próprio
+ * estilo. Maior que a caixa real = rótulo truncado para alguma escolha.
+ */
+export async function selectsTruncados(page: Page, escopo: string): Promise<string[]> {
+  return page.evaluate((sel) => {
+    const raiz = document.querySelector(sel);
+    if (!raiz) return [`escopo ${sel} não encontrado`];
+    const problemas: string[] = [];
+    for (const select of Array.from(raiz.querySelectorAll('select'))) {
+      const real = select.getBoundingClientRect().width;
+      if (real === 0) continue;
+      const clone = select.cloneNode(true) as HTMLSelectElement;
+      clone.removeAttribute('id');
+      clone.style.cssText = 'position:absolute;visibility:hidden;width:max-content;max-width:none';
+      select.parentElement?.appendChild(clone);
+      const pedida = clone.getBoundingClientRect().width;
+      clone.remove();
+      if (pedida > real + 0.5) {
+        const rotulo = select.labels?.[0]?.textContent?.trim() ?? select.id;
+        problemas.push(`select "${rotulo}": pede ${Math.round(pedida)} px e tem ${Math.round(real)}`);
+      }
+    }
+    return problemas;
+  }, escopo);
+}
+
 /** O controle está visível direto, ou pelo menu compacto da topbar. */
 export async function acionarNaTopbar(page: Page, nome: string | RegExp): Promise<void> {
   const direto = page
