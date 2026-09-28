@@ -26,7 +26,10 @@ let hubHome: string;
 function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env };
   for (const k of Object.keys(e)) {
-    if (/^(AGENTS_HUB_|NODE_OPTIONS$|NODE_NO_WARNINGS$)/.test(k)) delete e[k];
+    // FORCE_COLOR junto do NO_COLOR abaixo faria o Node avisar no stderr do
+    // filho, e os testes de "stderr limpo" falhariam por causa do ambiente de
+    // quem roda a suíte, não do produto.
+    if (/^(AGENTS_HUB_|NODE_OPTIONS$|NODE_NO_WARNINGS$|FORCE_COLOR$)/.test(k)) delete e[k];
   }
   return { ...e, AGENTS_HUB_HOME: hubHome, AGENTS_HUB_NO_AUTOSTART: '1', NO_COLOR: '1', ...extra };
 }
