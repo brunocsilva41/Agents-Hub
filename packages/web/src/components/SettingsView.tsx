@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 import type { AgentSummary, ProjectContextDto, ProjectSummary } from '@agents-hub/client';
 import { prefixosDeEnvPermitidos } from '@agents-hub/core/agent-env';
 import { describeError, useAction } from '../actions';
@@ -652,23 +652,57 @@ function BotaoAba(props: {
   );
 }
 
+/**
+ * Escolha do agente cujo trecho da configuração se edita abaixo.
+ *
+ * É escolha única de um valor, não navegação entre painéis: `radiogroup` com
+ * `radio`. Antes era `tablist`/`tab` sem nenhum `tabpanel` — o leitor de tela
+ * anunciava abas que não controlavam painel algum (R03-21). O teclado segue o
+ * padrão de grupo de rádio: só o marcado entra no Tab, e as setas trocam.
+ */
 function ChipsDeAgente(props: {
   agents: AgentSummary[];
   selecionado: string;
   onSelect: (id: string) => void;
 }): React.JSX.Element {
+  const grupoRef = useRef<HTMLDivElement>(null);
+  const indiceMarcado = props.agents.findIndex((a) => a.id === props.selecionado);
+  // Nenhum marcado (seleção ainda não carregada): o primeiro recebe o Tab.
+  const indiceFocavel = indiceMarcado >= 0 ? indiceMarcado : 0;
+
+  const aoTeclar = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const passos: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+    const passo = passos[e.key];
+    const total = props.agents.length;
+    if (passo === undefined || total === 0) return;
+    e.preventDefault();
+    const proximo = (indiceFocavel + passo + total) % total;
+    const agente = props.agents[proximo];
+    if (!agente) return;
+    props.onSelect(agente.id);
+    grupoRef.current?.querySelectorAll<HTMLElement>('[role="radio"]')[proximo]?.focus();
+  };
+
   return (
-    <div className="agent-selector-chips" role="tablist">
-      {props.agents.map((a) => (
+    <div
+      ref={grupoRef}
+      className="agent-selector-chips"
+      role="radiogroup"
+      aria-label="Agente"
+      onKeyDown={aoTeclar}
+    >
+      {props.agents.map((a, i) => (
         <button
           key={a.id}
-          role="tab"
-          aria-selected={props.selecionado === a.id}
+          type="button"
+          role="radio"
+          aria-checked={props.selecionado === a.id}
+          tabIndex={i === indiceFocavel ? 0 : -1}
           className={`agent-chip ${props.selecionado === a.id ? 'active' : ''}`}
           style={{ '--agent-chip-color': agentColor(a.id) } as React.CSSProperties}
           onClick={() => props.onSelect(a.id)}
         >
-          <span className="chip-dot" style={{ background: agentColor(a.id) }} />
+          <span className="chip-dot" style={{ background: agentColor(a.id) }} aria-hidden="true" />
           <span>{a.name}</span>
         </button>
       ))}

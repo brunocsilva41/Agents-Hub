@@ -12,7 +12,7 @@
  * sem daemon e sem agentes reais.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { acionarNaTopbar, problemasDeLayout, VIEWPORTS } from './medir';
+import { acionarNaTopbar, problemasDeLayout, selectsTruncados, transbordos, VIEWPORTS } from './medir';
 import {
   CONSULTAS_DE_AUDITORIA,
   ESCRITAS,
@@ -100,6 +100,41 @@ for (const vp of VIEWPORTS) {
       expect(await problemasDeLayout(page)).toEqual([]);
       await selecionarSessao(page, 'Refatorar');
       expect(await problemasDeLayout(page)).toEqual([]);
+
+      // Métricas do orçamento no painel da direita (3 colunas fixas espremiam
+      // o texto na gaveta de 375 px).
+      if (await ehGaveta(page, '.col-right')) {
+        await acionarNaTopbar(page, /^Painel/);
+        await esperarParada(page, '.col-right');
+      }
+      await expect(page.locator('.metrics-grid')).toBeVisible();
+      expect(await transbordos(page, '.metrics-grid')).toEqual([]);
+      if (await ehGaveta(page, '.col-right')) await page.keyboard.press('Escape');
+
+      // Swarm COM os cartões carregados — antes só era medido com /agents 500,
+      // e o cartão de 340 px mínimos cortava em 375 px (R03-15).
+      await acionarNaTopbar(page, /^Swarm/);
+      await expect(page.locator('.swarm-card')).toHaveCount(5);
+      expect(await problemasDeLayout(page)).toEqual([]);
+      expect(await transbordos(page, '.swarm-grid')).toEqual([]);
+
+      // Agentes detectados: a coluna de rótulos de 140 px fixos.
+      await acionarNaTopbar(page, /^Configurações/);
+      await page.getByRole('button', { name: /Agentes detectados/ }).click();
+      await expect(page.locator('.disc-dl')).toBeVisible();
+      expect(await problemasDeLayout(page)).toEqual([]);
+      expect(await transbordos(page, '.disc-card')).toEqual([]);
+      // Com o rótulo em 140 px fixos, o valor (caminho do binário, servidores
+      // MCP) ficava com 89 px em 375 px. A coluna do valor não pode ser a mais
+      // estreita.
+      const colunas = await page
+        .locator('.disc-dl')
+        .first()
+        .evaluate((dl) => ({
+          rotulo: dl.querySelector('dt')?.getBoundingClientRect().width ?? 0,
+          valor: dl.querySelector('dd')?.getBoundingClientRect().width ?? 0,
+        }));
+      expect(colunas.valor, JSON.stringify(colunas)).toBeGreaterThanOrEqual(colunas.rotulo);
     });
 
     test('toda aba e ação da topbar é alcançável', async ({ page }) => {
@@ -178,6 +213,14 @@ for (const vp of VIEWPORTS) {
         expect(await dialogo.evaluate((d) => d.contains(document.activeElement))).toBe(true);
       }
       expect(await problemasDeLayout(page, '[role="dialog"]')).toEqual([]);
+      // Nenhuma opção de Supervisão/Isolamento/Projeto truncada (R04-14):
+      // nesta largura e na de 580 px da vistoria.
+      expect(await selectsTruncados(page, '[role="dialog"]')).toEqual([]);
+      if (vp.largura > 580) {
+        await page.setViewportSize({ width: 580, height: vp.altura });
+        expect(await selectsTruncados(page, '[role="dialog"]'), '580px').toEqual([]);
+        await page.setViewportSize({ width: vp.largura, height: vp.altura });
+      }
       await page.keyboard.press('Escape');
       await expect(dialogo).toHaveCount(0);
       // O foco volta a quem abriu (o botão da topbar, ou o menu compacto).
@@ -472,10 +515,10 @@ test.describe('Segurança e Configurações (1100px)', () => {
     await abrir(page);
     await acionarNaTopbar(page, /^Configurações/);
     await page.getByRole('button', { name: /Modelos locais/ }).click();
-    await page.getByRole('tab', { name: 'OpenCode' }).click();
+    await page.getByRole('radio', { name: 'OpenCode' }).click();
     await expect(page.locator('#modelo')).toBeVisible();
     await expect(page.locator('label[for="modelo"]')).toContainText('MODEL');
-    await page.getByRole('tab', { name: 'Cursor Agent' }).click();
+    await page.getByRole('radio', { name: 'Cursor Agent' }).click();
     await expect(page.locator('#modelo')).toHaveCount(0);
   });
 

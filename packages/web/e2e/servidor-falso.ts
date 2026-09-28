@@ -440,6 +440,34 @@ async function estatico(res: ServerResponse, caminho: string): Promise<void> {
   res.end(corpo);
 }
 
+/**
+ * O que "Agentes detectados" mostra: caminhos longos e listas cheias, para a
+ * tabela de detalhes (.disc-dl) ser medida em 375 px com conteúdo de verdade.
+ */
+const DESCOBERTA = [
+  {
+    agentId: 'claude',
+    installed: true,
+    version: '1.0.0',
+    binPath: 'C:\\Users\\teste\\AppData\\Local\\Programs\\claude-code\\bin\\claude.exe',
+    auth: { state: 'present', evidence: ['~/.claude/.credentials.json'] },
+    defaults: { model: 'claude-opus-5-5', provider: 'anthropic', baseUrl: 'http://127.0.0.1:11434/v1' },
+    files: [],
+    mcpServers: [
+      { name: 'agents-hub', transport: 'stdio', source: '~/.claude.json', isHub: true },
+      {
+        name: 'filesystem-servidor-com-nome-comprido',
+        transport: 'stdio',
+        env: { FS_ROOT: '***' },
+        source: 'C:\\Users\\teste\\.claude\\settings.json',
+        isHub: false,
+      },
+    ],
+    instructionFiles: [{ path: 'C:\\Users\\teste\\.claude\\CLAUDE.md', bytes: 2048 }],
+    warnings: [],
+  },
+];
+
 /* ------------------------------------------------ Cenários de falha/vazio */
 
 /**
@@ -618,7 +646,7 @@ async function rotear(req: IncomingMessage, res: ServerResponse): Promise<void> 
       liveSessions: 3,
       subscribers: 1,
     });
-  if (p === '/discovery') return json(res, 200, { agents: [] });
+  if (p === '/discovery') return json(res, 200, { agents: DESCOBERTA });
 
   let m = /^\/sessions\/(ses_[a-z0-9]+)\/events$/i.exec(p);
   if (m) return json(res, 200, { events: eventosDe(m[1]!) });

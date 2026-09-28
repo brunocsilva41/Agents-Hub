@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import type { AgentSummary, SessionSummary } from '@agents-hub/client';
 import { pushToast, useAction } from '../actions';
 import { agentColor, hub, STATE_LABEL, formatDuration, formatTokens, formatUsd } from '../hub';
@@ -25,6 +25,7 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
   const [targetAgent, setTargetAgent] = useState('');
   const [handoffReason, setHandoffReason] = useState('');
   const [memoryExpanded, setMemoryExpanded] = useState(true);
+  const memoriaId = useId();
   const [projectGuidelines, setProjectGuidelines] = useState<string | null>(null);
   const [projectContextFailed, setProjectContextFailed] = useState(false);
   // Encerrar é destrutivo: o primeiro clique só pede confirmação.
@@ -217,17 +218,28 @@ export function SidePanel({ session, budgetState, agents = [], onDelegate, onCha
           <>
             {/* Bloco de Memória e Contexto */}
             <div className="section memory-section">
-              <div
-                className="section-header-row clickable"
-                onClick={() => setMemoryExpanded(!memoryExpanded)}
-                style={{ cursor: 'pointer', userSelect: 'none' }}
-              >
-                <h3>🧠 Memória & Contexto</h3>
-                <span className={`chevron-icon ${memoryExpanded ? 'rotated' : ''}`}>›</span>
-              </div>
+              {/* Divulgação (disclosure): botão de verdade dentro do título.
+                  Antes era um div com onClick — sem foco pelo Tab, sem
+                  Enter/Espaço e sem dizer se estava aberto (R03-21). */}
+              <h3 className="section-header-row">
+                <button
+                  type="button"
+                  className="memory-toggle"
+                  aria-expanded={memoryExpanded}
+                  aria-controls={memoryExpanded ? memoriaId : undefined}
+                  onClick={() => setMemoryExpanded(!memoryExpanded)}
+                >
+                  <span>
+                    <span aria-hidden="true">🧠 </span>Memória & Contexto
+                  </span>
+                  <span className={`chevron-icon ${memoryExpanded ? 'rotated' : ''}`} aria-hidden="true">
+                    ›
+                  </span>
+                </button>
+              </h3>
 
               {memoryExpanded && (
-                <div className="memory-body">
+                <div className="memory-body" id={memoriaId}>
                   {projectContextFailed && (
                     <div className="notice warn" role="alert">
                       ⚠️ Não foi possível buscar a memória do projeto — não é um projeto sem memória.
