@@ -3835,33 +3835,66 @@ ${task.brief.objective.slice(0, 500)}`,
   }
 
   /**
-   * Checa o teto de concorrência contando runs de verdade (`#runs`) E
-   * reservas em voo (`#reserved`) — sem as duas, uma reserva não impediria
-   * uma segunda checagem concorrente de passar antes de a run nascer.
+   * Quem ocupa vaga agora, exceto `excetoSessionId`, com o agente e o projeto
+   * contra os quais a vaga conta.
+   *
+   * Três fontes: runs de verdade (`#runs`), reservas em voo (`#reserved` —
+   * sem elas uma reserva não impediria uma segunda checagem concorrente de
+   * passar antes de a run nascer) e sessões em FECHAMENTO. Estas últimas
+   * ficavam de fora (pendência D(3) do fechamento do MVP): a run sai de
+   * `#runs` quando o processo do agente termina, mas a sessão segue viva
+   * rodando o `validation.command` (um `npm test`, processo real) e depois o
+   * revisor (outro processo de agente, até 10 min). Com `maxConcurrency: 1`,
+   * uma segunda sessão subia enquanto a primeira ainda validava — dois
+   * processos pesados sob um teto de um. A sessão segura a vaga, contada para
+   * o PRÓPRIO agente, até fechar: validação e revisão são parte dela, não uma
+   * sessão nova.
+   *
+   * Sessão já terminal não conta, mesmo com o fechamento ainda aberto: é o
+   * `#fallback`, que encerra a original (`failed`) ANTES de reservar a vaga do
+   * substituto — senão, com o Hub cheio, todo fallback seria recusado pela
+   * vaga da própria sessão que ele substitui.
+   *
+   * Uma sessão ocupa UMA vaga, mesmo com run viva E reserva ao mesmo tempo:
+   * é o `handoff`, que reserva a vaga do agente novo enquanto a run antiga da
+   * MESMA sessão ainda está em `#runs` (vistoria 2026-09-25, item 2.7). Por
+   * isso a chave é a sessão, e a reserva (o agente que vai rodar nela) vale
+   * sobre a run que está saindo, que vale sobre o fechamento.
    */
-  #assertConcurrency(agentId: string, sessionId: string, projectId?: string): void {
-    // Uma sessão ocupa UMA vaga, mesmo com run viva E reserva ao mesmo tempo:
-    // é o `handoff`, que reserva a vaga do agente novo enquanto a run antiga da
-    // MESMA sessão ainda está em `#runs`. Somar os dois mapas contava a sessão
-    // duas vezes — com o Hub cheio, todo handoff era recusado (vistoria
-    // 2026-09-25, item 2.7). Por isso a conta é "as OUTRAS sessões ocupando
-    // vaga", e na contagem por agente cada sessão vale para o agente que vai
-    // rodar nela (a reserva), não para o da run que está saindo.
-    const outras = new Set([...this.#runs.keys(), ...this.#reserved.keys()]);
-    outras.delete(sessionId);
+  #ocupantes(excetoSessionId: string): Map<string, { agentId: string; projectId: string | null }> {
+    const ocupantes = new Map<string, { agentId: string; projectId: string | null }>();
+    for (const id of this.#ciclo.sessoesEmFechamento()) {
+      const sessao = this.store.sessions.get(id);
+      if (sessao && !isTerminalSessionState(sessao.state)) {
+        ocupantes.set(id, { agentId: sessao.agentId, projectId: sessao.projectId });
+      }
+    }
+    for (const [id, run] of this.#runs) {
+      ocupantes.set(id, {
+        agentId: run.ctx.agentId,
+        projectId: this.store.sessions.get(run.sessionId)?.projectId ?? null,
+      });
+    }
+    for (const [id, reserva] of this.#reserved) ocupantes.set(id, reserva);
+    ocupantes.delete(excetoSessionId);
+    return ocupantes;
+  }
 
-    if (outras.size >= this.config.policy.maxConcurrency) {
+  /** Checa o teto de concorrência global, por agente e (se houver) do projeto. */
+  #assertConcurrency(agentId: string, sessionId: string, projectId?: string): void {
+    const ocupantes = this.#ocupantes(sessionId);
+
+    if (ocupantes.size >= this.config.policy.maxConcurrency) {
       throw new HubError(
         'CONCURRENCY_EXCEEDED',
         `Limite de ${this.config.policy.maxConcurrency} sessões simultâneas atingido`,
-        { active: outras.size, limit: this.config.policy.maxConcurrency },
+        { active: ocupantes.size, limit: this.config.policy.maxConcurrency },
       );
     }
 
     let perAgent = 0;
-    for (const id of outras) {
-      const agente = this.#reserved.get(id)?.agentId ?? this.#runs.get(id)?.ctx.agentId;
-      if (agente === agentId) perAgent += 1;
+    for (const ocupante of ocupantes.values()) {
+      if (ocupante.agentId === agentId) perAgent += 1;
     }
     if (perAgent >= this.config.policy.maxConcurrencyPerAgent) {
       throw new HubError(
@@ -3871,7 +3904,7 @@ ${task.brief.objective.slice(0, 500)}`,
       );
     }
 
-    if (projectId !== undefined) this.#assertConcurrencyDoProjeto(agentId, projectId, sessionId);
+    if (projectId !== undefined) this.#assertConcurrencyDoProjeto(agentId, projectId, ocupantes);
   }
 
   /**
@@ -3881,7 +3914,11 @@ ${task.brief.objective.slice(0, 500)}`,
    * repositório ("aqui, no máximo N agentes ao mesmo tempo"), não do Hub —
    * o global continua valendo por cima, na checagem acima.
    */
-  #assertConcurrencyDoProjeto(agentId: string, projectId: string, sessionId: string): void {
+  #assertConcurrencyDoProjeto(
+    agentId: string,
+    projectId: string,
+    ocupantes: Map<string, { agentId: string; projectId: string | null }>,
+  ): void {
     const politica = this.#projectPolicy(projectId);
     const global = this.config.policy;
     if (
@@ -3891,18 +3928,9 @@ ${task.brief.objective.slice(0, 500)}`,
       return;
     }
 
-    const ocupadas: string[] = [];
-    // Mesma regra do teto global: a sessão que pede a vaga (handoff) não
-    // conta contra si mesma.
-    for (const [id, run] of this.#runs) {
-      if (id === sessionId) continue;
-      if (this.store.sessions.get(run.sessionId)?.projectId === projectId)
-        ocupadas.push(run.ctx.agentId);
-    }
-    for (const [id, reserva] of this.#reserved) {
-      if (id === sessionId) continue;
-      if (reserva.projectId === projectId) ocupadas.push(reserva.agentId);
-    }
+    const ocupadas = [...ocupantes.values()]
+      .filter((o) => o.projectId === projectId)
+      .map((o) => o.agentId);
 
     if (ocupadas.length >= politica.maxConcurrency) {
       throw new HubError(
