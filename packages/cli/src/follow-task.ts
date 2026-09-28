@@ -1,5 +1,15 @@
 import type { HubClient, TaskStatus } from './client.js';
-import { bold, cyan, deveExibir, dim, formatTokens, green, red, renderEvent, yellow } from './render.js';
+import {
+  bold,
+  cyan,
+  deveExibir,
+  dim,
+  green,
+  red,
+  renderEvent,
+  rotuloDeTokens,
+  yellow,
+} from './render.js';
 
 const NEWLINE = String.fromCharCode(10);
 const TERMINAIS = new Set(['completed', 'failed', 'canceled', 'rejected']);
@@ -149,9 +159,10 @@ export async function aguardarTaskTerminal(
 
     const { budget } = status;
     console.log(
-      `${NEWLINE}${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${formatTokens(
+      `${NEWLINE}${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${rotuloDeTokens(
         budget.consumed.tokens,
-      )} tokens ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
+        budget.consumed.usd,
+      )} ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
     );
     return true;
   }

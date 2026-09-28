@@ -11,7 +11,7 @@ import type {
   TaskSummary,
 } from './client.js';
 import { flagOn, flagString, NEWLINE, required, semCor, type Args } from './cmd-util.js';
-import { renderEvent } from './render.js';
+import { renderEvent, tokensDesconhecidos } from './render.js';
 import { bold, dim, green } from './render.js';
 
 /** O que `hub export` junta de uma sessão — o mesmo objeto vira JSON ou Markdown. */
@@ -103,6 +103,11 @@ function usd(n: number): string {
   return `US$ ${n.toFixed(4)}`;
 }
 
+/** Número exato (é um export), mas sem "0 tokens" quando o agente não informou tokens. */
+function tokensDoExport(c: { usd: number; tokens: number }): string {
+  return tokensDesconhecidos(c.tokens, c.usd) ? 'sem contagem de tokens' : `${c.tokens} tokens`;
+}
+
 /** Markdown legível, sem cor, pensado para colar num PR ou numa issue. */
 export function renderExportMarkdown(dados: SessionExport): string {
   const s = dados.session;
@@ -119,10 +124,10 @@ export function renderExportMarkdown(dados: SessionExport): string {
 
   const f = dados.cost.flow;
   l.push('## Custo', '');
-  l.push(`- esta sessão: ${usd(dados.cost.session.usd)} · ${dados.cost.session.tokens} tokens`);
-  l.push(`- com as delegadas: ${usd(dados.cost.subtree.usd)} · ${dados.cost.subtree.tokens} tokens`);
+  l.push(`- esta sessão: ${usd(dados.cost.session.usd)} · ${tokensDoExport(dados.cost.session)}`);
+  l.push(`- com as delegadas: ${usd(dados.cost.subtree.usd)} · ${tokensDoExport(dados.cost.subtree)}`);
   l.push(
-    `- fluxo inteiro: ${usd(f.consumed.usd)} de ${usd(f.limits.usd)} · ${f.consumed.tokens} tokens · ` +
+    `- fluxo inteiro: ${usd(f.consumed.usd)} de ${usd(f.limits.usd)} · ${tokensDoExport(f.consumed)} · ` +
       `${Math.round(f.pressure * 100)}% do orçamento${f.exhausted ? ' (esgotado)' : ''}`,
   );
   l.push('');

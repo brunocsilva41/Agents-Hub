@@ -11,7 +11,9 @@ import {
   haEdicaoNaoSalva,
   historicoDeAprovacoes,
   podeTrocarDeAba,
+  projetoDaSeguranca,
   resumoDaConfianca,
+  seguirProjetoCorrente,
   sessaoDoFiltroValida,
   temAvisos,
   textoDaCamada,
@@ -246,5 +248,54 @@ describe('trocar de aba com edição não salva', () => {
   test('qualquer área suja conta', () => {
     assert.equal(haEdicaoNaoSalva({ a: false, b: true }), true);
     assert.equal(haEdicaoNaoSalva({}), false);
+  });
+});
+
+describe('projeto da aba Segurança acompanha o projeto corrente do painel', () => {
+  const projetos = [{ id: 'prj_alfa' }, { id: 'prj_beta' }];
+
+  test('filtro num projeto conhecido: a aba abre nele, não no primeiro da lista', () => {
+    assert.equal(projetoDaSeguranca('prj_beta', projetos), 'prj_beta');
+  });
+
+  test('"todos os projetos" (ou filtro de projeto que sumiu) cai no primeiro projeto', () => {
+    assert.equal(projetoDaSeguranca('all', projetos), 'prj_alfa');
+    assert.equal(projetoDaSeguranca('prj_removido', projetos), 'prj_alfa');
+  });
+
+  test('sem projeto carregado ainda: só global — e segue quando a lista chega', () => {
+    assert.equal(projetoDaSeguranca('prj_beta', []), '');
+    assert.equal(projetoDaSeguranca('prj_beta', projetos), 'prj_beta');
+  });
+
+  test('formulário limpo segue o novo projeto sem perguntar', () => {
+    let perguntou = false;
+    const novo = seguirProjetoCorrente({
+      atual: 'prj_alfa',
+      alvo: 'prj_beta',
+      sujo: false,
+      confirmar: () => {
+        perguntou = true;
+        return false;
+      },
+    });
+    assert.equal(novo, 'prj_beta');
+    assert.equal(perguntou, false);
+  });
+
+  test('edição não salva: pergunta antes, e "não" mantém o projeto da edição', () => {
+    const base = { atual: 'prj_alfa', alvo: 'prj_beta', sujo: true };
+    assert.equal(seguirProjetoCorrente({ ...base, confirmar: () => false }), 'prj_alfa');
+    assert.equal(seguirProjetoCorrente({ ...base, confirmar: () => true }), 'prj_beta');
+  });
+
+  test('mesmo projeto: nada a fazer, nem pergunta', () => {
+    const novo = seguirProjetoCorrente({
+      atual: 'prj_beta',
+      alvo: 'prj_beta',
+      sujo: true,
+      confirmar: () => assert.fail('não deveria perguntar'),
+    });
+    assert.equal(novo, 'prj_beta');
   });
 });

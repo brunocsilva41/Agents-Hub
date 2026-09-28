@@ -95,9 +95,12 @@ export function copilotMapper(line: unknown): MappedEvent[] {
         });
       }
 
-      // `outputTokens` é o único número de uso por mensagem no JSONL (a
-      // entrada não vem). Vai como estimativa: o dinheiro de verdade chega
-      // pelos créditos de `session.usage_checkpoint`, que manda sobre ela.
+      // `outputTokens` só existe até o 1.0.80: do 1.0.81 em diante (conferido
+      // no 1.0.88) a mensagem não traz número de uso nenhum, e o stdout JSON
+      // não tem outra fonte de tokens — `assistant.usage` e `session.shutdown`
+      // estão na lista de exclusão do escritor do `--output-format json`.
+      // Sem o campo, não há custo na mensagem (nunca um "0 tokens" inventado);
+      // o dinheiro chega pelos créditos de `session.usage_checkpoint`.
       const outputTokens = numberOf(data['outputTokens']);
       const primeiro = events[0];
       if (primeiro && outputTokens !== undefined) {

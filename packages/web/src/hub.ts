@@ -26,11 +26,7 @@ export function agentColor(agentId: string): string {
   return AGENT_COLORS[hash % AGENT_COLORS.length] as string;
 }
 
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
+export { formatTokens } from './lib/tokens';
 
 export function formatUsd(n: number): string {
   return `US$ ${n.toFixed(4)}`;

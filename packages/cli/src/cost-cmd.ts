@@ -1,7 +1,7 @@
 import { chaveDeCaminho } from './project-resolve.js';
 import type { GraphSummary, HubClient, ProjectSummary } from './client.js';
 import { flagOn, flagString, imprimirJson, instanteDe, type Args } from './cmd-util.js';
-import { bold, cyan, dim, formatTokens } from './render.js';
+import { bold, cyan, dim, rotuloDeTokens, tokensCompactos } from './render.js';
 
 interface Soma {
   usd: number;
@@ -120,7 +120,7 @@ export async function coletarCusto(
 }
 
 function linha(rotulo: string, s: Soma, largura: number): string {
-  return `  ${rotulo.padEnd(largura)} US$ ${s.usd.toFixed(4).padStart(10)}  ${formatTokens(s.tokens).padStart(7)} tok  ${dim(`${s.sessions} sessão(ões)`)}`;
+  return `  ${rotulo.padEnd(largura)} US$ ${s.usd.toFixed(4).padStart(10)}  ${tokensCompactos(s.tokens, s.usd).padStart(7)} tok  ${dim(`${s.sessions} sessão(ões)`)}`;
 }
 
 /** `hub cost [--since 7d | --all] [--project X] [--json]`. */
@@ -140,7 +140,7 @@ export async function costCommand(client: HubClient, args: Args): Promise<CostRe
     `${bold('custo')} ${dim(periodo)}${report.projectId ? dim(` · projeto ${report.projectId}`) : ''}`,
   );
   console.log(
-    `${bold(`US$ ${report.total.usd.toFixed(4)}`)} · ${formatTokens(report.total.tokens)} tokens · ` +
+    `${bold(`US$ ${report.total.usd.toFixed(4)}`)} · ${rotuloDeTokens(report.total.tokens, report.total.usd)} · ` +
       `${report.total.flows} fluxo(s), ${report.total.sessions} sessão(ões)`,
   );
   if (report.total.flows === 0) {

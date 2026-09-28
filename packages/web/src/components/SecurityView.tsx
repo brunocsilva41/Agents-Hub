@@ -1,10 +1,11 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentSummary, ProjectSummary, SessionSummary } from '@agents-hub/client';
 import { ApprovalHistory } from './ApprovalHistory';
 import { AuditTrail } from './AuditTrail';
 import { IntegrationsPanel } from './IntegrationsPanel';
 import { PolicyEditor } from './PolicyEditor';
 import { ProjectTrustPanel } from './ProjectTrustPanel';
+import { projetoDaSeguranca, seguirProjetoCorrente } from '../logic/security';
 import '../security.css';
 
 type Secao = 'policy' | 'trust' | 'integrations' | 'approvals' | 'audit';
@@ -12,6 +13,9 @@ type Secao = 'policy' | 'trust' | 'integrations' | 'approvals' | 'audit';
 interface Props {
   agents: AgentSummary[];
   projects: ProjectSummary[];
+  /** Filtro de projeto do painel (`'all'` = todos), o mesmo da Timeline, do DAG e da Telemetria. */
+  projectIdCorrente: string;
+  onProjectChange: (id: string) => void;
   sessions: SessionSummary[];
   /** Edição não salva (editor de política): o `App` pergunta antes de trocar de aba. */
   onSujoChange: (sujo: boolean) => void;
@@ -35,10 +39,31 @@ const SECOES: ReadonlyArray<{ id: Secao; icone: string; titulo: string; sub: str
  * fica auditada no daemon.
  */
 export function SecurityView(props: Props): React.JSX.Element {
-  const { projects, onSujoChange } = props;
+  const { projects, onSujoChange, onProjectChange } = props;
   const [secao, setSecao] = useState<Secao>('policy');
-  const [projectId, setProjectId] = useState<string>(projects[0]?.id ?? '');
+  const alvo = projetoDaSeguranca(props.projectIdCorrente, projects);
+  const [projectId, setProjectId] = useState<string>(alvo);
   const [sujo, setSujo] = useState(false);
+
+  // Segue o projeto corrente quando ele muda com a aba aberta (lista de
+  // projetos que chega depois, projeto recém-cadastrado). Só reage à MUDANÇA
+  // do alvo: escolher "nenhum (só global)" aqui não é desfeito no próximo
+  // render. Com edição não salva, pergunta antes de descartá-la.
+  const alvoAplicado = useRef(alvo);
+  useEffect(() => {
+    if (alvo === alvoAplicado.current) return;
+    alvoAplicado.current = alvo;
+    const novo = seguirProjetoCorrente({
+      atual: projectId,
+      alvo,
+      sujo,
+      confirmar: () => window.confirm('Há alterações não salvas na política. Descartar?'),
+    });
+    if (novo === projectId) return;
+    setProjectId(novo);
+    setSujo(false);
+    onSujoChange(false);
+  }, [alvo, projectId, sujo, onSujoChange]);
 
   const marcarSujo = useCallback(
     (v: boolean) => {
@@ -59,6 +84,10 @@ export function SecurityView(props: Props): React.JSX.Element {
   const trocarProjeto = (novo: string): void => {
     if (novo === projectId || !confirmarDescarte()) return;
     setProjectId(novo);
+    // Projeto escolhido aqui vira o filtro do painel, como no DAG e na
+    // Telemetria. "Nenhum (só global)" fica só nesta aba: não é um filtro de
+    // fluxos, e virar "todos" traria a aba de volta ao primeiro projeto.
+    if (novo !== '') onProjectChange(novo);
   };
 
   const projeto = projects.find((p) => p.id === projectId);

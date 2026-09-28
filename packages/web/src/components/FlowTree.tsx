@@ -1,5 +1,6 @@
 import type { GraphSummary } from '@agents-hub/client';
-import { agentColor, formatTokens, formatUsdShort, STATE_LABEL } from '../hub';
+import { agentColor, formatUsdShort, STATE_LABEL } from '../hub';
+import { tokensCompactos } from '../lib/tokens';
 
 interface Props {
   nodes: GraphSummary[];
@@ -50,7 +51,7 @@ export function FlowTree({ nodes, selectedId, onSelect, failed = false, onRetry 
                     {node.agentId}
                   </span>
                   <span className="node-cost-badge">
-                    {formatUsdShort(node.usd)} · {formatTokens(node.tokens)}
+                    {formatUsdShort(node.usd)} · {tokensCompactos(node.tokens, node.usd)}
                   </span>
                 </div>
                 <div className="node-title" title={node.title ?? node.sessionId}>

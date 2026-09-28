@@ -15,6 +15,7 @@ import {
   red,
   renderEvent,
   renderGraph,
+  rotuloDeTokens,
   yellow,
 } from './render.js';
 import type { GraphSummary } from './client.js';
@@ -359,9 +360,10 @@ async function relatarCusto(client: HubClient, rootId: string, log: Log): Promis
   try {
     const { budget } = await client.budget(rootId);
     log(
-      `${NEWLINE}${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${formatTokens(
+      `${NEWLINE}${dim('custo do fluxo:')} US$ ${budget.consumed.usd.toFixed(4)} · ${rotuloDeTokens(
         budget.consumed.tokens,
-      )} tokens ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
+        budget.consumed.usd,
+      )} ${dim(`(${Math.round(budget.pressure * 100)}% do orçamento)`)}`,
     );
   } catch {
     // custo é informativo; não derruba o desfecho
