@@ -163,7 +163,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       location: { directory: ctx.workdir },
       // O modo do Hub vira permissão nativa aqui — ver `permissions.ts`.
       agent: escolha.agent,
-      ...(ctx.model ? { model: { providerID: 'opencode', id: ctx.model } } : {}),
+      ...(ctx.model ? { model: modeloDoOpenCode(ctx.model) } : {}),
     });
 
     const nativeSessionId = created.data?.id;
@@ -195,7 +195,7 @@ export class OpenCodeAdapter implements AgentAdapter {
 
     if (ctx.model) {
       await this.#json('POST', `/api/session/${nativeSessionId}/model`, {
-        model: { providerID: 'opencode', id: ctx.model },
+        model: modeloDoOpenCode(ctx.model),
       }).catch(() => undefined);
     }
 
@@ -753,6 +753,18 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
     return response;
   }
+}
+
+/**
+ * `--model` do Hub no formato que o manifesto promete (`provider/model`, igual
+ * ao `-m` do `opencode run`) vira o par que a API HTTP espera. Corta na
+ * PRIMEIRA barra: ids de provedores agregadores têm barra no próprio modelo
+ * (`openrouter/anthropic/x`). Sem barra, vale o provedor padrão `opencode`.
+ */
+function modeloDoOpenCode(model: string): { providerID: string; id: string } {
+  const barra = model.indexOf('/');
+  if (barra <= 0 || barra === model.length - 1) return { providerID: 'opencode', id: model };
+  return { providerID: model.slice(0, barra), id: model.slice(barra + 1) };
 }
 
 export function createOpenCodeAdapter(

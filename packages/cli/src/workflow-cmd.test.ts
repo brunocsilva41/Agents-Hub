@@ -7,7 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
 import { createHub, type Hub } from '@agents-hub/daemon';
 import { HubClient } from './client.js';
-import { streamUntilDone } from './follow-task.js';
+import { watchCommand, type Desfecho } from './session-follow.js';
 import { workflowCommand } from './workflow-cmd.js';
 
 /**
@@ -286,20 +286,37 @@ describe('hub workflow run / hub start com agentes falsos (item 2.9)', () => {
     assert.equal(exitCode, undefined);
   });
 
-  test('`hub start` acompanha a tarefa até o substituto concluir (não sai calado no fallback)', async () => {
+  /**
+   * `hub watch` pelo caminho REAL (`watchCommand` → `acompanhar`, o mesmo que
+   * `main.ts` chama). Antes estes testes exercitavam `follow-task.ts`, módulo
+   * que nenhum código de produção importava — o watch de verdade ficava sem
+   * cobertura de fallback (R13-02, reaberto pela auditoria).
+   */
+  async function vigiar(
+    positional: string[],
+    flags: Record<string, string | boolean> = {},
+  ): Promise<{ texto: string; exitCode: number | undefined; desfecho: Desfecho }> {
+    let desfecho: Desfecho | undefined;
+    const { linhas, exitCode } = await capturar(async () => {
+      desfecho = await watchCommand(client, { command: 'watch', positional, flags }, { pollMs: 100 });
+    });
+    assert.ok(desfecho, 'watchCommand devolve o desfecho');
+    return { texto: linhas.join('\n'), exitCode, desfecho };
+  }
+
+  test('`hub watch --root` acompanha o fluxo até o substituto concluir (não sai calado no fallback)', async () => {
     const projectId = (await client.addProject(semGit)).project.id;
     const res = await client.startSession({
       projectId,
       brief: { agent: 'flaky', objective: 'tarefa @FAIL=flaky @SLEEP=200', isolation: 'none' },
     });
 
-    const { linhas } = await capturar(() =>
-      streamUntilDone(client, { rootId: res.session.rootId }, { taskId: res.task.id, intervaloMs: 100 }),
-    );
-    const texto = linhas.join('\n');
+    const { texto, exitCode, desfecho } = await vigiar([], { root: res.session.rootId });
     const task = hub.store.tasks.get(res.task.id)!;
     assert.equal(task.state, 'completed', 'a CLI só pode devolver o terminal com a tarefa terminada');
-    assert.match(texto, /a tarefa passou para/);
+    assert.equal(desfecho.estado, 'completed', texto);
+    assert.equal(exitCode, undefined, 'fallback bem-sucedido sai com código 0');
+    assert.match(texto, /⚠ fallback: a tarefa saiu de ses_\w+ e passou para beta/, texto);
     assert.match(texto, /custo do fluxo/);
   });
 
@@ -310,11 +327,15 @@ describe('hub workflow run / hub start com agentes falsos (item 2.9)', () => {
       brief: { agent: 'flaky', objective: 'tarefa vigiada @FAIL=flaky @SLEEP=200', isolation: 'none' },
     });
 
-    const { linhas } = await capturar(() =>
-      streamUntilDone(client, { sessionId: res.session.id }, { intervaloMs: 100 }),
-    );
+    const { texto, exitCode, desfecho } = await vigiar([res.session.id]);
     const task = hub.store.tasks.get(res.task.id)!;
     assert.equal(task.state, 'completed');
-    assert.match(linhas.join('\n'), /RESULTADO_beta/);
+    // Parar na sessão original daria desfecho "failed" nela e sem a resposta
+    // do substituto — exatamente o bug que o teste guarda.
+    assert.equal(desfecho.estado, 'completed', texto);
+    assert.notEqual(desfecho.sessionId, res.session.id, 'o watch terminou na sessão substituta');
+    assert.equal(desfecho.sessionId, task.sessionId);
+    assert.equal(exitCode, undefined);
+    assert.match(texto, /RESULTADO_beta/, texto);
   });
 });

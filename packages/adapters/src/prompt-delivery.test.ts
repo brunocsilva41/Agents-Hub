@@ -129,6 +129,25 @@ test('mimo: prompt vai por stdin, não como posicional de `run`', () => {
   assert.deepEqual(inv.args, ['run', '--format', 'json']);
 });
 
+// R10-16: sem `--skip-git-repo-check` o Codex recusa rodar fora de repositório
+// git ("Not inside a trusted directory") — sessões `isolation: none` em pasta
+// sem git quebram. Nada exigia a flag: uma remoção acidental passava calada.
+test('codex: argv efetivo leva --skip-git-repo-check no oneShot e no resume', () => {
+  const m = loadManifestFile(path.join(MANIFESTOS, 'codex.yaml'));
+  const templates: Array<[string, string[] | undefined]> = [
+    ['oneShot', m.invoke.oneShot],
+    ['resume', m.invoke.resume],
+  ];
+  for (const [nome, template] of templates) {
+    assert.ok(template, `codex.${nome}: template ausente`);
+    const inv = montarInvocacao(m, CTX_BASE, template, 'oi', 'thread-1');
+    assert.ok(
+      inv.args.includes('--skip-git-repo-check'),
+      `codex.${nome}: faltou --skip-git-repo-check em ${JSON.stringify(inv.args)}`,
+    );
+  }
+});
+
 // --- resolverShimNpm: formas reais do cmd-shim ------------------------------
 
 function depsDeArquivos(arquivos: Record<string, string>): LookupDeps {
