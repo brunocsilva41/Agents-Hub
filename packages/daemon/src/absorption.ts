@@ -566,6 +566,23 @@ export class ImportService {
           });
           continue;
         }
+        // R05-07: a importação lê a descoberta CRUA (precisa do comando real),
+        // e `/discovery` mascarar não protegia nada aqui. Segredo em args/URL
+        // PULA o servidor em vez de ir mascarado: `--api-key ***` gravado
+        // seria um servidor que sobe e falha na autenticação — um arquivo
+        // quebrado com cara de certo, e o destino pode ser o `.mcp.json`
+        // versionado do projeto. Credencial de MCP tem caminho próprio: `env`
+        // com `includeEnv`. Vale também no dry-run, para a prévia ser a verdade.
+        if (temSegredoEmClaro(portavel)) {
+          skipped.push({
+            what: rotulo,
+            reason:
+              'argumento ou URL com cara de segredo (chave, token, cabeçalho de autorização) — ' +
+              'não gravamos credencial em claro no arquivo de config; mova-a para uma variável ' +
+              'de ambiente do servidor (env) e importe com includeEnv',
+          });
+          continue;
+        }
         if (portavel.transport === 'sse' && target.format === 'toml-codex') {
           skipped.push({ what: rotulo, reason: 'o Codex não suporta servidores SSE' });
           continue;
@@ -621,6 +638,18 @@ export class ImportService {
       items.push(item);
     }
   }
+}
+
+/**
+ * O servidor carregaria segredo em claro para o arquivo de destino? Mesmo
+ * critério que mascara `/discovery` (`redactArgs`/`redactUrl`): se sanear
+ * muda alguma coisa, havia segredo ali.
+ */
+function temSegredoEmClaro(p: PortableMcpServer): boolean {
+  const args = p.args ?? [];
+  if (redactArgs(args).some((a, i) => a !== args[i])) return true;
+  if (p.command !== undefined && redactTexto(p.command) !== p.command) return true;
+  return p.url !== undefined && redactUrl(p.url) !== p.url;
 }
 
 function toPortable(s: AgentDiscovery['mcpServers'][number]): PortableMcpServer | null {
