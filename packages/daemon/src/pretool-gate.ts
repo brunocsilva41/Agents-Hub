@@ -1,5 +1,8 @@
 import path from 'node:path';
 import type { Decision, GuardedAction, RiskLevel, SessionMode } from '@agents-hub/core';
+// Subcaminho, não o índice do core: o hook importa este módulo a cada leitura
+// do agente, e o índice arrasta o zod e a política inteira.
+import { matchSecretPath } from '@agents-hub/core/sensitive-paths';
 
 /**
  * Gate PRÉ-execução, ligado por hook do agente.
@@ -54,7 +57,15 @@ export function actionsOfToolCall(call: ToolCall, workdir: string): GuardedActio
 
   if (nome === 'read' || nome === 'glob' || nome === 'grep') {
     const alvo = texto(input['file_path']) ?? texto(input['path']);
-    return alvo ? [{ kind: 'file.read', path: path.resolve(workdir, alvo) }] : [];
+    const acoes: GuardedAction[] = alvo
+      ? [{ kind: 'file.read', path: path.resolve(workdir, alvo) }]
+      : [];
+    // `Grep` com filtro de arquivo (`glob: ".env*"`) lê o CONTEÚDO do que o
+    // filtro alcança, mesmo com `path` inocente: o filtro entra como o último
+    // segmento do caminho, e o classificador de segredo já sabe ler curinga.
+    const filtro = nome === 'grep' ? texto(input['glob']) : undefined;
+    if (filtro) acoes.push({ kind: 'file.read', path: path.resolve(workdir, alvo ?? '.', filtro) });
+    return acoes;
   }
 
   if (nome === 'webfetch' || nome === 'websearch') {
@@ -63,6 +74,42 @@ export function actionsOfToolCall(call: ToolCall, workdir: string): GuardedActio
   }
 
   return [];
+}
+
+const FERRAMENTAS_DE_LEITURA = new Set(['read', 'glob', 'grep']);
+
+/**
+ * A chamada é uma leitura COMUM — dá para responder no próprio hook, sem
+ * perguntar ao daemon?
+ *
+ * `Read` e `Grep` entraram no matcher para que ler `~/.ssh/id_rsa` ou `.env`
+ * pela ferramenta de leitura pare no gate como para em `cat` pelo shell. Mas o
+ * agente lê muito mais do que escreve: se toda leitura fizesse a ida HTTP ao
+ * daemon (e a busca da sessão, a política efetiva, o registro), o custo cairia
+ * justamente no caminho quente. Então o hook decide sozinho o caso comum e só
+ * leva ao daemon o que a política classificaria como segredo.
+ *
+ * A regra é a do daemon (`#classifyRead`: segredo é `irreversible`, o resto é
+ * `read`), aplicada de forma CONSERVADORA — errar aqui só pode mandar ao daemon
+ * uma leitura a mais, nunca liberar uma que ele pararia:
+ * - o daemon casa o caminho RELATIVO ao worktree; os segmentos do relativo são
+ *   um sufixo dos do absoluto, então testar o absoluto casa tudo que o
+ *   relativo casaria (e mais);
+ * - o texto cru da entrada também é testado, para o caso de o daemon resolver
+ *   contra um diretório diferente do `cwd` que o hook recebeu.
+ *
+ * Limite conhecido e aceito: uma política que endureça `risk.read` para além
+ * de `allow` não é vista aqui (ler a política custaria o que se quer evitar).
+ * Antes desta mudança nenhuma leitura chegava ao gate; o caso comum continua
+ * igual, e o segredo passa a parar.
+ */
+export function leituraComum(call: ToolCall, workdir: string): boolean {
+  if (!FERRAMENTAS_DE_LEITURA.has(call.toolName.toLowerCase())) return false;
+  const crus = ['file_path', 'path', 'glob'].map((k) => texto(call.toolInput[k]));
+  if (crus.some((c) => c !== undefined && matchSecretPath(c) !== null)) return false;
+  return actionsOfToolCall(call, workdir).every(
+    (a) => a.kind === 'file.read' && matchSecretPath(a.path) === null,
+  );
 }
 
 /**
