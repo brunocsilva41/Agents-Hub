@@ -82,6 +82,34 @@ describe('códigos HTTP de aprovação e POST sem corpo', () => {
     assert.match(r.body, /SESSION_NOT_FOUND/);
   });
 
+  // Pendência D(2) do fechamento do MVP: `FOLDER_NOT_FOUND` caía no `default`
+  // de `statusFor` e respondia 400, como se o chamador tivesse mandado lixo.
+  // O id tem formato válido (passa `FolderIdSchema`); o recurso é que não
+  // existe naquele projeto — isso é 404, igual a sessão/projeto inexistente.
+  test('remover pasta inexistente de projeto real: 404 FOLDER_NOT_FOUND', async () => {
+    const dirProjeto = path.join(raiz, 'projeto-pastas');
+    mkdirSync(dirProjeto, { recursive: true });
+    const corpo = JSON.stringify({ path: dirProjeto });
+    const criado = await cru(
+      [
+        'POST /projects HTTP/1.1',
+        `Authorization: Bearer ${hub.operatorToken}`,
+        'Content-Type: application/json',
+        `Content-Length: ${Buffer.byteLength(corpo)}`,
+      ],
+      corpo,
+    );
+    assert.equal(criado.status, 201, criado.body);
+    const projectId = (JSON.parse(criado.body) as { project: { id: string } }).project.id;
+
+    const r = await cru([
+      `DELETE /projects/${projectId}/folders/pfd_naoexiste HTTP/1.1`,
+      `Authorization: Bearer ${hub.operatorToken}`,
+    ]);
+    assert.equal(r.status, 404, r.body);
+    assert.match(r.body, /FOLDER_NOT_FOUND/);
+  });
+
   test('POST com corpo e sem Content-Type continua 415', async () => {
     const r = await cru(
       [
