@@ -9,6 +9,7 @@ Claude Code, Codex e Cursor conversam com ele.
 Uso:
     python scripts/mcp-smoke.py                      # só leitura, sem custo
     python scripts/mcp-smoke.py --delegate codex     # delega de verdade (gasta tokens)
+    AGENTS_HUB_URL=http://127.0.0.1:4799 python scripts/mcp-smoke.py   # daemon isolado
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ for stream in (sys.stdout, sys.stderr):
 class McpSession:
     """Cliente MCP mínimo sobre stdio."""
 
-    def __init__(self, agent_id: str = "cursor", hub_url: str = "http://127.0.0.1:4747"):
+    def __init__(self, agent_id: str, hub_url: str):
         env = dict(os.environ)
         env["AGENTS_HUB_MCP_AGENT"] = agent_id
         env["AGENTS_HUB_URL"] = hub_url
@@ -135,13 +136,22 @@ def main() -> int:
         help="delega de verdade para este agente (gasta tokens)",
     )
     parser.add_argument("--agent", default="cursor", help="quem finge ser o chamador")
+    # O CI (e quem testa sem mexer no daemon do dia a dia) sobe um daemon
+    # isolado noutra porta e aponta para ele via ambiente. Antes o script
+    # sobrescrevia AGENTS_HUB_URL com a 4747 fixa, e o único alvo possível
+    # era o daemon real do usuário.
+    parser.add_argument(
+        "--hub-url",
+        default=os.environ.get("AGENTS_HUB_URL", "http://127.0.0.1:4747"),
+        help="daemon alvo (padrão: $AGENTS_HUB_URL ou http://127.0.0.1:4747)",
+    )
     args = parser.parse_args()
 
     if not SERVER.exists():
         print(f"servidor não compilado: {SERVER}\nrode: npx tsc -b", file=sys.stderr)
         return 1
 
-    session = McpSession(agent_id=args.agent)
+    session = McpSession(agent_id=args.agent, hub_url=args.hub_url)
     failures: list[str] = []
 
     try:
