@@ -12,7 +12,7 @@
  * sem daemon e sem agentes reais.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { acionarNaTopbar, problemasDeLayout, VIEWPORTS } from './medir';
+import { acionarNaTopbar, problemasDeLayout, transbordos, VIEWPORTS } from './medir';
 import {
   CONSULTAS_DE_AUDITORIA,
   ESCRITAS,
@@ -100,6 +100,41 @@ for (const vp of VIEWPORTS) {
       expect(await problemasDeLayout(page)).toEqual([]);
       await selecionarSessao(page, 'Refatorar');
       expect(await problemasDeLayout(page)).toEqual([]);
+
+      // Métricas do orçamento no painel da direita (3 colunas fixas espremiam
+      // o texto na gaveta de 375 px).
+      if (await ehGaveta(page, '.col-right')) {
+        await acionarNaTopbar(page, /^Painel/);
+        await esperarParada(page, '.col-right');
+      }
+      await expect(page.locator('.metrics-grid')).toBeVisible();
+      expect(await transbordos(page, '.metrics-grid')).toEqual([]);
+      if (await ehGaveta(page, '.col-right')) await page.keyboard.press('Escape');
+
+      // Swarm COM os cartões carregados — antes só era medido com /agents 500,
+      // e o cartão de 340 px mínimos cortava em 375 px (R03-15).
+      await acionarNaTopbar(page, /^Swarm/);
+      await expect(page.locator('.swarm-card')).toHaveCount(5);
+      expect(await problemasDeLayout(page)).toEqual([]);
+      expect(await transbordos(page, '.swarm-grid')).toEqual([]);
+
+      // Agentes detectados: a coluna de rótulos de 140 px fixos.
+      await acionarNaTopbar(page, /^Configurações/);
+      await page.getByRole('button', { name: /Agentes detectados/ }).click();
+      await expect(page.locator('.disc-dl')).toBeVisible();
+      expect(await problemasDeLayout(page)).toEqual([]);
+      expect(await transbordos(page, '.disc-card')).toEqual([]);
+      // Com o rótulo em 140 px fixos, o valor (caminho do binário, servidores
+      // MCP) ficava com 89 px em 375 px. A coluna do valor não pode ser a mais
+      // estreita.
+      const colunas = await page
+        .locator('.disc-dl')
+        .first()
+        .evaluate((dl) => ({
+          rotulo: dl.querySelector('dt')?.getBoundingClientRect().width ?? 0,
+          valor: dl.querySelector('dd')?.getBoundingClientRect().width ?? 0,
+        }));
+      expect(colunas.valor, JSON.stringify(colunas)).toBeGreaterThanOrEqual(colunas.rotulo);
     });
 
     test('toda aba e ação da topbar é alcançável', async ({ page }) => {

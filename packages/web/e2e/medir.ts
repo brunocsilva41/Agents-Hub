@@ -77,6 +77,56 @@ export async function problemasDeLayout(page: Page, escopo?: string): Promise<st
   }, escopo ?? null);
 }
 
+/**
+ * Conteúdo que transborda de cada `seletor`: um bloco que passa da largura
+ * da tela, um descendente que sai da caixa dele, ou texto maior que o próprio
+ * elemento (scrollWidth > clientWidth). Pega o que `problemasDeLayout` não vê
+ * — cartão cortado por `overflow: hidden`, coluna fixa que espreme o texto —
+ * mesmo onde não há controle nenhum. Vazio = tudo cabe.
+ */
+export async function transbordos(page: Page, seletor: string): Promise<string[]> {
+  return page.evaluate((sel) => {
+    const vw = window.innerWidth;
+    const problemas: string[] = [];
+    const nome = (el: Element): string => {
+      const classe = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
+      const texto = (el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 30);
+      return `<${el.tagName.toLowerCase()}${classe ? '.' + classe : ''}> "${texto}"`;
+    };
+    const blocos = Array.from(document.querySelectorAll(sel));
+    if (blocos.length === 0) return [`nenhum ${sel} na tela`];
+    for (const bloco of blocos) {
+      const b = bloco.getBoundingClientRect();
+      if (b.width === 0) continue;
+      if (b.left < -0.5 || b.right > vw + 0.5) {
+        problemas.push(
+          `${nome(bloco)}: fora da tela (${Math.round(b.left)}..${Math.round(b.right)} de ${vw})`,
+        );
+        continue;
+      }
+      // Só o elemento mais externo que sai: os filhos dele sairiam junto.
+      const vazados = new Set<Element>();
+      for (const el of [bloco, ...Array.from(bloco.querySelectorAll('*'))]) {
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        if (el.parentElement && vazados.has(el.parentElement)) {
+          vazados.add(el);
+          continue;
+        }
+        if (el !== bloco && (r.left < b.left - 0.5 || r.right > b.right + 0.5)) {
+          vazados.add(el);
+          problemas.push(
+            `${nome(el)}: sai de ${nome(bloco)} (${Math.round(r.right)} > ${Math.round(b.right)})`,
+          );
+        } else if (el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1) {
+          problemas.push(`${nome(el)}: texto maior que a caixa (${el.scrollWidth} > ${el.clientWidth})`);
+        }
+      }
+    }
+    return problemas;
+  }, seletor);
+}
+
 /** O controle está visível direto, ou pelo menu compacto da topbar. */
 export async function acionarNaTopbar(page: Page, nome: string | RegExp): Promise<void> {
   const direto = page
