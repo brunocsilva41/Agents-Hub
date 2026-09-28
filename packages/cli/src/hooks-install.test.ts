@@ -68,12 +68,23 @@ describe('mergeHooks / hookInstalado', () => {
     assert.equal(hookInstalado(mergeHooks({}, NOSSO)), true);
   });
 
-  test('o matcher cobre as ferramentas de risco e deixa as de leitura de fora', () => {
+  test('o matcher cobre as ferramentas de risco e as leituras que podem tocar segredo; Glob fica de fora', () => {
     const re = new RegExp(`^(${MATCHER_DE_RISCO})$`);
-    for (const t of ['Bash', 'PowerShell', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'WebFetch']) {
+    for (const t of [
+      'Bash',
+      'PowerShell',
+      'Write',
+      'Edit',
+      'MultiEdit',
+      'NotebookEdit',
+      'WebFetch',
+      'Read',
+      'Grep',
+    ]) {
       assert.ok(re.test(t), t);
     }
-    for (const t of ['Read', 'Glob', 'Grep']) assert.ok(!re.test(t), t);
+    // `Glob` devolve só nomes; o conteúdo de qualquer achado passa por `Read`.
+    for (const t of ['Glob', 'ReadX', 'TodoWrite']) assert.ok(!re.test(t), t);
   });
 
   test('hookCommand usa o node atual e o bin.js desta CLI (entrada instalada, item 5.7), entre aspas', () => {

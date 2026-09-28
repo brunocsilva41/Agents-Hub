@@ -14,14 +14,33 @@ import { TIMEOUT_DO_HOOK_SEC } from './pretool-gate.js';
  */
 
 /**
- * Só as ferramentas que carregam risco.
+ * As ferramentas que carregam risco — e as de leitura que podem ler segredo.
  *
- * Cada chamada gateada custa um processo Node novo. Incluir `Read`, `Glob` e
- * `Grep` — que a política classifica como `read` e sempre libera — colocaria
- * esse custo no caminho quente de toda leitura de arquivo, em troca de nenhuma
- * proteção. O agente lê muito mais do que escreve.
+ * `Read` e `Grep` entraram depois (decisão de 2026-09-28): sem elas, ler
+ * `~/.ssh/id_rsa` pela ferramenta de leitura passava longe do gate, enquanto o
+ * mesmo `cat` pelo shell parava. O custo que antes justificava deixá-las de
+ * fora (um processo Node por leitura, mais a ida ao daemon) caiu para o caso
+ * comum: o hook libera sozinho a leitura que não toca segredo
+ * (`leituraComum` em `pretool-gate.ts`) e só consulta o daemon no resto. A
+ * latência medida está em SECURITY.md, seção do gate.
+ *
+ * `Glob` continua de fora: ele devolve NOMES de arquivo, não conteúdo, e ler
+ * qualquer arquivo que ele encontre passa por `Read` — que agora é gateado.
+ * Gatear `Glob` pagaria o processo por listagem sem proteger nenhum byte de
+ * segredo.
  */
-export const MATCHER_DE_RISCO = 'Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch';
+export const FERRAMENTAS_DE_LEITURA_NO_GATE = ['Read', 'Grep'] as const;
+
+export const MATCHER_DE_RISCO = [
+  'Bash',
+  'PowerShell',
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+  'WebFetch',
+  ...FERRAMENTAS_DE_LEITURA_NO_GATE,
+].join('|');
 
 /**
  * O comando é nosso? Instalações anteriores gravaram `main.js" hook`; as novas,
@@ -63,7 +82,7 @@ export function hookTargets(home: string): AlvoDeHook[] {
       nome: 'Claude Code',
       configUsuario: path.join(home, '.claude', 'settings.json'),
       configProjeto: (p) => path.join(p, '.claude', 'settings.json'),
-      nota: 'o hook é consultado antes de cada Bash/Write/Edit e pode bloquear a chamada',
+      nota: 'o hook é consultado antes de cada Bash/Write/Edit/Read/Grep e pode bloquear a chamada (leitura comum é liberada no próprio hook)',
       gateNasSessoesDoHub: true,
     },
     {
@@ -139,23 +158,57 @@ export function hookInstalado(config: Record<string, unknown>): boolean {
 }
 
 /**
- * Hook do Hub instalado com timeout antigo (menor que o atual, ou ausente).
+ * O matcher gravado alcança a ferramenta? O Claude trata o matcher como regex
+ * (ou `*`/vazio para todas); casar a string inteira evita que `ReadX` conte.
+ */
+function matcherCobre(matcher: string | undefined, ferramenta: string): boolean {
+  if (matcher === undefined || matcher === '' || matcher === '*') return true;
+  try {
+    return new RegExp(`^(?:${matcher})$`).test(ferramenta);
+  } catch {
+    // Matcher que nem compila não cobre nada que dê para afirmar.
+    return false;
+  }
+}
+
+/**
+ * Hook do Hub instalado de um jeito antigo que deixa buraco no gate. Dois
+ * casos, mesmo remédio (reinstalar com `hub hooks install claude --write`):
  *
- * Instalações anteriores gravaram `timeout: 10`, e com isso a ação que pedia
- * aprovação humana RODAVA depois de 10 s sem resposta. Reinstalar corrige;
- * isto é o que avisa que é preciso. Devolve `null` quando está tudo certo ou
- * quando o hook nem está instalado.
+ * - **timeout** menor que o atual, ou ausente. Instalações anteriores gravaram
+ *   `timeout: 10`, e com isso a ação que pedia aprovação humana RODAVA depois
+ *   de 10 s sem resposta.
+ * - **matcher** sem `Read`/`Grep`. Instalações anteriores a 2026-09-28 só
+ *   gateavam shell/escrita/rede: ler um segredo pela ferramenta de leitura
+ *   passava direto.
+ *
+ * Devolve `null` quando está tudo certo ou quando o hook nem está instalado.
+ * (O nome ficou do primeiro caso; quem chama só mostra o texto.)
  */
 export function avisoDeTimeoutDoHook(config: Record<string, unknown>): string | null {
-  const nossos = entradasPreToolUse(config).flatMap((e) =>
-    (e.hooks ?? []).filter((h) => comandoDoHub(h.command)),
+  const nossas = entradasPreToolUse(config).filter((e) =>
+    (e.hooks ?? []).some((h) => comandoDoHub(h.command)),
   );
-  if (nossos.length === 0) return null;
+  if (nossas.length === 0) return null;
+  const nossos = nossas.flatMap((e) => (e.hooks ?? []).filter((h) => comandoDoHub(h.command)));
 
+  const avisos: string[] = [];
   const velho = nossos.find((h) => typeof h.timeout !== 'number' || h.timeout < TIMEOUT_DO_HOOK_SEC);
-  if (!velho) return null;
-  return (
-    `hook do gate instalado com timeout ${velho.timeout ?? 'ausente'}${typeof velho.timeout === 'number' ? ' s' : ''} ` +
-    `(precisa de ${TIMEOUT_DO_HOOK_SEC} s): ação que pede aprovação roda sem ela quando o agente desiste do hook`
+  if (velho) {
+    avisos.push(
+      `hook do gate instalado com timeout ${velho.timeout ?? 'ausente'}${typeof velho.timeout === 'number' ? ' s' : ''} ` +
+        `(precisa de ${TIMEOUT_DO_HOOK_SEC} s): ação que pede aprovação roda sem ela quando o agente desiste do hook`,
+    );
+  }
+  // Basta UMA das nossas entradas cobrir a ferramenta: é o que o agente faz.
+  const faltando = FERRAMENTAS_DE_LEITURA_NO_GATE.filter(
+    (f) => !nossas.some((e) => matcherCobre(e.matcher, f)),
   );
+  if (faltando.length > 0) {
+    avisos.push(
+      `hook do gate instalado com matcher antigo, sem ${faltando.join('/')}: ` +
+        'ler segredo (~/.ssh, .env, credenciais) pela ferramenta de leitura passa sem o gate',
+    );
+  }
+  return avisos.length > 0 ? avisos.join('; ') : null;
 }
