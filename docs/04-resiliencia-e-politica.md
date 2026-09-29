@@ -71,7 +71,7 @@ Validado com o Claude Code e com o Codex de verdade (2026-09, versão anterior d
 
 Sobre isso vem o modo da sessão, que só endurece (`decisionForMode`): `supervised` pede aprovação para tudo acima de `read`; `semi` para tudo acima de `exec`; `autonomous` só para `irreversible`/`budget`. A tabela completa risco × modo está no [README](../README.md#segurança).
 
-**O que "aprovação" significa depende do nível de controle.** No gate (Claude, Codex) é prévia e bloqueante, como descrito acima. Na vigilância, a decisão vem de `watch.pauseOn` (padrão `irreversible`; em `supervised` também `escalate`) e `watch.flagOn` (padrão `escalate`): o evento já aconteceu, e o Hub para a sessão ou só marca um alerta na timeline.
+**O que "aprovação" significa depende do nível de controle.** No gate (Claude, Codex) é prévia e bloqueante, como descrito acima. Na vigilância, a decisão vem de `watch.pauseOn` (padrão `irreversible`; em `supervised` também `escalate`) e `watch.flagOn` (padrão `escalate`): o evento já aconteceu, e o Hub para a sessão ou só marca um alerta na timeline. Evento de ferramenta que o gate da sessão decide (hook por sessão do Claude/OpenClaude; comando do Codex com bypass) não pausa pela vigilância, só vira alerta — a decisão é do gate, antes de rodar (ver SECURITY.md).
 
 ### Escrita fora do worktree: o que é detectado de verdade
 
