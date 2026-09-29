@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, newId, nowIso, type Session, type Task } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -139,10 +140,7 @@ defaults:
       assert.notEqual(hub.store.sessions.get(id)?.state, 'paused');
     } finally {
       // Deixa o turno fake terminar antes do shutdown.
-      const limite = Date.now() + 15_000;
-      while (hub.sessions.isLive(id) && Date.now() < limite) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      await esperarAte(() => !hub.sessions.isLive(id), 'turno fake terminar');
       desinscrever();
     }
   });

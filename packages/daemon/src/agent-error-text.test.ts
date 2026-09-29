@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, HubError } from '@agents-hub/core';
 import { juntarErroDoAgente, textoDoErroDoAgente } from './agent-error-text.js';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 describe('texto do erro do agente (unidade)', () => {
@@ -157,14 +158,6 @@ defaults:
     }
   });
 
-  async function esperar(cond: () => boolean, timeoutMs = 15_000): Promise<void> {
-    const limite = Date.now() + timeoutMs;
-    while (!cond()) {
-      if (Date.now() > limite) throw new Error('condição não satisfeita a tempo');
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
   async function rodar(agentId: string) {
     const proj = hub.sessions.registerProject(projetoPath, 'Erro do agente');
     const started = await hub.sessions.start({
@@ -179,12 +172,12 @@ defaults:
         supervision: 'semi',
       },
     });
-    await esperar(() => {
+    await esperarAte(() => {
       const t = hub.store.tasks.get(started.task.id);
       return (
         !!t && ['completed', 'failed'].includes(t.state) && !hub.sessions.isLive(started.session.id)
       );
-    });
+    }, `task de ${agentId} terminal e run encerrada`);
     return started;
   }
 

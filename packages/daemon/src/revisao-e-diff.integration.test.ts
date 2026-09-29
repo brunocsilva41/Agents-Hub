@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, isTerminalSessionState } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -34,6 +35,7 @@ process.stdin.on('end', async () => {
     for (const w of dir('WRITE')) fs.writeFileSync(path.join(process.cwd(), w), 'feito por ' + agente + '\\n');
     if (dir('FAIL').length > 0) { process.stderr.write('erro de sintaxe no arquivo\\n'); process.exitCode = 2; return; }
     const sleep = Number(dir('SLEEP')[0] || 0);
+    // Simula um agente ainda trabalhando: é a janela em que o teste cancela.
     if (sleep) await new Promise((r) => setTimeout(r, sleep));
   }
   out({ type: 'assistant', message: { id: 'm2', model: 'claude-opus-5-5', content: [{ type: 'text', text: texto }] } });
@@ -132,14 +134,6 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
     return hub.sessions.registerProject(dir, `repo-${cont}`).id;
   }
 
-  async function esperar(cond: () => boolean, oque: string, timeoutMs = 20_000): Promise<void> {
-    const limite = Date.now() + timeoutMs;
-    while (!cond()) {
-      if (Date.now() > limite) throw new Error(`${oque} não aconteceu em ${timeoutMs}ms`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
   const iniciar = (projectId: string, objective: string) =>
     hub.sessions.start({
       projectId,
@@ -149,8 +143,8 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
 
   // A task vira `failed` antes de a sessão fechar: o diff é gravado no
   // fechamento, então a espera é pela SESSÃO terminal.
-  const sessaoFechada = (sessionId: string): Promise<void> =>
-    esperar(() => {
+  const sessaoFechada = (sessionId: string): Promise<boolean> =>
+    esperarAte(() => {
       const s = hub.store.sessions.get(sessionId);
       return s !== null && isTerminalSessionState(s.state);
     }, 'sessão terminal');
@@ -160,7 +154,7 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
 
   test('revisão APROVADA entra em `validation` e vira evento na timeline', async () => {
     const { session, task } = await iniciar(projetoGit(), 'criar o arquivo @WRITE=novo.txt');
-    await esperar(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'task terminal');
+    await esperarAte(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'task terminal');
     const final = hub.store.tasks.get(task.id)!;
     assert.equal(final.state, 'completed');
     const checks = final.result?.validation?.checks ?? [];
@@ -179,7 +173,7 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
 
   test('sessão que FALHA depois de escrever gera o artefato de diff', async () => {
     const { session, task } = await iniciar(projetoGit(), 'escrever e quebrar @WRITE=parcial.txt @FAIL');
-    await esperar(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'task terminal');
+    await esperarAte(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'task terminal');
     assert.equal(hub.store.tasks.get(task.id)?.state, 'failed');
     await sessaoFechada(session.id);
     const d = diffs(session.id);
@@ -195,9 +189,9 @@ describe('revisão aprovada e diff em falha/cancelamento (R13-17, R06-14)', () =
       'escrever e esperar @WRITE=meio.txt @SLEEP=20000',
     );
     const arquivo = path.join(hub.store.sessions.get(session.id)!.workdir, 'meio.txt');
-    await esperar(() => existsSync(arquivo), 'agente escrever');
+    await esperarAte(() => existsSync(arquivo), 'agente escrever');
     await hub.sessions.cancel(session.id, 'teste');
-    await esperar(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'task terminal');
+    await esperarAte(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'task terminal');
     await sessaoFechada(session.id);
     const d = diffs(session.id);
     assert.equal(d.length, 1, 'um diff do trabalho interrompido');

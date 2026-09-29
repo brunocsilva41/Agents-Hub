@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { cliHookEntrypoint } from './config.js';
 import { ensureOperatorToken } from './operator-auth.js';
@@ -49,20 +50,6 @@ fs.writeFileSync(saida, JSON.stringify({ arquivo, existia: fs.existsSync(arquivo
 process.stdout.write('fim\\n');
 process.exit(0);
 `;
-
-async function esperar<T>(
-  sonda: () => T | undefined | null | false,
-  oque: string,
-  ms = 30_000,
-): Promise<T> {
-  const limite = Date.now() + ms;
-  for (;;) {
-    const v = sonda();
-    if (v) return v;
-    if (Date.now() > limite) throw new Error(`tempo esgotado esperando: ${oque}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
 
 describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
   let raiz: string;
@@ -175,7 +162,10 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
     const arquivo = caminhoDoSettingsDaSessao(home, session.id);
 
     // O hook chegou ao daemon: aprovação real aberta para o push forçado.
-    const apv = await esperar(() => hub.sessions.pendingApprovals(session.id)[0], 'aprovação do gate');
+    const apv = await esperarAte(
+      () => hub.sessions.pendingApprovals(session.id)[0],
+      'aprovação do gate',
+    );
     assert.match(apv.action, /git push --force/);
     assert.ok(existsSync(arquivo), 'o arquivo de settings deve existir enquanto a sessão roda');
 
@@ -187,7 +177,7 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
     });
     assert.equal(r.status, 200);
 
-    const resultado = await esperar(
+    const resultado = await esperarAte(
       () =>
         existsSync(saida) ? (JSON.parse(readFileSync(saida, 'utf8')) as Record<string, unknown>) : null,
       'saída do agente falso',
@@ -203,11 +193,11 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
     assert.match(decisao?.permissionDecisionReason ?? '', /humano negou/i);
     assert.equal(existsSync(`${saida}.executou`), false, 'a ferramenta NÃO pode ter rodado');
 
-    await esperar(() => {
+    await esperarAte(() => {
       const t = hub.store.tasks.get(task.id);
       return t && ['completed', 'failed', 'canceled', 'rejected'].includes(t.state);
     }, 'fim da tarefa');
-    await esperar(() => !existsSync(arquivo), 'arquivo de settings apagado no fim da sessão', 5_000);
+    await esperarAte(() => !existsSync(arquivo), 'arquivo de settings apagado no fim da sessão');
   });
 
   test('mesmo tool_use_id vindo de dois hooks (settings do Hub + do usuário): UMA aprovação, mesma decisão', async () => {
@@ -234,25 +224,33 @@ describe('gate por sessão via --settings (Claude/OpenClaude)', () => {
         headers: { 'Content-Type': 'application/json' },
         body: corpo,
       }).then((r) => r.json() as Promise<Record<string, unknown>>);
-    const a = perguntar();
-    const b = perguntar();
-    const apv = await esperar(
-      () =>
-        hub.store.approvals
-          .listPending({ sessionId: session.id })
-          .find((x) => /origin dev/.test(x.action)),
-      'aprovação',
-    );
-    await new Promise((r) => setTimeout(r, 300));
-    const doGate = hub.store.approvals
-      .listPending({ sessionId: session.id })
-      .filter((x) => /origin dev/.test(x.action));
-    assert.equal(doGate.length, 1, 'duas aprovações para a mesma chamada');
-    await hub.sessions.resolveApproval(apv.id, 'approved', 'teste');
-    const [ra, rb] = await Promise.all([a, b]);
-    assert.equal(ra['permission'], 'allow');
-    assert.equal(rb['permission'], 'allow');
-    assert.equal(ra['approvalId'], rb['approvalId']);
+    // Conta as chegadas ao gate. O trecho síncrono de `gateToolCall` já abre a
+    // aprovação (ou encosta na que está em voo), então, quando as DUAS
+    // chamadas chegaram, uma segunda aprovação indevida já estaria no banco —
+    // sem janela de tempo adivinhada.
+    let chegadas = 0;
+    const gateOriginal = hub.sessions.gateToolCall.bind(hub.sessions);
+    hub.sessions.gateToolCall = (input) => {
+      const veredito = gateOriginal(input);
+      chegadas += 1;
+      return veredito;
+    };
+    try {
+      const a = perguntar();
+      const b = perguntar();
+      await esperarAte(() => chegadas === 2, 'as duas chamadas do hook chegarem ao gate');
+      const doGate = hub.store.approvals
+        .listPending({ sessionId: session.id })
+        .filter((x) => /origin dev/.test(x.action));
+      assert.equal(doGate.length, 1, 'duas aprovações para a mesma chamada');
+      await hub.sessions.resolveApproval(doGate[0]!.id, 'approved', 'teste');
+      const [ra, rb] = await Promise.all([a, b]);
+      assert.equal(ra['permission'], 'allow');
+      assert.equal(rb['permission'], 'allow');
+      assert.equal(ra['approvalId'], rb['approvalId']);
+    } finally {
+      hub.sessions.gateToolCall = gateOriginal;
+    }
     await hub.sessions.cancel(session.id, 'fim do teste').catch(() => undefined);
   });
 });

@@ -5,7 +5,8 @@ import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY, textoDe, type EventEnvelope } from '@agents-hub/core';
+import { DEFAULT_POLICY, isTerminalSessionState, textoDe, type EventEnvelope } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -43,6 +44,7 @@ process.stdin.on('end', async () => {
   const tokens = Number(dir('TOKENS')[0] || 0);
   if (tokens) out({ type: 'assistant', message: { id: 'm1', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'pensando' }], usage: { input_tokens: tokens, output_tokens: 0 } } });
   const sleep = Number(dir('SLEEP')[0] || 0);
+  // Simula um turno longo (o teste de estouro de tempo precisa do agente vivo).
   if (sleep) await new Promise((r) => setTimeout(r, sleep));
   out({ type: 'assistant', message: { id: 'm2', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'RESULTADO_' + agente }] } });
   out({ type: 'result', subtype: 'success', is_error: false, result: 'RESULTADO_' + agente, session_id: sid, total_cost_usd: Number(dir('COST')[0] || 0), usage: { input_tokens: tokens, output_tokens: 0 } });
@@ -173,18 +175,9 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
     return readFileSync(log, 'utf8').split('\n').filter(Boolean);
   }
 
-  async function esperar(cond: () => boolean, timeoutMs = 20_000, oque = 'condição'): Promise<void> {
-    const limite = Date.now() + timeoutMs;
-    while (!cond()) {
-      if (Date.now() > limite) throw new Error(`${oque} não aconteceu em ${timeoutMs}ms`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
   async function terminal(taskId: string): Promise<string> {
-    await esperar(
+    await esperarAte(
       () => TERMINAIS.has(hub.store.tasks.get(taskId)?.state ?? ''),
-      20_000,
       `task ${taskId} terminal`,
     );
     return hub.store.tasks.get(taskId)!.state;
@@ -234,11 +227,10 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       agentId: '',
       brief: brief('solo', 'baixar algo @TOOL=curl_http://x.example', { supervision: 'semi' }),
     });
-    await esperar(
+    await esperarAte(
       () =>
         hub.store.tasks.get(task.id)?.state === 'input_required' ||
         TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''),
-      20_000,
       'pausa ou fim',
     );
     const pendentes = hub.sessions.pendingApprovals(session.id);
@@ -296,11 +288,10 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       agentId: '',
       brief: brief('solo', 'demora @SLEEP=6000', { budget: { seconds: 1 } }),
     });
-    await esperar(
+    await esperarAte(
       () =>
         hub.store.tasks.get(task.id)?.state === 'input_required' ||
         TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''),
-      20_000,
       'estouro de tempo',
     );
     assert.equal(hub.store.tasks.get(task.id)!.state, 'input_required');
@@ -319,18 +310,23 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       agentId: '',
       brief: brief('solo', 'caro @COST=0.9', { budget: { usd: 0.5 } }),
     });
-    await esperar(
+    await esperarAte(
       () => hub.sessions.pendingApprovals(session.id).length > 0,
-      20_000,
       'aprovação de orçamento',
     );
-    await esperar(() => !hub.sessions.isLive(session.id), 20_000, 'fim do processo');
+    await esperarAte(() => !hub.sessions.isLive(session.id), 'fim do processo');
     const [pendente] = hub.sessions.pendingApprovals(session.id);
 
     await hub.sessions.resolveApproval(pendente!.id, 'approved', 'teste');
     assert.equal(await terminal(task.id), 'completed');
-    // Dá tempo a um relançamento indevido de aparecer.
-    await new Promise((r) => setTimeout(r, 500));
+    // Um relançamento indevido deixaria a sessão `running` (e o agente
+    // escreve no log ao subir, antes de sair). Sessão terminal é o fim do
+    // fluxo: nada mais a relança — a contagem abaixo já é a definitiva.
+    await esperarAte(
+      () => isTerminalSessionState(hub.store.sessions.get(session.id)?.state ?? 'running'),
+      'sessão terminal',
+    );
+    assert.equal(hub.sessions.isLive(session.id), false, 'nenhuma run nova pode estar viva');
 
     assert.equal(execucoes().slice(antes).length, 1, 'o agente não pode rodar de novo');
     assert.equal(hub.sessions.pendingApprovals(session.id).length, 0);
@@ -345,8 +341,8 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       // A linha `assistant` (estimativa) já estoura; o `result` (final) estoura de novo.
       brief: brief('solo', 'tokens @TOKENS=30', { budget: { tokens: 20 } }),
     });
-    await esperar(() => hub.sessions.pendingApprovals(session.id).length > 0, 20_000, 'aprovação');
-    await esperar(() => !hub.sessions.isLive(session.id), 20_000, 'fim do processo');
+    await esperarAte(() => hub.sessions.pendingApprovals(session.id).length > 0, 'aprovação');
+    await esperarAte(() => !hub.sessions.isLive(session.id), 'fim do processo');
     assert.equal(hub.sessions.pendingApprovals(session.id).length, 1);
     assert.match(hub.sessions.pendingApprovals(session.id)[0]!.action, /tokens/);
 

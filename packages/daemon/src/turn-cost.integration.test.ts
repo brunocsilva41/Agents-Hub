@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { resolveMapper } from '@agents-hub/adapters';
 import { DEFAULT_POLICY, TurnCostTracker } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { baseDoAcumulado } from './turn-cost-base.js';
 
@@ -226,14 +227,6 @@ process.stdin.on('end', () => {
     }
   });
 
-  async function esperar(cond: () => boolean, timeoutMs = 15_000): Promise<void> {
-    const limite = Date.now() + timeoutMs;
-    while (!cond()) {
-      if (Date.now() > limite) throw new Error('condição não satisfeita a tempo');
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
   function brief(agent: string, usd: number) {
     return {
       agent,
@@ -256,10 +249,10 @@ process.stdin.on('end', () => {
       agentId: 'claude-fake',
       brief: brief('claude-fake', 0.15),
     });
-    await esperar(() => {
+    await esperarAte(() => {
       const t = hub.store.tasks.get(started.task.id);
       return !!t && TERMINAIS.has(t.state) && !hub.sessions.isLive(started.session.id);
-    });
+    }, 'task terminal e run encerrada');
 
     const custo = hub.store.events.costOf(started.session.id);
     assert.ok(Math.abs(custo.usd - 0.1378276) < 1e-9, `store: US$ ${custo.usd}, real 0.1378276`);
@@ -286,10 +279,10 @@ process.stdin.on('end', () => {
       brief: brief('copilot-fake', 1),
     });
     const sessionId = started.session.id;
-    await esperar(() => {
+    await esperarAte(() => {
       const t = hub.store.tasks.get(started.task.id);
       return !!t && TERMINAIS.has(t.state) && !hub.sessions.isLive(sessionId);
-    });
+    }, 'segundo turno terminal e run encerrada');
 
     let custo = hub.store.events.costOf(sessionId);
     assert.ok(Math.abs(custo.usd - 0.005298219) < 1e-9, `1º turno: US$ ${custo.usd}`);

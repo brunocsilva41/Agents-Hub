@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { esperarAte } from './esperar-ate.js';
 import { validarWorkflowYaml, WorkflowRunner, type WorkflowHost } from './workflow-runs.js';
 
 /**
@@ -117,14 +118,6 @@ function hostFalso(opts: { ticks?: number; bloquear?: string; fallback?: string 
   return { host, inicios, bases, aprovacoesPedidas };
 }
 
-async function ate(cond: () => boolean, ms = 3000): Promise<void> {
-  const limite = Date.now() + ms;
-  while (!cond()) {
-    if (Date.now() > limite) throw new Error('tempo esgotado esperando a condição');
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
-
 describe('WorkflowRunner', () => {
   test('dispara, respeita a dependência e registra o desfecho de cada passo', async () => {
     const { host, inicios } = hostFalso({ ticks: 2 });
@@ -138,7 +131,7 @@ describe('WorkflowRunner', () => {
     );
     assert.match(run.id, /^wfr_[a-f0-9]{24}$/);
 
-    await ate(() => runner.get(run.id).state !== 'running');
+    await esperarAte(() => runner.get(run.id).state !== 'running', 'run sair de running');
     const fim = runner.get(run.id);
     assert.equal(fim.state, 'completed', JSON.stringify(fim));
     assert.deepEqual(
@@ -165,7 +158,7 @@ describe('WorkflowRunner', () => {
     const runner = new WorkflowRunner(host, { intervaloMs: 1 });
     const yaml = DOIS_PASSOS.replace(/(objective: [^\n]+)/g, '$1\n    isolation: worktree');
     const run = runner.start({ yaml, projectId: 'prj_a' });
-    await ate(() => runner.get(run.id).state !== 'running');
+    await esperarAte(() => runner.get(run.id).state !== 'running', 'run sair de running');
     assert.equal(runner.get(run.id).state, 'completed');
     assert.equal(bases.get('claude'), undefined, 'o primeiro passo não tem de onde partir');
     assert.deepEqual(bases.get('codex'), ['ses_f1']);
@@ -175,7 +168,7 @@ describe('WorkflowRunner', () => {
     const { host } = hostFalso({ bloquear: 'claude' });
     const runner = new WorkflowRunner(host, { intervaloMs: 1 });
     const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' });
-    await ate(() => runner.get(run.id).state !== 'running');
+    await esperarAte(() => runner.get(run.id).state !== 'running', 'run sair de running');
     const fim = runner.get(run.id);
     assert.equal(fim.state, 'failed');
     assert.equal(fim.steps[0]?.state, 'blocked');
@@ -191,7 +184,7 @@ describe('WorkflowRunner', () => {
     const { host, bases } = hostFalso({ fallback: 'claude', ticks: 2 });
     const runner = new WorkflowRunner(host, { intervaloMs: 1 });
     const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' });
-    await ate(() => runner.get(run.id).state !== 'running');
+    await esperarAte(() => runner.get(run.id).state !== 'running', 'run sair de running');
 
     const fim = runner.get(run.id);
     assert.equal(fim.state, 'completed', JSON.stringify(fim.steps));
@@ -206,7 +199,7 @@ describe('WorkflowRunner', () => {
     const { host, aprovacoesPedidas } = hostFalso({ fallback: 'claude', bloquear: 'claude' });
     const runner = new WorkflowRunner(host, { intervaloMs: 1 });
     const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' });
-    await ate(() => runner.get(run.id).state !== 'running');
+    await esperarAte(() => runner.get(run.id).state !== 'running', 'run sair de running');
     assert.equal(runner.get(run.id).steps[0]?.state, 'blocked');
     assert.deepEqual(aprovacoesPedidas, ['ses_f1_sub']);
   });
@@ -222,9 +215,9 @@ describe('WorkflowRunner', () => {
     const { host } = hostFalso({ ticks: 1_000_000 });
     const runner = new WorkflowRunner(host, { intervaloMs: 60_000 });
     const run = runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' });
-    await ate(() => runner.get(run.id).steps[0]?.state === 'running');
+    await esperarAte(() => runner.get(run.id).steps[0]?.state === 'running', 'primeiro passo rodando');
     runner.close();
-    await ate(() => runner.get(run.id).state !== 'running');
+    await esperarAte(() => runner.get(run.id).state !== 'running', 'run sair de running');
     assert.equal(runner.get(run.id).state, 'interrupted');
     assert.throws(() => runner.start({ yaml: DOIS_PASSOS, projectId: 'prj_a' }), /encerrando/);
   });
