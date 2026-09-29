@@ -149,6 +149,9 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
   para o bundle; o teste compara os dois). Mutação reproduzida pelo coordenador: web com 6 → 1/17
   vermelho; laço+sleep ignorando o abort → "consultas depois do cancelamento". verify na main: 1772,
   0 fail, 1 skip.
+- **G MESCLADO** (achado do teste real): `avisoDeGate` respeita `hook.sessoesDoHubGateadas` — sessão do Hub
+  gateada por sessão não recebe "gate não instalado"; aviso de timeout antigo mantido (o Claude soma os hooks do
+  settings do usuário aos do `--settings`). Mutação reproduzida (sem o ramo: 1/9 vermelho). verify: 1776, 0 fail.
 - Decisão em andamento (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
   Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
   Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
