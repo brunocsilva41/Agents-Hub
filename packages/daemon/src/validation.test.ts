@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import type { ValidationPolicy } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { runValidation } from './validation.js';
 
 /**
@@ -55,16 +56,17 @@ function pidVivo(pid: number): boolean {
   }
 }
 
-async function aguardarArquivo(file: string, timeoutMs = 10_000): Promise<string> {
-  const limite = Date.now() + timeoutMs;
-  while (Date.now() < limite) {
-    try {
-      return readFileSync(file, 'utf8').trim();
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+/** Conteúdo do arquivo quando já foi escrito (não só criado); `undefined` até lá. */
+function conteudoEscrito(file: string): string | undefined {
+  try {
+    return readFileSync(file, 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
   }
-  throw new Error(`arquivo ${file} nunca apareceu`);
+}
+
+function aguardarArquivo(file: string): Promise<string> {
+  return esperarAte(() => conteudoEscrito(file), `arquivo ${file} escrito`);
 }
 
 const dirs: string[] = [];

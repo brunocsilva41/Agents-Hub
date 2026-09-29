@@ -297,44 +297,40 @@ describe('reconciliação na subida do daemon', () => {
     });
 
     // Mitigação de PID reciclado (segunda checagem, além do nome de imagem):
-    // só faz sentido no Windows, onde `horarioDeCriacaoDoProcesso` de fato
-    // consulta o SO — em POSIX ela sempre devolve `null` e a checagem vira
-    // no-op (limitação já documentada e assumida).
-    test(
-      'PID vivo mas processo nasceu DEPOIS do último registro da sessão: reconciliação NÃO mata (provável PID reciclado)',
-      { skip: process.platform !== 'win32' },
-      async () => {
-        // Sessão gravada como se tivesse sido atualizada pela última vez há uma
-        // hora — simula um daemon que crashou há tempo. Um processo real
-        // spawnado agora (bem depois desse "último registro") representa o SO
-        // tendo devolvido o PID órfão pra outro programa qualquer com o mesmo
-        // nome de binário.
-        const umaHoraAtras = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    // vale nas duas plataformas — `horarioDeCriacaoDoProcesso` consulta o
+    // PowerShell no Windows e o `/proc` no Linux. Antes rodava só no Windows,
+    // e no POSIX a checagem era no-op.
+    test('PID vivo mas processo nasceu DEPOIS do último registro da sessão: reconciliação NÃO mata (provável PID reciclado)', async () => {
+      // Sessão gravada como se tivesse sido atualizada pela última vez há uma
+      // hora — simula um daemon que crashou há tempo. Um processo real
+      // spawnado agora (bem depois desse "último registro") representa o SO
+      // tendo devolvido o PID órfão pra outro programa qualquer com o mesmo
+      // nome de binário.
+      const umaHoraAtras = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
-        const filho = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], {
-          stdio: 'ignore',
-        });
-        assert.ok(filho.pid);
-        await aguardarNascimento(filho);
+      const filho = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60000)'], {
+        stdio: 'ignore',
+      });
+      assert.ok(filho.pid);
+      await aguardarNascimento(filho);
 
-        try {
-          const { session } = semear('running', false, filho.pid, 'node-fake', umaHoraAtras);
+      try {
+        const { session } = semear('running', false, filho.pid, 'node-fake', umaHoraAtras);
 
-          await hub.sessions.reconcileOnStartup();
+        await hub.sessions.reconcileOnStartup();
 
-          assert.equal(
-            hub.store.sessions.get(session.id)?.state,
-            'killed',
-            'o registro no banco vira killed de qualquer jeito — só o kill do processo é que é abortado',
-          );
-          assert.ok(
-            pidVivo(filho.pid),
-            'o processo não deveria ter sido morto: ele nasceu bem depois do último registro da sessão, sinal de PID reciclado pelo SO',
-          );
-        } finally {
-          filho.kill();
-        }
-      },
-    );
+        assert.equal(
+          hub.store.sessions.get(session.id)?.state,
+          'killed',
+          'o registro no banco vira killed de qualquer jeito — só o kill do processo é que é abortado',
+        );
+        assert.ok(
+          pidVivo(filho.pid),
+          'o processo não deveria ter sido morto: ele nasceu bem depois do último registro da sessão, sinal de PID reciclado pelo SO',
+        );
+      } finally {
+        filho.kill();
+      }
+    });
   });
 });

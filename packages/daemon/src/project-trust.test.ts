@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { loadProjectOverrides, mergeProjectPolicy, PROJECT_CONFIG_RELATIVE } from './project-config.js';
 
@@ -116,13 +117,10 @@ defaults:
       },
     });
     const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
-    const limite = Date.now() + 20_000;
-    for (;;) {
-      const task = hub.store.tasks.get(started.task.id);
-      if (task && terminais.has(task.state)) break;
-      if (Date.now() > limite) throw new Error('task não terminou a tempo');
-      await new Promise((r) => setTimeout(r, 50));
-    }
+    await esperarAte(
+      () => terminais.has(hub.store.tasks.get(started.task.id)?.state ?? ''),
+      'task terminal',
+    );
     return started.session.id;
   }
 

@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { DEFAULT_POLICY } from '@agents-hub/core';
+import { DEFAULT_POLICY, isTerminalSessionState } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -134,14 +135,6 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
     return readFileSync(log, 'utf8').split('\n').filter(Boolean);
   }
 
-  async function esperar(cond: () => boolean, oque: string, ms = 20_000): Promise<void> {
-    const limite = Date.now() + ms;
-    while (!cond()) {
-      if (Date.now() > limite) throw new Error(`${oque} não aconteceu em ${ms}ms`);
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
   test('falha por cota: motivo = evento error do agente (não o aviso do stderr), sem retry, fallback AVISADO antes', async () => {
     const antes = execucoes().length;
     const { session, task } = await hub.sessions.start({
@@ -149,7 +142,7 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
       agentId: '',
       brief: { agent: 'cota', objective: 'tarefa @QUOTA=cota', isolation: 'none' },
     });
-    await esperar(
+    await esperarAte(
       () => hub.store.tasks.get(task.id)?.state === 'completed',
       'tarefa concluída pela reserva',
     );
@@ -178,14 +171,22 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
       agentId: '',
       brief: { agent: 'solo', objective: 'caro @COST=0.9', isolation: 'none', budget: { usd: 0.5 } },
     });
-    await esperar(() => hub.sessions.pendingApprovals(session.id).length > 0, 'aprovação de orçamento');
-    await esperar(() => !hub.sessions.isLive(session.id), 'fim do processo');
+    await esperarAte(
+      () => hub.sessions.pendingApprovals(session.id).length > 0,
+      'aprovação de orçamento',
+    );
+    await esperarAte(() => !hub.sessions.isLive(session.id), 'fim do processo');
     const [pendente] = hub.sessions.pendingApprovals(session.id);
     assert.equal(pendente?.detail['turnCompleted'], true);
 
     await hub.sessions.resolveApproval(pendente.id, 'denied', 'teste');
-    await esperar(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'tarefa terminal');
-    await new Promise((r) => setTimeout(r, 300));
+    await esperarAte(() => TERMINAIS.has(hub.store.tasks.get(task.id)?.state ?? ''), 'tarefa terminal');
+    // A task fecha antes da sessão: espera a SESSÃO terminal (qualquer estado),
+    // e só então exige que seja `completed`. Sessão terminal não é relançada.
+    await esperarAte(
+      () => isTerminalSessionState(hub.store.sessions.get(session.id)?.state ?? 'running'),
+      'sessão terminal',
+    );
 
     assert.equal(hub.store.sessions.get(session.id)!.state, 'completed');
     const t = hub.store.tasks.get(task.id)!;
@@ -201,7 +202,7 @@ describe('teste real — rodada 1: defeitos reproduzidos com agentes falsos', ()
       agentId: '',
       brief: { agent: 'solo', objective: 'simples @TURNO2', isolation: 'none' },
     });
-    await esperar(() => hub.store.tasks.get(task.id)?.state === 'completed', 'tarefa concluída');
+    await esperarAte(() => hub.store.tasks.get(task.id)?.state === 'completed', 'tarefa concluída');
     const fins = hub.sessions.listEvents(session.id).filter((e) => e.type === 'turn.completed');
     assert.equal(fins.length, 1, `turn.completed por turno: ${fins.length}`);
   });

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, newId, nowIso, type Approval } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { operatorTokenPath } from './operator-auth.js';
 
@@ -332,19 +333,14 @@ defaults:
     });
     // Espera o arquivo existir E estar completo (JSON válido): um respiro fixo
     // depois do `existsSync` podia ler a escrita pela metade num runner lento.
-    const limite = Date.now() + 20_000;
-    let bruto = '';
-    let env: Record<string, string> | null = null;
-    while (env === null) {
-      if (Date.now() > limite) throw new Error('o agente de teste não gravou o ambiente');
+    const { bruto, env } = await esperarAte(() => {
       try {
-        bruto = existsSync(envDump) ? readFileSync(envDump, 'utf8') : '';
-        env = bruto ? (JSON.parse(bruto) as Record<string, string>) : null;
+        const lido = existsSync(envDump) ? readFileSync(envDump, 'utf8') : '';
+        return lido ? { bruto: lido, env: JSON.parse(lido) as Record<string, string> } : undefined;
       } catch {
-        env = null;
+        return undefined; // escrita pela metade: a próxima consulta pega inteira
       }
-      if (env === null) await new Promise((r) => setTimeout(r, 50));
-    }
+    }, 'o agente de teste gravar o ambiente');
 
     // Prova de que é o ambiente montado pelo Hub para ESTA sessão.
     assert.equal(env['AGENTS_HUB_SESSION_ID'], started.session.id);

@@ -1,6 +1,6 @@
 # Variáveis de ambiente
 
-Seis variáveis `AGENTS_HUB_*` configuram o Hub de fora. Elas são lidas e
+Sete variáveis `AGENTS_HUB_*` configuram o Hub de fora. Elas são lidas e
 validadas por [`packages/core/src/hub-env.ts`](../packages/core/src/hub-env.ts)
 (`readHubEnv`), que o daemon (`daemon/src/main.ts` e `loadConfig`), a CLI (via
 `loadConfig` e `daemon-control.ts`) e o MCP server (`mcp/src/main.ts`) usam.
@@ -17,7 +17,6 @@ não era verdade):
 
 | Onde | Variável | Efeito de valor inválido |
 |---|---|---|
-| `packages/mcp/src/main.ts` | `AGENTS_HUB_MCP_HEARTBEAT_MS` (intervalo do sinal de vida da raiz adotada, padrão 30000) | não numérico ou ≤ 0 volta ao padrão, sem aviso |
 | `packages/web/vite.config.ts` (só `npm run web:dev`) | `AGENTS_HUB_URL`, `AGENTS_HUB_HOME` | lidos crus; URL inválida quebra o proxy de desenvolvimento |
 | `packages/client/src/operator-token.ts` | `AGENTS_HUB_HOME` (onde procurar o `operator-token`) | lido cru; é o mesmo valor que o daemon valida |
 | `packages/cli/src/hook-run.ts`, `packages/mcp/src/main.ts` | `AGENTS_HUB_SESSION_ID` | interna (ver abaixo) |
@@ -107,4 +106,18 @@ valor inválido encerra o MCP server com a mensagem no stderr.
 
 ```bash
 AGENTS_HUB_MCP_GRACE_MS=500 npx agents-hub-mcp
+```
+
+## `AGENTS_HUB_MCP_HEARTBEAT_MS`
+
+Intervalo, em milissegundos, do sinal de vida que o MCP server manda ao daemon
+pela raiz que ele adotou — é o que impede a raiz de ficar `running` para
+sempre quando o hospedeiro mata o processo sem fechar o stdin. Padrão:
+`30000`. Inteiro entre 1 e 2147483647 (o teto do `setInterval`: acima dele o
+Node troca o valor por 1 ms); valor inválido encerra o MCP server com a
+mensagem no stderr, como `AGENTS_HUB_MCP_GRACE_MS`. Antes era lida com
+`Number()` cru e o inválido voltava ao padrão sem aviso.
+
+```bash
+AGENTS_HUB_MCP_HEARTBEAT_MS=10000 npx agents-hub-mcp
 ```

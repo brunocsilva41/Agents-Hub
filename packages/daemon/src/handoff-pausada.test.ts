@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -46,14 +47,6 @@ defaults:
   isolation: none
   timeoutSeconds: 60
 `;
-}
-
-async function esperar(cond: () => boolean, oque: string, timeoutMs = 15_000): Promise<void> {
-  const limite = Date.now() + timeoutMs;
-  while (!cond()) {
-    if (Date.now() > limite) throw new Error(`${oque}: não aconteceu em ${timeoutMs}ms`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
 }
 
 describe('handoff de sessão pausada', () => {
@@ -99,17 +92,20 @@ describe('handoff de sessão pausada', () => {
         supervision: 'semi',
       },
     });
-    await esperar(
+    await esperarAte(
       () => hub.sessions.listEvents(session.id).some((e) => e.type === 'message'),
       'lento falou',
     );
     await hub.sessions.pause(session.id);
-    await esperar(() => hub.store.tasks.get(task.id)?.state === 'input_required', 'task input_required');
+    await esperarAte(
+      () => hub.store.tasks.get(task.id)?.state === 'input_required',
+      'task input_required',
+    );
 
     await hub.sessions.handoff(session.id, 'rapido', 'teste');
     assert.equal(hub.store.tasks.get(task.id)?.state, 'working', 'o substituto está trabalhando');
 
-    await esperar(
+    await esperarAte(
       () => ['completed', 'failed', 'canceled'].includes(hub.store.tasks.get(task.id)?.state ?? ''),
       'task terminal',
     );

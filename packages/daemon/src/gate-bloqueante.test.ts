@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { ensureOperatorToken } from './operator-auth.js';
 import { ESPERA_DO_GATE_MS, TETO_HTTP_DO_HOOK_MS, TIMEOUT_DO_HOOK_SEC } from './pretool-gate.js';
@@ -63,20 +64,6 @@ interface RespostaDoGate {
   sessionId: string | null;
 }
 
-async function esperar<T>(
-  sonda: () => T | undefined | null | false,
-  descricao: string,
-  timeoutMs = 10_000,
-): Promise<T> {
-  const limite = Date.now() + timeoutMs;
-  for (;;) {
-    const valor = sonda();
-    if (valor) return valor;
-    if (Date.now() > limite) throw new Error(`tempo esgotado esperando: ${descricao}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
-
 describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
   let raiz: string;
   let hub: Hub;
@@ -123,7 +110,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
   }
 
   async function aprovacaoPendente(sessionId: string): Promise<string> {
-    return esperar(() => {
+    return esperarAte(() => {
       const [pendente] = hub.sessions.pendingApprovals(sessionId);
       return pendente?.id;
     }, `aprovação pendente de ${sessionId}`);
@@ -199,7 +186,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
   test('aprovar: o hook recebe allow, POST /approvals responde 200 e a sessão segue viva', async () => {
     hub.sessions.gateWaitMs = 20_000;
     const { sessionId, taskId } = await iniciar('dorminhoco');
-    const pidAntes = await esperar(() => hub.store.sessions.get(sessionId)?.pid, 'pid da run');
+    const pidAntes = await esperarAte(() => hub.store.sessions.get(sessionId)?.pid, 'pid da run');
 
     const gate = perguntarAoGate(sessionId);
     const apv = await aprovacaoPendente(sessionId);
@@ -226,7 +213,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
   test('negar: o hook recebe deny com o motivo humano, e a sessão NÃO é cancelada', async () => {
     hub.sessions.gateWaitMs = 20_000;
     const { sessionId, taskId } = await iniciar('dorminhoco');
-    const pidAntes = await esperar(() => hub.store.sessions.get(sessionId)?.pid, 'pid da run');
+    const pidAntes = await esperarAte(() => hub.store.sessions.get(sessionId)?.pid, 'pid da run');
 
     const gate = perguntarAoGate(sessionId);
     const apv = await aprovacaoPendente(sessionId);
@@ -250,7 +237,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
   test('ninguém responde: deny por falta de resposta, sem matar a sessão', async () => {
     hub.sessions.gateWaitMs = 700;
     const { sessionId, taskId } = await iniciar('dorminhoco');
-    await esperar(() => hub.store.sessions.get(sessionId)?.pid, 'pid da run');
+    await esperarAte(() => hub.store.sessions.get(sessionId)?.pid, 'pid da run');
 
     const veredito = await perguntarAoGate(sessionId);
     assert.equal(veredito.permission, 'deny');
@@ -297,7 +284,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     const apv = await aprovacaoPendente(sessionId);
 
     // A run termina com a aprovação aberta — o cenário da vistoria.
-    await esperar(
+    await esperarAte(
       () =>
         hub.sessions
           .listEvents(sessionId)
@@ -333,7 +320,7 @@ describe('gate pré-execução: fluxo bloqueante via HTTP', () => {
     await hub.sessions.cancel(sessionId, 'teste');
     const terminal = (st: string | undefined): boolean =>
       st === 'killed' || st === 'failed' || st === 'completed';
-    await esperar(() => terminal(hub.store.sessions.get(sessionId)?.state), 'sessão encerrada');
+    await esperarAte(() => terminal(hub.store.sessions.get(sessionId)?.state), 'sessão encerrada');
 
     const inicio = Date.now();
     const veredito = await perguntarAoGate(sessionId);

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { ensureOperatorToken } from './operator-auth.js';
 
@@ -53,20 +54,6 @@ interface Resultado {
   hook: boolean;
   decisao?: string | null;
   executou: boolean;
-}
-
-async function esperar<T>(
-  sonda: () => T | undefined | null | false,
-  oque: string,
-  ms = 30_000,
-): Promise<T> {
-  const limite = Date.now() + ms;
-  for (;;) {
-    const v = sonda();
-    if (v) return v;
-    if (Date.now() > limite) throw new Error(`tempo esgotado esperando: ${oque}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
 }
 
 describe('gate de leitura: Read de segredo para no hook, leitura comum passa', () => {
@@ -175,7 +162,7 @@ describe('gate de leitura: Read de segredo para no hook, leitura comum passa', (
 
     // Com o matcher antigo, o agente nem chamaria o hook para `Read`: a saída
     // apareceria sem aprovação nenhuma. Esperar pelos dois acusa isso cedo.
-    const apv = await esperar(
+    const apv = await esperarAte(
       () =>
         hub.sessions.pendingApprovals(session.id)[0] ??
         (existsSync(saida) ? { id: null, action: readFileSync(saida, 'utf8') } : null),
@@ -192,7 +179,7 @@ describe('gate de leitura: Read de segredo para no hook, leitura comum passa', (
     });
     assert.equal(r.status, 200);
 
-    const resultados = await esperar(
+    const resultados = await esperarAte(
       () => (existsSync(saida) ? (JSON.parse(readFileSync(saida, 'utf8')) as Resultado[]) : null),
       'saída do agente falso',
     );
@@ -210,7 +197,7 @@ describe('gate de leitura: Read de segredo para no hook, leitura comum passa', (
     const todas = hub.store.approvals.listPending({ sessionId: session.id });
     assert.equal(todas.length, 0, JSON.stringify(todas));
 
-    await esperar(() => {
+    await esperarAte(() => {
       const t = hub.store.tasks.get(task.id);
       return t && ['completed', 'failed', 'canceled', 'rejected'].includes(t.state);
     }, 'fim da tarefa');

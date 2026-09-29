@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, HubError, rollupCost, type GraphNode } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -112,14 +113,6 @@ function montarAmbiente(): Ambiente {
   return { hub, raiz, projetoId };
 }
 
-async function esperar(cond: () => boolean, descricao: string, timeoutMs = 20_000): Promise<void> {
-  const limite = Date.now() + timeoutMs;
-  while (!cond()) {
-    if (Date.now() > limite) throw new Error(`timeout esperando: ${descricao}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
-
 function achatar(nos: GraphNode[]): GraphNode[] {
   return nos.flatMap((n) => [n, ...achatar(n.children)]);
 }
@@ -207,7 +200,7 @@ describe('delegação em profundidade (agentes falsos)', () => {
       // Custo: os eventos chegam de forma assíncrona; espera o livro-caixa da
       // RAIZ enxergar os três agentes (1000 + 2000 + 4000 tokens).
       const esperado = CUSTOS['a']!.tokens + CUSTOS['b']!.tokens + CUSTOS['c']!.tokens;
-      await esperar(
+      await esperarAte(
         () => amb.hub.sessions.budget(a.id).consumed.tokens >= esperado,
         'custo dos três agentes consolidado na raiz',
       );

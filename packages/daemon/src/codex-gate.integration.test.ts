@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { HubError } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -84,31 +85,26 @@ function montarAmbiente(): Ambiente {
   return { hub, raiz, projectId, argsFile };
 }
 
-async function esperarTerminal(hub: Hub, taskId: string, timeoutMs = 5000): Promise<void> {
-  const limite = Date.now() + timeoutMs;
+async function esperarTerminal(hub: Hub, taskId: string): Promise<void> {
   const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
-  for (;;) {
-    const task = hub.store.tasks.get(taskId);
-    if (task && terminais.has(task.state)) return;
-    if (Date.now() > limite)
-      throw new Error(`task ${taskId} não chegou a estado terminal em ${timeoutMs}ms`);
-    await new Promise((r) => setTimeout(r, 25));
+  await esperarAte(
+    () => terminais.has(hub.store.tasks.get(taskId)?.state ?? ''),
+    `task ${taskId} terminal`,
+  );
+}
+
+/** O argv gravado pelo agente falso, quando já existe e está completo (JSON válido). */
+function argvGravado(file: string): string[] | undefined {
+  if (!existsSync(file)) return undefined;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as string[];
+  } catch {
+    return undefined; // escrita em andamento — a próxima consulta pega inteira
   }
 }
 
-async function esperarArquivo(file: string, timeoutMs = 5000): Promise<string[]> {
-  const limite = Date.now() + timeoutMs;
-  for (;;) {
-    if (existsSync(file)) {
-      try {
-        return JSON.parse(readFileSync(file, 'utf8')) as string[];
-      } catch {
-        // Escrita em andamento — tenta de novo.
-      }
-    }
-    if (Date.now() > limite) throw new Error(`${file} não apareceu em ${timeoutMs}ms`);
-    await new Promise((r) => setTimeout(r, 25));
-  }
+function esperarArquivo(file: string): Promise<string[]> {
+  return esperarAte(() => argvGravado(file), `${file} gravado`);
 }
 
 describe('gate pré-execução do Codex — fim a fim', () => {
