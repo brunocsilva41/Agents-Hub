@@ -43,6 +43,7 @@ after(() => {
   clearBinCache();
 });
 
+/** Simula o consumidor lento (o `#pump` com SQLite); nenhum uso aqui sincroniza o teste. */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -147,7 +148,7 @@ test(
     let recebidos = 0;
     for await (const _evento of queue) {
       recebidos += 1;
-      if (recebidos % 50 === 0) await sleep(1);
+      if (recebidos % 50 === 0) await sleep(1); // simula o consumidor lento: é o cenário do teste
     }
     clearInterval(amostrador);
 
@@ -217,7 +218,7 @@ test(
     let recebidos = 0;
     for await (const _evento of queue) {
       recebidos += 1;
-      if (recebidos % 50 === 0) await sleep(1);
+      if (recebidos % 50 === 0) await sleep(1); // simula o consumidor lento: é o cenário do teste
     }
     clearInterval(amostrador);
 
@@ -319,7 +320,7 @@ test(
     const inicio = Date.now();
     for await (const _evento of queue) {
       recebidos += 1;
-      await sleep(3);
+      await sleep(3); // simula consumidor mais lento que o heartbeat: é o cenário, não sincronização
     }
     const duracaoMs = Date.now() - inicio;
 

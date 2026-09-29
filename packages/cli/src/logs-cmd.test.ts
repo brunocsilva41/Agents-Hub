@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, test } from 'node:test';
+import { esperar } from './hub-de-teste.js';
 import { arquivosDeLog, logsCommand } from './logs-cmd.js';
 import { capturar, limpar } from './test-kit.js';
 
@@ -70,12 +71,20 @@ describe('hub logs', () => {
         },
       ),
     );
-    await new Promise((r) => setTimeout(r, 60));
-    appendFileSync(hoje, 'nova linha\n');
-    await new Promise((r) => setTimeout(r, 120));
-    writeFileSync(path.join(dir, 'daemon-2026-09-26.log'), 'dia seguinte\n');
-    await new Promise((r) => setTimeout(r, 120));
-    ctl.abort();
+    // `logsCommand` guarda a posição (fim do arquivo) antes do primeiro
+    // `await`: o acréscimo já pode acontecer, sem respiro nenhum.
+    try {
+      appendFileSync(hoje, 'nova linha\n');
+      await esperar(() => escrito.join('') === 'nova linha\n', 'o follow mostrar a linha nova');
+      writeFileSync(path.join(dir, 'daemon-2026-09-26.log'), 'dia seguinte\n');
+      await esperar(
+        () => escrito.join('').includes('dia seguinte'),
+        'o follow trocar para o arquivo novo',
+      );
+    } finally {
+      // Espera que falha não pode deixar o follow vivo segurando o processo.
+      ctl.abort();
+    }
     const { out } = await seguindo;
 
     assert.ok(

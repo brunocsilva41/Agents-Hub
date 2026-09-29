@@ -209,9 +209,20 @@ describe('novaTentativa', () => {
 });
 
 describe('sleep', () => {
-  test('resolve depois de aproximadamente o tempo pedido', async () => {
-    const inicio = Date.now();
-    await sleep(20);
-    assert.ok(Date.now() - inicio >= 15, 'não pode resolver antes do tempo pedido');
+  test('resolve exatamente no tempo pedido, nem antes nem depois (relógio falso)', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let resolveu = false;
+    const espera = sleep(20).then(() => {
+      resolveu = true;
+    });
+    const drenarMicrotarefas = (): Promise<void> => new Promise((r) => setImmediate(r));
+
+    t.mock.timers.tick(19);
+    await drenarMicrotarefas();
+    assert.equal(resolveu, false, 'não pode resolver antes do tempo pedido');
+
+    t.mock.timers.tick(1);
+    await espera;
+    assert.equal(resolveu, true);
   });
 });

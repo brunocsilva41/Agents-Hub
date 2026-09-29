@@ -7,6 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
 import { createHub, type Hub } from '@agents-hub/daemon';
 import { HubClient } from './client.js';
+import { esperar } from './hub-de-teste.js';
 import { watchCommand, type Desfecho } from './session-follow.js';
 import { workflowCommand } from './workflow-cmd.js';
 
@@ -37,6 +38,7 @@ process.stdin.on('end', async () => {
   }
   for (const w of dir('WRITE')) fs.writeFileSync(path.join(process.cwd(), w), 'feito por ' + agente + '\\n');
   const sleep = Number(dir('SLEEP')[0] || 0);
+  // Simula o agente trabalhando (passos que se sobrepõem de verdade); não sincroniza o teste.
   if (sleep) await new Promise((r) => setTimeout(r, sleep));
   out({ type: 'assistant', message: { id: 'm2', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'RESULTADO_' + agente }] } });
   out({ type: 'result', subtype: 'success', is_error: false, result: 'RESULTADO_' + agente, session_id: sid, total_cost_usd: Number(dir('COST')[0] || 0), usage: { input_tokens: 1, output_tokens: 1 } });
@@ -51,11 +53,14 @@ function git(cwd: string, args: string[]): void {
   );
 }
 
-/** Roda `fn` capturando o console; devolve as linhas e restaura `process.exitCode`. */
+/**
+ * Roda `fn` capturando o console; devolve as linhas e restaura `process.exitCode`.
+ * `linhas` pode vir de fora para quem precisa reagir à saída enquanto `fn` roda.
+ */
 async function capturar(
   fn: () => Promise<void>,
+  linhas: string[] = [],
 ): Promise<{ linhas: string[]; exitCode: number | undefined }> {
-  const linhas: string[] = [];
   const log = console.log;
   const err = console.error;
   const exitAntes = process.exitCode;
@@ -160,17 +165,24 @@ describe('hub workflow run / hub start com agentes falsos (item 2.9)', () => {
     return f;
   }
 
-  async function rodar(yaml: string, projeto: string, flags: Record<string, string> = {}) {
-    return capturar(() =>
-      workflowCommand(
-        client,
-        {
-          command: 'workflow',
-          positional: ['run', arquivo(yaml)],
-          flags: { project: projeto, ...flags },
-        },
-        { intervaloMs: 100, esperaMaxMs: 60_000 },
-      ),
+  async function rodar(
+    yaml: string,
+    projeto: string,
+    flags: Record<string, string> = {},
+    linhas: string[] = [],
+  ) {
+    return capturar(
+      () =>
+        workflowCommand(
+          client,
+          {
+            command: 'workflow',
+            positional: ['run', arquivo(yaml)],
+            flags: { project: projeto, ...flags },
+          },
+          { intervaloMs: 100, esperaMaxMs: 60_000 },
+        ),
+      linhas,
     );
   }
 
@@ -222,16 +234,22 @@ describe('hub workflow run / hub start com agentes falsos (item 2.9)', () => {
   test('passo bloqueado por aprovação: o workflow espera, e aprovado, retoma o DAG', async () => {
     let aprovadas = 0;
     let parar = false;
+    const saida: string[] = [];
+    const avisouBloqueio = (): boolean => saida.some((l) => /esperando aprovação/.test(l));
     const aprovador = (async () => {
       while (!parar) {
+        // O humano aprova depois de VER o aviso do workflow: aprovar antes
+        // esconderia um workflow que não avisa o bloqueio. Pedido que aparecer
+        // depois do primeiro também é aprovado — e o teste o conta como turno extra.
+        await esperar(
+          () => parar || (avisouBloqueio() && hub.sessions.pendingApprovals().length > 0),
+          'o workflow avisar o bloqueio com um pedido pendente',
+          60_000,
+        );
         for (const a of hub.sessions.pendingApprovals()) {
-          // Humano não aprova no mesmo instante: dá tempo ao workflow (que
-          // consulta a cada 100 ms) de ver o bloqueio e avisar.
-          if (Date.now() - Date.parse(a.requestedAt) < 1_000) continue;
           await hub.sessions.resolveApproval(a.id, 'approved', 'teste');
           aprovadas += 1;
         }
-        await new Promise((r) => setTimeout(r, 100));
       }
     })();
 
@@ -253,6 +271,8 @@ describe('hub workflow run / hub start com agentes falsos (item 2.9)', () => {
           '',
         ].join('\n'),
         semGit,
+        {},
+        saida,
       );
       const texto = linhas.join('\n');
       assert.match(texto, /esperando aprovação/, texto);
