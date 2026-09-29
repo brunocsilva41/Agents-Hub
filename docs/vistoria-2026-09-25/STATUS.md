@@ -259,6 +259,32 @@ Triagem do coordenador sobre os 36 não sustentados:
 ## Fase 9 — Fechamento
 - [ ] Não iniciado
 
+## Teste real — rodada 2 (2026-09-29 17:01–17:13, daemon isolado porta 48621, home temporário, projeto git temporário, main @ 78131e3)
+Config do daemon isolado: `retries.max = 0` e TODAS as cadeias de fallback vazias. Prompt trivial, `--budget-usd 0.10`,
+em série. Versões: claude 2.1.285, codex 0.159.0, agy 1.2.12, copilot 1.0.88. **OpenCode AUSENTE** nesta máquina
+(`npm ls -g` mostra `opencode-ai@` sem versão — instalação quebrada; não reinstalado sem autorização).
+| # | Agente | O que provou | Custo registrado |
+|---|---|---|---|
+| 1 | claude semi | OK; nativeSessionId; teto 0,10 estourado → aprovação de orçamento; negar pós-turno → `completed` (defeito da rodada 1 NÃO voltou) | US$ 0,1537 |
+| 2–3 | claude interrupt+send | **DEFEITO (H)**: interrupt logo após os eventos `SessionStart` do hook do usuário → Hub guardou id nativo de `system/hook_*`, conversa nunca gravada; `send` → `--resume` → "No conversation found" → task `failed`; motivo exibido "o agente não emitiu mensagem de erro" (errado) | US$ 0 (0 turnos de modelo) |
+| 4 | claude supervised: Read `.env` | **GATE INJETADO PROVADO no binário real** (sem hook no ~/.claude): Read de segredo → aprovação irreversible (kind tool-call) → negada → agente recebeu a explicação, não contornou, relatou, sessão `completed`. Orçamento estourado NO MEIO do turno: pausa → aprovado → relançado com `--resume` e o agente lembrava da 1ª tentativa (**retomada nativa do Claude provada**). Em supervised o Claude roda em plan mode e recusa Bash | US$ 0,15 |
+| 5 | claude semi: `git push` | **DEFEITO ALTO (I)**: o Claude emite `tool_use` ANTES do PreToolUse; a vigilância reativa abriu aprovação "watch" com `alreadyExecuted:true` (falso) e matou o processo antes do gate; negar → sessão `killed` (contra a 1.5) | US$ 0 registrado (turno morto não fecha custo) |
+| 6 | codex | OK; validação ok (cota voltou) | US$ 0,0243 · 22,5k tokens |
+| 7–8 | codex interrupt+send | **retomada nativa do Codex provada**: "sessão nativa retomada", respondeu "2" (último número que escrevera) | US$ 0,0049 (turno interrompido não contado) |
+| 9 | antigravity | OK; 1 turno concluído (rodada 1 mostrava 2x); cosmético: pedaços do stream impressos em linhas separadas quebrando palavras | US$ 0,0356 · 14,9k tokens |
+| 10 | copilot | OK; 0,37 AI Credits; "sem contagem de tokens" honesto; 1 turno concluído | US$ 0,0037 |
+Chamadas: 11 lançamentos, 9 chegaram ao modelo (teto ~10). Custo REGISTRADO US$ 0,3694; o real é maior
+(turnos mortos/interrompidos não fecham custo — pendência J).
+Achados novos → workers: **G** `hub start` avisa "gate não instalado" para o Claude, que é gateado por sessão
+(o daemon já expõe `sessoesDoHubGateadas`; o painel respeita, a CLI não); **H** retomada após interrupt cedo;
+**I** vigilância atropela o gate pré-execução; **J (pendente, depois de H/I)** custo de turno morto/interrompido
+não é contado nem pela estimativa.
+**INCIDENTE (coordenador):** um `hub budget` rodado SEM as variáveis do daemon isolado não achou daemon na 4747
+e o autostart subiu o daemon REAL (PID 20520) sobre `~/.agents-hub` às 17:07. Conferido: nenhuma das 7 sessões
+do usuário mudou, as 2 aprovações pendentes (23/09) intocadas. O encerramento foi bloqueado pelo classificador de
+permissões — fica a critério do usuário (estado equivalente ao de qualquer autostart). Todas as chamadas seguintes
+passaram por um wrapper que sempre exporta HOME/PORT/NO_AUTOSTART.
+
 ## Teste real — rodada 1 (2026-09-26 23:38–23:42, daemon isolado porta 48511, home temporário, projeto git temporário)
 Prompt: "Responda apenas com a palavra OK. Não use ferramentas." `--budget-usd 0.10`, em série. Versões: claude 2.1.283, codex 0.155.0, opencode 1.18.32, agy 1.2.11, copilot 1.0.88.
 | # | Agente | Resultado | Custo registrado | Observações |
