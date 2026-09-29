@@ -262,6 +262,14 @@ Triagem do coordenador sobre os 36 não sustentados:
 ## Fase 9 — Fechamento
 - [ ] Não iniciado
 
+## Fase 9.3 — painel no navegador (2026-09-29, build real da main @ 1231eb8, daemon isolado com as 8 sessões reais da rodada 2)
+Playwright (Edge headless) em 1440/1100/768/375: cada aba (Timeline, Swarm, Grafo DAG, Telemetria, Operação, Segurança,
+Configurações), modal Nova Sessão (foco inicial dentro, Esc fecha), paleta Ctrl+K, gaveta "Painel & Telemetria", e uma
+sessão REAL aberta em Resumido/Detalhado/Fluxo inteiro. **Sobreposição/corte/rolagem horizontal: ZERO em todas.**
+Achados → worker **K**: `/favicon.ico` 404 = erro de console em toda carga nova; gaveta aberta deixa o fundo focável
+(não `inert`: 11 controles em 1100, 4 em 768/375); contador "Todos" mostra 0 até ser clicado (8 sessões); markdown do
+agente aparece cru na timeline. Scripts: scratchpad do orquestrador (painel/vistoria-painel.mjs, sonda-*.mjs).
+
 ## Teste real — rodada 2 (2026-09-29 17:01–17:13, daemon isolado porta 48621, home temporário, projeto git temporário, main @ 78131e3)
 Config do daemon isolado: `retries.max = 0` e TODAS as cadeias de fallback vazias. Prompt trivial, `--budget-usd 0.10`,
 em série. Versões: claude 2.1.285, codex 0.159.0, agy 1.2.12, copilot 1.0.88. **OpenCode AUSENTE** nesta máquina
