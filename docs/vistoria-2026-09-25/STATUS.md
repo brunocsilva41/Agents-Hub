@@ -179,8 +179,10 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
   andamento em Opus, terminam como estão.
 - Decisão tomada (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
   Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
-  Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
-  cessão da AsyncQueue. Aprovado: disco real + limite adaptativo min(500 + 3×fsync medido, 3000) ms.
+  Windows; tmpfs/:memory: = ~60 ms). Opção A (`:memory:` puro) VETADA: o teste não pegava a falta de
+  cessão da AsyncQueue. Opção C (disco real + limite min(500 + 3×fsync, 3000) ms) REPROVADA: pico de fsync de
+  4,3 s no Docker Desktop, flake. **Final (E):** `:memory:` + custo síncrono FIXO de 2 ms por INSERT
+  (`custoDeInsertFixo`), limite fixo de 500 ms; sem a cessão: 1357 ms no container, ECONNRESET no Windows.
   **Limitação conhecida**: SQLite síncrono no thread principal ⇒ em disco com fsync lento, o checkpoint
   do WAL pode segurar o event loop ~250 ms.
 
