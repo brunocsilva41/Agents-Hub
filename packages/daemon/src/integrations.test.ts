@@ -9,7 +9,6 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -227,18 +226,6 @@ describe('integrações: estado, prévia e gravação (sem HTTP)', () => {
   });
 });
 
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const a = srv.address();
-      const porta = typeof a === 'object' && a ? a.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
-
 describe('rotas /integrations e prévia de política (HTTP)', () => {
   let raiz: string;
   let userHome: string;
@@ -273,7 +260,7 @@ describe('rotas /integrations e prévia de política (HTTP)', () => {
     mkdirSync(path.join(projetoDir, '.agents-hub'), { recursive: true });
     writeFileSync(path.join(projetoDir, PROJECT_CONFIG_RELATIVE), 'memory: x\n', 'utf8');
     hub = createHub(
-      { home: path.join(raiz, 'home'), manifestsDir: manifestos, port: await portaLivre() },
+      { home: path.join(raiz, 'home'), manifestsDir: manifestos, port: 0 },
       { homeDir: userHome },
     );
     const { host, port } = await hub.start();

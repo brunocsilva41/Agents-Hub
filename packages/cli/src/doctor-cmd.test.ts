@@ -331,7 +331,7 @@ describe('hub doctor × config.json global inválido', () => {
           HOME: casa,
           USERPROFILE: casa,
           AGENTS_HUB_HOME: hubHome,
-          // Porta livre e sem autostart: se o doctor tentasse o daemon, falharia
+          // Porta reservada (o subprocesso precisa do número antes de existir) e sem autostart: se o doctor tentasse o daemon, falharia
           // aqui — nunca na 4747 do usuário.
           AGENTS_HUB_PORT: String(await portaLivre()),
           AGENTS_HUB_NO_AUTOSTART: '1',

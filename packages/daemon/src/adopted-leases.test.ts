@@ -1,24 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { newId, nowIso } from '@agents-hub/core';
 import { AdoptedRootLeases } from './adopted-leases.js';
 import { createHub, type Hub } from './hub.js';
-
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 /**
  * Raízes adotadas ficavam `running` para sempre quando o hospedeiro matava o
@@ -46,7 +33,7 @@ describe('prazo das raízes adotadas', () => {
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
       webRoot: path.join(raiz, 'sem-web'),
-      port: await portaLivre(),
+      port: 0,
     });
     const { host, port } = await hub.start();
     baseUrl = `http://${host}:${port}`;

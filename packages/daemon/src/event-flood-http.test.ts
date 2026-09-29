@@ -1,50 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, textoDe, type EventEnvelope } from '@agents-hub/core';
 import { createHub, type Hub } from './hub.js';
-
-/** Porta livre reservada antes do Hub: a guarda de borda compara o `Host` com ela. */
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
-
-/**
- * Cria e sobe o Hub numa porta livre, tentando outra se ela for tomada.
- *
- * `portaLivre` fecha a porta antes de o Hub escutá-la; com a suíte rodando
- * arquivos em paralelo, outro teste pode pegá-la nesse intervalo, e o
- * `before` morria com EADDRINUSE, cancelando os dois testes (visto 1 vez em
- * 10 execuções de `npm test` no container Linux).
- */
-async function subirComPortaLivre(
-  criar: (porta: number) => Hub,
-): Promise<{ hub: Hub; host: string; port: number }> {
-  for (let tentativa = 1; ; tentativa += 1) {
-    const hub = criar(await portaLivre());
-    try {
-      const { host, port } = await hub.start();
-      return { hub, host, port };
-    } catch (err) {
-      await hub.shutdown().catch(() => {
-        // desligar um Hub que nem chegou a escutar é só limpeza
-      });
-      const ocupada = (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
-      if (!ocupada || tentativa >= 5) throw err;
-    }
-  }
-}
 
 /**
  * Impõe a cada INSERT de evento um custo síncrono FIXO de `ms`, no lugar do
@@ -176,24 +136,23 @@ defaults:
       );
     }
 
-    const subido = await subirComPortaLivre((port) =>
-      createHub({
-        home: path.join(raiz, 'home'),
-        dbFile: ':memory:',
-        manifestsDir: manifestos,
-        webRoot: path.join(raiz, 'sem-web'),
-        port,
-        policy: {
-          ...DEFAULT_POLICY,
-          watch: { pauseOn: [], flagOn: [] },
-          retries: { max: 0, backoffMs: 0 },
-          heartbeatTimeoutSeconds: 300,
-        },
-      }),
-    );
-    hub = subido.hub;
+    // porta 0: o SO escolhe e liga num passo só, sem janela entre fechar e escutar
+    hub = createHub({
+      home: path.join(raiz, 'home'),
+      dbFile: ':memory:',
+      manifestsDir: manifestos,
+      webRoot: path.join(raiz, 'sem-web'),
+      port: 0,
+      policy: {
+        ...DEFAULT_POLICY,
+        watch: { pauseOn: [], flagOn: [] },
+        retries: { max: 0, backoffMs: 0 },
+        heartbeatTimeoutSeconds: 300,
+      },
+    });
+    const { host, port } = await hub.start();
     desfazerCusto = custoDeInsertFixo(hub, CUSTO_POR_INSERT_MS);
-    baseUrl = `http://${subido.host}:${subido.port}`;
+    baseUrl = `http://${host}:${port}`;
     projectId = hub.sessions.registerProject(projeto, 'projeto-rajada').id;
   });
 

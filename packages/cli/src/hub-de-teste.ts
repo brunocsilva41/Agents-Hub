@@ -57,8 +57,9 @@ export interface HubDeTeste {
 }
 
 /**
- * `port: 0` não basta: a guarda de borda compara o `Host` da requisição com
- * `config.port`, conhecido só depois do `listen` — reserva uma porta antes.
+ * Porta reservada e FECHADA, para quem precisa do número ANTES de o servidor
+ * existir (ex.: `AGENTS_HUB_PORT` de um subprocesso). Hub em-processo usa
+ * `port: 0` — a janela entre fechar e escutar é uma corrida.
  */
 export function portaLivre(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -118,7 +119,7 @@ export async function montarHubDeTeste(
     home: raiz,
     manifestsDir: manifestos,
     webRoot: path.join(raiz, 'sem-web'),
-    port: await portaLivre(),
+    port: 0,
     policy: {
       ...DEFAULT_POLICY,
       retries: { max: 0, backoffMs: 10 },

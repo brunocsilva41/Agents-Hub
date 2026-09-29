@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -16,18 +15,6 @@ import { createHub, type Hub } from './hub.js';
  * Contra o daemon de verdade (porta própria, home temporário, agente falso em
  * Node que não chama modelo nenhum).
  */
-
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const a = srv.address();
-      const porta = typeof a === 'object' && a ? a.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 let porta = 0;
 
@@ -125,14 +112,13 @@ defaults:
       'utf8',
     );
 
-    porta = await portaLivre();
     hub = createHub({
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
-      port: porta,
+      port: 0,
       policy: { ...DEFAULT_POLICY, watch: { pauseOn: [], flagOn: [] } },
     });
-    await hub.start();
+    porta = (await hub.start()).port;
     projectId = hub.sessions.registerProject(projetoDir, 'projeto').id;
   });
 
