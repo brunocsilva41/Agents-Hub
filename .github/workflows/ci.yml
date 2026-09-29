@@ -37,9 +37,12 @@ permissions:
 
 # Um push novo no mesmo branch cancela a execução anterior: o que interessa é
 # o veredito sobre o topo, não sobre um commit que já foi substituído.
+# Na main NÃO cancela: cada merge que entra precisa do próprio veredito, senão
+# um merge seguido de outro deixa o primeiro sem CI e uma quebra dele some da
+# história (fica parecendo que só o segundo quebrou, ou nenhum).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # ------------------------------------------------------------------ portão

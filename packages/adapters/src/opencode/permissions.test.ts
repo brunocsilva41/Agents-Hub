@@ -88,6 +88,8 @@ async function subirServidorFalso(): Promise<ServidorFalso> {
       if (req.method === 'POST' && url === '/api/session/ses_falsa/prompt') {
         json(200, { data: { id: 'msg_1', sessionID: 'ses_falsa' } });
         // O servidor real ecoa o prompt admitido antes de o loop começar.
+        // O atraso simula o loop do modelo rodando DEPOIS da resposta do POST
+        // (como no OpenCode real); não sincroniza o teste.
         setTimeout(() => {
           const prompt = (JSON.parse(raw) as { prompt: { text: string } }).prompt;
           emitir({ type: 'session.next.prompt.admitted', data: { sessionID: 'ses_falsa', prompt } });
@@ -316,6 +318,7 @@ http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   if (req.url === '/api/session/ses_x/prompt') {
     res.end('{"data":{}}');
+    // Simula o loop do modelo terminando depois da resposta do POST; não sincroniza o teste.
     setTimeout(() => {
       for (const s of streams) s.write('data: {"type":"session.idle","data":{"sessionID":"ses_x"}}\\n\\n');
     }, 20);

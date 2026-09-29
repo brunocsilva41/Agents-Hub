@@ -17,6 +17,8 @@ import { HubError } from './errors.js';
  * vir de um modelo.
  */
 export const LIMITE_OBJETIVO_BRIEF = 50_000;
+/** Objetivo mais curto que isto não descreve tarefa; o painel usa o mesmo número. */
+export const OBJETIVO_MINIMO_BRIEF = 8;
 const LIMITE_ITENS = 200;
 const LIMITE_ITEM = 4_000;
 const item = () => z.string().trim().min(1).max(LIMITE_ITEM);
@@ -80,7 +82,7 @@ export const BriefSchema = z.object({
   objective: z
     .string()
     .trim()
-    .min(8, 'o objetivo precisa ser descritivo')
+    .min(OBJETIVO_MINIMO_BRIEF, 'o objetivo precisa ser descritivo')
     .max(LIMITE_OBJETIVO_BRIEF, `o objetivo passa de ${LIMITE_OBJETIVO_BRIEF} caracteres`),
 
   /** Como o pai valida que o filho entregou. Sem isto, não há portão de validação. */

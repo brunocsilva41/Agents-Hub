@@ -13,8 +13,14 @@ import type { AgentSummary } from '@agents-hub/client';
 export const TETO_MINIMO_USD = 0.1;
 export const TETO_MAXIMO_USD = 50;
 
-/** Objetivo mais curto que isto não descreve tarefa nenhuma. */
-export const OBJETIVO_MINIMO = 6;
+/**
+ * Objetivo mais curto que isto não descreve tarefa nenhuma. É o
+ * `OBJETIVO_MINIMO_BRIEF` de packages/core/src/brief.ts (o daemon recusa com 400
+ * abaixo dele): copiado e não importado porque a entrada principal do core puxa
+ * zod e módulos do Node para o bundle do navegador. O teste de session-form
+ * compara os dois.
+ */
+export const OBJETIVO_MINIMO = 8;
 
 /** O agente está de fato nesta máquina? (`probe.installed` vem da sondagem do daemon.) */
 export function estaInstalado(a: Pick<AgentSummary, 'probe'>): boolean {

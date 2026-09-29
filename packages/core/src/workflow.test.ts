@@ -136,9 +136,9 @@ describe('execução do workflow', () => {
         return { sessionId: `ses_${n}`, taskId: `tsk_${n}` };
       },
       settle: async ({ step }) => {
-        // Um tick de event loop: sem isto, um `start` que não espera nada
-        // passaria no teste de ordem por acidente.
-        await new Promise((r) => setTimeout(r, 5));
+        // Uma volta do event loop (sem relógio): sem isto, um `start` que não
+        // espera nada passaria no teste de ordem por acidente.
+        await new Promise((r) => setImmediate(r));
         linhaDoTempo.push(`fim:${step.id}`);
         const d = desfechos[step.id] ?? {};
         return {

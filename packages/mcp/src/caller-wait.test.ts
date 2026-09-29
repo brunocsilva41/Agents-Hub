@@ -85,10 +85,84 @@ describe('CallerIdentity', () => {
 
 /**
  * `hub_agent_wait` cancelado pelo cliente seguia consultando o daemon (achado
- * 8), e `hub_agent_call` aceitava objetivo de 2 milhões de caracteres
- * (achado 11). Servidor HTTP falso que conta as requisições.
+ * 8). Relógio falso para o backoff do laço (1,5 s, 2,1 s, ...) e daemon falso
+ * EM PROCESSO: cada consulta é contada na hora, sem rede, então "nenhuma
+ * consulta depois do cancelamento" é verificável sem esperar tempo de parede.
+ *
+ * O daemon falso responde com uma sessão do fluxo de quem chama: a versão
+ * anterior deste teste respondia `session: null`, a espera morria na primeira
+ * consulta por erro de escopo e o teste passava mesmo com o laço ignorando o
+ * cancelamento.
  */
-describe('MCP: wait cancelável e limites do hub_agent_call', () => {
+describe('MCP: hub_agent_wait cancelável', () => {
+  test('para de consultar o daemon quando o cliente cancela', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let consultas = 0;
+    let avisarConsulta: () => void = () => {};
+    const proximaConsulta = (): Promise<void> =>
+      new Promise((resolve) => {
+        avisarConsulta = resolve;
+      });
+    const sessaoDoFluxo = { id: 'ses_chamador1', rootId: 'ses_raiz1' } as SessionSummary;
+    const hubClient = {
+      task: async (id: string) => {
+        consultas += 1;
+        avisarConsulta();
+        return {
+          task: { id, state: 'working', attempts: [], result: null },
+          session: sessaoDoFluxo,
+        };
+      },
+      session: async () => ({ session: sessaoDoFluxo }),
+    } as unknown as HubClient;
+    const caller = new CallerIdentity(hubClient, 'agente-mcp', os.tmpdir(), 'ses_chamador1');
+    const server = buildMcpServer(hubClient, caller);
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'teste-wait-cancelado', version: '0.0.1' });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    t.after(() => client.close());
+    // O transporte em memória e o laço só usam microtarefas: uma volta do
+    // event loop basta para tudo o que o relógio liberou acontecer.
+    const drenar = (): Promise<void> => new Promise((r) => setImmediate(r));
+
+    const controle = new AbortController();
+    const primeira = proximaConsulta();
+    const chamada = client
+      .callTool(
+        { name: 'hub_agent_wait', arguments: { task_id: 'tsk_abc123', timeout_seconds: 0 } },
+        undefined,
+        { signal: controle.signal },
+      )
+      .catch((err: unknown) => err);
+    await primeira;
+
+    // Controle positivo: sem cancelar, o relógio falso governa o backoff e o
+    // laço consulta de novo — prova que o silêncio lá embaixo não é de graça.
+    const segunda = proximaConsulta();
+    await drenar(); // o laço agenda o backoff depois da consulta; o tick tem de vir depois
+    t.mock.timers.tick(1500);
+    await segunda;
+    assert.equal(consultas, 2);
+
+    controle.abort();
+    await chamada;
+    await drenar();
+    const noCancelamento = consultas;
+
+    // Sem a correção, o laço segue consultando (2,1 s, 2,9 s, ...) para sempre.
+    for (let i = 0; i < 12; i += 1) {
+      t.mock.timers.tick(10_000);
+      await drenar();
+    }
+    assert.equal(consultas, noCancelamento, 'consultas depois do cancelamento');
+  });
+});
+
+/**
+ * `hub_agent_call` aceitava objetivo de 2 milhões de caracteres (achado 11).
+ * Servidor HTTP falso que conta as requisições.
+ */
+describe('MCP: limites do hub_agent_call', () => {
   let fake: HttpServer;
   let client: Client;
   const recebidos: string[] = [];
@@ -122,38 +196,6 @@ describe('MCP: wait cancelável e limites do hub_agent_call', () => {
     await client.close();
     await new Promise<void>((resolve) => fake.close(() => resolve()));
   });
-
-  test(
-    'hub_agent_wait para de consultar o daemon quando o cliente cancela',
-    { timeout: 20_000 },
-    async () => {
-      recebidos.length = 0;
-      const controle = new AbortController();
-      const chamada = client
-        .callTool(
-          { name: 'hub_agent_wait', arguments: { task_id: 'tsk_abc123', timeout_seconds: 0 } },
-          undefined,
-          {
-            signal: controle.signal,
-          },
-        )
-        .catch((err: unknown) => err);
-
-      await new Promise((r) => setTimeout(r, 300));
-      controle.abort();
-      await chamada;
-      const noCancelamento = recebidos.length;
-      assert.ok(noCancelamento >= 1, 'a espera deveria ter consultado ao menos uma vez');
-
-      // Sem a correção, o laço segue consultando (1,5 s, 2,1 s, ...) para sempre.
-      await new Promise((r) => setTimeout(r, 4000));
-      assert.equal(
-        recebidos.length,
-        noCancelamento,
-        `consultas depois do cancelamento: ${recebidos.join(', ')}`,
-      );
-    },
-  );
 
   test('hub_agent_call recusa objetivo gigante sem chegar ao daemon', async () => {
     recebidos.length = 0;
