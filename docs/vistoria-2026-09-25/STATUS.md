@@ -152,6 +152,15 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
 - **G MESCLADO** (achado do teste real): `avisoDeGate` respeita `hook.sessoesDoHubGateadas` — sessão do Hub
   gateada por sessão não recebe "gate não instalado"; aviso de timeout antigo mantido (o Claude soma os hooks do
   settings do usuário aos do `--settings`). Mutação reproduzida (sem o ramo: 1/9 vermelho). verify: 1776, 0 fail.
+- **I MESCLADO** (achado ALTO do teste real): `avaliarVigilancia` recebe a cobertura do gate da sessão (mesma fonte do
+  spawn: `gate.settingsArgs` → hook por sessão nas ferramentas de `MATCHER_DE_RISCO`; Codex com bypass → só
+  `command.executed`, que ele emite depois de rodar o que o hook deixou; `file_change` do Codex segue vigiado por não
+  ter sido medido). Evento coberto que bateria `pauseOn` vira só alerta "pediu para executar"; quem pergunta é o gate,
+  antes de rodar. Teste de integração com agente falso na ordem real (tool_use no stdout, depois o hook de verdade):
+  vermelho sem a correção reproduzindo o achado (kind watch, "executou", alreadyExecuted), verde com ela (kind
+  tool-call, negativa chega ao agente, push não roda, task completed). Agente sem gate segue pausando. Mutação
+  reproduzida pelo coordenador (2/25 vermelhos). verify: 1785, 0 fail. OpenClaude entra como gateado por ter
+  settingsArgs (o binário consultar o hook segue não exercitado — SECURITY.md).
 - Decisão em andamento (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
   Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
   Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
