@@ -37,6 +37,8 @@ export {
   type CoberturaDoGate,
   type VigilanciaVeredito,
 } from './guarded-actions.js';
+// Leitura da falha de um `resume` para o daemon decidir o replay de segurança.
+export { sessaoNativaInexistente } from './failure-reason.js';
 export { AgentRegistry, loadManifestDir, loadManifestFile } from './registry.js';
 export { resolveMapper, listMappers } from './mappers/index.js';
 export {

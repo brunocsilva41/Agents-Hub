@@ -14,7 +14,11 @@ import type { MappedEvent } from './types.js';
  *   1. a ÚLTIMA mensagem de evento `error` do próprio agente (é ele quem sabe
  *      por que parou);
  *   2. a última linha do stderr que PAREÇA erro (e não aviso);
- *   3. nada — melhor dizer "sem mensagem" do que promover um aviso a motivo.
+ *   3. a última linha útil do stderr que não seja aviso — o Claude recusa um
+ *      `--resume` de sessão inexistente com "No conversation found with
+ *      session ID: ..." (sem palavra de erro) e um `result` sem texto
+ *      (teste real de 2026-09-29);
+ *   4. nada — melhor dizer "sem mensagem" do que promover um aviso a motivo.
  */
 
 /** Texto de um evento `error` mapeado (cada mapper usa um campo). */
@@ -43,13 +47,23 @@ export function ultimaLinhaDeErro(stderr: readonly string[]): string | null {
   return null;
 }
 
+/** Última linha do stderr que não é aviso, com ou sem cara de erro. */
+function ultimaLinhaUtil(stderr: readonly string[]): string | null {
+  for (let i = stderr.length - 1; i >= 0; i -= 1) {
+    const linha = (stderr[i] ?? '').trim();
+    if (linha.length > 0 && !PARECE_AVISO.test(linha)) return linha;
+  }
+  return null;
+}
+
 /** Texto final: `processo terminou com código N: <motivo>`. */
 export function motivoDaFalha(
   exitCode: number | null,
   errosDoAgente: readonly string[],
   stderr: readonly string[],
 ): string {
-  const motivo = errosDoAgente[errosDoAgente.length - 1] ?? ultimaLinhaDeErro(stderr);
+  const motivo =
+    errosDoAgente[errosDoAgente.length - 1] ?? ultimaLinhaDeErro(stderr) ?? ultimaLinhaUtil(stderr);
   const base = `processo terminou com código ${exitCode}`;
   return motivo
     ? `${base}: ${cortar(motivo)}`
@@ -59,4 +73,21 @@ export function motivoDaFalha(
 function cortar(texto: string, max = 2000): string {
   const limpo = texto.replace(/\s+/g, ' ').trim();
   return limpo.length > max ? `${limpo.slice(0, max - 1)}…` : limpo;
+}
+
+/**
+ * A falha de um `resume` foi "a sessão nativa não existe"? Casa os padrões de
+ * `manifest.session.nativeSessionMissing` contra cada linha do stderr e contra
+ * o motivo já montado. Sem padrões declarados, nunca casa: o Hub não adivinha
+ * o texto de erro de um agente.
+ */
+export function sessaoNativaInexistente(
+  padroes: readonly string[],
+  stderr: string,
+  motivo: string | null,
+): boolean {
+  if (padroes.length === 0) return false;
+  const regexes = padroes.map((p) => new RegExp(p, 'i'));
+  const textos = [...stderr.split(/\r?\n/), motivo ?? ''];
+  return textos.some((t) => regexes.some((r) => r.test(t)));
 }

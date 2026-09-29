@@ -61,6 +61,7 @@ import {
   describeAction,
   describeRequest,
   avaliarVigilancia,
+  sessaoNativaInexistente,
 } from '@agents-hub/adapters';
 import type {
   AgentRegistry,
@@ -169,6 +170,12 @@ interface LiveRun {
   taskId: string;
   ctx: RunContext;
   startedAt: number;
+  /**
+   * Só num turno de `send` por resume nativo: o prompt que o mesmo turno
+   * teria em replay. Se o agente responder que a sessão nativa não existe, o
+   * turno é refeito com ele (ver `#refazerEmReplay`).
+   */
+  promptDeReplay?: string;
 }
 
 /**
@@ -1512,14 +1519,15 @@ export class SessionManager {
     // Sem sessão nativa, o processo novo nasce com contexto ZERO. Mandar só a
     // mensagem entregaria ao agente um "faça também X" sem ele saber qual era a
     // tarefa nem o que já tentou — que é o modo mais caro de ele recomeçar do
-    // zero e repetir o mesmo erro.
-    const prompt = canResume
-      ? text
-      : rebuildConversation({
-          brief: task.brief,
-          history: this.#historicoRecente(sessionId),
-          message: text,
-        });
+    // zero e repetir o mesmo erro. Montado ANTES do `user.message` (senão a
+    // mensagem viria duas vezes) e guardado também no resume: é a rede de
+    // segurança se a sessão nativa não existir mais.
+    const promptDeReplay = rebuildConversation({
+      brief: task.brief,
+      history: this.#historicoRecente(sessionId),
+      message: text,
+    });
+    const prompt = canResume ? text : promptDeReplay;
 
     // Antes do `#launch`: a fala do usuário precede o que o agente responde, e
     // o evento (estrutural para o painel) faz a UI reler o estado — que o
@@ -1536,6 +1544,7 @@ export class SessionManager {
     try {
       await this.#launch(session, task, prompt, canResume ? session.nativeSessionId : null, {
         continuacao: true,
+        ...(canResume ? { promptDeReplay } : {}),
       });
     } catch (err) {
       // `running` sem processo seria a sessão fantasma de novo: sem run
@@ -2169,7 +2178,7 @@ export class SessionManager {
     task: Task,
     prompt: string,
     nativeSessionId: string | null,
-    opcoes: { continuacao?: boolean } = {},
+    opcoes: { continuacao?: boolean; promptDeReplay?: string } = {},
   ): Promise<void> {
     const adapter = this.registry.get(session.agentId);
     const manifest = adapter.manifest;
@@ -2235,6 +2244,7 @@ export class SessionManager {
       taskId: task.id,
       ctx,
       startedAt: Date.now(),
+      ...(opcoes.promptDeReplay !== undefined ? { promptDeReplay: opcoes.promptDeReplay } : {}),
     });
 
     // O pump roda solto: quem chamou `start` não deve esperar o agente terminar.
@@ -2537,6 +2547,11 @@ export class SessionManager {
     const sessaoAtual = this.store.sessions.get(session.id);
     if (!sessaoAtual || isTerminalSessionState(sessaoAtual.state)) return;
 
+    if (live?.promptDeReplay !== undefined && this.#resumeSemSessaoNativa(session, handle, outcome)) {
+      await this.#refazerEmReplay(sessaoAtual, task, handle, live.promptDeReplay, outcome);
+      return;
+    }
+
     const current = this.store.tasks.get(task.id);
     // A task já está esperando decisão humana (orçamento estourado ou ação
     // barrada pela vigilância): o fim do processo não pode sobrescrever esse
@@ -2587,6 +2602,72 @@ export class SessionManager {
     const pedidoTardio = this.#ciclo.pedido(session.id);
     if (pedidoTardio?.tipo === 'cancel' && !this.#runs.has(session.id)) {
       await this.#encerrarCancelada(session.id, pedidoTardio.motivo);
+    }
+  }
+
+  /**
+   * O resume falhou porque a sessão nativa não existe (padrões declarados em
+   * `manifest.session.nativeSessionMissing`)? Só vale para saída com erro do
+   * próprio processo — timeout, cancelamento e afins seguem o caminho normal.
+   */
+  #resumeSemSessaoNativa(session: Session, handle: RunHandle, outcome: RunOutcome): boolean {
+    if (outcome.reason !== 'exit' || outcome.exitCode === 0 || handle.nativeSessionId === null) {
+      return false;
+    }
+    const padroes = this.registry.get(session.agentId).manifest.session.nativeSessionMissing;
+    return sessaoNativaInexistente(padroes, outcome.tail, outcome.error);
+  }
+
+  /**
+   * Refaz UMA vez, em replay (brief + histórico + mensagem), o turno cujo
+   * resume nativo achou a sessão inexistente.
+   *
+   * Teste real de 2026-09-29: um turno interrompido antes de o Claude gravar a
+   * conversa deixava um id que o `--resume` recusava ("No conversation
+   * found"), e a tarefa terminava `failed` — interromper e mandar mensagem
+   * (item 2.2) destruía o trabalho. Não é falha do agente: a tentativa segue
+   * aberta, nada de retry nem fallback. O id inválido é esquecido, e o turno
+   * novo sobe sem `promptDeReplay` — não há segunda rodada.
+   */
+  async #refazerEmReplay(
+    session: Session,
+    task: Task,
+    handle: RunHandle,
+    prompt: string,
+    outcome: RunOutcome,
+  ): Promise<void> {
+    this.store.sessions.update(session.id, { nativeSessionId: null });
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'log',
+      payload: {
+        kind: 'replay',
+        level: 'warn',
+        nativeSessionId: handle.nativeSessionId,
+        motivo: outcome.error,
+        text:
+          `A sessão nativa ${handle.nativeSessionId ?? '?'} não existe para ${session.agentId}; ` +
+          'o turno foi refeito em replay (tarefa + histórico + mensagem). Não conta como falha.',
+      },
+    });
+    const atual = this.store.sessions.get(session.id) ?? session;
+    const taskAtual = this.store.tasks.get(task.id) ?? task;
+    try {
+      await this.#launch(atual, taskAtual, prompt, null, { continuacao: true });
+    } catch (err) {
+      // Mesmo contrato do `send`: o agente não subir num turno de
+      // continuação deixa a sessão retomável, não `failed`.
+      this.store.sessions.update(session.id, { state: 'idle' });
+      this.store.tasks.update(task.id, { state: 'input_required' });
+      this.#emit({
+        sessionId: session.id,
+        taskId: task.id,
+        agentId: session.agentId,
+        type: 'error',
+        payload: { message: (err as Error).message, phase: 'replay' },
+      });
     }
   }
 

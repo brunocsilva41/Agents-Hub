@@ -63,6 +63,9 @@ verified:
 
 session:
   strategy: native
+  # Mesmo padrão do Claude Code por DEDUÇÃO (o OpenClaude é fork dele), não
+  # verificado no binário: `--resume` de conversa inexistente → replay.
+  nativeSessionMissing: ["No conversation found with session ID"]
 
 stream:
   format: jsonl

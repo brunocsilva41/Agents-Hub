@@ -62,6 +62,11 @@ verified:
 
 session:
   strategy: native
+  # `--resume` de uma conversa que o Claude nunca gravou (turno interrompido
+  # antes do `system/init`): o 2.1.285 escreve isto no stderr e sai com 1, com
+  # um `result` `error_during_execution` sem texto. O Hub refaz o turno em
+  # replay em vez de dar a tarefa por falha (teste real de 2026-09-29).
+  nativeSessionMissing: ["No conversation found with session ID"]
 
 stream:
   format: jsonl
