@@ -131,6 +131,14 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
     MCP com o nome da variável, como o GRACE_MS; docs/09 atualizado.
   - PID reciclado no POSIX: horário de criação por /proc/<pid>/stat (starttime) + btime + CLK_TCK no
     Linux, `ps -o lstart=` (LC_ALL=C, TZ=UTC) nos demais; checagem vale nas duas plataformas.
+- **C1 MESCLADO** (esperas fixas do daemon, R12-08 parte daemon): 25 arquivos de teste passam a usar
+  `esperarAte` (packages/daemon/src/esperar-ate.ts, prazo 30 s); nenhum código de produto. Mantidas
+  com comentário na linha: simulação (agente falso lento), corrida intencional, e provas de AUSÊNCIA
+  (não há evento positivo a esperar — ex.: backoff de 3 s / validação de 4 s em session-lifecycle).
+  Nenhuma asserção removida (as de gate-por-sessao ficaram mais fortes: conta as 2 chegadas ao gate
+  em vez de dormir 300 ms). Mutação reproduzida pelo coordenador: sem dedupe do gate → "duas
+  aprovações"; negar com turno concluído sem o ramo próprio → killed≠completed. verify na main: 1771,
+  0 fail, 1 skip.
 - Decisão em andamento (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
   Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
   Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
