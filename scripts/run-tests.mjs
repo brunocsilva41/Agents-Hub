@@ -4,7 +4,8 @@
  *
  * Existe por um motivo concreto: `node --test packages/*​/dist/**​/*.test.js`
  * depende de QUEM expande o glob. No PowerShell e no cmd, a string chega
- * intacta ao Node, que a expande certo e coleta os 29 arquivos. No bash, o
+ * intacta ao Node, que a expande certo e coleta todos os arquivos de teste
+ * (a contagem do dia é a que este script imprime). No bash, o
  * shell expande primeiro — e como `**` sem `globstar` vale por um `*` só,
  * `packages/*​/dist/**​/*.test.js` casa apenas o que está a exatamente dois
  * níveis: **3 arquivos**. A saída fica verde, o portão diz "passou", e todo o
