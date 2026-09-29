@@ -74,3 +74,20 @@ function cortar(texto: string, max = 2000): string {
   const limpo = texto.replace(/\s+/g, ' ').trim();
   return limpo.length > max ? `${limpo.slice(0, max - 1)}…` : limpo;
 }
+
+/**
+ * A falha de um `resume` foi "a sessão nativa não existe"? Casa os padrões de
+ * `manifest.session.nativeSessionMissing` contra cada linha do stderr e contra
+ * o motivo já montado. Sem padrões declarados, nunca casa: o Hub não adivinha
+ * o texto de erro de um agente.
+ */
+export function sessaoNativaInexistente(
+  padroes: readonly string[],
+  stderr: string,
+  motivo: string | null,
+): boolean {
+  if (padroes.length === 0) return false;
+  const regexes = padroes.map((p) => new RegExp(p, 'i'));
+  const textos = [...stderr.split(/\r?\n/), motivo ?? ''];
+  return textos.some((t) => regexes.some((r) => r.test(t)));
+}

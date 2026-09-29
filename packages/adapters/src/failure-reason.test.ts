@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mensagemDoEventoDeErro, motivoDaFalha, ultimaLinhaDeErro } from './failure-reason.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  mensagemDoEventoDeErro,
+  motivoDaFalha,
+  sessaoNativaInexistente,
+  ultimaLinhaDeErro,
+} from './failure-reason.js';
+import { loadManifestDir } from './registry.js';
+import { AgentManifestSchema } from './types.js';
 import { claudeMapper } from './mappers/claude.js';
 
 /**
@@ -65,6 +74,31 @@ test('ruído de SKILL.md do Codex antes da linha útil não vira motivo', () => 
   assert.match(motivoDaFalha(1, [], [SEM_CONVERSA, CODEX_RUIDO]), /No conversation found/);
   // Linha com cara de erro continua preferida à última linha qualquer.
   assert.match(motivoDaFalha(1, [], ['Error: 401 Unauthorized', 'tentando de novo em 3s']), /401/);
+});
+
+test('sessão nativa inexistente: padrão do manifesto casa stderr ou motivo, sem padrão nunca casa', () => {
+  const raiz = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const claude = loadManifestDir(path.join(raiz, 'manifests')).find((m) => m.id === 'claude');
+  const padroes = claude?.session.nativeSessionMissing ?? [];
+  assert.ok(padroes.length > 0, 'manifesto do Claude declara o padrão');
+  const stderr = ['aviso qualquer', SEM_CONVERSA].join('\n');
+  assert.equal(sessaoNativaInexistente(padroes, stderr, null), true);
+  assert.equal(
+    sessaoNativaInexistente(padroes, '', `processo terminou com código 1: ${SEM_CONVERSA}`),
+    true,
+  );
+  assert.equal(sessaoNativaInexistente(padroes, 'Error: 401 Unauthorized', 'código 1'), false);
+  assert.equal(sessaoNativaInexistente([], SEM_CONVERSA, SEM_CONVERSA), false);
+});
+
+test('schema: session.nativeSessionMissing com regex que não compila é recusado', () => {
+  const base = { id: 'x', name: 'X', bin: 'x', invoke: { oneShot: ['-p'] } };
+  assert.deepEqual(AgentManifestSchema.parse(base).session.nativeSessionMissing, []);
+  assert.equal(
+    AgentManifestSchema.safeParse({ ...base, session: { nativeSessionMissing: ['(sem fechar'] } })
+      .success,
+    false,
+  );
 });
 
 test('mapper do Claude: rate_limit_event e raciocínio vazio não viram ruído', () => {

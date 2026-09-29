@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import type { EventCost, EventEnvelope, EventType, SessionMode } from '@agents-hub/core';
 
+/** Padrão de manifesto que não compila seria um casamento que nunca acontece. */
+function compilaComoRegex(padrao: string): boolean {
+  try {
+    new RegExp(padrao, 'i');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const ModelSpecSchema = z
   .object({
     /** O CLI aceita modelo por invocação (flag/env conferidos no `--help`). */
@@ -175,6 +185,21 @@ export const AgentManifestSchema = z.object({
   session: z
     .object({
       strategy: z.enum(['native', 'replay', 'none']).default('replay'),
+      /**
+       * Regex (sem flags; testadas sem diferenciar maiúsculas) que reconhecem,
+       * no stderr ou no motivo da falha, "a sessão nativa pedida no resume não
+       * existe". Casou → o Hub refaz o MESMO turno uma vez em replay, sem
+       * contar como falha do agente. Existe porque o Claude recusa `--resume`
+       * de uma conversa nunca gravada (turno interrompido antes do `init`) e
+       * a tarefa terminava `failed` (teste real de 2026-09-29).
+       */
+      nativeSessionMissing: z
+        .array(
+          z
+            .string()
+            .refine(compilaComoRegex, { message: 'session.nativeSessionMissing: regex inválida' }),
+        )
+        .default([]),
     })
     .default({}),
 
