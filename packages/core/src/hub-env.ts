@@ -38,6 +38,17 @@ const HubEnvSchema = z.object({
     .int('precisa ser um inteiro')
     .min(0)
     .optional(),
+  /**
+   * Intervalo (ms) do sinal de vida da raiz adotada pelo MCP server. O teto é
+   * o do `setInterval`: acima de 2^31-1 o Node troca o valor por 1 ms, e o
+   * sinal de vida viraria uma rajada contra o daemon.
+   */
+  AGENTS_HUB_MCP_HEARTBEAT_MS: z.coerce
+    .number({ invalid_type_error: 'precisa ser um número' })
+    .int('precisa ser um inteiro')
+    .min(1)
+    .max(2_147_483_647)
+    .optional(),
 });
 
 export type HubEnv = z.infer<typeof HubEnvSchema>;
@@ -55,6 +66,7 @@ export function readHubEnv(env: NodeJS.ProcessEnv = process.env): HubEnv {
     AGENTS_HUB_URL: env['AGENTS_HUB_URL'],
     AGENTS_HUB_MCP_AGENT: env['AGENTS_HUB_MCP_AGENT'],
     AGENTS_HUB_MCP_GRACE_MS: env['AGENTS_HUB_MCP_GRACE_MS'],
+    AGENTS_HUB_MCP_HEARTBEAT_MS: env['AGENTS_HUB_MCP_HEARTBEAT_MS'],
   };
 
   const parsed = HubEnvSchema.safeParse(raw);
