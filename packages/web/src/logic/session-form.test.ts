@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { lerTeto, semErros, validarSessao, type EntradaSessao } from './session-form.js';
+import { OBJETIVO_MINIMO_BRIEF } from '@agents-hub/core';
+import {
+  lerTeto,
+  OBJETIVO_MINIMO,
+  semErros,
+  validarSessao,
+  type EntradaSessao,
+} from './session-form.js';
 
 const AGENTES = [
   { id: 'claude', name: 'Claude Code', probe: null },
@@ -66,5 +73,12 @@ describe('Nova Sessão: validação (R03-11)', () => {
 
   test('objetivo curto é recusado', () => {
     assert.ok(validarSessao(entrada({ objetivo: '  abc ' })).objetivo);
+  });
+
+  test('o mínimo do objetivo é o mesmo que o daemon exige (o formulário não aceita o que ele recusa)', () => {
+    assert.equal(OBJETIVO_MINIMO, OBJETIVO_MINIMO_BRIEF);
+    // 7 caracteres depois do trim: o daemon recusa com 400, então o formulário também.
+    assert.ok(validarSessao(entrada({ objetivo: '  Rodar j  ' })).objetivo);
+    assert.equal(validarSessao(entrada({ objetivo: '  Rodar já  ' })).objetivo, undefined);
   });
 });
