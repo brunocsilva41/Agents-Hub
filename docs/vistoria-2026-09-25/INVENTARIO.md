@@ -82,7 +82,7 @@ Como a contagem foi feita:
 | R02-07 | MED | Retenção documentada ("para sempre", bruto preservado) não bate com o código | 8.1 | [x] |
 | R02-08 | MED | ADRs 01/03/06 divergem do código (fallback, 9 agentes, TUI, nomes) | 8.1 | [x] |
 | R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [x] CONTRIBUTING (75afd04) + CI permissions |
-| R02-10 | MED | docs/09: MCP e CLI leem `process.env` cru, `NaN` volta | 5.4 | [x] |
+| R02-10 | MED | docs/09: MCP e CLI leem `process.env` cru, `NaN` volta | 5.4 | [x] (resíduo AGENTS_HUB_MCP_HEARTBEAT_MS fechado no merge ddf6f54: readHubEnv + hub-env.test/main-heartbeat.test) |
 | R02-11 | BAIXO | JSON malformado devolve 500 INTERNAL com mensagem do parser | 1.8 | [x] |
 | R02-12 | BAIXO | POST sem corpo e sem Content-Type recusado com 415 | — | [x] POST vazio aceito |
 | R02-13 | BAIXO | docs/10 e precos-modelos dizem que só o Claude reporta USD (OpenCode também) | 8.1 | [x] |
@@ -321,7 +321,7 @@ Como a contagem foi feita:
 | R13-10 | MED | Config de projeto sem `policy:` gera aviso falso de "configuração inválida" | 5.5 | [x] |
 | R13-11 | MED | Overrides de projeto (retries, fallback, watch, maxConcurrency) ignorados | 2.10 | [x] |
 | R13-12 | MED | `--mode autonomous` da CLI limitado em silêncio ao padrão do manifesto | 2.10 | [x] |
-| R13-13 | MED | `/api/tasks/:id/events` não segue o fallback, nunca fecha, ignora Last-Event-ID | 2.10 | [ ] REABERTO parcial (auditoria): Last-Event-ID segue ignorado (reconexão reenvia tudo) |
+| R13-13 | MED | `/api/tasks/:id/events` não segue o fallback, nunca fecha, ignora Last-Event-ID | 2.10 | [x] merge ddf6f54: id = cursor por sessão (`ses_a:12,ses_b:5`), replay a partir dele, malformado = 400, replay acima do teto pagina e fecha; sse-task-http.test (7) + sse.test; mutação reproduzida pelo coordenador |
 | R13-14 | MED | Aprovar estouro de orçamento após turno concluído relança o agente | 2.10 | [x] |
 | R13-15 | MED | Orçamento em `seconds` não aplicado durante a run; mensagem cita só USD | 2.10 | [x] |
 | R13-16 | MED | Workflow bloqueado por aprovação não tem retomada | 2.9 | [x] |

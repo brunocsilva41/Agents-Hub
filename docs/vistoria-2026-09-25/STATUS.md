@@ -112,6 +112,32 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
    cota, OpenCode, Antigravity, Copilot), instalação limpa só pelo doc 14, STATUS/roadmap/doc 07
    finais com antes/depois.
 
+## Sessão 2 do orquestrador (2026-09-29, run Orca run_392cd7501a6c)
+- Linha de base na main @ c549f25: `npm ci && npm run verify` verde — 1747 testes, 1746 pass, 0 fail,
+  1 skip (POSIX).
+- Onda única (4 workers claude, cada um no seu worktree Orca): A=suíte Linux verde (s2-linux),
+  B=daemon restos (s2-daemon), C1=esperas fixas do daemon (s2-waits-daemon), C2=esperas fixas fora do
+  daemon + R02-09 + OBJETIVO_MINIMO (s2-waits-resto).
+- **B MESCLADO (ddf6f54)**, diff lido inteiro, mutação reproduzida pelo coordenador no dist do worktree
+  (sem o filtro do cursor: 1/7 vermelho; sem o HEARTBEAT no readHubEnv: 3/5; sem a checagem de PID
+  reciclado: 1/10; restaurado: tudo verde). verify na main: 1771 testes, 0 fail, 1 skip.
+  - R13-13: `id:` do stream de task = cursor de TODAS as sessões da task (`ses_a:12,ses_b:5`); reconexão
+    manda só o que passa do cursor de cada sessão, intercalado por ts sem inverter seq; ausente = replay
+    completo; malformado/sessão alheia/repetida = 400 INVALID_QUERY antes do writeHead. Replay acima do
+    teto (500) manda a página, o aviso de truncado sem id e FECHA (o EventSource reconecta e pega a
+    próxima). Novo `SseChannel.end()` entrega a fila antes de fechar (o fechamento por task terminal com
+    `close()` perdia o final — bug achado pelo teste novo). `/events` global inalterado.
+  - R02-10 resíduo: AGENTS_HUB_MCP_HEARTBEAT_MS no HubEnvSchema (inteiro 1..2^31-1); inválido encerra o
+    MCP com o nome da variável, como o GRACE_MS; docs/09 atualizado.
+  - PID reciclado no POSIX: horário de criação por /proc/<pid>/stat (starttime) + btime + CLK_TCK no
+    Linux, `ps -o lstart=` (LC_ALL=C, TZ=UTC) nos demais; checagem vale nas duas plataformas.
+- Decisão em andamento (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
+  Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
+  Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
+  cessão da AsyncQueue. Aprovado: disco real + limite adaptativo min(500 + 3×fsync medido, 3000) ms.
+  **Limitação conhecida**: SQLite síncrono no thread principal ⇒ em disco com fsync lento, o checkpoint
+  do WAL pode segurar o event loop ~250 ms.
+
 ## Inventário
 Checklist por achado (225: 3 CRÍT / 52 ALTO / 104 MÉD / 66 BAIXO — o GOAL contou só grafias acentuadas) em [INVENTARIO.md](INVENTARIO.md), com ID R<nn>-<seq> e item do GOAL. Estado marcado a partir dos itens concluídos. Placar atual: CRÍT 3/3, ALTO 16/52, MÉD 11/104, BAIXO 7/66.
 

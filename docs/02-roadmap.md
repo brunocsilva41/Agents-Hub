@@ -895,9 +895,9 @@ Ordenado por dano, não por esforço. Detalhe e evidência na §3.7 do doc 08.
         e `pidPareceReciclado` rejeita o kill se esse horário for mais novo
         que o último `updatedAt` da sessão no banco (com folga de 5s para
         diferença de relógio) — um órfão de verdade só pode ter nascido
-        antes do daemon anterior morrer. POSIX continua sem cobertura de
-        kill nesta reconciliação (limitação já assumida, não resolvida
-        agora). Testado em `reconcile.test.ts` (processo nascido depois do
+        antes do daemon anterior morrer. Vale também no POSIX desde a
+        sessão 2 do fechamento (Linux por `/proc/<pid>/stat` + `btime`,
+        demais POSIX por `ps -o lstart=`). Testado em `reconcile.test.ts` (processo nascido depois do
         último registro da sessão NÃO é morto).
 - [x] **Keep-alive e `id:` no SSE de `/api/tasks/*`**, try/catch no keep-alive do
       `/events`, e teto de conexões com backpressure. As duas rotas
