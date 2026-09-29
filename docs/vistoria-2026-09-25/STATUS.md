@@ -179,6 +179,13 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
   `log kind=custo.turno.desconhecido` (`costBasis: 'unknown'`, sem `cost`, orçamento não cobrado por valor inventado).
   Cancel/interrupt/pause/teto já fechavam pela estimativa (testes nasceram verdes, ficam como regressão). Mutação
   reproduzida pelo coordenador (sem registrar na vigilância: 1/7; sem o aviso: 1/7). verify: 1801, 0 fail.
+- **A2 MESCLADO** (Sonnet; outcome `failed` honesto por causa do item 3): Hub em-processo nos testes usa `port: 0`
+  (event-flood + 6 do daemon + test-kit/hub-de-teste da CLI; `portaLivre` só onde a porta precisa existir antes de um
+  subprocesso ou estar livre de propósito, comentado). Flake do sse-task-http: causa no TESTE — seed síncrono de 520
+  eventos em disco travava o loop ~7 s no container, além do `keepAliveTimeout` (5 s), e o servidor derrubava o socket
+  ocioso antes de ler o pedido enfileirado; `dbFile ':memory:'` → 6/720 falhas antes, 0/480 depois. **Aberto**: mcp
+  server.test ("test failed" com 24/24 verdes, 1× no Windows) NÃO reproduziu em ~440 execuções sob carga; causa não
+  inventada. Evidência final fica com o clone limpo 3×. verify: 1801, 0 fail.
 - **Modelo dos workers**: até aqui Opus 5.5 (padrão da conta; `--model` não era passado). A pedido do usuário
   (2026-09-29, "o mais econômico que entregue bom resultado"), todo worker novo sobe com `--model sonnet`; J e K, já em
   andamento em Opus, terminam como estão.
