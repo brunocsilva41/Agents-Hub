@@ -40,10 +40,9 @@ const server = buildMcpServer(client, caller);
 // Sinal de vida da raiz adotada (só faz algo depois de uma adoção). Sem ele,
 // um hospedeiro que mata este processo sem fechar stdin deixava a raiz
 // `running` para sempre no daemon.
-const heartbeatMs = Number(process.env['AGENTS_HUB_MCP_HEARTBEAT_MS'] ?? 30_000);
-const pararHeartbeat = caller.startHeartbeat(
-  Number.isFinite(heartbeatMs) && heartbeatMs > 0 ? heartbeatMs : 30_000,
-);
+// O intervalo vem validado por `readHubEnv`, como a carência: antes era
+// `Number()` cru e `abc`/`0` voltavam ao padrão sem aviso.
+const pararHeartbeat = caller.startHeartbeat(hubEnv.AGENTS_HUB_MCP_HEARTBEAT_MS ?? 30_000);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
