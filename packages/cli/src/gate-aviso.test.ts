@@ -56,6 +56,40 @@ describe('aviso de gate pré-execução ausente', () => {
     assert.match(linhas.join('\n'), /timeout 10 s — reinstale: hub hooks install claude --write/);
   });
 
+  test('claude gateado por sessão pelo Hub, sem hook no arquivo: nenhum aviso de "não instalado"', () => {
+    // Teste real 2026-09-29: o daemon injeta o hook via --settings e o aviso
+    // mandava gravar no settings.json real sem necessidade.
+    const linhas = avisoDeGate('claude', integracao('claude', { sessoesDoHubGateadas: true }));
+    assert.deepEqual(linhas, []);
+  });
+
+  test('gateado por sessão com hook antigo no arquivo: o aviso de timeout continua', () => {
+    const linhas = avisoDeGate(
+      'claude',
+      integracao('claude', {
+        instalado: true,
+        sessoesDoHubGateadas: true,
+        avisoTimeout: 'hook do gate instalado com timeout 10 s',
+      }),
+    );
+    assert.match(linhas.join('\n'), /timeout 10 s — reinstale: hub hooks install claude --write/);
+  });
+
+  test('sessões do Hub NÃO gateadas (false) ou daemon antigo (campo ausente): aviso atual', () => {
+    for (const hook of [{ sessoesDoHubGateadas: false }, {}]) {
+      const linhas = avisoDeGate('claude', integracao('claude', hook));
+      assert.match(linhas.join('\n'), /não está instalado para claude/);
+    }
+  });
+
+  test('modo nenhum ignora sessoesDoHubGateadas: continua só vigilância reativa', () => {
+    const linhas = avisoDeGate(
+      'kimi',
+      integracao('kimi', { modo: 'nenhum', comando: null, sessoesDoHubGateadas: true }),
+    );
+    assert.match(linhas.join('\n'), /kimi não tem gate pré-execução: .*vigilância reativa/);
+  });
+
   test('agente sem hook possível: diz que só há vigilância reativa', () => {
     const linhas = avisoDeGate('kimi', integracao('kimi', { modo: 'nenhum', comando: null }));
     assert.match(linhas.join('\n'), /kimi não tem gate pré-execução: .*vigilância reativa/);
