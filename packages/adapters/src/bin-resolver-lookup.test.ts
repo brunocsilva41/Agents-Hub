@@ -23,11 +23,17 @@ import { AgentManifestSchema } from './types.js';
 // e era lida como UTF-8, corrompendo caminhos com acento — vistoria
 // 2026-09-25, relatório 10): varre PATH × PATHEXT em JS. Os testes "com disco
 // de verdade" no fim do arquivo provam isso com um diretório acentuado.
-function comoPlataforma<T>(plataforma: 'win32' | 'linux', fn: () => T): T {
+//
+// A plataforma falsa só é desfeita quando `fn` TERMINA, inclusive o trecho
+// depois de cada `await`. Restaurar no retorno síncrono da promessa deixava só
+// a primeira chamada de `resolveBin` no ramo pedido: no Linux as seguintes
+// caíam no `which` e os testes de cache falhavam; no Windows passavam por
+// coincidência, porque a plataforma "restaurada" já era a pedida.
+async function comoPlataforma<T>(plataforma: 'win32' | 'linux', fn: () => T | Promise<T>): Promise<T> {
   const original = Object.getOwnPropertyDescriptor(process, 'platform');
   Object.defineProperty(process, 'platform', { value: plataforma });
   try {
-    return fn();
+    return await fn();
   } finally {
     Object.defineProperty(process, 'platform', original as PropertyDescriptor);
   }
@@ -119,8 +125,8 @@ test('preferência de ordem entre candidatos no Windows (varredura do PATH)', as
     });
   });
 
-  await t.test('o diretório corrente NÃO entra na busca (diferente do `where`)', () => {
-    comoPlataforma('win32', () => {
+  await t.test('o diretório corrente NÃO entra na busca (diferente do `where`)', async () => {
+    await comoPlataforma('win32', () => {
       const plantado = path.win32.join(process.cwd(), 'codexe.cmd');
       const deps = depsWin([plantado], { PATH: 'C:\\vazio', PATHEXT });
       assert.deepEqual(candidatosNoPath('codexe', deps), []);
