@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -50,18 +49,6 @@ process.stdin.on('end', async () => {
   out({ type: 'result', subtype: 'success', is_error: false, result: 'RESULTADO_' + agente, session_id: sid, total_cost_usd: Number(dir('COST')[0] || 0), usage: { input_tokens: tokens, output_tokens: 0 } });
 });
 `;
-
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
 
 function git(cwd: string, args: string[]): string {
   return execFileSync(
@@ -130,7 +117,7 @@ describe('orquestração com agentes falsos (itens 2.9 e 2.10)', () => {
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
       webRoot: path.join(raiz, 'sem-web'),
-      port: await portaLivre(),
+      port: 0,
       policy: {
         ...DEFAULT_POLICY,
         retries: { max: 1, backoffMs: 10 },

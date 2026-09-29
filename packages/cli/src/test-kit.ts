@@ -21,9 +21,9 @@ import { HubClient } from './client.js';
  */
 
 /**
- * `port: 0` não basta: a guarda de borda compara o `Host` da requisição com
- * `config.port`, que só é conhecido depois do `listen`. Reservamos uma porta
- * livre antes de montar o Hub (mesma técnica de `pause-cmd.test.ts`).
+ * Porta reservada e FECHADA, só para quem precisa dela LIVRE e sem ninguém
+ * escutando (ex.: provar que o cliente lida com daemon ausente). Hub de teste
+ * usa `port: 0`: `listen` devolve a porta real e não há corrida.
  */
 export function portaLivre(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -74,7 +74,7 @@ export async function montarHub(
       home: path.join(raiz, 'home'),
       manifestsDir: manifestos,
       webRoot: path.join(raiz, 'sem-web'),
-      port: opts.porta ?? (await portaLivre()),
+      port: opts.porta ?? 0,
     },
     {
       homeDir: path.join(raiz, 'user-home'),

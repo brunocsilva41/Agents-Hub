@@ -36,6 +36,7 @@ describe('hub version', () => {
   });
 
   test('sem daemon no ar diz isso — e não tenta subir', async () => {
+    // porta reservada e fechada DE PROPÓSITO: o teste precisa de um endereço sem ninguém escutando
     const semNinguem = new HubClient(`http://127.0.0.1:${await portaLivre()}`);
     const { out, valor } = await capturar(() =>
       versionCommand({ command: '--version', positional: [], flags: {} }, semNinguem),

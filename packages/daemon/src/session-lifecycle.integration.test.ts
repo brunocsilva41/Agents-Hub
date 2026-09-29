@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -115,18 +114,6 @@ function manifesto(id: string, script: string, o: OpcoesDoManifesto = {}): strin
   ].join('\n');
 }
 
-function portaLivre(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const endereco = srv.address();
-      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;
-      srv.close(() => resolve(porta));
-    });
-  });
-}
-
 /**
  * Espera fixa — NUNCA para sincronizar (isso é `esperarAte`). Só em dois usos
  * deliberados, cada um comentado na chamada: variar o instante de uma corrida
@@ -209,7 +196,7 @@ async function montar(
     home: raiz,
     manifestsDir: manifestos,
     webRoot: path.join(raiz, 'sem-web'),
-    ...(opcoes.http ? { port: await portaLivre() } : {}),
+    ...(opcoes.http ? { port: 0 } : {}),
     policy: {
       ...DEFAULT_POLICY,
       retries: { max: 2, backoffMs: opcoes.backoffMs ?? 10 },
