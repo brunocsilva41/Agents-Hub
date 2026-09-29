@@ -81,7 +81,7 @@ Como a contagem foi feita:
 | R02-06 | MED | SECURITY.md omite vetores reais (BASE_URL, prompts/memory, env de projeto) | 1.9 | [x] |
 | R02-07 | MED | Retenção documentada ("para sempre", bruto preservado) não bate com o código | 8.1 | [x] |
 | R02-08 | MED | ADRs 01/03/06 divergem do código (fallback, 9 agentes, TUI, nomes) | 8.1 | [x] |
-| R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [x] CONTRIBUTING (75afd04) + CI permissions |
+| R02-09 | MED | CONTRIBUTING desatualizado (273 testes) e CI sem `permissions:` | 8.1, 7.2 | [x] CONTRIBUTING (75afd04) + CI permissions; resíduos (run-tests.mjs sem contagem fixa, cancel-in-progress só fora da main) na sessão 2 (merge s2-waits-resto) |
 | R02-10 | MED | docs/09: MCP e CLI leem `process.env` cru, `NaN` volta | 5.4 | [x] (resíduo AGENTS_HUB_MCP_HEARTBEAT_MS fechado no merge ddf6f54: readHubEnv + hub-env.test/main-heartbeat.test) |
 | R02-11 | BAIXO | JSON malformado devolve 500 INTERNAL com mensagem do parser | 1.8 | [x] |
 | R02-12 | BAIXO | POST sem corpo e sem Content-Type recusado com 415 | — | [x] POST vazio aceito |
@@ -302,7 +302,7 @@ Como a contagem foi feita:
 | R12-05 | MED | Job Linux informativo (continue-on-error); portão só exige Windows | 7.2 | [ ] |
 | R12-06 | BAIXO | `npm audit`: 1 vulnerabilidade moderada (qs), transitiva | 7.3 | [x] |
 | R12-07 | BAIXO | Dependências com patch/minor pendentes; majors adiante | — | [x] patch/minor atualizados (67ff177, merge 8f75671) |
-| R12-08 | BAIXO | Testes dependem de timers reais (risco latente de flakiness) | 7.3 | [ ] REABERTO parcial (auditoria): esperas fixas seguem em ~37 arquivos de teste |
+| R12-08 | BAIXO | Testes dependem de timers reais (risco latente de flakiness) | 7.3 | [x] sessão 2 (merges s2-waits-daemon + s2-waits-resto): esperas de sincronização viram esperarAte/esperar()/mock.timers em 33 arquivos; as que ficaram simulam comportamento ou provam ausência, com motivo na linha; teste de cancelamento do hub_agent_wait era vazio e foi refeito; mutação reproduzida pelo coordenador |
 | R12-09 | BAIXO | `verify` não roda typecheck da web separado; `typecheck` duplica o build | — | [x] verify já checa tipos da web (79d8ec2) |
 
 ## R13 — 13-orquestracao-e2e.md
@@ -338,7 +338,7 @@ Como a contagem foi feita:
 | R14-03 | ALTO | `hub watch <id-inexistente>` trava para sempre, sem erro | 5.2 | [x] |
 | R14-04 | MED | `hub start` em subpasta de projeto registrado falha com PROJECT_FOLDER_CONFLICT | 5.3 | [x] |
 | R14-05 | MED | Repositório git sem commits: erro cru do git | 5.3 | [x] |
-| R14-06 | MED | Objetivo curto rejeitado (`min(8)`) e validação de agente vem depois | — | [x] agente validado antes; msg melhor (6f231e2) |
+| R14-06 | MED | Objetivo curto rejeitado (`min(8)`) e validação de agente vem depois | — | [x] agente validado antes; msg melhor (6f231e2); painel alinhado ao min(8) do daemon (OBJETIVO_MINIMO_BRIEF, sessão 2) |
 | R14-07 | MED | `AGENTS_HUB_PORT` ignorada pelo cliente da CLI | 5.4 | [x] |
 | R14-08 | MED | `ExperimentalWarning: SQLite` em todo comando, até `hub help` | 5.6 | [x] |
 | R14-09 | MED | Sem onboarding (`hub init`); doctor, discover e painel não se conversam | 5.6 | [x] |

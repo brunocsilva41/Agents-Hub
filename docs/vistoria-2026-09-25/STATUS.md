@@ -139,6 +139,16 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
   em vez de dormir 300 ms). Mutação reproduzida pelo coordenador: sem dedupe do gate → "duas
   aprovações"; negar com turno concluído sem o ramo próprio → killed≠completed. verify na main: 1771,
   0 fail, 1 skip.
+- **C2 MESCLADO** (R12-08 fora do daemon + R02-09 + objetivo mínimo): esperas por condição/relógio falso
+  em mcp/cli/core; mantidas com motivo as que simulam consumidor lento (backpressure) e o loop do
+  modelo (opencode). ACHADO: o teste de cancelamento do `hub_agent_wait` era VAZIO (o servidor falso
+  devolvia session:null, a espera morria por escopo e o teste passava com o laço ignorando o cancel) —
+  refeito com mock.timers + daemon falso em processo + controle positivo (4,3 s → ~50 ms).
+  run-tests.mjs sem contagem fixa; CI `cancel-in-progress` só fora da main. Painel: OBJETIVO_MINIMO=8
+  (core exporta OBJETIVO_MINIMO_BRIEF; o web copia com comentário porque a entrada do core puxa zod/Node
+  para o bundle; o teste compara os dois). Mutação reproduzida pelo coordenador: web com 6 → 1/17
+  vermelho; laço+sleep ignorando o abort → "consultas depois do cancelamento". verify na main: 1772,
+  0 fail, 1 skip.
 - Decisão em andamento (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
   Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
   Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
