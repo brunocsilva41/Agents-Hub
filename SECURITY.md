@@ -112,6 +112,16 @@ o que está em `watch.pauseOn` (padrão: `irreversible`; em `supervised` também
 (pausar depois do fato não desfaz nada e gera ruído), dita aqui para não ser
 confundida com prevenção.
 
+Onde a sessão **tem** gate para a ferramenta do evento, a vigilância não pausa:
+só registra na timeline, e quem pergunta é o gate, antes de rodar
+(`gateDecideOEvento`, `packages/adapters/src/guarded-actions.ts`). O Claude
+emite o `tool_use` no stream antes de chamar o hook; pausar ali matava a sessão
+por uma chamada que o gate ainda ia decidir. Vale para o hook por sessão
+(`gate.settingsArgs`: Claude, OpenClaude) nas ferramentas de `MATCHER_DE_RISCO`,
+e para comandos do Codex com o bypass ligado (o `file_change` dele segue
+vigiado: não foi medido que o hook o intercepte). Daemon fora do ar não abre
+brecha: o hook falha fechado nas sessões do Hub (ver "Daemon indisponível").
+
 ### Gate pré-execução
 
 O agente pergunta ao Hub (`POST /hooks/pretooluse`) **antes** de rodar a

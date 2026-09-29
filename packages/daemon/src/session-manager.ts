@@ -59,10 +59,12 @@ import {
   horarioDeCriacaoDoProcesso,
   pidPareceReciclado,
   describeAction,
+  describeRequest,
   avaliarVigilancia,
 } from '@agents-hub/adapters';
 import type {
   AgentRegistry,
+  CoberturaDoGate,
   MappedEvent,
   RunContext,
   RunHandle,
@@ -71,6 +73,7 @@ import type {
 import type { InMemoryEventBus } from './bus.js';
 import type { HubConfig } from './config.js';
 import { cliHookEntrypoint } from './config.js';
+import { MATCHER_DE_RISCO } from './hooks-config.js';
 import { juntarErroDoAgente, textoDoErroDoAgente } from './agent-error-text.js';
 import { recusaDeSessaoTerminada } from './session-continuation.js';
 import { apagarSettingsDaSessao, gravarSettingsDaSessao } from './session-settings.js';
@@ -2445,7 +2448,9 @@ export class SessionManager {
         if (mapped.type === 'error') erroDoAgente = textoDoErroDoAgente(mapped.payload) ?? erroDoAgente;
 
         // Vigilância: classifica o que o agente ACABOU de fazer. Não previne a
-        // ação que já ocorreu — impede a próxima, parando a sessão.
+        // ação que já ocorreu — impede a próxima, parando a sessão. Evento que
+        // o gate pré-execução decide não pausa: no Claude o `tool_use` chega
+        // aqui antes do hook, e quem pergunta ao humano é o gate.
         const breach = this.#watch(session, task, mapped);
         if (breach === 'paused') {
           await this.registry.get(session.agentId).cancel(handle);
@@ -3198,6 +3203,24 @@ ${task.brief.objective.slice(0, 500)}`,
     return agentOwnDirs(session.agentId, os.homedir(), process.env);
   }
 
+  /**
+   * O que o gate pré-execução desta sessão cobre — mesma fonte de verdade que
+   * o liga no spawn (`#settingsDoGate`: `gate.settingsArgs` do manifesto;
+   * `#codexGate`: `codexGate.bypassHookTrust`) e que `integrations.ts` mostra
+   * como `sessoesDoHubGateadas`. Todo spawn que chega ao `#pump` passa por
+   * ali, e `#settingsDoGate` lança se não gravar o hook: sessão viva com
+   * `settingsArgs` tem o hook.
+   */
+  #coberturaDoGate(session: Session): CoberturaDoGate {
+    if (this.registry.get(session.agentId).manifest.gate.settingsArgs.length > 0) {
+      return { tipo: 'hook-por-sessao', ferramentas: MATCHER_DE_RISCO.split('|') };
+    }
+    if (session.agentId === 'codex' && this.config.codexGate.bypassHookTrust) {
+      return { tipo: 'codex-comandos' };
+    }
+    return { tipo: 'nenhuma' };
+  }
+
   #watch(session: Session, task: Task, mapped: MappedEvent): 'ok' | 'flagged' | 'paused' {
     const engine = this.policyFor(session);
     // `watch` da política EFETIVA (global + projeto + pai): o projeto que pede
@@ -3210,6 +3233,7 @@ ${task.brief.objective.slice(0, 500)}`,
       engine,
       watch,
       this.#agentDirs(session),
+      this.#coberturaDoGate(session),
     );
 
     for (const f of veredito.flagged) {
@@ -3220,7 +3244,9 @@ ${task.brief.objective.slice(0, 500)}`,
         type: 'log',
         payload: {
           level: 'warn',
-          text: `ação de risco "${f.risk}": ${describeAction(f.action)} — ${f.reason}`,
+          text: f.peloGate
+            ? `ação de risco "${f.risk}" sob o gate pré-execução (ele decide antes de rodar): ${describeRequest(f.action)} — ${f.reason}`
+            : `ação de risco "${f.risk}": ${describeAction(f.action)} — ${f.reason}`,
         },
       });
     }
@@ -3235,6 +3261,11 @@ ${task.brief.objective.slice(0, 500)}`,
           kind: 'watch',
           reason: veredito.pausedBy.reason,
           eventType: mapped.type,
+          // Só chega aqui evento que nenhum gate decidiu: agente sem gate, ou
+          // Codex sem bypass (o `command_execution` dele vem no
+          // `item.completed`, já rodou). Mapper que emite no pedido (estilo
+          // `tool_use` do Claude, sem hook) pode pausar antes do fim da
+          // ferramenta — "já executou" é o pior caso, o único honesto sem gate.
           alreadyExecuted: true,
         },
       });
