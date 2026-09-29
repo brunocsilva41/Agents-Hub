@@ -28,6 +28,8 @@ import {
   resolveEventCost,
   TurnCostTracker,
   usoDoCusto,
+  type EventCost,
+  type PassoDeCusto,
   EVENTOS_NARRATIVOS,
   watchForMode,
   agentOwnDirs,
@@ -95,7 +97,7 @@ import {
 import { effectiveProjectContext, repoTrustWarning } from './repo-trust.js';
 import { captureBaseline, captureDiff, loadBaseline, saveBaseline } from './diff-capture.js';
 import { capturarMudancas } from './artifact-capture.js';
-import { baseDoAcumulado, CUSTO_FECHADO } from './turn-cost-base.js';
+import { baseDoAcumulado, CUSTO_DESCONHECIDO, CUSTO_FECHADO } from './turn-cost-base.js';
 import { interpretarRevisao } from './review-verdict.js';
 import {
   actionsOfToolCall,
@@ -2438,6 +2440,11 @@ export class SessionManager {
     // outra aprovação de orçamento para a mesma parada.
     let estourou = false;
     let turnoConcluidoNoEstouro = false;
+    // Para distinguir, no fim, "turno de custo desconhecido" de "turno que
+    // terminou sozinho sem usage": só o primeiro merece aviso — é o Hub que
+    // cortou o agente antes de ele informar o que gastou.
+    let custoNoTurno = false;
+    let paradaPeloHub = false;
     // O motivo que o agente deu (ex.: "Prompt is too long"), para a tentativa
     // não ficar só com "processo terminou com código 1" (achado 11 da 08).
     let erroDoAgente: string | null = null;
@@ -2448,6 +2455,7 @@ export class SessionManager {
     const tetoDeTempo = this.#armarTetoDeTempo(session, task, handle, ledger, () => {
       if (estourou) return false;
       estourou = true;
+      paradaPeloHub = true;
       return true;
     });
 
@@ -2463,6 +2471,17 @@ export class SessionManager {
         // aqui antes do hook, e quem pergunta ao humano é o gate.
         const breach = this.#watch(session, task, mapped);
         if (breach === 'paused') {
+          // O evento que disparou a pausa pode ser o mesmo que traz o `usage`
+          // (o `tool_use` do Claude vem na mensagem do assistente, com ele).
+          // Sair antes de registrá-lo fechava o turno morto sem estimativa: o
+          // modelo foi chamado e o orçamento ficava em US$ 0,00 (teste real,
+          // 2026-09-29). O estouro que ele causar é tratado pela aprovação
+          // da vigilância, que já parou a sessão.
+          if (mapped.cost) {
+            custoNoTurno = true;
+            this.#registrarCusto(custos, ledger, task.id, mapped.cost);
+          }
+          paradaPeloHub = true;
           await this.registry.get(session.agentId).cancel(handle);
           break;
         }
@@ -2473,16 +2492,13 @@ export class SessionManager {
         }
 
         if (mapped.cost) {
-          const passo = custos.observe(mapped.cost);
-          const snapshot =
-            passo.kind === 'final'
-              ? ledger.charge(usoDoCusto(passo.cost), task.id)
-              : ledger.estimate(task.id, usoDoCusto(passo.total));
-          this.#persistLedger(ledger);
+          custoNoTurno = true;
+          const { passo, snapshot } = this.#registrarCusto(custos, ledger, task.id, mapped.cost);
           this.#checkBudgetWarning(session, task.id, snapshot);
 
           if (snapshot.exhausted && !estourou) {
             estourou = true;
+            paradaPeloHub = true;
             // Estouro na linha de custo FINAL do turno = o turno já acabou; o
             // agente não está no meio de nada. Aprovar depois disso não pode
             // relançá-lo (era um turno extra, não pedido, que estourava de
@@ -2505,7 +2521,13 @@ export class SessionManager {
       });
     }
 
-    this.#fecharCustoDoTurno(session, task, custos, ledger);
+    const fechou = this.#fecharCustoDoTurno(session, task, custos, ledger);
+    // Cancel/interrupt/pause anotam o pedido antes de mexer no processo; os
+    // outros cortes do Hub (vigilância, estouro, teto de tempo) foram
+    // marcados no laço acima.
+    if (!fechou && !custoNoTurno && (paradaPeloHub || this.#ciclo.pedido(session.id))) {
+      this.#avisarCustoDesconhecido(session, task);
+    }
 
     const desfechoBruto = await handle.done;
     clearTimeout(tetoDeTempo);
@@ -3414,20 +3436,42 @@ ${task.brief.objective.slice(0, 500)}`,
   }
 
   /**
+   * Custo de um evento no turno e no orçamento: a estimativa parcial
+   * substitui a anterior, o custo final é cobrado e zera as parciais (ver
+   * `TurnCostTracker`).
+   */
+  #registrarCusto(
+    custos: TurnCostTracker,
+    ledger: BudgetLedger,
+    taskId: string,
+    cost: EventCost,
+  ): { passo: PassoDeCusto; snapshot: BudgetSnapshot } {
+    const passo = custos.observe(cost);
+    const snapshot =
+      passo.kind === 'final'
+        ? ledger.charge(usoDoCusto(passo.cost), taskId)
+        : ledger.estimate(taskId, usoDoCusto(passo.total));
+    this.#persistLedger(ledger);
+    return { passo, snapshot };
+  }
+
+  /**
    * Turno que acabou sem custo final do agente (Copilot nunca manda um; um
    * processo morto no meio também não): a última estimativa vira custo num
    * evento próprio, para o store/grafo e o orçamento não perderem o gasto.
+   *
+   * Devolve se havia estimativa a fechar.
    */
   #fecharCustoDoTurno(
     session: Session,
     task: Task,
     custos: TurnCostTracker,
     ledger: BudgetLedger,
-  ): void {
+  ): boolean {
     const cumulativeUsd = custos.cumulativeUsd;
     const cumulativeCredits = custos.cumulativeCredits;
     const aberto = custos.flush();
-    if (!aberto) return;
+    if (!aberto) return false;
 
     const creditos = aberto.credits;
     const event = makeEvent(
@@ -3457,6 +3501,30 @@ ${task.brief.objective.slice(0, 500)}`,
     const snapshot = ledger.charge(usoDoCusto(aberto), task.id);
     this.#persistLedger(ledger);
     this.#checkBudgetWarning(session, task.id, snapshot);
+    return true;
+  }
+
+  /**
+   * Turno cortado pelo Hub antes de o agente informar uso nenhum: o custo
+   * existe (o modelo foi chamado), mas não há número — nem estimativa. O
+   * evento não leva `cost`, para nenhuma soma o ler como zero, e o orçamento
+   * fica como está: cobrar um valor inventado seria pior que dizer que não
+   * se sabe.
+   */
+  #avisarCustoDesconhecido(session: Session, task: Task): void {
+    this.#emit({
+      sessionId: session.id,
+      taskId: task.id,
+      agentId: session.agentId,
+      type: 'log',
+      payload: {
+        kind: CUSTO_DESCONHECIDO,
+        level: 'warn',
+        text: 'custo do turno desconhecido: o agente não informou uso antes de parar (não entra no orçamento)',
+        costBasis: 'unknown',
+        costConfidence: 'none',
+      },
+    });
   }
 
   #persistMapped(session: Session, task: Task, mapped: MappedEvent): void {

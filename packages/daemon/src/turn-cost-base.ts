@@ -8,6 +8,15 @@ import type { EventEnvelope, Session, UnitOfWork } from '@agents-hub/core';
 export const CUSTO_FECHADO = 'custo.turno.fechado';
 
 /**
+ * Marca do evento que avisa que o custo de um turno parado pelo Hub é
+ * DESCONHECIDO: o agente não informou uso nenhum antes de parar (o Codex só
+ * manda `usage` no `turn.completed`). Sem este aviso o turno virava US$ 0,00
+ * silencioso, lido como "de graça"; com ele, a timeline diz que o número não
+ * existe e o orçamento não é cobrado por um valor inventado.
+ */
+export const CUSTO_DESCONHECIDO = 'custo.turno.desconhecido';
+
+/**
  * Base do custo ACUMULADO da sessão nativa (Copilot: créditos da sessão
  * inteira, inclusive turnos anteriores retomados com `--resume`).
  *
