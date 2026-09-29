@@ -173,9 +173,11 @@ describe('loadConfig — variáveis de ambiente', () => {
 // `node_modules/` e o daemon subia sem manifestos e sem painel.
 describe('raiz da instalação', () => {
   test('pacote instalado: a raiz é o próprio agents-hub/', () => {
+    // Prefixo ABSOLUTO na plataforma corrente: `installRoot` resolve o
+    // caminho, e `C:` no Linux é um nome relativo que viraria `<cwd>/C:/...`.
+    const prefixo = path.join(os.tmpdir(), 'npm');
     const dist = path.join(
-      'C:',
-      'npm',
+      prefixo,
       'node_modules',
       'agents-hub',
       'node_modules',
@@ -183,7 +185,7 @@ describe('raiz da instalação', () => {
       'daemon',
       'dist',
     );
-    assert.equal(installRoot(dist), path.join('C:', 'npm', 'node_modules', 'agents-hub'));
+    assert.equal(installRoot(dist), path.join(prefixo, 'node_modules', 'agents-hub'));
   });
 
   test('clone: a raiz é a do repositório (tem manifests/)', () => {
