@@ -805,24 +805,21 @@ export class SessionManager {
       // DEPOIS do daemon anterior morrer — ou seja, depois do último registro
       // conhecido desta sessão no banco. Se o horário de criação do processo
       // vivo for mais novo que isso, não é o órfão de verdade: é o SO tendo
-      // devolvido o número pra outro programa. Só no Windows por enquanto
-      // (mesma limitação de `imagemDoProcesso`: POSIX segue sem cobertura de
-      // kill nesta reconciliação).
-      if (process.platform === 'win32') {
-        const inicioProcesso = await horarioDeCriacaoDoProcesso(pid);
-        if (pidPareceReciclado(inicioProcesso, sessao.updatedAt)) {
-          console.error(
-            `reconciliação: pid ${pid} (${imagem}) da sessão ${sessao.id} nasceu em ` +
-              `${inicioProcesso?.toISOString()}, depois do último registro da sessão ` +
-              `(${sessao.updatedAt}) — provável PID reciclado, kill abortado`,
-          );
-          return;
-        }
+      // devolvido o número pra outro programa. Vale no Windows e no POSIX
+      // (ver `horarioDeCriacaoDoProcesso`); horário desconhecido não bloqueia.
+      const inicioProcesso = await horarioDeCriacaoDoProcesso(pid);
+      if (pidPareceReciclado(inicioProcesso, sessao.updatedAt)) {
+        console.error(
+          `reconciliação: pid ${pid} (${imagem}) da sessão ${sessao.id} nasceu em ` +
+            `${inicioProcesso?.toISOString()}, depois do último registro da sessão ` +
+            `(${sessao.updatedAt}) — provável PID reciclado, kill abortado`,
+        );
+        return;
       }
 
       // Chegamos até aqui só porque `imagemDoProcesso` confirmou que o PID
-      // está vivo e bate com o binário esperado, e (no Windows) o processo não
-      // nasceu depois do último registro da sessão — ou seja, é um órfão de
+      // está vivo e bate com o binário esperado, e o processo não nasceu
+      // depois do último registro da sessão — ou seja, é um órfão de
       // verdade sobrevivendo a um crash, não o caminho comum de "já tinha
       // morrido sozinho". Vale o log.
       await killProcessTree(pid, () => {

@@ -314,7 +314,9 @@ export function imagemPareceEsperada(imagem: string, bin: string, executavelSpaw
 /**
  * Tolerância de relógio na comparação de horários: `sessao.updatedAt` e o
  * `StartTime` do processo vêm de relógios/resoluções diferentes (SQLite vs.
- * `Get-Process`), então uma diferença de poucos segundos não é sinal de nada
+ * `Get-Process`; no POSIX, o `btime` de 1 s de resolução, que ainda anda um
+ * pouco com ajuste de NTP, ou o `lstart` do `ps`, também de 1 s), então uma
+ * diferença de poucos segundos não é sinal de nada
  * — só folga suficiente para não gerar falso positivo no caminho comum onde
  * processo e atualização da sessão acontecem quase juntos.
  */
@@ -322,20 +324,24 @@ export const TOLERANCIA_RELOGIO_MS = 5_000;
 
 /**
  * Horário em que o processo vivo no PID foi criado, ou `null` quando não dá
- * para saber (POSIX hoje, ou qualquer falha ao consultar o SO).
+ * para saber (qualquer falha ao consultar o SO).
  *
- * Usa PowerShell (`Get-Process -Id <pid>).StartTime`) em vez de
+ * Windows: PowerShell (`Get-Process -Id <pid>).StartTime`) em vez de
  * `wmic process ... get CreationDate`: `wmic` está descontinuado nas versões
  * recentes do Windows e seu formato de data (`yyyyMMddHHmmss.ffffff+UUU`)
  * exige parsing manual sujeito a erro; `StartTime` já vem como `DateTime`.
+ *
+ * Linux: `/proc` direto (ver `inicioPeloProcStat`), não `ps -o lstart=` —
+ * `procps` falta em imagens de container enxutas (o mesmo motivo de
+ * `paresPidPpid` ler `/proc`), `lstart` tem resolução de 1 s e sai em hora
+ * local num formato que depende de locale. Demais POSIX (macOS, BSD): `ps`,
+ * que lá é do sistema base, com `LC_ALL=C` e `TZ=UTC` para o texto ter um
+ * formato só.
  */
 export async function horarioDeCriacaoDoProcesso(pid: number): Promise<Date | null> {
-  if (process.platform !== 'win32') {
-    // Fora do Windows a reconciliação confere só o NOME da imagem
-    // (`imagemDoProcessoPosix`); a checagem de horário de criação ainda não
-    // tem implementação POSIX — `session-manager.ts` só a consulta no win32.
-    return null;
-  }
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === 'linux') return horarioDeCriacaoLinux(pid);
+  if (process.platform !== 'win32') return horarioDeCriacaoPorPs(pid);
 
   try {
     const { stdout } = await execFileAsync('powershell', [
@@ -353,6 +359,99 @@ export async function horarioDeCriacaoDoProcesso(pid: number): Promise<Date | nu
     // de sistema, por exemplo) — nos dois casos, não dá pra confirmar horário.
     return null;
   }
+}
+
+/**
+ * Ticks de relógio por segundo em que o kernel conta o `starttime`.
+ *
+ * É o `USER_HZ` da ABI do kernel — 100 em x86, ARM, RISC-V, PowerPC e s390.
+ * O Node não expõe `sysconf(_SC_CLK_TCK)`, então pergunta ao `getconf` (da
+ * libc, sem shell) uma vez só e cai para 100 se ele não existir.
+ */
+let clkTck: Promise<number> | undefined;
+function ticksPorSegundo(): Promise<number> {
+  clkTck ??= execFileAsync('getconf', ['CLK_TCK'])
+    .then(({ stdout }) => {
+      const n = Number(stdout.trim());
+      return Number.isInteger(n) && n > 0 ? n : 100;
+    })
+    .catch(() => 100);
+  return clkTck;
+}
+
+async function horarioDeCriacaoLinux(pid: number): Promise<Date | null> {
+  try {
+    const [stat, procStat, tck] = await Promise.all([
+      readFile(`/proc/${pid}/stat`, 'utf8'),
+      readFile('/proc/stat', 'utf8'),
+      ticksPorSegundo(),
+    ]);
+    const btime = bootDoProcStat(procStat);
+    return btime === null ? null : inicioPeloProcStat(stat, btime, tck);
+  } catch {
+    // PID sem entrada em /proc: o processo já não existe.
+    return null;
+  }
+}
+
+async function horarioDeCriacaoPorPs(pid: number): Promise<Date | null> {
+  try {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'lstart='], {
+      env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+    });
+    return inicioPeloLstart(stdout);
+  } catch {
+    // `ps -p` sai com código != 0 quando o PID não existe.
+    return null;
+  }
+}
+
+/** `btime` de `/proc/stat`: o boot do sistema, em segundos desde a época. */
+export function bootDoProcStat(procStat: string): number | null {
+  const casou = /^btime\s+(\d+)\s*$/m.exec(procStat);
+  return casou ? Number(casou[1]) : null;
+}
+
+/**
+ * Início do processo a partir de `/proc/<pid>/stat`: o campo 22
+ * (`starttime`) conta ticks desde o boot; somado ao `btime`, vira instante.
+ *
+ * O 2º campo (`comm`) vem entre parênteses e pode ter espaço e `)` — por isso
+ * a contagem começa depois do ÚLTIMO `)`, onde o 3º campo é o índice 0 e o
+ * 22º, o índice 19.
+ */
+export function inicioPeloProcStat(
+  stat: string,
+  btimeSegundos: number,
+  ticksPorSeg: number,
+): Date | null {
+  const fim = stat.lastIndexOf(')');
+  if (fim < 0) return null;
+  const campo = stat.slice(fim + 2).split(' ')[19] ?? '';
+  if (!/^\d+$/.test(campo)) return null;
+  return new Date(btimeSegundos * 1000 + (Number(campo) * 1000) / ticksPorSeg);
+}
+
+const MESES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Início do processo a partir de `ps -o lstart=` com `LC_ALL=C` e `TZ=UTC`
+ * (`Tue Sep 29 12:00:00 2026`). Parse manual, não `new Date(texto)`: o
+ * formato aceito pelo `Date` para strings fora do ISO depende do motor.
+ */
+export function inicioPeloLstart(texto: string): Date | null {
+  const casou = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(texto.trim());
+  if (!casou) return null;
+  const mes = MESES.indexOf(casou[1] as string);
+  if (mes < 0) return null;
+  const [dia, hora, minuto, segundo, ano] = casou.slice(2).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  return new Date(Date.UTC(ano, mes, dia, hora, minuto, segundo));
 }
 
 /**

@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import {
+  bootDoProcStat,
+  horarioDeCriacaoDoProcesso,
+  inicioPeloLstart,
+  inicioPeloProcStat,
   killProcessTree,
   opcoesDeGrupo,
   imagemPareceEsperada,
@@ -269,4 +273,56 @@ test('pidPareceReciclado: processo nascido antes do último updatedAt não é re
 
 test('pidPareceReciclado: referência inválida não lança e não conta como reciclado', () => {
   assert.equal(pidPareceReciclado(new Date(), 'não é uma data'), false);
+});
+
+/**
+ * Horário de criação do processo no POSIX: antes `horarioDeCriacaoDoProcesso`
+ * devolvia `null` fora do Windows, e a checagem de PID reciclado da
+ * reconciliação não valia no Linux/macOS. O parse é puro e roda em qualquer
+ * plataforma; a consulta de verdade roda em todas (PowerShell, `/proc`, `ps`).
+ */
+test('bootDoProcStat: lê o btime de /proc/stat', () => {
+  const procStat = 'cpu  1 2 3 4\nintr 99\nctxt 1234\nbtime 1790000000\nprocesses 42\n';
+  assert.equal(bootDoProcStat(procStat), 1790000000);
+  assert.equal(bootDoProcStat('cpu 1 2 3\n'), null);
+});
+
+test('inicioPeloProcStat: soma o starttime (campo 22, em ticks) ao boot', () => {
+  // comm com espaço e ")" de propósito: o campo 22 conta depois do ÚLTIMO ")".
+  const campos = ['S', '1', ...Array.from({ length: 17 }, (_, i) => String(i + 10)), '12345', '99'];
+  const stat = `4242 (node) (x) ${campos.join(' ')}`;
+  const inicio = inicioPeloProcStat(stat, 1_790_000_000, 100);
+  assert.equal(inicio?.getTime(), 1_790_000_000_000 + 123_450);
+  assert.equal(inicioPeloProcStat(stat, 1_790_000_000, 1000)?.getTime(), 1_790_000_000_000 + 12_345);
+});
+
+test('inicioPeloProcStat: stat truncado ou sem parênteses devolve null', () => {
+  assert.equal(inicioPeloProcStat('4242 node S 1', 0, 100), null);
+  assert.equal(inicioPeloProcStat('4242 (node) S 1 2 3', 0, 100), null);
+});
+
+test('inicioPeloLstart: formato do ps com LC_ALL=C e TZ=UTC', () => {
+  assert.equal(
+    inicioPeloLstart('Tue Sep 29 12:34:56 2026\n')?.toISOString(),
+    '2026-09-29T12:34:56.000Z',
+  );
+  // Dia de um dígito vem com espaço duplo.
+  assert.equal(inicioPeloLstart('Thu Oct  1 00:00:05 2026')?.toISOString(), '2026-10-01T00:00:05.000Z');
+  assert.equal(inicioPeloLstart('ter 29 set 2026 12:34:56'), null);
+  assert.equal(inicioPeloLstart(''), null);
+});
+
+test('horarioDeCriacaoDoProcesso: o do processo atual bate com o uptime dele', async () => {
+  const esperado = Date.now() - process.uptime() * 1000;
+  const inicio = await horarioDeCriacaoDoProcesso(process.pid);
+  assert.ok(inicio, `o SO deveria informar o início do pid ${process.pid} em ${process.platform}`);
+  assert.ok(
+    Math.abs(inicio.getTime() - esperado) <= TOLERANCIA_RELOGIO_MS,
+    `início ${inicio.toISOString()} longe do esperado ${new Date(esperado).toISOString()}`,
+  );
+});
+
+test('horarioDeCriacaoDoProcesso: PID inexistente ou inválido devolve null', async () => {
+  assert.equal(await horarioDeCriacaoDoProcesso(999_999_999), null);
+  assert.equal(await horarioDeCriacaoDoProcesso(-1), null);
 });
