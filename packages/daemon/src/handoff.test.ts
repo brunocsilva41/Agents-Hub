@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 const SCRIPT_AGENTE = `
@@ -15,18 +16,12 @@ process.stdout.write('AGENTE OK\\n');
 process.exit(0);
 `;
 
-async function esperarTerminal(hub: Hub, taskId: string, timeoutMs = 15_000): Promise<string> {
-  const limite = Date.now() + timeoutMs;
+async function esperarTerminal(hub: Hub, taskId: string): Promise<string> {
   const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
-
-  for (;;) {
-    const task = hub.store.tasks.get(taskId);
-    if (task && terminais.has(task.state)) return task.state;
-    if (Date.now() > limite) {
-      throw new Error(`task ${taskId} não chegou a estado terminal em ${timeoutMs}ms`);
-    }
-    await new Promise((r) => setTimeout(r, 50));
-  }
+  return esperarAte(() => {
+    const estado = hub.store.tasks.get(taskId)?.state;
+    return estado && terminais.has(estado) ? estado : undefined;
+  }, `task ${taskId} terminal`);
 }
 
 describe('Session Handoff (Fase 3)', () => {

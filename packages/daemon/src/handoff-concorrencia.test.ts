@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, textoDe } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -19,18 +20,9 @@ import { createHub, type Hub } from './hub.js';
 const SCRIPT = `
 if (process.argv.includes('--version')) { process.stdout.write('1.0.0\\n'); process.exit(0); }
 const lento = process.argv.includes('lento');
+// Simula o turno: o lento dura o bastante para o handoff acontecer no meio dele.
 setTimeout(() => { process.stdout.write('pronto\\n'); process.exit(0); }, lento ? 30000 : 800);
 `;
-
-async function esperar<T>(fn: () => T | undefined, timeoutMs = 20_000): Promise<T> {
-  const limite = Date.now() + timeoutMs;
-  for (;;) {
-    const v = fn();
-    if (v !== undefined) return v;
-    if (Date.now() > limite) throw new Error('condição não atingida a tempo');
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
 
 describe('handoff: agente persistido, uma vaga só, sem falha fantasma', () => {
   let raiz: string;
@@ -128,10 +120,10 @@ defaults:
       'o banco precisa refletir o agente novo (agent_id no UPDATE)',
     );
 
-    const estado = await esperar(() => {
+    const estado = await esperarAte(() => {
       const t = hub.store.tasks.get(started.task.id);
       return t && ['completed', 'failed', 'canceled', 'rejected'].includes(t.state) ? t : undefined;
-    });
+    }, 'task terminal');
     assert.equal(estado.state, 'completed', 'a run cancelada no handoff não pode derrubar a task');
 
     const agentes = estado.attempts.map((a) => a.agentId);

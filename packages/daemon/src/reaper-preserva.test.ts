@@ -185,6 +185,7 @@ describe('WorktreeReaper: recolhe worktree com trabalho sem perder o trabalho', 
     const manager = {
       release: async () => {
         releases += 1;
+        // Lentidão simulada: mantém a 1ª passada em voo enquanto as outras chegam.
         await new Promise((r) => setTimeout(r, 30));
         return { removed: true };
       },

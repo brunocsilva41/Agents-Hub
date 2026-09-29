@@ -4,6 +4,7 @@ import { request } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, test } from 'node:test';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 import { encerradorDoProcesso } from './safety-net.js';
 
@@ -35,6 +36,7 @@ describe('Hub.shutdown idempotente', () => {
     const original = h.sessions.shutdown.bind(h.sessions);
     h.sessions.shutdown = async () => {
       espia.entradas += 1;
+      // Lentidão simulada: alarga a janela em que a segunda chamada chega.
       await new Promise((r) => setTimeout(r, 50));
       await original();
       espia.fim = Date.now();
@@ -104,13 +106,8 @@ describe('Hub.shutdown idempotente', () => {
 
     // A rota agenda o desligamento para 100 ms depois de responder; o sinal
     // chega no meio dele, com as sessões ainda sendo encerradas.
-    await new Promise<void>((resolve) => {
-      const olhar = (): void => {
-        if (espia.entradas > 0) resolve();
-        else setTimeout(olhar, 2);
-      };
-      olhar();
-    });
+    // Consulta curta: o sinal precisa cair DENTRO da janela de ~50 ms do desligamento.
+    await esperarAte(() => espia.entradas > 0, 'o desligamento começar', { intervaloMs: 2 });
     void porSinal('SIGINT');
     await ambas;
 

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, type EventEnvelope } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -74,6 +75,7 @@ if (process.argv.includes('--version')) {
   process.exit(0);
 }
 process.stdin.resume();
+// Simula trabalho em andamento: a sessão precisa estar viva quando o teste lê o orçamento.
 setTimeout(() => { process.stdout.write('OK\\n'); process.exit(0); }, 200);
 `,
       'utf8',
@@ -133,6 +135,7 @@ process.stdin.on('end', () => {
   // esgotar.
   if (invocacao === 1) {
     process.stdout.write(JSON.stringify({ type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'trabalhando' }], usage: { input_tokens: 1500000, output_tokens: 0 } } }) + '\\n');
+    // Simula o agente ainda trabalhando: quem o encerra é o corte do Hub no estouro.
     setTimeout(() => process.exit(0), 10000);
     return;
   }
@@ -163,14 +166,6 @@ process.stdin.on('end', () => {
       /* limpeza de temp é oportunista */
     }
   });
-
-  async function esperar(cond: () => boolean, timeoutMs = 15_000): Promise<void> {
-    const limite = Date.now() + timeoutMs;
-    while (!cond()) {
-      if (Date.now() > limite) throw new Error('condição não satisfeita a tempo');
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
 
   test('projeção aparece com a sessão ainda viva (não precisa esperar o fim da run)', async () => {
     const proj = hub.sessions.registerProject(projetoPath, 'Teste Projeção Viva');
@@ -213,10 +208,10 @@ process.stdin.on('end', () => {
     });
 
     const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
-    await esperar(() => {
+    await esperarAte(() => {
       const task = hub.store.tasks.get(started.task.id);
       return !!task && terminais.has(task.state);
-    });
+    }, 'task terminal');
 
     const eventos: EventEnvelope[] = hub.sessions.listEvents(started.session.id);
     const avisos = eventos.filter((e) => e.type === 'budget.warning');
@@ -251,10 +246,11 @@ process.stdin.on('end', () => {
     // de custo é processado, mas o processo do agente só sai de `#runs`
     // depois que `handle.done` resolve — resolver a aprovação antes disso
     // colide com uma run que `send()` ainda considera em andamento.
-    await esperar(
+    await esperarAte(
       () =>
         hub.sessions.pendingApprovals(started.session.id).length > 0 &&
         !hub.sessions.isLive(started.session.id),
+      'aprovação de orçamento pendente e run encerrada',
     );
     const [approval] = hub.sessions.pendingApprovals(started.session.id);
     assert.ok(approval, 'deveria existir uma aprovação de orçamento pendente');
@@ -267,10 +263,10 @@ process.stdin.on('end', () => {
     // "a segunda rodada terminou" é a task voltar a um estado terminal depois
     // de ter sido reaberta para `working` pela aprovação.
     const terminais = new Set(['completed', 'failed', 'canceled', 'rejected']);
-    await esperar(() => {
+    await esperarAte(() => {
       const task = hub.store.tasks.get(started.task.id);
       return !!task && terminais.has(task.state);
-    });
+    }, 'segunda rodada terminal');
 
     const eventos: EventEnvelope[] = hub.sessions.listEvents(started.session.id);
     const avisos = eventos.filter((e) => e.type === 'budget.warning');

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, isTerminalTaskState } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -69,14 +70,6 @@ function manifesto(id: string, script: string, modo: 'ok' | 'rate'): string {
     '  supervision: autonomous',
     '',
   ].join('\n');
-}
-
-async function esperar(descricao: string, condicao: () => boolean, timeoutMs = 20_000): Promise<void> {
-  const limite = Date.now() + timeoutMs;
-  while (!condicao()) {
-    if (Date.now() > limite) throw new Error(`tempo esgotado esperando: ${descricao}`);
-    await new Promise((r) => setTimeout(r, 20));
-  }
 }
 
 interface Ambiente {
@@ -167,7 +160,7 @@ describe('teto de concorrência conta sessão em validação/revisão', () => {
     const primeira = await iniciar(amb, 'rapido');
     // O processo do agente já saiu (a run deixou `#runs`); o que roda agora
     // é o `validation.command` da sessão.
-    await esperar('validação da primeira começar', () => existsSync(amb.pidValidacao));
+    await esperarAte(() => existsSync(amb.pidValidacao), 'validação da primeira começar');
     assert.ok(Number(readFileSync(amb.pidValidacao, 'utf8')) > 0);
     assert.equal(amb.hub.sessions.isLive(primeira.session.id), false, 'a run já saiu de #runs');
 
@@ -178,10 +171,10 @@ describe('teto de concorrência conta sessão em validação/revisão', () => {
     );
 
     // Terminada a validação, a vaga volta.
-    await esperar('primeira terminar', () => terminou(amb.hub, primeira.task.id));
+    await esperarAte(() => terminou(amb.hub, primeira.task.id), 'primeira terminar');
     assert.equal(amb.hub.store.tasks.get(primeira.task.id)?.state, 'completed');
     const segunda = await iniciar(amb, 'outro');
-    await esperar('segunda terminar', () => terminou(amb.hub, segunda.task.id));
+    await esperarAte(() => terminou(amb.hub, segunda.task.id), 'segunda terminar');
   });
 });
 
@@ -195,7 +188,7 @@ describe('a vaga do fechamento não barra o substituto da própria sessão', () 
 
   test('fallback com maxConcurrency 1: o substituto sobe e conclui', async () => {
     const { task } = await iniciar(amb, 'rate');
-    await esperar('task terminar', () => terminou(amb.hub, task.id));
+    await esperarAte(() => terminou(amb.hub, task.id), 'task terminar');
     const final = amb.hub.store.tasks.get(task.id)!;
     assert.equal(final.state, 'completed', JSON.stringify(final.attempts));
     assert.deepEqual(
@@ -215,7 +208,7 @@ describe('retry também não é barrado pela vaga da própria sessão', () => {
 
   test('retry com maxConcurrency 1: a segunda tentativa roda na mesma vaga', async () => {
     const { task } = await iniciar(amb, 'rate');
-    await esperar('task terminar', () => terminou(amb.hub, task.id));
+    await esperarAte(() => terminou(amb.hub, task.id), 'task terminar');
     const final = amb.hub.store.tasks.get(task.id)!;
     const recusas = amb.hub.store.events
       .list({ taskId: task.id, limit: 500 })
