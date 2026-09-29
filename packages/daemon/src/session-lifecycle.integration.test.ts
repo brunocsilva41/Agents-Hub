@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { DEFAULT_POLICY, type EventEnvelope, type Session } from '@agents-hub/core';
+import { esperarAte } from './esperar-ate.js';
 import { createHub, type Hub } from './hub.js';
 
 /**
@@ -51,6 +52,7 @@ process.stdin.on('end', () => {
   }
   fala('comecei');
   if (modo === 'sleep' && !retomada) {
+    // Simula um turno longo: é a janela em que os testes cancelam/pausam.
     setTimeout(() => {
       fala('terminei');
       process.exit(0);
@@ -62,7 +64,7 @@ process.stdin.on('end', () => {
 });
 `;
 
-/** Comando de validação: grava o PID e dorme — o "npm test" lento. */
+/** Comando de validação: grava o PID e dorme de propósito — simula o "npm test" lento. */
 const VALIDACAO_FALSA = `
 require('node:fs').writeFileSync(process.argv[2], String(process.pid));
 setTimeout(() => process.exit(0), Number(process.argv[3] || 4000));
@@ -125,14 +127,12 @@ function portaLivre(): Promise<number> {
   });
 }
 
-async function esperar(descricao: string, condicao: () => boolean, timeoutMs = 15_000): Promise<void> {
-  const limite = Date.now() + timeoutMs;
-  while (!condicao()) {
-    if (Date.now() > limite) throw new Error(`tempo esgotado esperando: ${descricao}`);
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
-
+/**
+ * Espera fixa — NUNCA para sincronizar (isso é `esperarAte`). Só em dois usos
+ * deliberados, cada um comentado na chamada: variar o instante de uma corrida
+ * de propósito, e a janela de uma prova de AUSÊNCIA (algo que não pode
+ * acontecer depois de um prazo), onde não existe evento positivo a esperar.
+ */
 const pausa = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function vivo(pid: number): boolean {
@@ -306,14 +306,17 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
       // Varia o instante do cancelamento: logo depois do spawn, e depois de
       // o agente já ter falado (a janela em que o pump já está no laço).
       if (i % 2 === 1) {
-        await esperar('primeiro evento', () =>
-          eventos(amb.hub, session.id).some((e) => e.type === 'message'),
+        await esperarAte(
+          () => eventos(amb.hub, session.id).some((e) => e.type === 'message'),
+          'primeiro evento',
         );
       } else {
+        // Corrida intencional: varia o instante do cancel logo após o spawn.
         await pausa(i * 5);
       }
       await amb.hub.sessions.cancel(session.id);
-      // Dá tempo ao pump atrasado de (não) sobrescrever o desfecho.
+      // Prova de ausência: janela para um pump atrasado (não) sobrescrever o
+      // desfecho — o defeito era exatamente uma escrita DEPOIS do cancel.
       await pausa(150);
       const s = amb.hub.store.sessions.get(session.id);
       const t = amb.hub.store.tasks.get(taskId);
@@ -335,11 +338,14 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
   test('pai recebe delegation.completed com state canceled, não failed', async () => {
     const pai = await iniciar(amb, 'lento');
     const filho = await iniciar(amb, 'lento', { requesterSessionId: pai.session.id });
-    await esperar('filho falou', () =>
-      eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'),
+    await esperarAte(
+      () => eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'),
+      'filho falou',
     );
 
     await amb.hub.sessions.cancel(filho.session.id);
+    // Prova de ausência: janela para um segundo `delegation.completed`
+    // (duplicado) ou um desfecho `failed` tardio aparecerem.
     await pausa(150);
 
     const retorno = eventos(amb.hub, pai.session.id).filter(
@@ -356,13 +362,15 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
   test('cancel em cascata alcança filho pausado (e fecha todos como canceled)', async () => {
     const pai = await iniciar(amb, 'lento');
     const filho = await iniciar(amb, 'lento', { requesterSessionId: pai.session.id });
-    await esperar('filho falou', () =>
-      eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'),
+    await esperarAte(
+      () => eventos(amb.hub, filho.session.id).some((e) => e.type === 'message'),
+      'filho falou',
     );
     await amb.hub.sessions.pause(filho.session.id);
     assert.equal(amb.hub.store.sessions.get(filho.session.id)?.state, 'paused');
 
     await amb.hub.sessions.cancel(pai.session.id);
+    // Prova de ausência: janela para um pump atrasado (não) reescrever o desfecho.
     await pausa(150);
     assert.deepEqual(estado(amb.hub, pai.session.id), { sessao: 'killed', task: 'canceled' });
     assert.deepEqual(estado(amb.hub, filho.session.id), { sessao: 'killed', task: 'canceled' });
@@ -371,10 +379,12 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
   test('cancel durante o backoff de retry fecha a task como canceled na hora', async () => {
     writeFileSync(amb.logRate, '');
     const { session, taskId } = await iniciar(amb, 'rate');
-    await esperar('aviso de nova tentativa', () =>
-      eventos(amb.hub, session.id).some(
-        (e) => e.type === 'log' && /nova tentativa/.test(String(e.payload['text'])),
-      ),
+    await esperarAte(
+      () =>
+        eventos(amb.hub, session.id).some(
+          (e) => e.type === 'log' && /nova tentativa/.test(String(e.payload['text'])),
+        ),
+      'aviso de nova tentativa',
     );
 
     const t0 = Date.now();
@@ -383,7 +393,8 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
     assert.equal(amb.hub.store.sessions.get(session.id)?.state, 'killed');
     assert.equal(amb.hub.store.tasks.get(taskId)?.state, 'canceled', 'task não pode ficar working');
 
-    // Passado o backoff, nenhuma tentativa nova subiu.
+    // Passado o backoff, nenhuma tentativa nova subiu. Prova de ausência cujo
+    // objeto é o próprio prazo (3000 ms de backoff): não há evento a esperar.
     await pausa(3500);
     const execucoes = readFileSync(amb.logRate, 'utf8').trim().split('\n').filter(Boolean);
     assert.equal(execucoes.length, 1, 'o retry não pode rodar depois do cancelamento');
@@ -392,8 +403,9 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
 
   test('eventos do fechamento chegam a quem assina a raiz (nada depois de #finish)', async () => {
     const { session } = await iniciar(amb, 'lento');
-    await esperar('primeiro evento', () =>
-      eventos(amb.hub, session.id).some((e) => e.type === 'message'),
+    await esperarAte(
+      () => eventos(amb.hub, session.id).some((e) => e.type === 'message'),
+      'primeiro evento',
     );
 
     const recebidos = new Set<number>();
@@ -403,6 +415,8 @@ describe('2.1 — cancelar termina killed/canceled, nunca failed', () => {
     const ultimoAntes = Math.max(...eventos(amb.hub, session.id).map((e) => e.seq));
     try {
       await amb.hub.sessions.cancel(session.id);
+      // Prova de ausência: janela para um evento tardio (depois do #finish)
+      // cair no banco sem passar pela assinatura da raiz.
       await pausa(300);
     } finally {
       desassinar();
@@ -429,9 +443,9 @@ describe('2.1 — cancelar durante a validação', () => {
   test('cancelado no meio da validação não ressuscita como completed, e o comando morre', async () => {
     rmSync(amb.pidValidacao, { force: true });
     const { session, taskId } = await iniciar(amb, 'rapido');
-    await esperar(
-      'validação começou',
+    await esperarAte(
       () => existsSync(amb.pidValidacao) && readFileSync(amb.pidValidacao, 'utf8').length > 0,
+      'validação começou',
     );
     const pid = Number(readFileSync(amb.pidValidacao, 'utf8'));
     assert.ok(vivo(pid), 'a validação deveria estar rodando');
@@ -441,7 +455,8 @@ describe('2.1 — cancelar durante a validação', () => {
     assert.deepEqual(estado(amb.hub, session.id), { sessao: 'killed', task: 'canceled' });
     assert.equal(vivo(pid), false, 'o comando de validação precisa morrer com o cancelamento');
 
-    // Depois do tempo que a validação levaria, o desfecho continua o do cancel.
+    // Depois do tempo que a validação levaria (4000 ms), o desfecho continua o
+    // do cancel. Prova de ausência cujo objeto é o próprio prazo.
     await pausa(4500);
     assert.deepEqual(estado(amb.hub, session.id), { sessao: 'killed', task: 'canceled' });
     assert.equal(amb.hub.store.tasks.get(taskId)?.result, null, 'nada de resultado entregue');
@@ -456,9 +471,9 @@ describe('2.1 — desligar durante a validação', () => {
     try {
       rmSync(amb.pidValidacao, { force: true });
       await iniciar(amb, 'rapido');
-      await esperar(
-        'validação começou',
+      await esperarAte(
         () => existsSync(amb.pidValidacao) && readFileSync(amb.pidValidacao, 'utf8').length > 0,
+        'validação começou',
       );
       const pid = Number(readFileSync(amb.pidValidacao, 'utf8'));
       assert.ok(vivo(pid));
@@ -502,9 +517,9 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
   test('interrupt via HTTP: sessão idle (não failed), task input_required, send retoma com resume nativo', async () => {
     writeFileSync(amb.logNativo, '');
     const { session, taskId } = await iniciar(amb, 'nativo');
-    await esperar(
-      'id nativo conhecido',
+    await esperarAte(
       () => amb.hub.store.sessions.get(session.id)?.nativeSessionId === 'nat_falso_1',
+      'id nativo conhecido',
     );
     const pid = amb.hub.store.sessions.get(session.id)?.pid;
     assert.ok(pid);
@@ -514,9 +529,9 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
     assert.equal(r.body['interrupted'], true);
     assert.equal(r.body['state'], 'idle');
 
-    await pausa(500);
+    // O sinal de parada já saiu; o processo morre no ritmo do SO.
+    await esperarAte(() => !vivo(pid), 'o processo do turno ser encerrado');
     assert.deepEqual(estado(amb.hub, session.id), { sessao: 'idle', task: 'input_required' });
-    assert.equal(vivo(pid), false, 'o processo do turno foi encerrado');
     const task = amb.hub.store.tasks.get(taskId);
     assert.equal(task?.attempts.length, 1);
     assert.equal(task?.attempts[0]?.endedAt, null, 'interromper não fecha a tentativa (não é falha)');
@@ -529,9 +544,9 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
     const envio = await post(`/sessions/${session.id}/send`, { text: 'continue de onde parou' });
     assert.equal(envio.status, 200);
     assert.equal(envio.body['mode'], 'resume');
-    await esperar(
-      'retomada concluída',
+    await esperarAte(
       () => amb.hub.store.sessions.get(session.id)?.state === 'completed',
+      'retomada concluída',
     );
     assert.equal(amb.hub.store.tasks.get(taskId)?.state, 'completed');
 
@@ -545,29 +560,32 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
 
   test('pause via HTTP: sessão paused, task input_required, send retoma', async () => {
     const { session, taskId } = await iniciar(amb, 'nativo');
-    await esperar(
-      'id nativo conhecido',
+    await esperarAte(
       () => amb.hub.store.sessions.get(session.id)?.nativeSessionId === 'nat_falso_1',
+      'id nativo conhecido',
     );
+    const pid = amb.hub.store.sessions.get(session.id)?.pid;
+    assert.ok(pid);
 
     const r = await post(`/sessions/${session.id}/pause`);
     assert.equal(r.status, 200);
     assert.equal(r.body['state'], 'paused');
-    await pausa(500);
+    // O sinal de parada já saiu; o processo morre no ritmo do SO.
+    await esperarAte(() => !vivo(pid), 'o processo do turno ser encerrado');
     assert.deepEqual(estado(amb.hub, session.id), { sessao: 'paused', task: 'input_required' });
 
     const envio = await post(`/sessions/${session.id}/send`, { text: 'pode seguir' });
     assert.equal(envio.body['mode'], 'resume');
-    await esperar(
-      'retomada concluída',
+    await esperarAte(
       () => amb.hub.store.sessions.get(session.id)?.state === 'completed',
+      'retomada concluída',
     );
     assert.equal(amb.hub.store.tasks.get(taskId)?.state, 'completed');
   });
 
   test('interrupt sem turno em andamento responde interrupted:false e não mexe no estado', async () => {
     const { session } = await iniciar(amb, 'lento');
-    await esperar('falou', () => eventos(amb.hub, session.id).some((e) => e.type === 'message'));
+    await esperarAte(() => eventos(amb.hub, session.id).some((e) => e.type === 'message'), 'falou');
     await post(`/sessions/${session.id}/interrupt`);
     const r = await post(`/sessions/${session.id}/interrupt`);
     assert.equal(r.body['interrupted'], false);
@@ -585,7 +603,7 @@ describe('2.2 — interrupt e pause param o turno sem matar a sessão', () => {
 
   test('agente sem retomada (strategy none): recusa explícita, sessão segue rodando', async () => {
     const { session } = await iniciar(amb, 'semretomada');
-    await esperar('falou', () => eventos(amb.hub, session.id).some((e) => e.type === 'message'));
+    await esperarAte(() => eventos(amb.hub, session.id).some((e) => e.type === 'message'), 'falou');
     const r = await post(`/sessions/${session.id}/interrupt`);
     assert.equal((r.body['error'] as { code: string }).code, 'ILLEGAL_STATE');
     assert.match(String((r.body['error'] as { message: string }).message), /não retoma sessão/);
@@ -671,10 +689,10 @@ describe('2.3 — falha ao subir o agente não deixa fantasma', () => {
     } catch {
       sessionId = ultimaSessao('quebrado').id;
     }
-    await esperar('desfecho do spawn', () => {
+    await esperarAte(() => {
       const st = amb.hub.store.sessions.get(sessionId)?.state;
       return st === 'failed';
-    });
+    }, 'desfecho do spawn');
     assert.equal(amb.hub.store.tasks.list({ sessionId })[0]?.state, 'failed');
     semFantasma();
   });
