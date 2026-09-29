@@ -174,6 +174,11 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
   event-flood reproduzida pelo coordenador no Windows (sem a cessão da AsyncQueue: ECONNRESET; restaurado: verde).
   Follow-up A2 (Sonnet): trocar `portaLivre`+retry por porta 0; flakes raros vistos pelo A — sse-task-http "replay maior
   que o teto" ECONNRESET 1/20 no container, mcp server.test "test failed" com 24/24 subtestes verdes 1× no Windows.
+- **J MESCLADO** (achado do teste real): só o caminho da vigilância perdia o custo — o `tool_use` que dispara a pausa
+  traz o `usage` e o `break` saía antes de registrá-lo; agora registra. Turno cortado pelo Hub sem `usage` nenhum emite
+  `log kind=custo.turno.desconhecido` (`costBasis: 'unknown'`, sem `cost`, orçamento não cobrado por valor inventado).
+  Cancel/interrupt/pause/teto já fechavam pela estimativa (testes nasceram verdes, ficam como regressão). Mutação
+  reproduzida pelo coordenador (sem registrar na vigilância: 1/7; sem o aviso: 1/7). verify: 1801, 0 fail.
 - **Modelo dos workers**: até aqui Opus 5.5 (padrão da conta; `--model` não era passado). A pedido do usuário
   (2026-09-29, "o mais econômico que entregue bom resultado"), todo worker novo sobe com `--model sonnet`; J e K, já em
   andamento em Opus, terminam como estão.
