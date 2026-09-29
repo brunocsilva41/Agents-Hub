@@ -299,7 +299,7 @@ Como a contagem foi feita:
 | R12-02 | MED | Módulos relevantes sem teste (reaper, project-registry, hooks-install, client, web) | 7.1 | [x] |
 | R12-03 | MED | Não há medição nem gate de cobertura | 7.2 | [x] npm run coverage + job CI (ab3a0af) |
 | R12-04 | MED | Sem lint nem formatador | 7.2 | [x] ESLint (no-floating-promises) + Prettier + verify (merge 8f75671) |
-| R12-05 | MED | Job Linux informativo (continue-on-error); portão só exige Windows | 7.2 | [ ] |
+| R12-05 | MED | Job Linux informativo (continue-on-error); portão só exige Windows | 7.2 | [x] job `verificar-linux` bloqueante (5f4a497/117e214) + suíte verde no container node:24-bookworm (merge s2-linux, sessão 2: 2 verifies + 10× npm test, 0 fail) |
 | R12-06 | BAIXO | `npm audit`: 1 vulnerabilidade moderada (qs), transitiva | 7.3 | [x] |
 | R12-07 | BAIXO | Dependências com patch/minor pendentes; majors adiante | — | [x] patch/minor atualizados (67ff177, merge 8f75671) |
 | R12-08 | BAIXO | Testes dependem de timers reais (risco latente de flakiness) | 7.3 | [x] sessão 2 (merges s2-waits-daemon + s2-waits-resto): esperas de sincronização viram esperarAte/esperar()/mock.timers em 33 arquivos; as que ficaram simulam comportamento ou provam ausência, com motivo na linha; teste de cancelamento do hub_agent_wait era vazio e foi refeito; mutação reproduzida pelo coordenador |
