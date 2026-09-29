@@ -161,6 +161,12 @@ docs/16-prompt-continuacao-mvp.md. O que FALTA (nada disso foi despachado):
   tool-call, negativa chega ao agente, push não roda, task completed). Agente sem gate segue pausando. Mutação
   reproduzida pelo coordenador (2/25 vermelhos). verify: 1785, 0 fail. OpenClaude entra como gateado por ter
   settingsArgs (o binário consultar o hook segue não exercitado — SECURITY.md).
+- **H MESCLADO** (achado do teste real): id nativo do Claude só a partir do `system/init` (os `system/hook_*` do
+  SessionStart do usuário chegam antes de a conversa existir); `manifest.session.nativeSessionMissing` (regex validada no
+  schema; claude e openclaude — este por dedução) e, se o `--resume` de um `send` falhar com esse padrão, o MESMO turno é
+  refeito UMA vez em replay (brief + histórico + mensagem), id inválido esquecido, sem retry/fallback, log kind=replay;
+  motivo de falha cai na última linha útil do stderr (ruído SKILL.md do Codex segue filtrado). Mutação reproduzida pelo
+  coordenador na main: mapper antigo → 2/5 vermelhos; sem o desvio para replay → task `failed`. verify: 1794, 0 fail.
 - Decisão em andamento (A): event-flood "/health < 500 ms" no container é custo de fsync do disco do
   Docker Desktop (cpu-prof: 47 de 53 s em EventsRepo.append; fsync 4 MB = 122 ms no overlay vs 5 ms no
   Windows; tmpfs/:memory: = ~60 ms). Banco em memória foi VETADO: com ele o teste não pega a falta de
