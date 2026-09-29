@@ -9,7 +9,14 @@ import {
   type GuardedAction,
   type WatchPolicy,
 } from '@agents-hub/core';
-import { avaliarVigilancia, describeAction, guardedActionsOf } from './guarded-actions.js';
+import {
+  avaliarVigilancia,
+  describeAction,
+  describeRequest,
+  gateDecideOEvento,
+  guardedActionsOf,
+  type CoberturaDoGate,
+} from './guarded-actions.js';
 import type { MappedEvent } from './types.js';
 
 /**
@@ -212,4 +219,72 @@ test('avaliarVigilancia: ações flagged ANTES da que pausa continuam presentes 
   assert.equal(veredito.flagged.length, 1);
   assert.equal(veredito.flagged[0]?.risk, 'write');
   assert.equal(veredito.pausedBy?.risk, 'escalate');
+});
+
+/**
+ * Vigilância × gate pré-execução (teste real de 2026-09-29, achado ALTO): o
+ * Claude emite o `tool_use` no stream ANTES de chamar o PreToolUse, e a
+ * vigilância pausava (matando a sessão) um `git push` que o gate ainda ia
+ * perguntar — negar tem que negar só a chamada.
+ */
+
+const hookDoClaude: CoberturaDoGate = {
+  tipo: 'hook-por-sessao',
+  ferramentas: ['Bash', 'PowerShell', 'Write'],
+};
+const pushDoClaude = mapped('command.executed', { tool: 'Bash', command: 'git push origin main' });
+
+test('gateDecideOEvento: hook por sessão cobre só a ferramenta do matcher', () => {
+  assert.equal(gateDecideOEvento(pushDoClaude, hookDoClaude), true);
+  const foraDoMatcher = mapped('command.executed', { tool: 'OutraShell', command: 'git push' });
+  assert.equal(gateDecideOEvento(foraDoMatcher, hookDoClaude), false);
+  const semFerramenta = mapped('command.executed', { command: 'git push' });
+  assert.equal(gateDecideOEvento(semFerramenta, hookDoClaude), false);
+});
+
+test('gateDecideOEvento: Codex com bypass cobre comando, não file_change (apply_patch não medido)', () => {
+  const codex: CoberturaDoGate = { tipo: 'codex-comandos' };
+  assert.equal(gateDecideOEvento(mapped('command.executed', { command: 'git push' }), codex), true);
+  assert.equal(gateDecideOEvento(mapped('file.changed', { path: '.env' }), codex), false);
+});
+
+test('gateDecideOEvento: sem gate nada é coberto', () => {
+  assert.equal(gateDecideOEvento(pushDoClaude, { tipo: 'nenhuma' }), false);
+});
+
+test('avaliarVigilancia: evento que o gate decide NÃO pausa — vira flagged peloGate', () => {
+  const veredito = avaliarVigilancia(
+    pushDoClaude,
+    '/repo',
+    'semi',
+    engine,
+    watchPadrao,
+    [],
+    hookDoClaude,
+  );
+  assert.equal(veredito.outcome, 'flagged');
+  assert.equal(veredito.pausedBy, undefined);
+  assert.equal(veredito.flagged.length, 1);
+  assert.equal(veredito.flagged[0]?.risk, 'irreversible');
+  assert.equal(veredito.flagged[0]?.peloGate, true);
+});
+
+test('avaliarVigilancia: sem gate o mesmo push continua pausando (não afrouxa)', () => {
+  const veredito = avaliarVigilancia(pushDoClaude, '/repo', 'semi', engine, watchPadrao);
+  assert.equal(veredito.outcome, 'paused');
+  assert.equal(veredito.pausedBy?.risk, 'irreversible');
+});
+
+test('avaliarVigilancia: ferramenta fora do matcher do gate continua pausando', () => {
+  const evento = mapped('command.executed', { tool: 'OutraShell', command: 'git push origin main' });
+  const veredito = avaliarVigilancia(evento, '/repo', 'semi', engine, watchPadrao, [], hookDoClaude);
+  assert.equal(veredito.outcome, 'paused');
+});
+
+test('describeRequest: descreve como pedido, sem dizer que executou', () => {
+  assert.equal(
+    describeRequest({ kind: 'command', command: 'git push' }),
+    'pediu para executar: git push',
+  );
+  assert.doesNotMatch(describeRequest({ kind: 'file.write', path: '/repo/.env' }), /escreveu/);
 });

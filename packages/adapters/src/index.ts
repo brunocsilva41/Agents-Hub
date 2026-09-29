@@ -31,7 +31,10 @@ export {
 export {
   guardedActionsOf,
   describeAction,
+  describeRequest,
   avaliarVigilancia,
+  gateDecideOEvento,
+  type CoberturaDoGate,
   type VigilanciaVeredito,
 } from './guarded-actions.js';
 export { AgentRegistry, loadManifestDir, loadManifestFile } from './registry.js';
