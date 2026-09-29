@@ -32,7 +32,12 @@ export function claudeMapper(line: unknown): MappedEvent[] {
             },
         raw: line,
       };
-      if (sessionId) event.nativeSessionId = sessionId;
+      // Só o `init` prova que a conversa existe. Os `system/hook_*` do hook
+      // `SessionStart` do usuário também trazem `session_id`, mas chegam
+      // ANTES de o Claude gravar a conversa: guardado como nativo, um turno
+      // interrompido nesse intervalo deixava um id que o `--resume` recusa
+      // com "No conversation found" (teste real de 2026-09-29).
+      if (init && sessionId) event.nativeSessionId = sessionId;
       return [event];
     }
 
