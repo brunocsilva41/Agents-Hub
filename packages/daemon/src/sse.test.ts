@@ -2,8 +2,14 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { describe, test } from 'node:test';
-import { makeEvent } from '@agents-hub/core';
-import { SSE_KEEPALIVE_MS, startSseChannel } from './sse.js';
+import { HubError, makeEvent } from '@agents-hub/core';
+import {
+  formatarCursorDaTask,
+  intercalarTimelines,
+  lerCursorDaTask,
+  SSE_KEEPALIVE_MS,
+  startSseChannel,
+} from './sse.js';
 
 /**
  * `startSseChannel` é a extração que faz `/events` e `/api/tasks/:id/events`
@@ -200,6 +206,26 @@ describe('startSseChannel — backpressure e cliente lento', () => {
     assert.equal(channel.closed, true);
   });
 
+  test('end() entrega a fila pendente antes de fechar; close() a larga', () => {
+    const req = new FakeReq() as unknown as IncomingMessage;
+    const fakeRes = new FakeRes();
+    const res = fakeRes as unknown as ServerResponse;
+    let closes = 0;
+    const channel = startSseChannel(req, res, { withId: true, onClose: () => (closes += 1) });
+
+    fakeRes.writeReturns = false; // socket "cheio": 2 e 3 ficam na fila
+    channel.send(evento(1));
+    channel.send(evento(2));
+    channel.send(evento(3));
+    channel.end();
+
+    assert.equal(fakeRes.chunks.length, 3, 'o fim normal não pode perder o final do stream');
+    assert.match(fakeRes.chunks[2] ?? '', /^id: 3\n/);
+    assert.equal(fakeRes.ended, true);
+    assert.equal(closes, 1);
+    assert.equal(channel.closed, true);
+  });
+
   test('depois de fechado, send() não escreve mais nada', () => {
     const req = new FakeReq() as unknown as IncomingMessage;
     const fakeRes = new FakeRes();
@@ -210,5 +236,78 @@ describe('startSseChannel — backpressure e cliente lento', () => {
     channel.send(evento(1));
 
     assert.equal(fakeRes.chunks.length, 0);
+  });
+});
+
+describe('cursor de reconexão do stream da task', () => {
+  const A = 'ses_aaa111';
+  const B = 'ses_bbb222';
+
+  test('id explícito tem precedência sobre o seq', () => {
+    const req = new FakeReq() as unknown as IncomingMessage;
+    const fakeRes = new FakeRes();
+    const channel = startSseChannel(req, fakeRes as unknown as ServerResponse, { withId: false });
+    channel.send(evento(4), { id: `${A}:4` });
+    assert.match(fakeRes.chunks[0] ?? '', new RegExp(`^id: ${A}:4\\n`));
+    channel.close();
+  });
+
+  test('formata e lê de volta a posição de todas as sessões, na ordem', () => {
+    const texto = formatarCursorDaTask(
+      new Map([
+        [A, 3],
+        [B, 12],
+      ]),
+    );
+    assert.equal(texto, `${A}:3,${B}:12`);
+    assert.deepEqual(
+      [...lerCursorDaTask(texto, [A, B])],
+      [
+        [A, 3],
+        [B, 12],
+      ],
+    );
+  });
+
+  test('ausente ou vazio é "sem cursor" (replay desde o começo)', () => {
+    assert.equal(lerCursorDaTask(undefined, [A]).size, 0);
+    assert.equal(lerCursorDaTask('', [A]).size, 0);
+    assert.equal(lerCursorDaTask('   ', [A]).size, 0);
+  });
+
+  test('malformado, repetido ou de sessão alheia é INVALID_QUERY', () => {
+    const invalidos = [
+      '7',
+      `${A}`,
+      `${A}:`,
+      `${A}:-1`,
+      `${A}:1.5`,
+      `${A}:1,`,
+      `${A}:1, ${B}:2`,
+      `${A}:1,${A}:2`,
+      `${B}:1`,
+      `tsk_x:1`,
+      `${A}:1234567890123456`,
+    ];
+    for (const valor of invalidos) {
+      assert.throws(
+        () => lerCursorDaTask(valor, [A]),
+        (err: unknown) => err instanceof HubError && err.code === 'INVALID_QUERY',
+        `"${valor}" deveria ser recusado`,
+      );
+    }
+  });
+
+  test('intercala por ts sem inverter a ordem de seq dentro de uma sessão', () => {
+    const ev = (sessionId: string, seq: number, s: number) => ({
+      ...evento(seq, sessionId),
+      ts: new Date(Date.UTC(2026, 0, 1, 0, 0, s)).toISOString(),
+    });
+    // O relógio de A "voltou" entre o 2 e o 3: um sort global por ts poria o
+    // 3 antes do 2, e o cursor (maior seq entregue) pularia o 2 na reconexão.
+    const a = [ev(A, 1, 1), ev(A, 2, 5), ev(A, 3, 2)];
+    const b = [ev(B, 1, 3), ev(B, 2, 6)];
+    const saida = intercalarTimelines([a, b]).map((e) => `${e.sessionId === A ? 'A' : 'B'}${e.seq}`);
+    assert.deepEqual(saida, ['A1', 'B1', 'A2', 'A3', 'B2']);
   });
 });

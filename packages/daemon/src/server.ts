@@ -52,7 +52,7 @@ import { registerOperationRoutes } from './operation-routes.js';
 import { WorkflowRunner } from './workflow-runs.js';
 import { registerIntegrationRoutes } from './integration-routes.js';
 import type { PolicyService } from './policy-service.js';
-import { startSseChannel } from './sse.js';
+import { formatarCursorDaTask, intercalarTimelines, lerCursorDaTask, startSseChannel } from './sse.js';
 import type { DiscoveryService, ImportService } from './absorption.js';
 
 /**
@@ -422,6 +422,9 @@ export class HubServer {
     this.#route('GET', '/api/tasks/:id/events', (req, res, params) => {
       const taskId = param(params['id'], TaskIdSchema, 'id');
       const task = this.sessions.getTask(taskId);
+      const sessoes = new Set(this.sessions.sessoesDaTask(taskId));
+      // Validado ANTES de `writeHead`: cursor malformado é 400, não stream.
+      const cursor = lerCursorDaTask(ultimoEventId(req), [...sessoes]);
 
       if (!this.#acceptSseConnection(res)) return;
 
@@ -438,8 +441,9 @@ export class HubServer {
       // cliente vendo "passando a tarefa para beta" e depois silêncio para
       // sempre: nada do substituto, nem o fim da task, e o stream nunca
       // fechava. Por isso: assina a RAIZ e filtra pelas sessões por onde a
-      // task passou, e fecha quando ela chega a estado terminal. Sem `id:` —
-      // o `seq` é por sessão e se repetiria entre a original e o substituto.
+      // task passou, e fecha quando ela chega a estado terminal. O `id:` é o
+      // cursor de TODAS as sessões (`formatarCursorDaTask`), não o `seq` —
+      // que é por sessão e se repetiria entre a original e o substituto.
       let unsubscribe: () => void = () => {};
       let vigia: ReturnType<typeof setInterval> | undefined;
       const channel = startSseChannel(req, res, {
@@ -451,31 +455,43 @@ export class HubServer {
         },
       });
 
-      const sessoes = new Set(this.sessions.sessoesDaTask(taskId));
-      const past =
-        sessoes.size <= 1
-          ? this.sessions.listEvents(task.sessionId, undefined, SSE_REPLAY_LIMIT)
-          : [...sessoes]
-              .flatMap((id) => this.sessions.listEvents(id, undefined, SSE_REPLAY_LIMIT))
-              .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
-              .slice(-SSE_REPLAY_LIMIT);
-      for (const event of past) channel.send(event);
-      if (past.length === SSE_REPLAY_LIMIT) {
-        channel.send(truncatedReplayNotice(task.sessionId, past.length), { withId: false });
+      // Entrega só o que passa do cursor da sessão e o avança: é isso que
+      // impede o replay e o ao vivo de repetirem um evento entre si, e a
+      // reconexão de repetir o que o cliente já tinha.
+      const entregar = (event: EventEnvelope): void => {
+        if (event.seq <= (cursor.get(event.sessionId) ?? 0)) return;
+        cursor.set(event.sessionId, event.seq);
+        channel.send(event, { id: formatarCursorDaTask(cursor) });
+      };
+
+      // Um a mais que o teto por sessão para saber se sobrou coisa depois.
+      const pendentes = intercalarTimelines(
+        [...sessoes].map((id) => this.sessions.listEvents(id, cursor.get(id), SSE_REPLAY_LIMIT + 1)),
+      );
+      for (const event of pendentes.slice(0, SSE_REPLAY_LIMIT)) entregar(event);
+      if (pendentes.length > SSE_REPLAY_LIMIT) {
+        // Replay cortado: em vez de emendar o ao vivo depois de um buraco (e o
+        // cursor saltar por cima dele no primeiro evento novo), avisa e fecha.
+        // O `EventSource` reconecta sozinho com o cursor do último evento
+        // entregue e recebe a página seguinte — nada se perde.
+        channel.send(truncatedReplayNotice(task.sessionId, SSE_REPLAY_LIMIT), { withId: false });
+        channel.end();
+        return;
       }
 
       const rootId = this.sessions.getSession(task.sessionId).rootId;
       unsubscribe = this.bus.subscribe({ rootId }, (event: EventEnvelope) => {
         const atual = this.sessions.getTask(taskId).sessionId;
         sessoes.add(atual);
-        if (sessoes.has(event.sessionId)) channel.send(event);
+        if (sessoes.has(event.sessionId)) entregar(event);
       });
 
       const encerrarSeTerminal = (): void => {
         if (channel.closed) return;
         if (!TASK_TERMINAIS.has(this.sessions.getTask(taskId).state)) return;
-        channel.close();
-        if (!res.writableEnded) res.end();
+        // `end`, não `close`: o fim da task costuma chegar junto do replay, e
+        // `close` largaria o que ainda estivesse na fila.
+        channel.end();
       };
       encerrarSeTerminal();
       if (!channel.closed) {
@@ -1218,6 +1234,16 @@ function param<T>(valor: string | undefined, schema: ZodType<T>, nome: string): 
     });
   }
   return parsed.data;
+}
+
+/**
+ * `Last-Event-ID` da reconexão SSE. Cabeçalho repetido chega como lista (ou
+ * juntado com ", " pelo Node) — juntar com ", " faz os dois casos caírem no
+ * mesmo 400 de formato, em vez de escolher um deles em silêncio.
+ */
+function ultimoEventId(req: IncomingMessage): string | undefined {
+  const valor = req.headers['last-event-id'];
+  return Array.isArray(valor) ? valor.join(', ') : valor;
 }
 
 /**
