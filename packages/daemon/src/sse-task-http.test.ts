@@ -74,6 +74,13 @@ describe('SSE de /api/tasks/:id/events — reconexão com Last-Event-ID', () => 
       home: path.join(raiz, 'home'),
       manifestsDir: path.join(raiz, 'sem-manifestos'),
       webRoot: path.join(raiz, 'sem-web'),
+      // Banco em memória: o `gravar` é SÍNCRONO, e com o banco em disco os 520
+      // INSERTs do teste do teto chegavam a travar o event loop por ~7 s
+      // (fsync do overlay do container sob carga). Travado mais que o
+      // `keepAliveTimeout` (5 s) do servidor, o socket ocioso do fetch
+      // anterior era derrubado ANTES de o loop ler o pedido já enfileirado
+      // nele — `fetch failed / ECONNRESET` no primeiro fetch do teste.
+      dbFile: ':memory:',
       port: 0,
     });
     const { host, port } = await hub.start();
