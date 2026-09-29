@@ -21,6 +21,77 @@ function portaLivre(): Promise<number> {
 }
 
 /**
+ * Cria e sobe o Hub numa porta livre, tentando outra se ela for tomada.
+ *
+ * `portaLivre` fecha a porta antes de o Hub escutá-la; com a suíte rodando
+ * arquivos em paralelo, outro teste pode pegá-la nesse intervalo, e o
+ * `before` morria com EADDRINUSE, cancelando os dois testes (visto 1 vez em
+ * 10 execuções de `npm test` no container Linux).
+ */
+async function subirComPortaLivre(
+  criar: (porta: number) => Hub,
+): Promise<{ hub: Hub; host: string; port: number }> {
+  for (let tentativa = 1; ; tentativa += 1) {
+    const hub = criar(await portaLivre());
+    try {
+      const { host, port } = await hub.start();
+      return { hub, host, port };
+    } catch (err) {
+      await hub.shutdown().catch(() => {
+        // desligar um Hub que nem chegou a escutar é só limpeza
+      });
+      const ocupada = (err as NodeJS.ErrnoException).code === 'EADDRINUSE';
+      if (!ocupada || tentativa >= 5) throw err;
+    }
+  }
+}
+
+/**
+ * Impõe a cada INSERT de evento um custo síncrono FIXO de `ms`, no lugar do
+ * disco. Devolve a função que desfaz o embrulho.
+ *
+ * O que este teste guarda (item 2.5) é o daemon ceder o event loop enquanto
+ * drena a rajada, e o defeito só aparece se gravar cada evento CUSTA: com o
+ * banco em disco no Windows, sem a cessão da `AsyncQueue`, o /health levou
+ * 21 s; com `:memory:` puro o mesmo defeito passava despercebido.
+ *
+ * O disco de verdade, porém, não serve de régua: o checkpoint do WAL faz
+ * fsync, e o fsync é do HOST — 4 MB levam ~5 ms no Windows e ~122 ms no
+ * overlay do Docker Desktop, com picos de até 4,3 s sob carga (medido na
+ * Passagem 2, tarefa Linux). Ali o /health passava de 500 ms com o mesmo
+ * código que em tmpfs fica em ~65 ms, e nem um limite proporcional ao fsync
+ * medido antes da rajada segurava os picos.
+ *
+ * Espera ativa pelo relógio, e não `Atomics.wait`: no Windows o timer tem
+ * granularidade de ~15 ms, e `Atomics.wait(2)` dormia 14,6 ms em média.
+ */
+function custoDeInsertFixo(hub: Hub, ms: number): () => void {
+  const eventos = hub.store.events;
+  // `append` mora no protótipo do repositório; o embrulho é propriedade da
+  // instância, e desfazer é devolver o descritor que havia (em geral nenhum).
+  const descritor = Object.getOwnPropertyDescriptor(eventos, 'append');
+  const gravar = eventos.append.bind(eventos);
+  eventos.append = (evento) => {
+    gravar(evento);
+    const ate = performance.now() + ms;
+    while (performance.now() < ate) {
+      // espera ativa: é o custo síncrono que o teste quer impor
+    }
+  };
+  return () => {
+    if (descritor) Object.defineProperty(eventos, 'append', descritor);
+    else Reflect.deleteProperty(eventos, 'append');
+  };
+}
+
+/**
+ * 2 ms e não 1 ms: com 1 ms, sem a cessão o /health chegava a só 760 ms (perto
+ * demais dos 500); com 2 ms chega a 1357 ms, e com a cessão fica abaixo de
+ * 120 ms (container e Windows).
+ */
+const CUSTO_POR_INSERT_MS = 2;
+
+/**
  * Agente "ruidoso": 12.000 linhas de 1 KB (12 MB) de uma vez, depois UMA
  * linha de 24 MB sem quebra (acima do teto de linha). No modo `claude`, um `tool_result` de 5 MB.
  */
@@ -62,6 +133,7 @@ describe('HTTP sob rajada de saída do agente', () => {
   let hub: Hub;
   let baseUrl: string;
   let projectId: string;
+  let desfazerCusto: () => void = () => {};
 
   before(async () => {
     raiz = mkdtempSync(path.join(os.tmpdir(), 'hub-flood-'));
@@ -104,24 +176,29 @@ defaults:
       );
     }
 
-    hub = createHub({
-      home: path.join(raiz, 'home'),
-      manifestsDir: manifestos,
-      webRoot: path.join(raiz, 'sem-web'),
-      port: await portaLivre(),
-      policy: {
-        ...DEFAULT_POLICY,
-        watch: { pauseOn: [], flagOn: [] },
-        retries: { max: 0, backoffMs: 0 },
-        heartbeatTimeoutSeconds: 300,
-      },
-    });
-    const { host, port } = await hub.start();
-    baseUrl = `http://${host}:${port}`;
+    const subido = await subirComPortaLivre((port) =>
+      createHub({
+        home: path.join(raiz, 'home'),
+        dbFile: ':memory:',
+        manifestsDir: manifestos,
+        webRoot: path.join(raiz, 'sem-web'),
+        port,
+        policy: {
+          ...DEFAULT_POLICY,
+          watch: { pauseOn: [], flagOn: [] },
+          retries: { max: 0, backoffMs: 0 },
+          heartbeatTimeoutSeconds: 300,
+        },
+      }),
+    );
+    hub = subido.hub;
+    desfazerCusto = custoDeInsertFixo(hub, CUSTO_POR_INSERT_MS);
+    baseUrl = `http://${subido.host}:${subido.port}`;
     projectId = hub.sessions.registerProject(projeto, 'projeto-rajada').id;
   });
 
   after(async () => {
+    desfazerCusto();
     await hub.shutdown();
     try {
       rmSync(raiz, { recursive: true, force: true });
@@ -155,7 +232,7 @@ defaults:
   test(
     'GET /health responde em menos de 500 ms durante a rajada, e a página de eventos tem teto de bytes',
     { timeout: 240_000 },
-    async () => {
+    async (t) => {
       const { sessionId, taskId } = await iniciar('ruidoso');
 
       let pior = 0;
@@ -172,6 +249,7 @@ defaults:
       }
       assert.ok(terminou(taskId), 'a sessão ruidosa não terminou a tempo');
       assert.ok(medidas >= 3, `poucas medidas (${medidas}) para concluir alguma coisa`);
+      t.diagnostic(`pior /health ${Math.round(pior)} ms em ${medidas} medidas`);
       assert.ok(pior < 500, `GET /health levou ${Math.round(pior)} ms durante a rajada`);
 
       const res = await fetch(`${baseUrl}/sessions/${sessionId}/events?tail=1&limit=5000`);

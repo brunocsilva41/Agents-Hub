@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { after, afterEach, before, describe, test } from 'node:test';
 import { newId, nowIso, type Session } from '@agents-hub/core';
 import { HubApiError } from './client.js';
@@ -128,6 +130,12 @@ describe('hub watch/budget/graph/send (CLI)', () => {
       brief: { agent: 'dorminhoco', objective: 'faça algo demorado aqui', isolation: 'none' },
     });
     await esperar(() => h.hub.sessions.isLive(session.id), 'processo subir');
+    // "Processo vivo" não basta: no Linux o spawn volta antes de o Node do
+    // agente falso rodar a 1ª linha. Pausado aí, a execução morta não conta,
+    // e a do `send` vira a "1ª" — que dorme, e o send pendura. Espera o
+    // agente registrar a execução (o contador do `dorme-uma-vez`).
+    const contador = path.join(h.raiz, 'dorminhoco.count');
+    await esperar(() => existsSync(contador), 'agente falso começar a 1ª execução');
     await h.client.pause(session.id);
     // O pause é real (item 2.2): o turno termina, a sessão fica `paused` e a
     // task aberta — e o histórico ganha o `turn.completed` do turno
