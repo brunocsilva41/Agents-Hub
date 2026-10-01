@@ -1,16 +1,27 @@
-/* F0-12: prova mínima da pilha de UI vendorizada (ADR 8.4).
+/* F0-12: prova mínima da pilha de UI vendorizada (ADR 8.4; DA-12 e DA-25).
  *
- * Cria uma janela SDL3 oculta, inicializa o SDL_ttf, mede um texto e faz um
- * layout vazio no Clay. Confere também as versões compiladas (SDL 3.4.16,
- * SDL_ttf 3.2.2, FreeType 2.13.2, HarfBuzz 8.5.0): HarfBuzz 0.0.0 aqui
- * significaria SDL_ttf sem shaping.
+ * 1. Janela SDL3 oculta.
+ * 2. Versões compiladas: SDL 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2,
+ *    HarfBuzz 8.5.0 (HarfBuzz 0.0.0 significaria SDL_ttf sem shaping).
+ * 3. Medida de um texto latino.
+ * 4. Shaping (HarfBuzz): a palavra árabe "بببب" (quatro BEH) só sai com as
+ *    formas inicial/medial/final, mais estreitas, se houver shaping. Sem
+ *    shaping cada letra vira o glifo isolado do cmap, e a palavra mede o
+ *    mesmo que 4 BEH isolados. O teste exige a palavra < 80% disso. Também
+ *    confere que TTF_SetFontDirection(RTL) é aceito (sem HarfBuzz o SDL_ttf
+ *    devolve "unsupported").
+ * 5. Emoji colorido (COLR do Segoe UI Emoji, sem plutosvg; só no Windows):
+ *    renderiza U+1F600 numa superfície com cor de frente cinza. Se a cor do
+ *    glifo for ignorada, todos os pixels saem cinza (R=G=B); o teste exige
+ *    pixels coloridos.
+ * 6. Layout vazio no Clay.
  *
- * Sem display (CI/headless): SDL_Init(SDL_INIT_VIDEO) falha e o teste sai com
- * AH_UI_SMOKE_SKIP (77), que o CTest conta como "skipped" (SKIP_RETURN_CODE em
- * CMakeLists.txt), em vez de falhar.
- *
- * Fonte: nenhuma fonte é vendorizada (decisão de fonte ainda aberta, relatório
- * da F0-14 §10). O teste usa uma fonte do sistema, só para medir texto. */
+ * Skip (código AH_UI_SMOKE_SKIP = 77, que o CTest conta como "Skipped" via
+ * SKIP_RETURN_CODE em CMakeLists.txt), sempre com mensagem "SKIP: ...":
+ * - Linux sem DISPLAY nem WAYLAND_DISPLAY: sai antes de tocar no SDL;
+ * - SDL_Init(SDL_INIT_VIDEO) falha (sem display utilizável);
+ * - uma fonte exigida não existe (nenhuma fonte é vendorizada; decisão de
+ *   fonte em aberto, relatório da F0-14 §10). */
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -21,45 +32,37 @@
 #include "clay.h"
 
 #define AH_UI_SMOKE_SKIP 77
+#define FONT_PT 32.0f
 
-/* Abre a primeira fonte do sistema que existir; NULL se nenhuma. */
-static TTF_Font *open_system_font(float ptsize) {
+/* Abre uma fonte do sistema pelo nome do arquivo; NULL (com mensagem) se não
+ * existir. No Windows procura em %WINDIR%\Fonts; fora dele, nos caminhos
+ * completos dados. */
+static TTF_Font *open_font(const char *name) {
+    TTF_Font *font;
 #ifdef _WIN32
-    static const char *const names[] = {"segoeui.ttf", "arial.ttf"};
     const char *windir = SDL_getenv("WINDIR");
     char path[512];
-    size_t i;
+    int n;
 
     if (windir == NULL) {
+        printf("SKIP: WINDIR não definido, sem como achar %s\n", name);
         return NULL;
     }
-    for (i = 0; i < sizeof names / sizeof names[0]; i++) {
-        int n = SDL_snprintf(path, sizeof path, "%s\\Fonts\\%s", windir, names[i]);
-        if (n > 0 && (size_t)n < sizeof path) {
-            TTF_Font *font = TTF_OpenFont(path, ptsize);
-            if (font != NULL) {
-                printf("fonte: %s\n", path);
-                return font;
-            }
-        }
+    n = SDL_snprintf(path, sizeof path, "%s\\Fonts\\%s", windir, name);
+    if (n <= 0 || (size_t)n >= sizeof path) {
+        printf("SKIP: caminho da fonte %s longo demais\n", name);
+        return NULL;
     }
-    return NULL;
 #else
-    static const char *const paths[] = {
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    };
-    size_t i;
-
-    for (i = 0; i < sizeof paths / sizeof paths[0]; i++) {
-        TTF_Font *font = TTF_OpenFont(paths[i], ptsize);
-        if (font != NULL) {
-            printf("fonte: %s\n", paths[i]);
-            return font;
-        }
-    }
-    return NULL;
+    const char *path = name;
 #endif
+    font = TTF_OpenFont(path, FONT_PT);
+    if (font == NULL) {
+        printf("SKIP: fonte %s não abriu (%s)\n", path, SDL_GetError());
+        return NULL;
+    }
+    printf("fonte: %s\n", path);
+    return font;
 }
 
 static void clay_error(Clay_ErrorData error) {
@@ -82,32 +85,79 @@ static void test_versions(void) {
     CHECK(major == 8 && minor == 5 && patch == 0);
 }
 
-/* Retorna 0 se mediu, AH_UI_SMOKE_SKIP se não há fonte (só fora do Windows). */
-static int test_measure_text(void) {
+static void test_measure_latin(TTF_Font *font) {
     /* "Agents-Hub ação" em UTF-8, com escapes para não depender do código de
      * página do compilador. */
     static const char text[] = "Agents-Hub a\xc3\xa7\xc3\xa3o";
-    TTF_Font *font = open_system_font(16.0f);
     int w = 0, h = 0;
 
-    if (font == NULL) {
-#ifdef _WIN32
-        fprintf(stderr, "nenhuma fonte do sistema abriu: %s\n", SDL_GetError());
-        ah_test_failures++;
-        return 0;
-#else
-        printf("SKIP: nenhuma fonte do sistema encontrada\n");
-        return AH_UI_SMOKE_SKIP;
-#endif
-    }
-
     CHECK(TTF_GetStringSize(font, text, 0, &w, &h));
-    printf("texto medido: %dx%d px\n", w, h);
+    printf("texto latino: %dx%d px\n", w, h);
     CHECK(w > 0);
     CHECK(h > 0);
-    TTF_CloseFont(font);
-    return 0;
 }
+
+static void test_shaping(TTF_Font *font) {
+    static const char beh[] = "\xd8\xa8";                   /* U+0628 */
+    static const char word[] = "\xd8\xa8\xd8\xa8\xd8\xa8\xd8\xa8"; /* 4x U+0628 */
+    int w1 = 0, w4 = 0, h = 0;
+    bool rtl;
+
+    CHECK(TTF_FontHasGlyph(font, 0x0628));
+    CHECK(TTF_GetStringSize(font, beh, 0, &w1, &h));
+    CHECK(TTF_GetStringSize(font, word, 0, &w4, &h));
+    printf("shaping: 1 BEH isolado = %d px; palavra de 4 BEH = %d px "
+           "(sem shaping seria ~%d px)\n", w1, w4, 4 * w1);
+    CHECK(w1 > 0);
+    /* palavra < 80% de 4 isolados, em inteiros: w4 * 10 < 4 * w1 * 8 */
+    CHECK(w4 > 0 && w4 * 10 < 4 * w1 * 8);
+
+    rtl = TTF_SetFontDirection(font, TTF_DIRECTION_RTL);
+    if (!rtl) {
+        fprintf(stderr, "TTF_SetFontDirection(RTL): %s\n", SDL_GetError());
+    }
+    CHECK(rtl);
+    CHECK(TTF_SetFontDirection(font, TTF_DIRECTION_INVALID));
+}
+
+#ifdef _WIN32
+static void test_color_emoji(TTF_Font *font) {
+    static const char emoji[] = "\xf0\x9f\x98\x80"; /* U+1F600 */
+    const SDL_Color gray = {128, 128, 128, 255};
+    SDL_Surface *surface;
+    int x, y, inked = 0, colored = 0;
+
+    CHECK(TTF_FontHasGlyph(font, 0x1F600));
+    surface = TTF_RenderText_Blended(font, emoji, 0, gray);
+    CHECK(surface != NULL);
+    if (surface == NULL) {
+        fprintf(stderr, "TTF_RenderText_Blended: %s\n", SDL_GetError());
+        return;
+    }
+    for (y = 0; y < surface->h; y++) {
+        for (x = 0; x < surface->w; x++) {
+            Uint8 r, g, b, a;
+            if (!SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a)) {
+                continue;
+            }
+            if (a == 0) {
+                continue;
+            }
+            inked++;
+            if (abs((int)r - (int)g) > 40 || abs((int)g - (int)b) > 40 ||
+                abs((int)r - (int)b) > 40) {
+                colored++;
+            }
+        }
+    }
+    printf("emoji: superfície %dx%d, %d pixels com tinta, %d coloridos\n",
+           surface->w, surface->h, inked, colored);
+    CHECK(inked > 0);
+    /* Pelo menos um quarto da tinta com cor: cinza puro daria 0. */
+    CHECK(colored * 4 >= inked && colored > 0);
+    SDL_DestroySurface(surface);
+}
+#endif
 
 static void test_clay_empty_layout(void) {
     uint32_t size = Clay_MinMemorySize();
@@ -133,7 +183,20 @@ static void test_clay_empty_layout(void) {
 
 int main(void) {
     SDL_Window *window;
-    int rc;
+    TTF_Font *text_font = NULL;
+#ifdef _WIN32
+    TTF_Font *emoji_font = NULL;
+#endif
+    int skip = 0;
+
+#ifndef _WIN32
+    /* Sem servidor gráfico, nem toca no SDL (evita vazamentos de libs do
+     * sistema no caminho de falha e o LSan acusar o skip). */
+    if (getenv("DISPLAY") == NULL && getenv("WAYLAND_DISPLAY") == NULL) {
+        printf("SKIP: sem display (DISPLAY e WAYLAND_DISPLAY não definidos)\n");
+        return AH_UI_SMOKE_SKIP;
+    }
+#endif
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         printf("SKIP: sem display (SDL_Init(VIDEO): %s)\n", SDL_GetError());
@@ -149,18 +212,46 @@ int main(void) {
     }
 
     CHECK(TTF_Init());
-
     test_versions();
-    rc = test_measure_text();
+
+#ifdef _WIN32
+    text_font = open_font("segoeui.ttf");
+    emoji_font = open_font("seguiemj.ttf");
+    skip = (text_font == NULL || emoji_font == NULL);
+#else
+    text_font = open_font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    skip = (text_font == NULL);
+#endif
+
+    if (!skip) {
+        test_measure_latin(text_font);
+        test_shaping(text_font);
+#ifdef _WIN32
+        test_color_emoji(emoji_font);
+#else
+        /* DA-12: emoji colorido no Linux ainda em aberto (a fonte de emoji
+         * comum no Linux é CBDT/PNG, e o FreeType vendorizado é compilado sem
+         * PNG). Fica explícito na saída, não passa calado. */
+        printf("emoji colorido: NAO verificado fora do Windows (DA-12, Linux em aberto)\n");
+#endif
+    }
     test_clay_empty_layout();
 
+    if (text_font != NULL) {
+        TTF_CloseFont(text_font);
+    }
+#ifdef _WIN32
+    if (emoji_font != NULL) {
+        TTF_CloseFont(emoji_font);
+    }
+#endif
     TTF_Quit();
     if (window != NULL) {
         SDL_DestroyWindow(window);
     }
     SDL_Quit();
 
-    if (rc == AH_UI_SMOKE_SKIP && ah_test_failures == 0) {
+    if (skip && ah_test_failures == 0) {
         return AH_UI_SMOKE_SKIP;
     }
     return AH_TEST_END("test_ui_smoke");

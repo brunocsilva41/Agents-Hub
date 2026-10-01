@@ -27,6 +27,7 @@
       "inherits": "windows-base",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
         "CMAKE_BUILD_TYPE": "Debug"
       }
     },
@@ -37,6 +38,7 @@
       "inherits": "windows-base",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
@@ -47,6 +49,7 @@
       "inherits": "windows-base",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "AH_SANITIZE": "ON"
       }
@@ -58,6 +61,7 @@
       "inherits": "linux-base",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
         "CMAKE_BUILD_TYPE": "Debug",
         "AH_SANITIZE": "ON"
       }
@@ -68,6 +72,7 @@
       "inherits": "linux-base",
       "cacheVariables": {
         "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_BUILD_TYPE": "Debug",
         "AH_SANITIZE": "ON"
       }

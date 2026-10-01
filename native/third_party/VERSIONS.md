@@ -139,8 +139,10 @@ próprio SDL nessa pasta). Foram adicionados com `git add -f` para a cópia fica
 upstream via `add_subdirectory(... EXCLUDE_FROM_ALL)`, como indicam SDL `docs/README-cmake.md`
 ("Using a vendored SDL") e SDL_ttf `docs/INTRO-cmake.md`. Nenhum dos CMakeLists (SDL3,
 SDL_ttf, FreeType, HarfBuzz) usa `FetchContent`, `ExternalProject` ou `file(DOWNLOAD)`. Opções
-(definidas como variáveis normais antes de cada `add_subdirectory`; o `option()` do upstream as
-respeita e as grava no cache):
+(definidas como variáveis normais antes de cada `add_subdirectory`; com a CMP0077 em NEW, o
+`option()` do upstream respeita a variável normal e **não** grava no cache; só as que são
+`cmake_dependent_option`, como `SDL_SHARED`, `SDL_STATIC` e o `BUILD_SHARED_LIBS` do SDL_ttf,
+gravam o valor no cache):
 
 - SDL3: `SDL_SHARED=ON`, `SDL_STATIC=OFF` (padrão upstream: só a biblioteca compartilhada),
   `SDL_TEST_LIBRARY=OFF`, `SDL_TESTS=OFF`, `SDL_EXAMPLES=OFF`, `SDL_INSTALL=OFF`. Subsistemas no
@@ -151,13 +153,14 @@ respeita e as grava no cache):
   (SDL3_ttf compartilhado, padrão upstream). O SDL_ttf compila FreeType e HarfBuzz estáticos
   dentro do SDL3_ttf e força, no FreeType, `FT_DISABLE_ZLIB/BZIP2/PNG/BROTLI=ON` e
   `FT_REQUIRE_HARFBUZZ=ON`: nenhuma outra dependência transitiva entra.
-  **Efeito colateral:** o SDL_ttf grava `BUILD_SHARED_LIBS=ON` no cache (é um
-  `cmake_dependent_option`); por isso todo `add_library` do projeto deve declarar `STATIC`
-  (todos já declaram).
-- Compilador C++: o SDL3 (no Windows) e o HarfBuzz habilitam C++. Os presets só fixam o compilador C, então o
-  `CMakeLists.txt` faz o C++ seguir o C (cl → cl, clang-cl → clang-cl, gcc → g++, clang →
-  clang++ na mesma pasta), salvo se `CMAKE_CXX_COMPILER` ou `CXX` já estiverem definidos. Sem
-  isso o preset clang-cl pegava `clang++` com flags do MSVC e o configure falhava.
+  O SDL_ttf grava `BUILD_SHARED_LIBS=ON` no cache (é um `cmake_dependent_option`); logo depois
+  do `add_subdirectory(sdl_ttf)` o `CMakeLists.txt` faz `unset(BUILD_SHARED_LIBS)` e
+  `unset(BUILD_SHARED_LIBS CACHE)`, para `src/` e `tests/` não herdarem bibliotecas
+  compartilhadas por padrão.
+- Compilador C++: o SDL3 (no Windows) e o HarfBuzz habilitam C++. Cada preset de
+  `native/CMakePresets.json` fixa `CMAKE_CXX_COMPILER` par do compilador C (`cl`, `clang-cl`,
+  `g++`, `clang++`). Sem isso o preset clang-cl pegava `clang++` com flags do MSVC e o configure
+  falhava, e o Linux Clang pegaria `g++`, misturando runtimes de ASan.
 - Clay: a implementação (`#define CLAY_IMPLEMENTATION` + `#include "clay.h"`) vai numa TU gerada
   em `build/.../third_party/clay/clay_impl.c` (`file(CONFIGURE)`), alvo `ah_clay` com alias
   `ah::clay`. O `clay.h` fica sem edição.
@@ -198,11 +201,18 @@ No Release, `SDL3.dll` importa só DLLs do Windows e o CRT (`VCRUNTIME140.dll`,
 (`dumpbin /dependents` e `/exports`). Os binários oficiais pré-compilados usados no spike da
 F0-14 não dependiam do VC++ Redistributable; estes dependem (CRT `/MD`, padrão do projeto).
 
-**Teste:** `native/tests/unit/ui_smoke/` (CTest `unit.ui_smoke`): janela SDL3 oculta, SDL_ttf
-medindo um texto com uma fonte do sistema e layout vazio no Clay. Confere as versões
-compiladas (SDL 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2, HarfBuzz 8.5.0). Sem display, sai com
-77 e o CTest marca "Skipped" (`SKIP_RETURN_CODE 77`); fora do Windows, também pula se não
-achar a DejaVu Sans. Nenhuma fonte é vendorizada.
+**Teste:** `native/tests/unit/ui_smoke/` (CTest `unit.ui_smoke`): janela SDL3 oculta; versões
+compiladas (SDL 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2, HarfBuzz 8.5.0); medida de texto
+latino; **shaping** (a palavra árabe de quatro BEH tem de medir menos de 80% de quatro BEH
+isolados, o que só acontece com as formas contextuais do HarfBuzz, e `TTF_SetFontDirection(RTL)`
+tem de ser aceito); **emoji COLR** (só no Windows: U+1F600 do `seguiemj.ttf` renderizado numa
+superfície com cor de frente cinza tem de ter pixels coloridos, não R=G=B); layout vazio no
+Clay. Fontes do sistema: `segoeui.ttf` e `seguiemj.ttf` no Windows, DejaVu Sans no Linux
+(nenhuma fonte é vendorizada). Sai com 77 e o CTest marca "Skipped" (`SKIP_RETURN_CODE 77`),
+sempre com mensagem `SKIP: ...`, quando: no Linux não há `DISPLAY` nem `WAYLAND_DISPLAY` (sai
+antes de tocar no SDL); `SDL_Init(SDL_INIT_VIDEO)` falha; ou uma fonte exigida não existe. No
+Linux o emoji colorido não é testado (DA-12 em aberto; a saída diz isso). No CI Linux o teste
+roda sob `xvfb-run -a`.
 
 ## Como atualizar uma lib
 

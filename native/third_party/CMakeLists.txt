@@ -150,41 +150,18 @@ target_include_directories(ah_monocypher SYSTEM PUBLIC
 # Nenhum dos quatro CMakeLists usa FetchContent/ExternalProject/file(DOWNLOAD).
 #
 # As opções são definidas como variáveis normais antes de cada
-# add_subdirectory (o option() do upstream as respeita e as copia para o
-# cache). Bibliotecas compartilhadas (SDL3 e SDL3_ttf), que é o padrão dos dois
+# add_subdirectory. Com a CMP0077 em NEW (os dois upstreams exigem CMake
+# >= 3.16), option() respeita a variável normal e NÃO grava no cache; só
+# cmake_dependent_option (ex.: SDL_SHARED, SDL_STATIC, BUILD_SHARED_LIBS do
+# SDL_ttf) grava o valor no cache.
+#
+# Bibliotecas compartilhadas (SDL3 e SDL3_ttf), que é o padrão dos dois
 # upstreams (exceção à regra "STATIC" do topo deste arquivo; os alvos são os
 # do próprio upstream, com alias ah::); FreeType e HarfBuzz entram estáticos
 # dentro do SDL3_ttf (o SDL_ttf força isso). Warnings: os de cada upstream,
 # sem warning como erro (SDL_WERROR e SDLTTF_WERROR ficam no padrão OFF).
-
-# ------------------------------------------------- compilador C++ (UI)
-# O SDL3 (enable_language(CXX) no Windows) e o SDL_ttf (HarfBuzz é C++)
-# habilitam C++. Os presets só fixam o compilador C; sem isto o CMake escolhe
-# o C++ padrão do sistema: com clang-cl ele pega clang++ (sintaxe GNU) e
-# quebra, e no Linux Clang pegaria g++, misturando runtimes de ASan. Por isso
-# o C++ segue o compilador C do preset, salvo se CMAKE_CXX_COMPILER ou a
-# variável de ambiente CXX já o definirem.
-if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
-  if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    # cl.exe e clang-cl compilam C e C++ com o mesmo executável.
-    set(CMAKE_CXX_COMPILER "${CMAKE_C_COMPILER}")
-  else()
-    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-      set(_ah_cxx_name g++)
-    elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang")
-      set(_ah_cxx_name clang++)
-    else()
-      message(FATAL_ERROR "compilador C ${CMAKE_C_COMPILER_ID} sem par C++ conhecido; defina CMAKE_CXX_COMPILER")
-    endif()
-    get_filename_component(_ah_c_dir "${CMAKE_C_COMPILER}" DIRECTORY)
-    find_program(AH_CXX_COMPILER NAMES ${_ah_cxx_name} HINTS "${_ah_c_dir}" NO_DEFAULT_PATH)
-    if(NOT AH_CXX_COMPILER)
-      message(FATAL_ERROR "não achei ${_ah_cxx_name} ao lado de ${CMAKE_C_COMPILER}; defina CMAKE_CXX_COMPILER")
-    endif()
-    set(CMAKE_CXX_COMPILER "${AH_CXX_COMPILER}")
-  endif()
-  message(STATUS "UI: compilador C++ = ${CMAKE_CXX_COMPILER}")
-endif()
+# O SDL3 (no Windows) e o HarfBuzz habilitam C++: o compilador C++ vem do
+# preset (CMAKE_CXX_COMPILER em CMakePresets.json).
 
 # ---------------------------------------------------------------- SDL3
 # Opções da tabela de docs/README-cmake.md do SDL 3.4.16.
@@ -207,6 +184,11 @@ set(SDLTTF_SAMPLES OFF)
 set(SDLTTF_INSTALL OFF)
 add_subdirectory(sdl_ttf EXCLUDE_FROM_ALL)
 add_library(ah::sdl3_ttf ALIAS SDL3_ttf-shared)
+# O SDL_ttf grava BUILD_SHARED_LIBS=ON no cache (cmake_dependent_option).
+# Apaga a variável normal e a do cache para src/ e tests/ não herdarem
+# bibliotecas compartilhadas por padrão.
+unset(BUILD_SHARED_LIBS)
+unset(BUILD_SHARED_LIBS CACHE)
 
 # ---------------------------------------------------------------- Clay
 # Biblioteca de um cabeçalho: a implementação entra numa TU gerada no build (o
