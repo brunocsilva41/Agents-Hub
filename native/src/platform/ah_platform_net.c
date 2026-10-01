@@ -927,7 +927,7 @@ ah_status ah_platform_net_pid_is_current_user(uint32_t pid, bool *same) {
 #elif defined(__linux__)
 
 /* uid dono do lado `peer`, lido de /proc/net/tcp. Formato de cada linha:
- * "sl local rem st tx:rx tr:when retrnsmt uid ...", endereços como
+ * "sl local rem st tx:rx tr:when retrnsmt uid timeout inode ...", endereços como
  * %08X:%04X (o endereço é o valor bruto de s_addr, a porta em ordem do
  * host). */
 static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_in *peer,
@@ -940,7 +940,9 @@ static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_
     unsigned int want_rp = ntohs(self->sin_port);
     unsigned int listen_uid = 0;
     int listen_hits = 0;
-    ah_status st = AH_ERR_NOT_FOUND;
+    bool row_found = false;
+    unsigned int row_uid = 0;
+    unsigned long row_inode = 0;
 
     f = fopen("/proc/net/tcp", "r");
     if (f == NULL) {
@@ -951,10 +953,14 @@ static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_
         fclose(f);
         return AH_ERR_IO;
     }
+    /* Lê a tabela inteira (sem parar na linha casada): os sockets que escutam
+     * entram na contagem do plano B onde quer que apareçam. */
     while (fgets(line, sizeof line, f) != NULL) {
         unsigned int la, lp, ra, rp, state, u;
-        if (sscanf(line, " %*u: %8X:%4X %8X:%4X %2X %*X:%*X %*X:%*X %*X %u", &la, &lp, &ra,
-                   &rp, &state, &u) != 6) {
+        unsigned long ino;
+        /* Campos: sl local rem st tx:rx tr:when retrnsmt uid timeout inode */
+        if (sscanf(line, " %*u: %8X:%4X %8X:%4X %2X %*X:%*X %*X:%*X %*X %u %*d %lu", &la, &lp,
+                   &ra, &rp, &state, &u, &ino) != 7) {
             continue;
         }
         if (state == 0x0Au) { /* TCP_LISTEN */
@@ -966,19 +972,30 @@ static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_
             }
             continue;
         }
-        if (la == want_la && lp == want_lp && ra == want_ra && rp == want_rp) {
-            *uid = (uid_t)u;
-            st = AH_OK;
-            break;
+        if (!row_found && la == want_la && lp == want_lp && ra == want_ra && rp == want_rp) {
+            row_found = true;
+            row_uid = u;
+            row_inode = ino;
         }
     }
     fclose(f);
-    /* Plano B só do lado do cliente, como no Windows (ver peer_pid). */
-    if (st != AH_OK && client && listen_hits == 1) {
-        *uid = (uid_t)listen_uid;
-        st = AH_OK;
+    /* Linha com inode != 0: o socket já tem dono (struct socket ligada) e o
+     * uid dela é o do processo. Inode 0 quer dizer que ainda não há socket de
+     * usuário ligado: conexão na fila do accept (ESTABLISHED não aceita, cujo
+     * uid o kernel mostra como 0 porque sock_i_uid lê o inode ausente) ou
+     * SYN_RECV. Esse uid não identifica ninguém e não pode ser usado. */
+    if (row_found && row_inode != 0) {
+        *uid = (uid_t)row_uid;
+        return AH_OK;
     }
-    return st;
+    /* Plano B só do lado do cliente, como no Windows (ver peer_pid): a
+     * conexão ainda na fila pertence a quem escuta na porta conectada, desde
+     * que seja um só dono. */
+    if (client && listen_hits == 1) {
+        *uid = (uid_t)listen_uid;
+        return AH_OK;
+    }
+    return AH_ERR_NOT_FOUND;
 }
 
 ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock, bool *same) {

@@ -262,6 +262,38 @@ static void test_echo_via_loop(void) {
 /* Dono da conexão dos dois lados, sem laço: o cliente confere o dono do
  * socket servidor ANTES de mandar qualquer coisa (SEC-R13), inclusive com a
  * conexão ainda na fila do accept. */
+/* Diagnóstico só em falha: no Linux, imprime em stderr o uid efetivo e as
+ * linhas de /proc/net/tcp que envolvem a porta do servidor (local ou
+ * remota), com estado, uid e inode, para o log do CI mostrar o que a
+ * checagem leu. */
+static void dump_tcp_table(uint16_t port, ah_status st, bool same) {
+#if defined(__linux__)
+    FILE *f = fopen("/proc/net/tcp", "r");
+    char line[512];
+    char needle[8];
+
+    fprintf(stderr, "dono: st=%d same=%d geteuid=%u porta=%u\n", (int)st, (int)same,
+            (unsigned)geteuid(), (unsigned)port);
+    if (f == NULL || snprintf(needle, sizeof needle, ":%04X", (unsigned)port) <= 0) {
+        if (f != NULL) {
+            fclose(f);
+        }
+        return;
+    }
+    if (fgets(line, sizeof line, f) != NULL) {
+        fprintf(stderr, "  %s", line);
+    }
+    while (fgets(line, sizeof line, f) != NULL) {
+        if (strstr(line, needle) != NULL) {
+            fprintf(stderr, "  %s", line);
+        }
+    }
+    fclose(f);
+#else
+    fprintf(stderr, "dono: st=%d same=%d porta=%u\n", (int)st, (int)same, (unsigned)port);
+#endif
+}
+
 static void test_owner_both_sides(void) {
     ah_platform_socket *l = NULL, *cli = NULL, *srv = NULL;
     ah_platform_net_err err = AH_PLATFORM_NET_NONE;
@@ -279,8 +311,14 @@ static void test_owner_both_sides(void) {
 
     /* Ainda não aceita do lado do servidor. */
     same = false;
-    CHECK(ah_platform_socket_peer_is_current_user(cli, &same) == AH_OK);
-    CHECK(same);
+    {
+        ah_status st = ah_platform_socket_peer_is_current_user(cli, &same);
+        CHECK(st == AH_OK);
+        CHECK(same);
+        if (st != AH_OK || !same) {
+            dump_tcp_table(port, st, same);
+        }
+    }
 
     CHECK(ah_platform_socket_wait(l, AH_PLATFORM_IO_READ, 2000, &ready) == AH_OK);
     CHECK(ready & AH_PLATFORM_IO_READ);
