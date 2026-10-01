@@ -1,0 +1,76 @@
+{
+  "files": {
+    "antigravity.jsonl": {
+      "cases": 16,
+      "sha256": "8816b2865263d8d444930e8c765dc50b1fc663cb202d76d27a8ccbdb4ccdebc9"
+    },
+    "claude.jsonl": {
+      "cases": 30,
+      "sha256": "2ecc8ca587eb5954c3b68a2c32451d0fb2511c8b74e0be10aabe2364f2938895"
+    },
+    "codex.jsonl": {
+      "cases": 8,
+      "sha256": "f5d0131a3b1f7a8bfb0a37eaa51fcb86fcda1336cdb02fdb2bec59297766d920"
+    },
+    "copilot.jsonl": {
+      "cases": 22,
+      "sha256": "53529656a5bbf77fcc6e31192b248250fe349798f26c996dc88d37981e1e079c"
+    },
+    "kimi.jsonl": {
+      "cases": 19,
+      "sha256": "224a847276a733a287835c24430f8d6b630a558a78f8111565600eb9e736213b"
+    },
+    "generic-json.jsonl": {
+      "cases": 15,
+      "sha256": "0833439a099adb369d6b5f0e5c11b9c0ddbd17dc9e3e88c375e615ec3020f05c"
+    },
+    "generic-text.jsonl": {
+      "cases": 17,
+      "sha256": "ea083a908a9d0a23f5961afe223503be03ce6e0067966558dec510ae250d01b9"
+    },
+    "opencode-sse.jsonl": {
+      "cases": 36,
+      "sha256": "9759ce7d1d3abca1a0c19a9b0fc259651851a1d5750c9c1a21a0f3c08e58e29e"
+    },
+    "invocation.jsonl": {
+      "cases": 169,
+      "sha256": "3a2c960bf412aac122fb525440173c8f32e3e80dcac0824eaa9777536639f844"
+    },
+    "manifest-schema.jsonl": {
+      "cases": 21,
+      "sha256": "4fe8cea3b1f4c6487aa7d3e8b11b7c09f70b499c8d98dc07b4c375226376f87e"
+    },
+    "failure-reason.jsonl": {
+      "cases": 26,
+      "sha256": "b4ade9d619e239ff90a2a3d09648d47154822c661ba8ed9ec831dc10c8a99cd0"
+    }
+  },
+  "sources": {
+    "packages/adapters/src/mappers/index.ts": "45a1bcbe1fa470085f2baebcf87aa6589146eff3ba00a6b7b1e9bdee349173bc",
+    "packages/adapters/src/mappers/claude.ts": "e988d3fe4b2d784adc494ced44de1fe49a3355d0f6249bf74268b128e8e119cd",
+    "packages/adapters/src/mappers/codex.ts": "ade839402fb2ea977898aa524d0506e57aab8d9b92a8dc62d0106e551e11fb63",
+    "packages/adapters/src/mappers/copilot.ts": "ef189857cd5ca98de6719e18c8d2ec2f4ffe05707898a7553df69677f0049112",
+    "packages/adapters/src/mappers/kimi.ts": "f3cdc5aad85fa38e86ecf4f6a504b08cb6a64768f2ebdba7f84dc5570762fcf5",
+    "packages/adapters/src/mappers/antigravity.ts": "e873cd5c90aa7107d6a7305a0bb0fa645bca28b90288fd5079b9be29682b0a48",
+    "packages/adapters/src/mappers/generic.ts": "d2775cc68cef426fff8fa4541f2b1a560c79fba7546ba0ab97324dfa2012b6a0",
+    "packages/adapters/src/opencode/events.ts": "5fd31f3ca0de6b71af3f05ed4675775b0fb1184bc25dfbec9c7796b7ff3a3d18",
+    "packages/adapters/src/opencode/adapter.ts": "7c2545b284d2911180b951b661283541aedfb113ff6f6b4d2a8d725e6f585855",
+    "packages/adapters/src/process-adapter.ts": "002caf2161ce01ae17010d72a632d732964354ef01d491b2b6ab0e0c357e98c8",
+    "packages/adapters/src/failure-reason.ts": "4818e5771deb3d037eecd936ef9dff32368109bace4292a0a20604caa4c7c819",
+    "packages/adapters/src/types.ts": "7efdeb1438a8d7ac40c81375e68d223980d08071f80fd750752f9fcc4958d982",
+    "packages/adapters/src/registry.ts": "110cb36eb05dcb05110dfb1508fd25e2f2a4a0b4837e31bfb21c2ee6626b5be8",
+    "packages/adapters/src/async-queue.ts": "a631bcb4a61440d008cafcb6a61901acb7881037682e7c82ecad50771c3cfbe8",
+    "packages/core/src/turn-cost.ts": "7ef1b03d6341e3fcfe12b89807026247c7258a7b3b92c9c777948e8cf5405862",
+    "packages/core/src/texto.ts": "835873c52609384ca7da5bf00d980633925e58f97745af9e6299ebd1e107d64d",
+    "packages/core/src/pricing.ts": "7208be2621e7c2e7c7d05ccf11aad57b3bd9d4c160e3d2a8a72a6f79acee6292",
+    "manifests/antigravity.yaml": "fc13856c1433d5d42868dc27d80884470eee5e6b78625f5ba67f8942bf3636a4",
+    "manifests/claude.yaml": "552871dc5170541ccd8cf6e234546ddf68a7801a3a8fe731528600a4ee517465",
+    "manifests/codex.yaml": "2c2f344567d463f5299ddd4a0c8e8769edce9f1fb8cc1e1b7cd2cfae5c1b13c1",
+    "manifests/copilot.yaml": "7397bd8c8ffc0bf4065a2a5f1e0cc63cdbf82b1ffb19cc83f345b16ed55ef9af",
+    "manifests/cursor.yaml": "fa8b1b427bb246704135f704267db29d0749131ecaa5fff602162e6a1aceeb26",
+    "manifests/kimi.yaml": "56025ee32f5b765f9cae2d01cc77b4a5348e68b74a03933a46357cc9c33b763a",
+    "manifests/mimo.yaml": "34fd9eed0a49fa96d009d9f869fb31eacc6073c5e96decca8bbc7818fff4de12",
+    "manifests/openclaude.yaml": "09a548c5ec30b047d1dac107ca2b8ec417aa590468cb55f8cebaf59a2eae8028",
+    "manifests/opencode.yaml": "fc13ec8dce65276ba647220f83cdc2b2bc5c2e8ca9eb82ad4d38db530baf2c66"
+  }
+}

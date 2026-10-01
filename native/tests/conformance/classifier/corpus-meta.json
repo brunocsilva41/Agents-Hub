@@ -1,0 +1,60 @@
+{
+  "gerador": "native/tests/conformance/tools/gen-classifier.mjs",
+  "plataforma": "win32",
+  "node": "Node >= 22.15 com --experimental-transform-types (versão exata não registrada)",
+  "home": "C:\\Users\\conformance",
+  "cwd": "C:\\",
+  "workdirPadrao": "C:\\tmp\\hub\\worktree",
+  "hubPortsPadrao": "ausente (o classificador usa DEFAULT_HUB_PORT = 4747)",
+  "fontesSha256": {
+    "packages/core/src/command-classifier.ts": "df6942d619ca05d777d07918847de2960b1f86218b6f27610c65d5e6f2a73725",
+    "packages/core/src/shell-tokenizer.ts": "6503f3fa877852265bda61ed37bf182aeaf7d9e7f5fd6945c34002cbc106c786",
+    "packages/core/src/sensitive-paths.ts": "48f5afd7bd46bac887b74dfe1649f08c17a0d8ac870c351d708dbc59a7e40b40",
+    "packages/core/src/policy.ts": "1a97cac78dab1183e0f2e6c5901bd646d1debcb7dc44d6a54b7834d7d90447d2"
+  },
+  "contagem": {
+    "classifier": 2759,
+    "classifierPorGrupo": {
+      "teste": 217,
+      "spec": 7,
+      "read-only": 102,
+      "builtin": 109,
+      "ps-predicate": 28,
+      "controle": 55,
+      "data-only": 16,
+      "hijack": 97,
+      "irrev": 103,
+      "shell": 85,
+      "rede": 118,
+      "loopback": 76,
+      "interp": 202,
+      "danger-api": 96,
+      "process-api": 85,
+      "wrapper": 206,
+      "profundidade": 17,
+      "redir": 207,
+      "composto": 94,
+      "sintaxe": 73,
+      "windows": 181,
+      "hub": 48,
+      "git": 149,
+      "escrita": 170,
+      "divergencia-S": 23,
+      "divergencia-t": 3,
+      "deny": 97,
+      "segredo": 63,
+      "workdir": 32
+    },
+    "classifierComTeste": 224,
+    "tokenizer": 2784,
+    "tokenizerErros": 45,
+    "sensitive": 1659,
+    "cruzamentosComTestes": 350
+  },
+  "arquivosSha256": {
+    "classifier.jsonl": "4acfa9aed19ffe99fb173731e5b3784fd6729980d75fdfe838e22bd812702d0e",
+    "tokenizer.jsonl": "18cdbe901b601d0ee4fc28bfaff754e2fba5ca0f5aa57a111257bdc5e2b530eb",
+    "sensitive.jsonl": "d8fe12dea9bd7c25b8c43d891aec7c2188cb5b304e904299d3ffeb39e9f2cbda",
+    "default-policy.json": "6e9e3c8416285a4971285b34cde10500153d9854db9498fcb691a0420f82099d"
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "generator": "native/tests/conformance/tools/gen-domain.mjs",
+  "hashNormalization": "sha256 do texto UTF-8 com CRLF/CR convertidos para LF",
+  "zod": "3.25.76",
+  "sources": [
+    {
+      "path": "packages/core/src/policy.ts",
+      "sha256": "1a97cac78dab1183e0f2e6c5901bd646d1debcb7dc44d6a54b7834d7d90447d2"
+    },
+    {
+      "path": "packages/core/src/domain.ts",
+      "sha256": "4bd26c3cd682e239790b6c78c1ada392a1a89e7b9d09dc833d1c0a4f08730c58"
+    },
+    {
+      "path": "packages/core/src/budget.ts",
+      "sha256": "5a4aa17886c822024e6f2f618f289015baf8c9a40ec90924c7f8c6f2942688ee"
+    },
+    {
+      "path": "packages/core/src/graph.ts",
+      "sha256": "23519bc386fda93a3f69db9221a4b8087d9f73d8aaa9bd3a1013879e338cd81c"
+    },
+    {
+      "path": "packages/core/src/brief.ts",
+      "sha256": "318b4822605522398f49ddfc1d3602fa954381af7e24803fa70f1ae7d7bbd130"
+    },
+    {
+      "path": "packages/core/src/resilience.ts",
+      "sha256": "6d073e80d00cc25fc094bef5d3047a4122dcbf6af16010c0133a7947202da779"
+    },
+    {
+      "path": "packages/core/src/pricing.ts",
+      "sha256": "7208be2621e7c2e7c7d05ccf11aad57b3bd9d4c160e3d2a8a72a6f79acee6292"
+    },
+    {
+      "path": "packages/core/src/turn-cost.ts",
+      "sha256": "7ef1b03d6341e3fcfe12b89807026247c7258a7b3b92c9c777948e8cf5405862"
+    },
+    {
+      "path": "packages/core/src/ids.ts",
+      "sha256": "4819decf6f00746519ee586c96eb1ad364863abbd82431cf86d1fb940014d3d9"
+    },
+    {
+      "path": "packages/core/src/errors.ts",
+      "sha256": "d75723052241392de14d63625ccbe4315b13b949b07247e52400ca19b1605d73"
+    },
+    {
+      "path": "packages/core/src/command-classifier.ts",
+      "sha256": "df6942d619ca05d777d07918847de2960b1f86218b6f27610c65d5e6f2a73725"
+    },
+    {
+      "path": "packages/core/src/sensitive-paths.ts",
+      "sha256": "48f5afd7bd46bac887b74dfe1649f08c17a0d8ac870c351d708dbc59a7e40b40"
+    },
+    {
+      "path": "packages/core/src/shell-tokenizer.ts",
+      "sha256": "6503f3fa877852265bda61ed37bf182aeaf7d9e7f5fd6945c34002cbc106c786"
+    },
+    {
+      "path": "packages/daemon/src/http-schemas.ts",
+      "sha256": "dc04e1cf81464122d16c514e13a597b171be208e0d595ae62cb88ec2858cc39b"
+    },
+    {
+      "path": "packages/client/src/ids.ts",
+      "sha256": "233d64b7053c70658676ff199720cee4587616e01429a43aef04154a15bfeec4"
+    },
+    {
+      "path": "packages/adapters/src/registry.ts",
+      "sha256": "110cb36eb05dcb05110dfb1508fd25e2f2a4a0b4837e31bfb21c2ee6626b5be8"
+    },
+    {
+      "path": "packages/daemon/src/session-manager.ts",
+      "sha256": "455d9c721058163e233f094ea4b42a00873ad18fa8c739031c987d5d3b1cef76"
+    },
+    {
+      "path": "manifests/antigravity.yaml",
+      "sha256": "fc13856c1433d5d42868dc27d80884470eee5e6b78625f5ba67f8942bf3636a4"
+    },
+    {
+      "path": "manifests/claude.yaml",
+      "sha256": "552871dc5170541ccd8cf6e234546ddf68a7801a3a8fe731528600a4ee517465"
+    },
+    {
+      "path": "manifests/codex.yaml",
+      "sha256": "2c2f344567d463f5299ddd4a0c8e8769edce9f1fb8cc1e1b7cd2cfae5c1b13c1"
+    },
+    {
+      "path": "manifests/copilot.yaml",
+      "sha256": "7397bd8c8ffc0bf4065a2a5f1e0cc63cdbf82b1ffb19cc83f345b16ed55ef9af"
+    },
+    {
+      "path": "manifests/cursor.yaml",
+      "sha256": "fa8b1b427bb246704135f704267db29d0749131ecaa5fff602162e6a1aceeb26"
+    },
+    {
+      "path": "manifests/kimi.yaml",
+      "sha256": "56025ee32f5b765f9cae2d01cc77b4a5348e68b74a03933a46357cc9c33b763a"
+    },
+    {
+      "path": "manifests/mimo.yaml",
+      "sha256": "34fd9eed0a49fa96d009d9f869fb31eacc6073c5e96decca8bbc7818fff4de12"
+    },
+    {
+      "path": "manifests/openclaude.yaml",
+      "sha256": "09a548c5ec30b047d1dac107ca2b8ec417aa590468cb55f8cebaf59a2eae8028"
+    },
+    {
+      "path": "manifests/opencode.yaml",
+      "sha256": "fc13ec8dce65276ba647220f83cdc2b2bc5c2e8ca9eb82ad4d38db530baf2c66"
+    },
+    {
+      "path": "native/tests/conformance/tools/gen-domain.mjs",
+      "sha256": "8dfdf8f45d20239d31af7b29066d7a5b583bd77d464f0b690463f69dcf530089"
+    }
+  ],
+  "locks": [
+    {
+      "arquivo": "packages/daemon/src/session-manager.ts",
+      "trecho": "novaTentativa(anterior.attempts.length + 1, agentId)",
+      "linhas": [
+        3055,
+        3178
+      ]
+    },
+    {
+      "arquivo": "packages/core/src/resilience.ts",
+      "trecho": "const nextAttempt = state.attempts.length + 1;",
+      "linhas": [
+        135
+      ]
+    }
+  ]
+}
