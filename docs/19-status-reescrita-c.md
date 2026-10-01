@@ -27,7 +27,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F0-03 | Vendorização das bibliotecas do núcleo | `[x]` | 008e944 | 6 SHA-256 conferidos contra download oficial refeito; 65 arquivos idênticos ao upstream (code-reviewer); `native/third_party/VERSIONS.md` |
 | F0-04 | Padrões de código C | `[~]` | cb804af | `docs/18-padroes-c.md` aprovado em auditoria; falta a configuração de formatação (clang-format é PROPOSTA) |
 | F0-05 | Plataforma: texto, caminhos e arquivos | `[ ]` | | |
-| F0-06 | Plataforma: tempo, aleatoriedade e ambiente | `[ ]` | | |
+| F0-06 | Plataforma: tempo, aleatoriedade e ambiente | `[~]` | fca9657 | Windows: build limpo + ctest 100% em windows-msvc-debug/-release/-clangcl-asan na main integrada (coordenador); revisão independente aprovada com ressalvas, fechadas em 581d745; POSIX não verificado (CI Linux ainda não rodou) |
 | F0-07 | Plataforma: processos (spawn, pipes, ambiente) | `[ ]` | | |
 | F0-08 | Plataforma: árvore de processos e identidade de PID | `[ ]` | | |
 | F0-09 | Plataforma: sockets loopback, laço de eventos, timers e threads | `[ ]` | | |
