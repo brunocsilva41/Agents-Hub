@@ -3,8 +3,8 @@
  * O manifesto real manifests/claude.yaml entra pelo cabeçalho gerado
  * claude_manifest.h (bytes do arquivo, gerados pelo CMake na configuração),
  * para o teste não depender de I/O. */
+#include <stdbool.h>
 #include <string.h>
-#include <time.h>
 
 #include "ah_test.h"
 #include "ah_yaml.h"
@@ -119,9 +119,37 @@ static void test_alias_shares_node(void) {
     ah_yaml_free(doc);
 }
 
-/* "Billion laughs": 9 níveis, cada um com 9 aliases do anterior; expandido
- * daria ~4,3e8 nós. Tem de ser recusado rápido (SEC-R36: < 100 ms). */
+/* Contagem exata de nós expandidos: mapa raiz (1) + chave "a" (1) + [x, y]
+ * (1 + 2) + chave "b" (1) + [*a, *a] (1 + 2 aliases de 3 nós cada) = 13. */
+static void test_expanded_count_exact(void) {
+    static const char y[] = "a: &a [x, y]\nb: [*a, *a]\n";
+    ah_yaml_doc *doc = NULL;
+    ah_yaml_limits lim;
+
+    ah_yaml_limits_default(&lim);
+    lim.max_nodes = 13;
+    CHECK(ah_yaml_load(LIT(y), &lim, &doc, NULL, 0) == AH_OK && doc != NULL);
+    ah_yaml_free(doc);
+    doc = NULL;
+    lim.max_nodes = 12;
+    CHECK(ah_yaml_load(LIT(y), &lim, &doc, NULL, 0) == AH_ERR_LIMIT && doc == NULL);
+}
+
+/* "Billion laughs": cada nível tem 9 aliases do anterior. Nível a = 10 nós,
+ * b = 91, c = 820, d = 7381, e = 66430, ... (9 níveis dariam ~4,3e8).
+ * Prova por contagem, sem relógio (docs/18 §12): até o nível e o total
+ * expandido é 74.738 (mapa raiz + 5 chaves + 10 + 91 + 820 + 7381 + 66430) e
+ * passa no teto padrão de 100.000 sem copiar nada; o teto no valor exato
+ * passa e um abaixo recusa. Com os 9 níveis, o primeiro alias do nível f já
+ * passaria de 100.000 e o documento é recusado ali, antes de qualquer
+ * expansão. */
 static void test_billion_laughs(void) {
+    static const char five[] =
+        "a: &a [\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\"]\n"
+        "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\n"
+        "c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]\n"
+        "d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]\n"
+        "e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]\n";
     static const char y[] =
         "a: &a [\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\",\"lol\"]\n"
         "b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]\n"
@@ -135,18 +163,25 @@ static void test_billion_laughs(void) {
     ah_yaml_doc *doc = NULL;
     ah_yaml_limits lim;
     char err[128];
-    clock_t t0 = clock();
-    clock_t t1;
-    double ms;
+    const ah_yaml_node *r;
+
+    CHECK(ah_yaml_load(LIT(five), NULL, &doc, NULL, 0) == AH_OK && doc != NULL);
+    r = ah_yaml_root(doc);
+    /* Os aliases apontam para o mesmo nó: nada foi copiado. */
+    CHECK(ah_yaml_seq_at(ah_yaml_map_get(r, "e"), 0) == ah_yaml_map_get(r, "d"));
+    CHECK(ah_yaml_seq_at(ah_yaml_map_get(r, "e"), 8) == ah_yaml_map_get(r, "d"));
+    ah_yaml_free(doc);
+    doc = NULL;
+    ah_yaml_limits_default(&lim);
+    lim.max_nodes = 74738;
+    CHECK(ah_yaml_load(LIT(five), &lim, &doc, NULL, 0) == AH_OK);
+    ah_yaml_free(doc);
+    doc = NULL;
+    lim.max_nodes = 74737;
+    CHECK(ah_yaml_load(LIT(five), &lim, &doc, NULL, 0) == AH_ERR_LIMIT && doc == NULL);
 
     CHECK(ah_yaml_load(LIT(y), NULL, &doc, err, sizeof err) == AH_ERR_LIMIT && doc == NULL);
     CHECK(strstr(err, "expandidos") != NULL);
-    t1 = clock();
-    ms = (double)(t1 - t0) * 1000.0 / CLOCKS_PER_SEC;
-    CHECK(ms < 100.0);
-    if (ms >= 100.0) {
-        fprintf(stderr, "  billion laughs levou %.1f ms\n", ms);
-    }
 
     /* Teto de aliases separado do teto de nós. */
     ah_yaml_limits_default(&lim);
@@ -200,6 +235,11 @@ static void test_size_and_invalid(void) {
     /* Alias para a coleção ainda aberta (ciclo). */
     CHECK(ah_yaml_load(LIT("a: &a [*a]\n"), NULL, &doc, NULL, 0) == AH_ERR_INVALID);
     CHECK(ah_yaml_load(LIT("? [k]\n: v\n"), NULL, &doc, NULL, 0) == AH_ERR_INVALID);
+    /* Chave vazia implícita: a libyaml 0.2.5 recusa ("did not find expected
+     * key"); o yaml 2.9.1 do TS lê {"": "b"}. Divergência do parser. */
+    CHECK(ah_yaml_load(LIT(": b\n"), NULL, &doc, NULL, 0) == AH_ERR_INVALID);
+    /* UTF-8 inválido é recusado (divergência documentada em ah_yaml.h: o TS
+     * leria com U+FFFD no lugar do byte). */
     CHECK(ah_yaml_load(LIT("a: \xFF\n"), NULL, &doc, NULL, 0) == AH_ERR_INVALID);
     CHECK(doc == NULL);
 
@@ -212,11 +252,72 @@ static void test_size_and_invalid(void) {
     ah_yaml_free(NULL);
 }
 
+typedef struct dup_case {
+    const char *yaml;
+    bool accepted; /* veredito do yaml 2.9.1 do TS: true = lê, false = DUPLICATE_KEY */
+} dup_case;
+
+/* Vereditos gerados com o yaml 2.9.1 (node_modules da raiz, Node v24.14.0,
+ * `require('yaml').parse(texto)`), script de referência citado no relatório. */
+static void test_duplicate_keys(void) {
+    static const dup_case cases[] = {
+        {"a: 1\na: 2\n", false},
+        {"a: 1\n\"a\": 2\n", false},
+        {"'x': 1\n\"x\": 2\n", false},
+        {"k: |\n  t\n\"k\": 2\n", false},
+        {"a: 1\n!!str a: 2\n", false},
+        {"1: x\n\"1\": y\n", true},
+        {"1: x\n01: y\n", false},
+        {"010: a\n10: b\n", false},
+        {"+1: a\n1: b\n", false},
+        {"1.0: a\n1: b\n", false},
+        {"-0: a\n0: b\n", false},
+        {"0x10: a\n16: b\n", false},
+        {"0o10: a\n8: b\n", false},
+        {"1e3: a\n1000: b\n", false},
+        {".inf: a\n+.inf: b\n", false},
+        {".nan: 1\n.nan: 2\n", true},
+        {"True: a\ntrue: b\n", false},
+        {"~: x\nnull: y\n", false},
+        /* Chave vazia explícita (?): null, igual a ~; diferente de "". A forma
+         * implícita ": b" a libyaml recusa como sintaxe (ver
+         * test_size_and_invalid), e o yaml do TS aceita. */
+        {"~: a\n?\n: b\n", false},
+        {"\"\": a\n?\n: b\n", true},
+        {"0x1: a\n\"0x1\": b\n", true},
+        {"<<: 1\n<<: 2\n", false},
+        {"a: {x: 1, x: 2}\n", false},
+        {"a: &k b\n*k : c\nb: d\n", true},
+        {"x: &a k\n*a : 1\n*a : 2\n", true},
+        {"a: 1\nb: 2\n", true},
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        ah_yaml_doc *doc = NULL;
+        char err[128];
+        ah_status st = ah_yaml_load(cases[i].yaml, strlen(cases[i].yaml), NULL, &doc, err,
+                                    sizeof err);
+        if (cases[i].accepted) {
+            CHECK(st == AH_OK);
+        } else {
+            CHECK(st == AH_ERR_INVALID && strstr(err, "repetida") != NULL);
+        }
+        if ((st == AH_OK) != cases[i].accepted ||
+            (st != AH_OK && strstr(err, "repetida") == NULL)) {
+            fprintf(stderr, "  caso %zu (%s): %s", i, err, cases[i].yaml);
+        }
+        ah_yaml_free(doc);
+    }
+}
+
 int main(void) {
     test_real_manifest();
     test_scalars_are_text();
     test_alias_shares_node();
+    test_expanded_count_exact();
     test_billion_laughs();
+    test_duplicate_keys();
     test_depth();
     test_size_and_invalid();
     return AH_TEST_END("test_core_yaml");

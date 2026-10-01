@@ -9,9 +9,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <math.h>
+
 #include "ah_json.h"
 #include "ah_test.h"
 #include "ah_text.h"
+#include "json_pow2_expected.h"
 
 #define LIT(s) (s), (sizeof(s) - 1)
 
@@ -72,6 +75,31 @@ static void test_numbers(void) {
                        "9007199254740992,-1.25e+300,0.3333333333333333,100,"
                        "100000000000000000000,5e-324,1.7976931348623157e+308,"
                        "0.30000000000000004,123.456,-42,null,null]");
+}
+
+/* Todas as potências de 2 representáveis em double, de 2^-1074 a 2^1023,
+ * contra JSON.stringify do Node (json_pow2_expected.h, gerado com node -e).
+ * Nelas o intervalo de arredondamento é assimétrico: o decimal mais próximo
+ * nem sempre faz ida e volta e o vizinho de cima faz. */
+static void test_powers_of_two(void) {
+    int e;
+    int failures = 0;
+    for (e = AH_POW2_MIN_EXP; e <= AH_POW2_MAX_EXP; e++) {
+        ah_json *v = ah_json_new_number(ldexp(1.0, e));
+        char *s = NULL;
+        const char *exp = ah_pow2_js[e - AH_POW2_MIN_EXP];
+        CHECK(v != NULL && ah_json_stringify(v, &s, NULL) == AH_OK);
+        if (s == NULL || strcmp(s, exp) != 0) {
+            if (failures++ < 10) {
+                fprintf(stderr, "  2^%d: esperado %s, obtido %s\n", e, exp, s != NULL ? s : "(nulo)");
+            }
+        }
+        ah_text_free(s);
+        ah_json_free(v);
+    }
+    CHECK(failures == 0);
+    CHECK(sizeof ah_pow2_js / sizeof ah_pow2_js[0] ==
+          (size_t)(AH_POW2_MAX_EXP - AH_POW2_MIN_EXP + 1));
 }
 
 static void test_nested_and_null(void) {
@@ -166,32 +194,80 @@ static void test_parse_grammar(void) {
 
 static void test_parse_limitations(void) {
     ah_json *v = NULL;
-    /* Limitações documentadas em ah_json.h. */
-    CHECK(ah_json_parse(LIT("\"a\\u0000b\""), &v) == AH_ERR_INVALID && v == NULL);
+    ah_json *fb = ah_json_new_object();
+
+    /* "\u0000": JSON válido que o cJSON não guarda -> AH_ERR_LIMIT, distinto
+     * de inválido; parse_or repassa o erro e não aplica o padrão. */
+    CHECK(ah_json_parse(LIT("\"a\\u0000b\""), &v) == AH_ERR_LIMIT && v == NULL);
+    CHECK(ah_json_parse(LIT("{\"k\\u0000\":1}"), &v) == AH_ERR_LIMIT && v == NULL);
+    v = fb;
+    CHECK(ah_json_parse_or(LIT("[\"\\u0000\"]"), fb, &v) == AH_ERR_LIMIT && v == NULL);
+    /* Com NUL mas inválido no resto: continua sendo inválido -> padrão. */
+    CHECK(ah_json_parse(LIT("[\"\\u0000\",]"), &v) == AH_ERR_INVALID && v == NULL);
+    CHECK(ah_json_parse_or(LIT("[\"\\u0000\",]"), fb, &v) == AH_OK);
+    check_stringify(v, "{}");
+
     CHECK(ah_json_parse(LIT("\"\\ud800x\""), &v) == AH_OK);
     check_stringify(v, "\"\xEF\xBF\xBDx\"");
+    ah_json_free(fb);
+}
+
+/* Monta `d` arrays aninhados em `buf`, com `inner` (pode ser "") no meio. */
+static size_t nested(char *buf, size_t d, const char *inner) {
+    size_t n = strlen(inner);
+    memset(buf, '[', d);
+    memcpy(buf + d, inner, n);
+    memset(buf + d + n, ']', d);
+    buf[2 * d + n] = '\0';
+    return 2 * d + n;
 }
 
 static void test_depth(void) {
-    char buf[2 * (AH_JSON_MAX_DEPTH + 1)];
+    static char buf[2 * (AH_JSON_MAX_DEPTH + 1) + 8];
     ah_json *v = NULL;
     ah_json *fb = ah_json_new_object();
-    size_t d;
+    ah_json *deep;
+    size_t len;
+    size_t i;
+    char *s = NULL;
 
-    d = AH_JSON_MAX_DEPTH;
-    memset(buf, '[', d);
-    memset(buf + d, ']', d);
-    CHECK(ah_json_parse(buf, 2 * d, &v) == AH_OK);
+    /* Caso limite simétrico: AH_JSON_MAX_DEPTH contêineres com um escalar
+     * dentro são lidos E escritos (escalar não conta nível). */
+    len = nested(buf, AH_JSON_MAX_DEPTH, "1");
+    CHECK(ah_json_parse(buf, len, &v) == AH_OK);
+    CHECK(ah_json_stringify(v, &s, NULL) == AH_OK);
+    CHECK(s != NULL && strcmp(s, buf) == 0);
+    ah_text_free(s);
+    s = NULL;
     ah_json_free(v);
     v = NULL;
 
-    d = AH_JSON_MAX_DEPTH + 1;
-    memset(buf, '[', d);
-    memset(buf + d, ']', d);
-    CHECK(ah_json_parse(buf, 2 * d, &v) == AH_ERR_LIMIT && v == NULL);
-    CHECK(ah_json_parse_or(buf, 2 * d, fb, &v) == AH_OK);
-    CHECK(v != NULL && ah_json_type_of(v) == AH_JSON_OBJECT && ah_json_count(v) == 0);
-    ah_json_free(v);
+    len = nested(buf, AH_JSON_MAX_DEPTH, "{}");
+    CHECK(ah_json_parse(buf, len, &v) == AH_ERR_LIMIT && v == NULL);
+    len = nested(buf, AH_JSON_MAX_DEPTH + 1, "");
+    CHECK(ah_json_parse(buf, len, &v) == AH_ERR_LIMIT && v == NULL);
+    /* O TS leria: parse_or repassa LIMIT em vez do padrão. */
+    v = fb;
+    CHECK(ah_json_parse_or(buf, len, fb, &v) == AH_ERR_LIMIT && v == NULL);
+
+    /* Escrita: árvore montada pela API com AH_JSON_MAX_DEPTH contêineres
+     * passa; com um a mais, AH_ERR_LIMIT. */
+    deep = ah_json_new_number(1);
+    for (i = 0; i < AH_JSON_MAX_DEPTH; i++) {
+        ah_json *a = ah_json_new_array();
+        CHECK(ah_json_push(a, deep) == AH_OK);
+        deep = a;
+    }
+    CHECK(ah_json_stringify(deep, &s, NULL) == AH_OK);
+    ah_text_free(s);
+    s = NULL;
+    {
+        ah_json *a = ah_json_new_array();
+        CHECK(ah_json_push(a, deep) == AH_OK);
+        deep = a;
+    }
+    CHECK(ah_json_stringify(deep, &s, NULL) == AH_ERR_LIMIT && s == NULL);
+    ah_json_free(deep);
     ah_json_free(fb);
 }
 
@@ -243,6 +319,7 @@ int main(void) {
     test_key_order();
     test_strings();
     test_numbers();
+    test_powers_of_two();
     test_nested_and_null();
     test_set_replaces_in_place();
     test_parse_grammar();

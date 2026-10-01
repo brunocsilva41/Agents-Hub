@@ -43,6 +43,7 @@ typedef struct parser {
     size_t stack_cap;
     cJSON *root;
     ah_text_buf scratch;
+    bool saw_nul; /* achou "\u0000" em string ou chave */
 } parser;
 
 static void skip_ws(parser *p) {
@@ -169,8 +170,10 @@ static ah_status parse_string(parser *p) {
             cp = (uint32_t)u;
             if (cp == 0) {
                 /* O cJSON guarda string terminada em NUL: U+0000 truncaria o
-                 * texto em silêncio. Recusa explícita (limitação no header). */
-                return AH_ERR_INVALID;
+                 * texto em silêncio. Marca e segue validando o resto; no fim,
+                 * JSON válido com NUL vira AH_ERR_LIMIT (ver o header). */
+                p->saw_nul = true;
+                break;
             }
             if (cp >= 0xD800 && cp <= 0xDBFF) {
                 long lo = -1;
@@ -543,6 +546,9 @@ ah_status ah_json_parse(const char *text, size_t len, ah_json **out) {
     }
     free(p.stack);
     ah_text_buf_free(&p.scratch);
+    if (st == AH_OK && p.saw_nul) {
+        st = AH_ERR_LIMIT; /* JSON válido, mas não representável aqui */
+    }
     if (st != AH_OK) {
         cJSON_Delete(p.root);
         return st;
@@ -562,7 +568,9 @@ ah_status ah_json_parse_or(const char *text, size_t len, const ah_json *fallback
     *out = NULL;
     if (text != NULL && len != 0) {
         st = ah_json_parse(text, len, &v);
-        if (st == AH_ERR_NOMEM) {
+        if (st == AH_ERR_NOMEM || st == AH_ERR_LIMIT) {
+            /* LIMIT não é "inválido": o TS leria esse texto. Quem chama decide;
+             * o padrão não é aplicado em silêncio. */
             return st;
         }
         if (st == AH_OK && item_type(J(v)) == cJSON_NULL) {
@@ -586,22 +594,85 @@ ah_status ah_json_parse_or(const char *text, size_t len, const ah_json *fallback
  * Escrita
  * ====================================================================== */
 
-/* Number::toString(10) do ECMAScript (ECMA-262, Number::toString, passo
- * "let n, k, and s be integers such that k >= 1, 10^(k-1) <= s < 10^k, s ×
- * 10^(n-k) is x, and k is as small as possible"). O menor k que faz ida e
- * volta é achado tentando precisões de 1 a 17 com "%.*e" + strtod; o "%.*e"
- * arredonda para o mais próximo, que é o s que a especificação escolhe. */
-static ah_status append_number(ah_text_buf *b, double x) {
+/* true se m × 10^q, lido pelo strtod, volta exatamente a `x` (> 0). O texto
+ * "<m>e<q>" não tem separador decimal, então não depende do locale. */
+static bool round_trips(uint64_t m, long q, double x) {
+    char t[48];
+    int w = snprintf(t, sizeof t, "%llue%ld", (unsigned long long)m, q);
+    return w > 0 && (size_t)w < sizeof t && strtod(t, NULL) == x;
+}
+
+/* Dígitos do Number::toString(10) do ECMAScript (ECMA-262): "let n, k, and s
+ * be integers such that k >= 1, 10^(k-1) <= s < 10^k, s × 10^(n-k) is x, and
+ * k is as small as possible"; havendo mais de um s, o mais próximo de x.
+ * Para cada precisão p de 1 a 17, o candidato c é o "%.*e" de p dígitos (o
+ * decimal de p dígitos mais próximo de x). Se c não faz ida e volta, o
+ * vizinho c+1 ou c-1 ainda pode fazer: nas potências de 2 o intervalo que
+ * arredonda para x é assimétrico (a metade de baixo tem metade do tamanho),
+ * e o decimal mais próximo pode cair fora dele enquanto o vizinho cai
+ * dentro (ex.: 2^-24 = 5.9604644775390625e-8 sai 5.960464477539063e-8).
+ * Basta olhar ±1: o intervalo é contíguo e contém x, então se c+2 estivesse
+ * dentro, c+1 também estaria. Sai em `digits` (k dígitos, sem zeros à
+ * direita) e em *n_out a posição do ponto decimal (valor = 0.digits × 10^n). */
+static ah_status shortest_digits(double ax, char *digits, size_t digits_size, size_t *k_out,
+                                 long *n_out) {
     char tmp[64];
+    int prec;
+
+    for (prec = 1; prec <= 17; prec++) {
+        uint64_t m = 0;
+        long q;
+        const char *e;
+        size_t t;
+        int w = snprintf(tmp, sizeof tmp, "%.*e", prec - 1, ax);
+        if (w < 0 || (size_t)w >= sizeof tmp) {
+            return AH_ERR_INTERNAL;
+        }
+        /* tmp = "d[<ponto do locale>ddd]e<sinal>dd": mantissa inteira m e
+         * expoente q, com valor m × 10^q. */
+        e = strchr(tmp, 'e');
+        if (e == NULL) {
+            return AH_ERR_INTERNAL;
+        }
+        for (t = 0; tmp + t < e; t++) {
+            if (tmp[t] >= '0' && tmp[t] <= '9') {
+                m = m * 10 + (uint64_t)(tmp[t] - '0'); /* até 17 dígitos: cabe */
+            }
+        }
+        q = strtol(e + 1, NULL, 10) - (prec - 1);
+        if (!round_trips(m, q, ax)) {
+            if (round_trips(m + 1, q, ax)) {
+                m++;
+            } else if (m > 1 && round_trips(m - 1, q, ax)) {
+                m--;
+            } else {
+                continue;
+            }
+        }
+        while (m % 10 == 0) {
+            m /= 10;
+            q++;
+        }
+        w = snprintf(digits, digits_size, "%llu", (unsigned long long)m);
+        if (w <= 0 || (size_t)w >= digits_size) {
+            return AH_ERR_INTERNAL;
+        }
+        *k_out = (size_t)w;
+        *n_out = q + (long)w;
+        return AH_OK;
+    }
+    return AH_ERR_INTERNAL; /* 17 dígitos sempre fazem ida e volta */
+}
+
+/* Number::toString(10): escolhe a forma (inteira, decimal ou exponencial)
+ * pela posição n do ponto decimal, como a especificação manda. */
+static ah_status append_number(ah_text_buf *b, double x) {
     char digits[24];
     char out[64];
     size_t k = 0;
-    long exp10 = 0;
-    long n;
+    long n = 0;
     size_t o = 0;
-    int prec;
-    const char *e;
-    size_t t;
+    ah_status st;
 
     if (isnan(x) || isinf(x)) {
         return ah_text_buf_append(b, "null", 4);
@@ -609,32 +680,10 @@ static ah_status append_number(ah_text_buf *b, double x) {
     if (x == 0.0) {
         return ah_text_buf_append_char(b, '0'); /* inclui -0 */
     }
-    for (prec = 1; prec <= 17; prec++) {
-        int w = snprintf(tmp, sizeof tmp, "%.*e", prec - 1, x);
-        if (w < 0 || (size_t)w >= sizeof tmp) {
-            return AH_ERR_INTERNAL;
-        }
-        if (strtod(tmp, NULL) == x) {
-            break;
-        }
+    st = shortest_digits(fabs(x), digits, sizeof digits, &k, &n);
+    if (st != AH_OK) {
+        return st;
     }
-    /* tmp = "[-]d[<ponto>ddd]e<sinal>dd": junta os dígitos da mantissa
-     * (pulando sinal e separador decimal do locale) e lê o expoente. */
-    e = strchr(tmp, 'e');
-    if (e == NULL) {
-        return AH_ERR_INTERNAL;
-    }
-    for (t = 0; tmp + t < e; t++) {
-        if (tmp[t] >= '0' && tmp[t] <= '9' && k < sizeof digits - 1) {
-            digits[k++] = tmp[t];
-        }
-    }
-    while (k > 1 && digits[k - 1] == '0') {
-        k--;
-    }
-    digits[k] = '\0';
-    exp10 = strtol(e + 1, NULL, 10);
-    n = exp10 + 1; /* posição do ponto decimal em relação aos dígitos */
 
     if (x < 0) {
         out[o++] = '-';
@@ -783,11 +832,15 @@ static ah_status write_object(ah_text_buf *b, const cJSON *v, size_t depth) {
     return st;
 }
 
+/* `depth` = contêineres já abertos em volta de `v` (0 na raiz). Como no
+ * parser, só contêiner conta: o contêiner que levaria a mais de
+ * AH_JSON_MAX_DEPTH níveis é recusado; escalar não soma nível. */
 static ah_status write_value(ah_text_buf *b, const cJSON *v, size_t depth) {
-    if (depth > AH_JSON_MAX_DEPTH) {
+    int t = item_type(v);
+    if ((t == cJSON_Array || t == cJSON_Object) && depth >= AH_JSON_MAX_DEPTH) {
         return AH_ERR_LIMIT;
     }
-    switch (item_type(v)) {
+    switch (t) {
     case cJSON_NULL:
         return ah_text_buf_append(b, "null", 4);
     case cJSON_True:
@@ -836,7 +889,7 @@ ah_status ah_json_stringify(const ah_json *value, char **out, size_t *out_len) {
     if (value == NULL) {
         st = ah_text_buf_append(&b, "null", 4);
     } else {
-        st = write_value(&b, CJ(value), 1);
+        st = write_value(&b, CJ(value), 0);
     }
     if (st != AH_OK) {
         ah_text_buf_free(&b);

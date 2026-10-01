@@ -17,9 +17,23 @@
  * expandidos garante que quem percorrer a árvore visita no máximo esse total.
  *
  * Também recusados (AH_ERR_INVALID): YAML malformado, mais de um documento,
- * alias para âncora inexistente ou ainda aberta (ciclo) e chave de mapa que
- * não é escalar. Chave repetida NÃO é recusada aqui: ah_yaml_map_get devolve a
- * primeira, e quem precisar recusar confere. Merge key (`<<`) é chave comum. */
+ * alias para âncora inexistente ou ainda aberta (ciclo), chave de mapa que
+ * não é escalar, e chave repetida no mesmo mapa.
+ *
+ * Chave repetida segue o pacote `yaml` 2.9.1 do TS (opção padrão
+ * uniqueKeys): duas chaves são iguais quando o valor tipado no esquema core
+ * do YAML 1.2 é igual. `a` e `"a"` são iguais (texto), `1`, `01`, `+1` e
+ * `1.0` são iguais (número 1), `~`, `null` e vazio são iguais; `1` e `"1"`
+ * não são (número e texto). Ficam fora da comparação, como no TS: chave que
+ * é alias e `.nan`; e, por simplificação daqui, chave com tag explícita
+ * diferente de `!!str`. Essa tipagem serve SÓ para achar repetição; os
+ * escalares continuam entregues como texto. Merge key (`<<`) é chave comum
+ * (o esquema core não tem merge), então `<<` repetido também é recusado.
+ *
+ * UTF-8 inválido no texto é recusado (AH_ERR_INVALID, pelo leitor da
+ * libyaml). O `yaml` do TS recebe texto já decodificado pelo Node, em que o
+ * byte inválido vira U+FFFD; aqui não há substituição (divergência
+ * registrada pelo coordenador). */
 #ifndef AH_CORE_YAML_H
 #define AH_CORE_YAML_H
 

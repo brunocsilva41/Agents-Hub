@@ -20,11 +20,19 @@
  *   ah_text_append_json_string.
  *
  * Limitações conhecidas (o cJSON guarda string terminada em NUL e o C guarda
- * UTF-8): "\u0000" dentro de string é recusado (AH_ERR_INVALID), e "\uD800"
- * sem par vira U+FFFD (o JS manteria o surrogate isolado).
+ * UTF-8):
+ * - "\u0000" em string ou chave: o JSON.parse aceita, mas aqui o NUL
+ *   truncaria o texto. O texto inteiro é validado e, se for JSON válido,
+ *   devolve AH_ERR_LIMIT ("válido, mas não representável"), distinto de
+ *   AH_ERR_INVALID. Guardar o NUL exige strings com tamanho explícito
+ *   (decisão pendente do dono).
+ * - "\uD800" sem par vira U+FFFD (o JS manteria o surrogate isolado).
  *
- * Profundidade máxima de aninhamento: AH_JSON_MAX_DEPTH (o mesmo
- * CJSON_NESTING_LIMIT do cJSON vendorizado). Acima disso: AH_ERR_LIMIT. */
+ * Profundidade: no máximo AH_JSON_MAX_DEPTH contêineres (array/objeto)
+ * aninhados, contados igual na leitura e na escrita; escalar não soma nível
+ * (o mesmo limite do CJSON_NESTING_LIMIT do cJSON vendorizado). Acima disso:
+ * AH_ERR_LIMIT; na leitura, o resto do texto depois do ponto em que o teto
+ * estoura não é validado. */
 #ifndef AH_CORE_JSON_H
 #define AH_CORE_JSON_H
 
@@ -50,14 +58,17 @@ typedef enum ah_json_type {
 
 /* Lê `len` bytes de `text` (emprestado; não precisa terminar em NUL).
  * AH_ERR_INVALID: fora da gramática do JSON.parse (inclusive vazio).
- * AH_ERR_LIMIT: aninhamento acima de AH_JSON_MAX_DEPTH.
+ * AH_ERR_LIMIT: o JSON.parse leria, mas não cabe aqui: aninhamento acima de
+ * AH_JSON_MAX_DEPTH ou "\u0000" em string/chave (ver o topo do arquivo).
  * Posse: o chamador libera *out com ah_json_free. Em erro, *out = NULL. */
 ah_status ah_json_parse(const char *text, size_t len, ah_json **out);
 
-/* `fromJson` do TS: `text` NULL ou vazio, inválido (qualquer erro do
- * ah_json_parse exceto falta de memória) ou o literal `null` dão uma cópia de
- * `fallback`; senão, o valor lido. `fallback` NULL deixa *out = NULL nesses
- * casos. Devolve AH_OK ou AH_ERR_NOMEM. Posse: o chamador libera *out com
+/* `fromJson` do TS: `text` NULL ou vazio, inválido (AH_ERR_INVALID do
+ * ah_json_parse) ou o literal `null` dão uma cópia de `fallback`; senão, o
+ * valor lido. `fallback` NULL deixa *out = NULL nesses casos.
+ * Devolve AH_OK, AH_ERR_NOMEM ou AH_ERR_LIMIT. AH_ERR_LIMIT é repassado do
+ * ah_json_parse e NÃO aplica o padrão: o TS leria esse texto, então quem
+ * chama decide (*out = NULL). Posse: o chamador libera *out com
  * ah_json_free; `fallback` é emprestado. */
 ah_status ah_json_parse_or(const char *text, size_t len, const ah_json *fallback,
                            ah_json **out);

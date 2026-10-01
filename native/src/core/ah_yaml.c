@@ -1,5 +1,7 @@
 #include "ah_yaml.h"
 
+#include <locale.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -34,11 +36,35 @@ typedef struct anchor_slot {
     const ah_yaml_node *node;
 } anchor_slot;
 
+/* Identidade de uma chave de mapa para achar repetição, como o `yaml` 2.9.1
+ * do TS (compose/util-map-includes.js): duas chaves são iguais se ambas são
+ * escalares (não alias) e o VALOR tipado é igual (===), no esquema core do
+ * YAML 1.2 (arquivos de dist/schema/core/ do pacote). Ex.: `1` e `01` são iguais (número 1); `1` e
+ * `"1"` não (número e texto); `~` e `null` são iguais. */
+typedef enum key_class {
+    KEY_SKIP, /* não entra na comparação: alias, tag explícita que não é !!str, .nan */
+    KEY_NULL,
+    KEY_BOOL,
+    KEY_NUMBER,
+    KEY_STRING
+} key_class;
+
+typedef struct key_id {
+    key_class cls;
+    bool boolean;
+    double number;
+    const char *text; /* KEY_STRING: texto do nó (pertence ao documento) */
+    size_t len;
+} key_id;
+
 typedef struct open_frame {
     ah_yaml_node *node;
     size_t expanded_at_start;
     size_t max_child_height;
     char *anchor; /* registrada só no fim da coleção: alias para coleção aberta é recusado */
+    key_id *keys; /* só mapa: identidade de cada chave, conferida no fim */
+    size_t n_keys;
+    size_t cap_keys;
 } open_frame;
 
 typedef struct loader {
@@ -235,8 +261,241 @@ static ah_status check_depth(loader *l, size_t height) {
     return AH_OK;
 }
 
-/* Anexa `child` (novo ou apontado por alias) ao topo, ou o faz raiz. */
-static ah_status attach(loader *l, const ah_yaml_node *child) {
+/* ---- identidade de chave (esquema core do YAML 1.2, como o yaml 2.9.1) -- */
+
+static bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
+static bool text_is(const char *s, size_t len, const char *lit) {
+    return strlen(lit) == len && memcmp(s, lit, len) == 0;
+}
+
+/* Converte com strtod trocando o '.' pelo separador do locale (como o
+ * parser de JSON faz). `s` já passou pela gramática de número. */
+static bool to_double(const char *s, size_t len, double *out) {
+    char buf[128];
+    char *end = NULL;
+    const struct lconv *lc = localeconv();
+    char point = (lc != NULL && lc->decimal_point != NULL && lc->decimal_point[0] != '\0')
+                     ? lc->decimal_point[0]
+                     : '.';
+    size_t i;
+    if (len >= sizeof buf) {
+        return false; /* número enorme como chave: fica como texto */
+    }
+    for (i = 0; i < len; i++) {
+        buf[i] = s[i] == '.' ? point : s[i];
+    }
+    buf[len] = '\0';
+    *out = strtod(buf, &end);
+    return end == buf + len;
+}
+
+/* Inteiro sem sinal na base `radix` (8 ou 16) depois do prefixo 0o/0x. */
+static bool radix_int(const char *s, size_t len, unsigned radix, double *out) {
+    double v = 0;
+    size_t i;
+    if (len == 0) {
+        return false;
+    }
+    for (i = 0; i < len; i++) {
+        unsigned d;
+        char c = s[i];
+        if (c >= '0' && c <= '9') {
+            d = (unsigned)(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            d = (unsigned)(c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            d = (unsigned)(c - 'A' + 10);
+        } else {
+            return false;
+        }
+        if (d >= radix) {
+            return false;
+        }
+        v = v * radix + d;
+    }
+    *out = v;
+    return true;
+}
+
+/* Gramática dos floats do esquema core:
+ *   /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/   (floatExp)
+ *   /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)$/                         (float)
+ * Inteiro sem ponto nem expoente já foi resolvido antes, como no yaml. */
+static bool is_core_float(const char *s, size_t len) {
+    size_t i = 0;
+    size_t d;
+    bool dot = false;
+    bool exp = false;
+    if (i < len && (s[i] == '+' || s[i] == '-')) {
+        i++;
+    }
+    if (i < len && s[i] == '.') {
+        dot = true;
+        d = ++i;
+        while (i < len && is_digit(s[i])) {
+            i++;
+        }
+        if (i == d) {
+            return false;
+        }
+    } else {
+        d = i;
+        while (i < len && is_digit(s[i])) {
+            i++;
+        }
+        if (i == d) {
+            return false;
+        }
+        if (i < len && s[i] == '.') {
+            dot = true;
+            i++;
+            while (i < len && is_digit(s[i])) {
+                i++;
+            }
+        }
+    }
+    if (i < len && (s[i] == 'e' || s[i] == 'E')) {
+        exp = true;
+        i++;
+        if (i < len && (s[i] == '+' || s[i] == '-')) {
+            i++;
+        }
+        d = i;
+        while (i < len && is_digit(s[i])) {
+            i++;
+        }
+        if (i == d) {
+            return false;
+        }
+    }
+    return i == len && (dot || exp);
+}
+
+static key_id classify_key(const ah_yaml_node *k, bool via_alias) {
+    key_id id;
+    const char *s = k->text;
+    size_t len = k->text_len;
+    size_t i;
+
+    memset(&id, 0, sizeof id);
+    id.cls = KEY_SKIP;
+    if (via_alias) {
+        return id; /* o yaml compara alias por identidade de nó: nunca repete */
+    }
+    if (k->tag != NULL) {
+        if (strcmp(k->tag, "tag:yaml.org,2002:str") == 0) {
+            id.cls = KEY_STRING;
+            id.text = s;
+            id.len = len;
+        }
+        return id;
+    }
+    if (k->style != AH_YAML_PLAIN) {
+        id.cls = KEY_STRING;
+        id.text = s;
+        id.len = len;
+        return id;
+    }
+    /* null: /^(?:~|[Nn]ull|NULL)?$/ */
+    if (len == 0 || text_is(s, len, "~") || text_is(s, len, "null") ||
+        text_is(s, len, "Null") || text_is(s, len, "NULL")) {
+        id.cls = KEY_NULL;
+        return id;
+    }
+    /* bool: /^(?:[Tt]rue|TRUE|[Ff]alse|FALSE)$/ */
+    if (text_is(s, len, "true") || text_is(s, len, "True") || text_is(s, len, "TRUE")) {
+        id.cls = KEY_BOOL;
+        id.boolean = true;
+        return id;
+    }
+    if (text_is(s, len, "false") || text_is(s, len, "False") || text_is(s, len, "FALSE")) {
+        id.cls = KEY_BOOL;
+        return id;
+    }
+    /* int: /^0o[0-7]+$/, /^[-+]?[0-9]+$/, /^0x[0-9a-fA-F]+$/ */
+    if (len > 2 && s[0] == '0' && s[1] == 'o' && radix_int(s + 2, len - 2, 8, &id.number)) {
+        id.cls = KEY_NUMBER;
+        return id;
+    }
+    i = (s[0] == '+' || s[0] == '-') ? 1 : 0;
+    if (i < len) {
+        size_t j = i;
+        while (j < len && is_digit(s[j])) {
+            j++;
+        }
+        if (j == len && to_double(s, len, &id.number)) {
+            id.cls = KEY_NUMBER;
+            return id;
+        }
+    }
+    if (len > 2 && s[0] == '0' && s[1] == 'x' && radix_int(s + 2, len - 2, 16, &id.number)) {
+        id.cls = KEY_NUMBER;
+        return id;
+    }
+    /* floatNaN: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/ */
+    if (text_is(s, len, ".nan") || text_is(s, len, ".NaN") || text_is(s, len, ".NAN")) {
+        return id; /* NaN !== NaN: nunca repete */
+    }
+    i = (s[0] == '+' || s[0] == '-') ? 1 : 0;
+    if (text_is(s + i, len - i, ".inf") || text_is(s + i, len - i, ".Inf") ||
+        text_is(s + i, len - i, ".INF")) {
+        id.cls = KEY_NUMBER;
+        id.number = s[0] == '-' ? -HUGE_VAL : HUGE_VAL;
+        return id;
+    }
+    if (is_core_float(s, len) && to_double(s, len, &id.number)) {
+        id.cls = KEY_NUMBER;
+        return id;
+    }
+    id.cls = KEY_STRING;
+    id.text = s;
+    id.len = len;
+    return id;
+}
+
+static int compare_key_id(const void *pa, const void *pb) {
+    const key_id *a = pa;
+    const key_id *b = pb;
+    int c;
+    if (a->cls != b->cls) {
+        return a->cls < b->cls ? -1 : 1;
+    }
+    switch (a->cls) {
+    case KEY_BOOL:
+        return (int)a->boolean - (int)b->boolean;
+    case KEY_NUMBER:
+        return (a->number > b->number) - (a->number < b->number); /* 0 == -0, como === */
+    case KEY_STRING:
+        c = memcmp(a->text, b->text, a->len < b->len ? a->len : b->len);
+        if (c != 0) {
+            return c;
+        }
+        return (a->len > b->len) - (a->len < b->len);
+    default:
+        return 0;
+    }
+}
+
+/* Recusa chave repetida no mapa que está fechando. O(n log n). */
+static ah_status check_unique_keys(loader *l, open_frame *f) {
+    size_t i;
+    if (f->n_keys < 2) {
+        return AH_OK;
+    }
+    qsort(f->keys, f->n_keys, sizeof *f->keys, compare_key_id);
+    for (i = 1; i < f->n_keys; i++) {
+        if (f->keys[i].cls != KEY_SKIP && compare_key_id(&f->keys[i - 1], &f->keys[i]) == 0) {
+            return fail(l, AH_ERR_INVALID, "chave repetida no mapa YAML");
+        }
+    }
+    return AH_OK;
+}
+
+/* Anexa `child` (novo, ou apontado por alias quando `via_alias`) ao topo, ou
+ * o faz raiz. Chave de mapa tem a identidade guardada para a checagem de
+ * repetição no fim do mapa. */
+static ah_status attach(loader *l, const ah_yaml_node *child, bool via_alias) {
     open_frame *top;
     ah_yaml_node *parent;
     void *grown = NULL;
@@ -248,9 +507,16 @@ static ah_status attach(loader *l, const ah_yaml_node *child) {
     }
     top = &l->stack[l->depth - 1];
     parent = top->node;
-    if (parent->kind == AH_YAML_MAPPING && parent->count % 2 == 0 &&
-        child->kind != AH_YAML_SCALAR) {
-        return fail(l, AH_ERR_INVALID, "chave de mapa YAML que nao e escalar");
+    if (parent->kind == AH_YAML_MAPPING && parent->count % 2 == 0) {
+        if (child->kind != AH_YAML_SCALAR) {
+            return fail(l, AH_ERR_INVALID, "chave de mapa YAML que nao e escalar");
+        }
+        st = reserve(top->keys, &top->cap_keys, top->n_keys + 1, sizeof *top->keys, &grown);
+        if (st != AH_OK) {
+            return st;
+        }
+        top->keys = grown;
+        top->keys[top->n_keys++] = classify_key(child, via_alias);
     }
     st = reserve((void *)parent->items, &parent->cap, parent->count + 1, sizeof *parent->items,
                  &grown);
@@ -297,7 +563,7 @@ static ah_status on_scalar(loader *l, const yaml_event_t *ev) {
             return st;
         }
     }
-    return attach(l, n);
+    return attach(l, n, false);
 }
 
 static ah_status on_alias(loader *l, const yaml_event_t *ev) {
@@ -319,7 +585,7 @@ static ah_status on_alias(loader *l, const yaml_event_t *ev) {
     if (st != AH_OK) {
         return st;
     }
-    return attach(l, s->node);
+    return attach(l, s->node, true);
 }
 
 static ah_status on_collection_start(loader *l, ah_yaml_kind kind, const yaml_char_t *anchor,
@@ -338,7 +604,7 @@ static ah_status on_collection_start(loader *l, ah_yaml_kind kind, const yaml_ch
         st = new_node(l, kind, tag, &n);
     }
     if (st == AH_OK) {
-        st = attach(l, n);
+        st = attach(l, n, false);
     }
     if (st == AH_OK) {
         st = reserve(l->stack, &l->stack_cap, l->depth + 1, sizeof *l->stack, &grown);
@@ -352,6 +618,9 @@ static ah_status on_collection_start(loader *l, ah_yaml_kind kind, const yaml_ch
     f->expanded_at_start = start;
     f->max_child_height = 0;
     f->anchor = NULL;
+    f->keys = NULL;
+    f->n_keys = 0;
+    f->cap_keys = 0;
     if (anchor != NULL) {
         f->anchor = dup_bytes(anchor, strlen((const char *)anchor));
         if (f->anchor == NULL) {
@@ -373,11 +642,16 @@ static ah_status on_collection_end(loader *l) {
     n = f->node;
     n->weight = l->expanded - f->expanded_at_start;
     n->height = 1 + f->max_child_height;
-    if (f->anchor != NULL) {
-        st = anchor_put(l, f->anchor, n);
-        free(f->anchor);
-        f->anchor = NULL;
+    if (n->kind == AH_YAML_MAPPING) {
+        st = check_unique_keys(l, f);
     }
+    free(f->keys);
+    f->keys = NULL;
+    if (st == AH_OK && f->anchor != NULL) {
+        st = anchor_put(l, f->anchor, n);
+    }
+    free(f->anchor);
+    f->anchor = NULL;
     if (st == AH_OK && l->depth > 0 && n->height > l->stack[l->depth - 1].max_child_height) {
         l->stack[l->depth - 1].max_child_height = n->height;
     }
@@ -496,6 +770,7 @@ ah_status ah_yaml_load(const char *text, size_t len, const ah_yaml_limits *lim,
 
     for (k = 0; k < l.depth; k++) {
         free(l.stack[k].anchor);
+        free(l.stack[k].keys);
     }
     free(l.stack);
     for (k = 0; k < l.anchor_cap; k++) {
