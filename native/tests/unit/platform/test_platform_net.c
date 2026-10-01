@@ -1,8 +1,19 @@
 /* Testes de ah_platform_net (F0-09): escuta em 127.0.0.1 com port 0, porta
  * ocupada, bind exclusivo (SEC-R14), eco cliente<->servidor pelo laço e dono
- * da conexão (SEC-R12/R13). Nunca usa a porta 4747: toda escuta é port 0. */
+ * da conexão (SEC-R12/R13), inclusive com OUTRO processo do mesmo usuário
+ * (o próprio executável relançado com "--connect <porta>"). Nunca usa a
+ * porta 4747: toda escuta é port 0.
+ *
+ * Inclui o cabeçalho interno da plataforma para ler opções do descritor e
+ * provar cada passo do dono da conexão; também chama o SO direto para o
+ * "intruso" de SEC-R14 e para criar o processo auxiliar. É teste da própria
+ * camada de plataforma. */
+#include "ah_platform_net_priv.h" /* primeiro: define as macros de recurso do POSIX */
+
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ah_platform_loop.h"
@@ -10,12 +21,13 @@
 #include "ah_test.h"
 
 #ifdef _WIN32
-/* Só para o teste de SEC-R14: um "intruso" com SO_REUSEADDR, como faria um
- * processo hostil. Não há API do Hub que faça isso de propósito. */
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
+#include <windows.h>
+#include <wchar.h>
+#else
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 static void test_listen_port_zero(void) {
@@ -29,7 +41,51 @@ static void test_listen_port_zero(void) {
     CHECK(ah_platform_socket_local_port(l, &port) == AH_OK);
     CHECK(port > 0);
     CHECK(port != 4747);
+    if (l != NULL) {
+        /* SEC-R14: a opção de bind exclusivo está de fato no descritor. O
+         * teste de segundo bind sozinho não prova isso: como o mesmo
+         * usuário, o Windows já recusa o segundo bind em 127.0.0.1. */
+#ifdef _WIN32
+        BOOL excl = FALSE;
+        int len = (int)sizeof excl;
+        CHECK(getsockopt(l->fd, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (char *)&excl, &len) == 0);
+        CHECK(excl != FALSE);
+#elif defined(SO_REUSEPORT)
+        int rp = 1;
+        socklen_t len = (socklen_t)sizeof rp;
+        CHECK(getsockopt(l->fd, SOL_SOCKET, SO_REUSEPORT, &rp, &len) == 0);
+        CHECK(rp == 0);
+#endif
+    }
     ah_platform_socket_close(l);
+}
+
+/* Connect a porta fechada: recusa rápida e distinta de TIMEOUT. No Windows
+ * depende de SIO_TCP_INITIAL_RTO (sem ela, a recusa leva ~2 s e o teto de
+ * 500 ms venceria antes). */
+static void test_connect_refused(void) {
+    ah_platform_socket *l = NULL, *c = NULL;
+    ah_platform_net_err err = AH_PLATFORM_NET_NONE;
+    uint16_t port = 0;
+    uint64_t t0, dt;
+
+    CHECK(ah_platform_net_listen(0, NULL, &l) == AH_OK);
+    CHECK(ah_platform_socket_local_port(l, &port) == AH_OK);
+    ah_platform_socket_close(l);
+    if (port == 0) {
+        return;
+    }
+    t0 = ah_platform_loop_now_ms();
+    CHECK(ah_platform_net_connect(port, 500, &err, &c) == AH_ERR_IO);
+    dt = ah_platform_loop_now_ms() - t0;
+    CHECK(c == NULL);
+    if (err != AH_PLATFORM_NET_REFUSED) {
+        fprintf(stderr, "connect a porta fechada: %s em %llu ms\n", ah_platform_net_err_text(err),
+                (unsigned long long)dt);
+    }
+    CHECK(err == AH_PLATFORM_NET_REFUSED);
+    CHECK(dt < 500);
+    ah_platform_socket_close(c);
 }
 
 static void test_port_in_use(void) {
@@ -291,11 +347,156 @@ static void test_nonblocking_accept_and_read(void) {
     ah_platform_socket_close(l);
 }
 
-int main(void) {
+/* ------------------------------------------------------------------------- */
+/* Processo auxiliar: conecta na porta e espera o servidor fechar. */
+
+static int child_connect_main(const char *port_text) {
+    ah_platform_socket *c = NULL;
+    ah_platform_net_err err = AH_PLATFORM_NET_NONE;
+    char *end = NULL;
+    long port = strtol(port_text, &end, 10);
+    int rc = 0;
+
+    if (end == port_text || *end != '\0' || port <= 0 || port > 65535) {
+        return 2;
+    }
+    if (ah_platform_net_connect((uint16_t)port, 5000, &err, &c) != AH_OK) {
+        return 3;
+    }
+    for (;;) {
+        unsigned ready = 0;
+        char b[16];
+        size_t n = 0;
+        if (ah_platform_socket_wait(c, AH_PLATFORM_IO_READ, 10000, &ready) != AH_OK ||
+            ready == 0) {
+            rc = 4;
+            break;
+        }
+        if (ah_platform_socket_read(c, b, sizeof b, &n, &err) != AH_OK) {
+            break; /* queda também encerra o auxiliar */
+        }
+        if (n == 0 && err == AH_PLATFORM_NET_CLOSED) {
+            break;
+        }
+    }
+    ah_platform_socket_close(c);
+    return rc;
+}
+
+/* Conexão vinda de OUTRO processo do mesmo usuário: o atalho "PID igual ao
+ * meu" não se aplica, e o resultado sai da comparação de SID (Windows) ou de
+ * uid (Linux). */
+static void test_owner_other_process(const char *argv0) {
+    ah_platform_socket *l = NULL, *srv = NULL;
+    ah_platform_net_err err = AH_PLATFORM_NET_NONE;
+    uint16_t port = 0;
+    unsigned ready = 0;
+    bool same = false;
+#ifdef _WIN32
+    wchar_t exe[1024];
+    wchar_t cmd[1200];
+    DWORD nexe;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    DWORD code = 99;
+    (void)argv0;
+#else
+    pid_t child;
+    char port_text[16];
+    int status = 0;
+#endif
+
+    CHECK(ah_platform_net_listen(0, &err, &l) == AH_OK);
+    CHECK(ah_platform_socket_local_port(l, &port) == AH_OK);
+    if (l == NULL || port == 0) {
+        ah_platform_socket_close(l);
+        return;
+    }
+
+#ifdef _WIN32
+    nexe = GetModuleFileNameW(NULL, exe, (DWORD)(sizeof exe / sizeof exe[0]));
+    CHECK(nexe > 0 && nexe < sizeof exe / sizeof exe[0]);
+    CHECK(swprintf(cmd, sizeof cmd / sizeof cmd[0], L"\"%ls\" --connect %u", exe,
+                   (unsigned)port) > 0);
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    memset(&pi, 0, sizeof pi);
+    if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CHECK(!"CreateProcessW falhou");
+        ah_platform_socket_close(l);
+        return;
+    }
+#else
+    CHECK(snprintf(port_text, sizeof port_text, "%u", (unsigned)port) > 0);
+    child = fork();
+    if (child == 0) {
+        execl(argv0, argv0, "--connect", port_text, (char *)NULL);
+        _exit(127);
+    }
+    CHECK(child > 0);
+    if (child < 0) {
+        ah_platform_socket_close(l);
+        return;
+    }
+#endif
+
+    CHECK(ah_platform_socket_wait(l, AH_PLATFORM_IO_READ, 10000, &ready) == AH_OK);
+    CHECK(ready & AH_PLATFORM_IO_READ);
+    CHECK(ah_platform_socket_accept(l, &err, &srv) == AH_OK);
+    CHECK(srv != NULL);
+    if (srv != NULL) {
+#ifdef _WIN32
+        uint32_t pid = 0;
+        /* O PID achado na tabela TCP é o do auxiliar, não o nosso. */
+        CHECK(ah_platform_net_peer_pid(srv, &pid) == AH_OK);
+        CHECK(pid == pi.dwProcessId);
+        CHECK(pid != GetCurrentProcessId());
+        same = false;
+        CHECK(ah_platform_net_pid_is_current_user(pid, &same) == AH_OK);
+        CHECK(same);
+#endif
+        same = false;
+        CHECK(ah_platform_socket_peer_is_current_user(srv, &same) == AH_OK);
+        CHECK(same);
+    }
+#ifdef _WIN32
+    /* PIDs que não são deste usuário (ocioso e System) nunca passam: nem
+     * AH_OK com same=true. Reprova um atalho que aceite qualquer PID. */
+    {
+        uint32_t others[2] = {0, 4};
+        int i;
+        for (i = 0; i < 2; i++) {
+            ah_status st;
+            same = true;
+            st = ah_platform_net_pid_is_current_user(others[i], &same);
+            CHECK(!(st == AH_OK && same));
+        }
+    }
+#endif
+
+    ah_platform_socket_close(srv); /* o auxiliar vê o fim de fluxo e sai */
+#ifdef _WIN32
+    CHECK(WaitForSingleObject(pi.hProcess, 10000) == WAIT_OBJECT_0);
+    CHECK(GetExitCodeProcess(pi.hProcess, &code) && code == 0);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+#else
+    CHECK(waitpid(child, &status, 0) == child);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+#endif
+    ah_platform_socket_close(l);
+}
+
+int main(int argc, char **argv) {
+    if (argc == 3 && strcmp(argv[1], "--connect") == 0) {
+        return child_connect_main(argv[2]);
+    }
     test_listen_port_zero();
     test_port_in_use();
+    test_connect_refused();
     test_nonblocking_accept_and_read();
     test_echo_via_loop();
     test_owner_both_sides();
+    test_owner_other_process(argc > 0 ? argv[0] : "");
     return AH_TEST_END("test_platform_net");
 }

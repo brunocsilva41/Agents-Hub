@@ -60,8 +60,9 @@ ah_status ah_platform_loop_wake(ah_platform_loop *loop);
 void ah_platform_loop_set_wake_cb(ah_platform_loop *loop, ah_platform_wake_cb cb, void *ud);
 
 /* Registra o socket para `events` (AH_PLATFORM_IO_READ e/ou _WRITE) ou, se já
- * registrado neste laço, troca eventos, callback e ud. `events` 0 mantém o
- * registro sem pedir nada (erros ainda são entregues). O socket continua do
+ * registrado neste laço, troca eventos, callback e ud. `events` 0 suspende o
+ * registro: o socket fica fora da espera e NADA é entregue, nem erro nem
+ * queda, até que se peçam eventos de novo. O socket continua do
  * chamador; ah_platform_socket_close o tira do laço automaticamente. Um socket
  * só pode estar num laço por vez. `ud` é emprestado. */
 ah_status ah_platform_loop_watch(ah_platform_loop *loop, ah_platform_socket *sock,

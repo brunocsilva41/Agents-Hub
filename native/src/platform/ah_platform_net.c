@@ -1,4 +1,8 @@
 /* Sockets TCP em loopback e dono da conexão (F0-09). Ver ah_platform_net.h. */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+/* accept4 (atômico com SOCK_CLOEXEC) é extensão do Linux. */
+#define _GNU_SOURCE
+#endif
 #include "ah_platform_net_priv.h"
 
 #include <limits.h>
@@ -7,6 +11,7 @@
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 #include <iphlpapi.h>
 #include <windows.h>
 #else
@@ -203,6 +208,9 @@ static ah_status new_tcp_socket(ah_platform_net_fd *out, ah_platform_net_err *er
 #ifdef _WIN32
     fd = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, NULL, 0,
                     WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+#elif defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+    /* Atômico: sem janela em que um fork de outra thread herde o socket. */
+    fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 #else
     fd = socket(AF_INET, SOCK_STREAM, 0);
 #endif
@@ -210,6 +218,8 @@ static ah_status new_tcp_socket(ah_platform_net_fd *out, ah_platform_net_err *er
         set_err(err, map_error(last_net_error()));
         return AH_ERR_IO;
     }
+    /* Repetido mesmo quando já veio atômico: no Windows o modo não
+     * bloqueante não existe na criação, e o custo é desprezível. */
     if (set_no_inherit(fd) != AH_OK || ah_platform_net_set_nonblocking_fd(fd) != AH_OK) {
         set_err(err, map_error(last_net_error()));
         ah_platform_net_close_fd(fd);
@@ -227,6 +237,7 @@ ah_status ah_platform_net_wrap_fd(ah_platform_net_fd fd, ah_platform_socket **ou
         return AH_ERR_NOMEM;
     }
     s->fd = fd;
+    s->is_client = false;
     s->loop = NULL;
     s->watch_idx = 0;
     *out = s;
@@ -310,7 +321,11 @@ ah_status ah_platform_socket_accept(ah_platform_socket *listener, ah_platform_ne
     }
     *out = NULL;
     for (;;) {
+#if defined(__linux__)
+        fd = accept4(listener->fd, NULL, NULL, SOCK_CLOEXEC | SOCK_NONBLOCK);
+#else
         fd = accept(listener->fd, NULL, NULL);
+#endif
         if (fd != AH_PLATFORM_NET_BAD_FD) {
             break;
         }
@@ -395,6 +410,20 @@ ah_status ah_platform_net_connect(uint16_t port, uint32_t timeout_ms,
     if (st != AH_OK) {
         return st;
     }
+#ifdef _WIN32
+    {
+        /* Sem isto, o Windows repete o SYN ao receber RST e um connect a
+         * porta local fechada leva ~2 s para dar "recusado". Em loopback não
+         * há perda a compensar: zero retransmissões de SYN. Se o SO não
+         * aceitar a opção (a chamada falhar), segue com o padrão:
+         * o resultado continua correto, só mais lento. */
+        TCP_INITIAL_RTO_PARAMETERS rto;
+        DWORD bytes = 0;
+        rto.Rtt = TCP_INITIAL_RTO_UNSPECIFIED_RTT;
+        rto.MaxSynRetransmissions = TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS;
+        (void)WSAIoctl(fd, SIO_TCP_INITIAL_RTO, &rto, sizeof rto, NULL, 0, &bytes, NULL, NULL);
+    }
+#endif
     loopback_addr(&sa, port);
     rc = connect(fd, (const struct sockaddr *)&sa, sizeof sa);
     if (rc != 0) {
@@ -425,7 +454,11 @@ ah_status ah_platform_net_connect(uint16_t port, uint32_t timeout_ms,
             return AH_ERR_IO;
         }
     }
-    return ah_platform_net_wrap_fd(fd, out);
+    st = ah_platform_net_wrap_fd(fd, out);
+    if (st == AH_OK) {
+        (*out)->is_client = true;
+    }
+    return st;
 }
 
 ah_status ah_platform_socket_read(ah_platform_socket *sock, void *buf, size_t cap,
@@ -652,7 +685,11 @@ ah_status ah_platform_net_socketpair_fds(ah_platform_net_fd *a, ah_platform_net_
     {
         int fds[2];
         int i;
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+        if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, fds) != 0) {
+#else
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0) {
+#endif
             return AH_ERR_IO;
         }
         for (i = 0; i < 2; i++) {
@@ -763,9 +800,11 @@ static ah_status tcp_table(MIB_TCPTABLE_OWNER_PID **out) {
     return AH_ERR_IO;
 }
 
-/* PID do processo dono do lado `peer` da conexão self<->peer. */
+/* PID do processo dono do lado `peer` da conexão self<->peer. `client`
+ * diz se `self` é o lado que conectou (a porta remota é a porta conectada):
+ * só então vale o plano B do dono de quem escuta. */
 static ah_status peer_pid(const struct sockaddr_in *self, const struct sockaddr_in *peer,
-                          DWORD *pid) {
+                          bool client, DWORD *pid) {
     MIB_TCPTABLE_OWNER_PID *t = NULL;
     ah_status st = tcp_table(&t);
     DWORD i;
@@ -783,7 +822,7 @@ static ah_status peer_pid(const struct sockaddr_in *self, const struct sockaddr_
         u_short lport = (u_short)(r->dwLocalPort & 0xFFFFu);
         u_short rport = (u_short)(r->dwRemotePort & 0xFFFFu);
         if (r->dwState == MIB_TCP_STATE_LISTEN) {
-            if (lport == peer->sin_port &&
+            if (client && lport == peer->sin_port &&
                 (r->dwLocalAddr == peer->sin_addr.s_addr || r->dwLocalAddr == htonl(INADDR_ANY))) {
                 if (listen_hits == 0 || r->dwOwningPid != listen_pid) {
                     listen_hits++;
@@ -799,10 +838,10 @@ static ah_status peer_pid(const struct sockaddr_in *self, const struct sockaddr_
             break;
         }
     }
-    /* Do lado do cliente, a conexão ainda na fila do servidor pode não ter
-     * linha própria: vale o dono do socket que escuta na porta, desde que
-     * seja um só (dois donos possíveis = ambíguo = recusa). */
-    if (st != AH_OK && listen_hits == 1) {
+    /* Só do lado do cliente: a conexão ainda na fila do servidor pode não
+     * ter linha própria; vale o dono do socket que escuta na porta
+     * conectada, desde que seja um só (dois donos = ambíguo = recusa). */
+    if (st != AH_OK && client && listen_hits == 1) {
         *pid = listen_pid;
         st = AH_OK;
     }
@@ -810,11 +849,28 @@ static ah_status peer_pid(const struct sockaddr_in *self, const struct sockaddr_
     return st;
 }
 
-ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock, bool *same) {
+ah_status ah_platform_net_peer_pid(const ah_platform_socket *sock, uint32_t *pid) {
     struct sockaddr_in self, peer;
-    TOKEN_USER *mine = NULL, *theirs = NULL;
-    HANDLE proc = NULL;
-    DWORD pid = 0;
+    DWORD p = 0;
+    ah_status st;
+
+    if (sock == NULL || pid == NULL) {
+        return AH_ERR_INVALID;
+    }
+    *pid = 0;
+    st = endpoints(sock, &self, &peer);
+    if (st != AH_OK) {
+        return st;
+    }
+    st = peer_pid(&self, &peer, sock->is_client, &p);
+    if (st == AH_OK) {
+        *pid = (uint32_t)p;
+    }
+    return st;
+}
+
+ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock, bool *same) {
+    uint32_t pid = 0;
     ah_status st;
 
     if (same == NULL) {
@@ -824,14 +880,22 @@ ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock
     if (sock == NULL) {
         return AH_ERR_INVALID;
     }
-    st = endpoints(sock, &self, &peer);
+    st = ah_platform_net_peer_pid(sock, &pid);
     if (st != AH_OK) {
         return st;
     }
-    st = peer_pid(&self, &peer, &pid);
-    if (st != AH_OK) {
-        return st;
+    return ah_platform_net_pid_is_current_user(pid, same);
+}
+
+ah_status ah_platform_net_pid_is_current_user(uint32_t pid, bool *same) {
+    TOKEN_USER *mine = NULL, *theirs = NULL;
+    HANDLE proc = NULL;
+    ah_status st;
+
+    if (same == NULL) {
+        return AH_ERR_INVALID;
     }
+    *same = false;
     if (pid == GetCurrentProcessId()) {
         *same = true;
         return AH_OK;
@@ -844,7 +908,7 @@ ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock
     if (st != AH_OK) {
         return st;
     }
-    proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
     if (proc == NULL) {
         /* Sem acesso ao processo: não dá para provar que é nosso. */
         free(mine);
@@ -867,7 +931,7 @@ ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock
  * %08X:%04X (o endereço é o valor bruto de s_addr, a porta em ordem do
  * host). */
 static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_in *peer,
-                          uid_t *uid) {
+                          bool client, uid_t *uid) {
     FILE *f;
     char line[512];
     unsigned int want_la = (unsigned int)peer->sin_addr.s_addr;
@@ -894,7 +958,7 @@ static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_
             continue;
         }
         if (state == 0x0Au) { /* TCP_LISTEN */
-            if (lp == want_lp && (la == want_la || la == 0u)) {
+            if (client && lp == want_lp && (la == want_la || la == 0u)) {
                 if (listen_hits == 0 || u != listen_uid) {
                     listen_hits++;
                 }
@@ -909,7 +973,8 @@ static ah_status peer_uid(const struct sockaddr_in *self, const struct sockaddr_
         }
     }
     fclose(f);
-    if (st != AH_OK && listen_hits == 1) {
+    /* Plano B só do lado do cliente, como no Windows (ver peer_pid). */
+    if (st != AH_OK && client && listen_hits == 1) {
         *uid = (uid_t)listen_uid;
         st = AH_OK;
     }
@@ -932,7 +997,7 @@ ah_status ah_platform_socket_peer_is_current_user(const ah_platform_socket *sock
     if (st != AH_OK) {
         return st;
     }
-    st = peer_uid(&self, &peer, &uid);
+    st = peer_uid(&self, &peer, sock->is_client, &uid);
     if (st != AH_OK) {
         return st;
     }

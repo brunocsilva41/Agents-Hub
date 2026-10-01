@@ -61,7 +61,11 @@ ah_status ah_platform_socket_accept(ah_platform_socket *listener, ah_platform_ne
 /* Conecta a 127.0.0.1:`port`, esperando no máximo `timeout_ms` pelo
  * estabelecimento (espera bloqueante por evento, sem polling). Recusa:
  * AH_ERR_IO com AH_PLATFORM_NET_REFUSED; teto vencido: AH_ERR_IO com
- * AH_PLATFORM_NET_TIMEOUT. O socket devolvido fica não bloqueante. Posse: o
+ * AH_PLATFORM_NET_TIMEOUT. No Windows o socket é configurado sem
+ * retransmissão de SYN (SIO_TCP_INITIAL_RTO), para a recusa em loopback
+ * chegar na hora e não depois de ~2 s; se o SO não aceitar a opção (a
+ * chamada falhar), a recusa pode demorar e, com teto curto, sair como
+ * TIMEOUT. O socket devolvido fica não bloqueante. Posse: o
  * chamador fecha *out com ah_platform_socket_close. */
 ah_status ah_platform_net_connect(uint16_t port, uint32_t timeout_ms,
                                   ah_platform_net_err *err, ah_platform_socket **out);

@@ -7,7 +7,9 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -30,6 +32,10 @@ struct ah_platform_loop;
 
 struct ah_platform_socket {
     ah_platform_net_fd fd;
+    /* true se veio de ah_platform_net_connect: a porta remota é a porta
+     * conectada, o que libera o plano B "dono de quem escuta" na checagem
+     * de dono (só faz sentido do lado do cliente). */
+    bool is_client;
     /* Laço em que o socket está registrado (NULL se nenhum) e posição do
      * registro; mantidos por ah_platform_loop.c. */
     struct ah_platform_loop *loop;
@@ -56,6 +62,15 @@ int ah_platform_net_poll_fds(ah_platform_net_pollfd *fds, size_t n, int timeout_
 ah_status ah_platform_net_socketpair_fds(ah_platform_net_fd *a, ah_platform_net_fd *b);
 
 void ah_platform_net_close_fd(ah_platform_net_fd fd);
+
+#ifdef _WIN32
+/* As duas metades de ah_platform_socket_peer_is_current_user no Windows,
+ * expostas à pasta e aos testes de plataforma para provar cada passo:
+ * PID do processo do outro lado (tabela TCP estendida) e comparação do SID
+ * do token desse PID com o deste processo. */
+ah_status ah_platform_net_peer_pid(const ah_platform_socket *sock, uint32_t *pid);
+ah_status ah_platform_net_pid_is_current_user(uint32_t pid, bool *same);
+#endif
 
 /* Chamado por ah_platform_socket_close para tirar o socket do laço. */
 void ah_platform_loop_forget_socket(struct ah_platform_loop *loop, ah_platform_socket *sock);

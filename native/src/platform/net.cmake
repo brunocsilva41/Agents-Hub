@@ -8,7 +8,8 @@ list(APPEND AH_PLATFORM_SOURCES
 
 if(WIN32)
   # ws2_32: Winsock. iphlpapi: GetExtendedTcpTable (dono da conexão, SEC-R12/R13).
-  list(APPEND AH_PLATFORM_LIBS ws2_32 iphlpapi)
+  # advapi32: OpenProcessToken, GetTokenInformation e EqualSid (SID do dono).
+  list(APPEND AH_PLATFORM_LIBS ws2_32 iphlpapi advapi32)
 else()
   find_package(Threads REQUIRED)
   list(APPEND AH_PLATFORM_LIBS Threads::Threads)
