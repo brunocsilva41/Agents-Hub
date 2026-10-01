@@ -12,3 +12,4 @@
 [1,2]
 {"spec":"exemplo do runner: caso sem id","entrada":1,"esperado":2}
 {"id":"ex/lote-003","spec":"exemplo do runner","entrada":1,"esperado":99,"divergencia":"prefixo da tabela; o esperado decidido (0) não é o dobro de 1"}
+{"id":"ex/notas-sem-dv-001","spec":"exemplo do runner","entrada":7,"esperado":14,"notes":"DIVERGÊNCIA CONHECIDA: exemplo sem entrada na tabela nem ID de DV no texto"}

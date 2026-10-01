@@ -58,9 +58,9 @@ typedef struct ah_itest_spawn_opts {
     const char *const *args; /* argv[1..] do filho (UTF-8); pode ser NULL se nargs == 0 */
     size_t nargs;
     /* Variáveis extras "NOME=valor" para o filho (substituem a herdada de
-     * mesmo nome). Recusadas com AH_ERR_INVALID se o NOME for AGENTS_HUB_HOME,
-     * AGENTS_HUB_PORT ou AGENTS_HUB_NO_AUTOSTART (sem diferença de caixa no
-     * Windows): o isolamento não se negocia. */
+     * mesmo nome). Recusadas com AH_ERR_INVALID se o NOME começar com
+     * AGENTS_HUB_ (sem diferença de caixa no Windows): o isolamento não se
+     * negocia e AGENTS_HUB_URL/SESSION_ID etc. poderiam apontar para o Hub real. */
     const char *const *extra_env;
     size_t n_extra_env;
 } ah_itest_spawn_opts;
@@ -129,5 +129,21 @@ ah_status ah_itest_make_dir(const char *path);
 
 /* 1 se o caminho existe (arquivo ou diretório). */
 int ah_itest_path_exists(const char *path);
+
+typedef enum ah_itest_link_kind {
+    AH_ITEST_LINK_DIR = 0, /* Windows: junção (não exige privilégio); POSIX: symlink */
+    AH_ITEST_LINK_FILE     /* Windows: link simbólico de arquivo; POSIX: symlink */
+} ah_itest_link_kind;
+
+/* Cria `link` apontando para `target` (que deve existir; caminhos UTF-8).
+ * Serve aos testes que provam que a limpeza não segue links. No Windows, link
+ * simbólico de arquivo exige modo desenvolvedor ou privilégio: sem isso,
+ * AH_ERR_IO (o teste decide o que fazer). */
+ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind);
+
+/* Remove `path` recursivamente sem seguir junções/links (um link é removido
+ * como entrada; o alvo fica intacto). Recusa caminho proibido
+ * (ah_itest_path_is_forbidden) com AH_ERR_INVALID. Inexistente = AH_OK. */
+ah_status ah_itest_remove_tree(const char *path);
 
 #endif /* AH_ITEST_H */

@@ -8,8 +8,9 @@ target_include_directories(ah_itest PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(ah_itest PUBLIC ah::core)
 if(WIN32)
   # Chamadas de SO locais até a migração para ah_platform (ver ah_itest.c):
-  # Winsock (porta livre), userenv/advapi32 (perfil real do usuário).
-  target_link_libraries(ah_itest PRIVATE ws2_32 userenv advapi32)
+  # Winsock (porta livre), userenv/advapi32 (perfil real do usuário),
+  # user32 (CharLowerBuffW, na comparação de caminhos sem caixa).
+  target_link_libraries(ah_itest PRIVATE ws2_32 userenv advapi32 user32)
 endif()
 ah_project_warnings(ah_itest)
 

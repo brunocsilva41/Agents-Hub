@@ -63,9 +63,17 @@ ah_project_warnings(conformance_exemplo)
 
 # Corpus de exemplo pelo caminho real de uso: verde passa; misto tem casos que
 # falham, então o CTest só fica verde se o executável sair != 0 (WILL_FAIL).
+# A linha RESUMO do misto é conferida num segundo registro: no CTest,
+# WILL_FAIL inverte também o resultado de PASS_REGULAR_EXPRESSION (conferido:
+# com os dois no mesmo teste ele falha com "Required regular expression
+# found"), e PASS_REGULAR_EXPRESSION sozinho ignora o código de saída. Os dois
+# registros juntos provam código de saída != 0 E o resumo esperado.
 ah_add_conformance_test(exemplo.verde conformance_exemplo runner/exemplo/verde.jsonl)
 ah_add_conformance_test(exemplo.misto conformance_exemplo runner/exemplo/misto.jsonl)
 set_tests_properties(conformance.exemplo.misto PROPERTIES WILL_FAIL TRUE)
+ah_add_conformance_test(exemplo.misto.resumo conformance_exemplo runner/exemplo/misto.jsonl)
+set_tests_properties(conformance.exemplo.misto.resumo PROPERTIES PASS_REGULAR_EXPRESSION
+  "RESUMO  misto\\.jsonl: 12 casos, 8 passaram, 3 falharam, 1 pulados; 8 com diverg[^;]*; 2 linhas inv[^;]*; 0 entradas")
 
 # Autoverificação: confere contagens e o texto do relatório caso a caso.
 set(_ah_conf_tmp "${CMAKE_CURRENT_BINARY_DIR}/selftest-tmp")

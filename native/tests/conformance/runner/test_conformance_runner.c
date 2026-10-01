@@ -101,12 +101,12 @@ static void test_misto(void) {
     join(path, sizeof path, g_exemplo_dir, "misto.jsonl");
     st = run(path, ah_conformance_exemplo_suite(), &cap, &rep);
     CHECK(st == AH_OK);
-    CHECK(rep.cases == 11);
-    CHECK(rep.passed == 7);
+    CHECK(rep.cases == 12);
+    CHECK(rep.passed == 8);
     CHECK(rep.failed == 3);
     CHECK(rep.skipped == 1);
-    CHECK(rep.divergent == 7);
-    CHECK(rep.divergent_without_dv == 1);
+    CHECK(rep.divergent == 8);
+    CHECK(rep.divergent_without_dv == 2);
     CHECK(rep.overridden == 4);
     CHECK(rep.invalid_lines == 2);
     CHECK(rep.unused_decided == 0);
@@ -129,11 +129,15 @@ static void test_misto(void) {
                     "esperado decidido (corrigir)]\n"));
     CHECK(has(&cap, "PASSOU  misto.jsonl ex/div-pt-001 [divergência sem ID de DV: \"SPEC-04 A6: "
                     "exemplo de marca sem ID de DV\"]\n"));
+    /* Marca só no texto (mappers: `notes`), sem entrada na tabela nem DV no texto. */
+    CHECK(has(&cap, "PASSOU  misto.jsonl ex/notas-sem-dv-001 [divergência sem ID de DV: "
+                    "\"DIVERGÊNCIA CONHECIDA: exemplo sem entrada na tabela nem ID de DV no "
+                    "texto\"]\n"));
     CHECK(has(&cap, "FALHOU  misto.jsonl linha 11: JSON inválido\n"));
     CHECK(has(&cap, "FALHOU  misto.jsonl linha 12: a linha não é um objeto JSON\n"));
     CHECK(has(&cap, "FALHOU  misto.jsonl linha 13: caso sem campo \"id\" (texto)\n"));
-    CHECK(has(&cap, "RESUMO  misto.jsonl: 11 casos, 7 passaram, 3 falharam, 1 pulados; 7 com "
-                    "divergência (4 com esperado decidido, 1 sem ID de DV); 2 linhas inválidas; "
+    CHECK(has(&cap, "RESUMO  misto.jsonl: 12 casos, 8 passaram, 3 falharam, 1 pulados; 8 com "
+                    "divergência (4 com esperado decidido, 2 sem ID de DV); 2 linhas inválidas; "
                     "0 entradas da tabela sem uso\n"));
     capture_free(&cap);
 }
@@ -166,6 +170,7 @@ typedef struct seen {
     int corrigir_dv09;
     int div_en_ok;
     int passa_ok;
+    int notas_sem_dv_ok;
     int calls;
 } seen;
 
@@ -184,6 +189,9 @@ static ah_conformance_verdict recording_case(const cJSON *caso,
     } else if (strcmp(info->id, "ex/div-en-001") == 0) {
         s->div_en_ok = info->dv_id != NULL && strcmp(info->dv_id, "DV-44") == 0 &&
                        info->divergence_marked == 1 && info->expected_overridden == 0;
+    } else if (strcmp(info->id, "ex/notas-sem-dv-001") == 0) {
+        s->notas_sem_dv_ok = info->divergence_marked == 1 && info->dv_id == NULL &&
+                             info->expected_overridden == 0 && info->line == 15;
     } else if (strcmp(info->id, "ex/passa-001") == 0) {
         s->passa_ok = info->dv_id == NULL && info->divergence_marked == 0 &&
                       info->expected_overridden == 0 && info->line == 1 &&
@@ -211,6 +219,36 @@ static void test_case_receives_decided_expected(void) {
     CHECK(s.corrigir_dv09 == 1);
     CHECK(s.div_en_ok == 1);
     CHECK(s.passa_ok == 1);
+    CHECK(s.notas_sem_dv_ok == 0); /* o caso não existe em verde.jsonl */
+
+    /* misto.jsonl: marca DIVERGÊNCIA CONHECIDA sem tabela chega marcada e sem DV. */
+    memset(&s, 0, sizeof s);
+    join(path, sizeof path, g_exemplo_dir, "misto.jsonl");
+    CHECK(run(path, &suite, &cap, &rep) == AH_OK);
+    CHECK(s.notas_sem_dv_ok == 1);
+    capture_free(&cap);
+}
+
+static void test_nul_byte_rejects_line(void) {
+    /* Linha 1 tem um NUL depois do JSON válido: fgets+strlen veria só o JSON
+     * e o caso passaria. A linha precisa ser recusada; a linha 2 segue. */
+    static const char data[] = "{\"id\":\"n/1\",\"entrada\":1,\"esperado\":2}\0lixo\n"
+                               "{\"id\":\"n/2\",\"entrada\":2,\"esperado\":4}\n";
+    char path[1024];
+    capture cap = {0};
+    ah_conformance_report rep;
+    ah_conformance_suite suite = {"zero", ah_conformance_exemplo_case, NULL, NULL, 0, 0};
+
+    /* Não "nul.jsonl": NUL é nome de dispositivo reservado no Windows. */
+    join(path, sizeof path, g_tmp_dir, "byte-zero.jsonl");
+    CHECK(write_file(path, data, sizeof data - 1));
+    CHECK(run(path, &suite, &cap, &rep) == AH_OK);
+    CHECK(rep.invalid_lines == 1);
+    CHECK(rep.cases == 1);
+    CHECK(rep.passed == 1);
+    CHECK(ah_conformance_exit_code(&rep) == 1);
+    CHECK(has(&cap, "FALHOU  byte-zero.jsonl linha 1: a linha contém byte NUL\n"));
+    CHECK(has(&cap, "PASSOU  byte-zero.jsonl n/2\n"));
     capture_free(&cap);
 }
 
@@ -223,9 +261,11 @@ static void test_require_dv_id(void) {
     suite.require_dv_id = 1;
     join(path, sizeof path, g_exemplo_dir, "misto.jsonl");
     CHECK(run(path, &suite, &cap, &rep) == AH_OK);
-    CHECK(rep.failed == 4);
+    CHECK(rep.failed == 5);
     CHECK(rep.passed == 6);
     CHECK(has(&cap, "FALHOU  misto.jsonl ex/div-pt-001: divergência sem ID de DV "
+                    "(require_dv_id): registre o caso na tabela do módulo [divergência sem ID"));
+    CHECK(has(&cap, "FALHOU  misto.jsonl ex/notas-sem-dv-001: divergência sem ID de DV "
                     "(require_dv_id): registre o caso na tabela do módulo [divergência sem ID"));
     capture_free(&cap);
 }
@@ -526,6 +566,7 @@ int main(int argc, char **argv) {
     test_empty_corpus_fails();
     test_line_limit();
     test_invalid_verdict_is_failure();
+    test_nul_byte_rejects_line();
     test_main_exit_codes();
     return AH_TEST_END("test_conformance_runner");
 }

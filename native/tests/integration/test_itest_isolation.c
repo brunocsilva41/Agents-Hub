@@ -399,8 +399,10 @@ static void test_hostile_parent_env(void) {
 static void test_extra_env_cannot_break_isolation(void) {
     static const char *const bad[] = {
         "AGENTS_HUB_HOME=/tmp/x", "AGENTS_HUB_PORT=4747", "AGENTS_HUB_NO_AUTOSTART=0",
+        "AGENTS_HUB_URL=http://127.0.0.1:4747", "AGENTS_HUB_SESSION_ID=ses_real",
+        "AGENTS_HUB_=x",
 #if defined(_WIN32)
-        "agents_hub_port=4747", "Agents_Hub_Home=C:\\x",
+        "agents_hub_port=4747", "Agents_Hub_Home=C:\\x", "agents_hub_url=http://127.0.0.1:4747",
 #endif
         "SEM_IGUAL", "=C:=C:\\"};
     ah_itest_env *env = NULL;
@@ -425,6 +427,9 @@ static void test_extra_env_cannot_break_isolation(void) {
         CHECK(vars == NULL);
         CHECK(ah_itest_spawn(env, g_probe, &opts, &proc) == AH_ERR_INVALID);
         CHECK(proc == NULL);
+        ah_itest_strv_free(vars);
+        /* Se o helper (com defeito) aceitar, não deixa filho vivo prendendo o home. */
+        ah_itest_proc_free(proc);
     }
     CHECK(ah_itest_env_destroy(env) == AH_OK);
 }
@@ -464,6 +469,7 @@ static void test_refuses_temp_in_forbidden_root(void) {
     err[0] = '\0';
     CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
     CHECK(env == NULL);
+    (void)ah_itest_env_destroy(env); /* no-op se recusou; limpa se o helper falhou */
     CHECK(strstr(err, "recusado") != NULL);
     CHECK(!ah_itest_path_exists(agents)); /* nada foi criado */
     env_restore(&sv);
@@ -477,6 +483,7 @@ static void test_refuses_temp_in_forbidden_root(void) {
     env = NULL;
     CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
     CHECK(env == NULL);
+    (void)ah_itest_env_destroy(env); /* no-op se recusou; limpa se o helper falhou */
     CHECK(!ah_itest_path_exists(tmp_in));
     env_restore(&sv);
 
@@ -498,6 +505,132 @@ static void test_refuses_temp_in_forbidden_root(void) {
     }
     CHECK(!ah_itest_path_exists(hub_real));
     env_restore(&sv);
+}
+
+/* ------------------------------------------------------------ links */
+
+/* Diretório-sentinela do build com um arquivo; recriado a cada execução. */
+static void make_sentinel(char *dir, size_t cap, char *file, size_t fcap, const char *name) {
+    FILE *f = NULL;
+    path_join(dir, cap, g_tmp, name);
+    CHECK(ah_itest_remove_tree(dir) == AH_OK);
+    CHECK(ah_itest_make_dir(dir) == AH_OK);
+    path_join(file, fcap, dir, "vivo.txt");
+#if defined(_MSC_VER)
+    CHECK(fopen_s(&f, file, "wb") == 0);
+#else
+    f = fopen(file, "wb");
+#endif
+    CHECK(f != NULL);
+    if (f != NULL) {
+        CHECK(fputs("sentinela\n", f) >= 0);
+        CHECK(fclose(f) == 0);
+    }
+}
+
+/* Junção (Windows) / symlink (POSIX) e link de arquivo DENTRO do home,
+ * apontando para um sentinela fora dele: o destroy remove os links e deixa o
+ * sentinela intacto. */
+static void test_destroy_does_not_follow_links(void) {
+    char sent[1024];
+    char sent_file[1200];
+    char home[4096];
+    char link[4200];
+    char sub[4200];
+    char link2[4300];
+    char via[4400];
+    char flink[4200];
+    ah_itest_env *env = NULL;
+    char err[512];
+    ah_status fst;
+
+    make_sentinel(sent, sizeof sent, sent_file, sizeof sent_file, "sentinela");
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_OK);
+    if (env == NULL) {
+        return;
+    }
+    CHECK(snprintf(home, sizeof home, "%s", ah_itest_env_home(env)) > 0);
+
+    path_join(link, sizeof link, home, "juncao");
+    CHECK(ah_itest_make_link(link, sent, AH_ITEST_LINK_DIR) == AH_OK);
+    path_join(via, sizeof via, link, "vivo.txt");
+    CHECK(ah_itest_path_exists(via)); /* o link funciona: enxerga o sentinela */
+
+    path_join(sub, sizeof sub, home, "sub");
+    CHECK(ah_itest_make_dir(sub) == AH_OK);
+    path_join(link2, sizeof link2, sub, "juncao-funda");
+    CHECK(ah_itest_make_link(link2, sent, AH_ITEST_LINK_DIR) == AH_OK);
+
+    path_join(flink, sizeof flink, home, "arquivo-link.txt");
+    fst = ah_itest_make_link(flink, sent_file, AH_ITEST_LINK_FILE);
+    if (fst != AH_OK) {
+        /* Windows sem modo desenvolvedor/privilégio: o SO recusa o symlink. */
+        printf("aviso: link simbólico de arquivo indisponível neste ambiente; "
+               "parte do teste pulada (junções testadas)\n");
+    } else {
+        CHECK(ah_itest_path_exists(flink));
+    }
+
+    CHECK(ah_itest_env_destroy(env) == AH_OK);
+    CHECK(!ah_itest_path_exists(home));
+    CHECK(ah_itest_path_exists(sent));
+    CHECK(ah_itest_path_exists(sent_file)); /* o alvo dos links sobreviveu */
+}
+
+/* TMP aponta para uma junção (Windows) / symlink (POSIX) cujo alvo é o
+ * AGENTS_HUB_HOME do pai: o helper resolve o link e recusa. */
+static void test_temp_link_into_parent_home(void) {
+    char pai[1024];
+    char pai_file[1200];
+    char juncao[1024];
+    char outro[1024];
+    char outro_file[1200];
+    saved_env sv;
+    ah_itest_env *env = NULL;
+    char err[512];
+
+    make_sentinel(pai, sizeof pai, pai_file, sizeof pai_file, "hub-do-pai-via-juncao");
+    path_join(juncao, sizeof juncao, g_tmp, "tmp-juncao-para-o-pai");
+    CHECK(ah_itest_remove_tree(juncao) == AH_OK); /* remove só o link antigo */
+    CHECK(ah_itest_make_link(juncao, pai, AH_ITEST_LINK_DIR) == AH_OK);
+
+    /* 1) AGENTS_HUB_HOME = alvo real; TMP = junção para ele: recusa. */
+    env_save(&sv);
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", pai) == AH_OK);
+    set_temp(juncao);
+    err[0] = '\0';
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
+    CHECK(env == NULL);
+    (void)ah_itest_env_destroy(env); /* no-op se recusou; limpa se o helper falhou */
+    CHECK(strstr(err, "recusado") != NULL);
+    env_restore(&sv);
+
+    /* 2) AGENTS_HUB_HOME = a junção; TMP = o alvo real: recusa (raiz resolvida). */
+    env_save(&sv);
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", juncao) == AH_OK);
+    set_temp(pai);
+    env = NULL;
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
+    CHECK(env == NULL);
+    (void)ah_itest_env_destroy(env); /* no-op se recusou; limpa se o helper falhou */
+    env_restore(&sv);
+
+    /* 3) Controle positivo: mesma junção como TMP, AGENTS_HUB_HOME em outro lugar. */
+    env_save(&sv);
+    make_sentinel(outro, sizeof outro, outro_file, sizeof outro_file, "hub-do-pai-outro");
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", outro) == AH_OK);
+    set_temp(juncao);
+    env = NULL;
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_OK);
+    if (env != NULL) {
+        CHECK(run_probe(env, NULL, NULL) == 0);
+        CHECK(ah_itest_env_destroy(env) == AH_OK);
+    }
+    env_restore(&sv);
+
+    CHECK(ah_itest_remove_tree(juncao) == AH_OK);
+    CHECK(!ah_itest_path_exists(juncao));
+    CHECK(ah_itest_path_exists(pai_file)); /* remover a junção não tocou o alvo */
 }
 
 /* ------------------------------------------------------------ processos */
@@ -570,5 +703,7 @@ int main(int argc, char **argv) {
     test_extra_env_cannot_break_isolation();
     test_refuses_temp_in_forbidden_root();
     test_kill_and_free();
+    test_destroy_does_not_follow_links();
+    test_temp_link_into_parent_home();
     return AH_TEST_END("test_itest_isolation");
 }

@@ -3,10 +3,14 @@
  * Chamadas de SO LOCAIS a este arquivo, porque ah_platform está sendo escrita
  * em paralelo. Migram para native/src/platform/ no merge (área entre
  * parênteses, conforme native/src/platform/CMakeLists.txt):
- *   (fs)   utf8 <-> UTF-16, caminho absoluto/longo canônico, diretório
- *          temporário do SO, criar diretório único, remover árvore sem seguir
- *          links, existe?, perfil do usuário (GetUserProfileDirectoryW/getpwuid);
- *   (time) ler/definir variável de ambiente, snapshot do ambiente;
+ *   (fs)   utf8 <-> UTF-16, caminho canônico (GetFinalPathNameByHandleW /
+ *          realpath, resolvendo junções e links), diretório temporário do SO,
+ *          criar diretório único, remover árvore sem seguir links, existe?,
+ *          criar junção/link (FSCTL_SET_REPARSE_POINT, CreateSymbolicLinkW,
+ *          symlink);
+ *   (time) ler/definir variável de ambiente, snapshot do ambiente, perfil do
+ *          usuário do SO (GetUserProfileDirectoryW/getpwuid) — F0-06, "ambiente
+ *          e usuário do SO";
  *   (proc) spawn com ambiente e cwd próprios, esperar, matar, código de saída;
  *   (net)  porta livre em 127.0.0.1 (bind na porta 0).
  * O que fica aqui depois da migração: a política de isolamento (raízes
@@ -18,6 +22,7 @@
 #include "ah_itest.h"
 
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +32,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <winioctl.h>
 #include <userenv.h>
 #else
 #include <arpa/inet.h>
@@ -45,9 +51,6 @@ extern char **environ;
 
 #define HUB_PREFIX "AGENTS_HUB_"
 #define HOME_DIR_PREFIX "ah-itest-"
-
-static const char *const k_isolation_vars[] = {"AGENTS_HUB_HOME", "AGENTS_HUB_PORT",
-                                               "AGENTS_HUB_NO_AUTOSTART"};
 
 struct ah_itest_env {
     char *home;
@@ -167,20 +170,6 @@ static int chr_eq(char a, char b) {
 static size_t env_name_len(const char *entry) {
     const char *eq = strchr(entry[0] == '=' ? entry + 1 : entry, '=');
     return eq == NULL ? strlen(entry) : (size_t)(eq - entry);
-}
-
-static int env_name_is(const char *entry, const char *name) {
-    size_t ln = env_name_len(entry);
-    size_t i;
-    if (ln != strlen(name)) {
-        return 0;
-    }
-    for (i = 0; i < ln; i++) {
-        if (!chr_eq(entry[i], name[i])) {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 static int env_same_name(const char *a, const char *b) {
@@ -327,8 +316,63 @@ static ah_status env_snapshot(strv *out) {
     return st;
 }
 
-/* Canoniza (absoluto, nome longo, '\\' -> '/', minúsculas, sem barra final)
- * mesmo quando o caminho ainda não existe: canoniza o pai e anexa o nome. */
+/* Caminho final de algo que existe, seguindo junções, links simbólicos e
+ * nomes 8.3 (CreateFileW com FILE_FLAG_BACKUP_SEMANTICS abre diretórios e,
+ * sem FILE_FLAG_OPEN_REPARSE_POINT, segue o reparse point até o alvo).
+ * Devolve sem o prefixo "\\?\" (ou "\\?\UNC\" -> "\\"); NULL se não abriu. */
+static wchar_t *final_path_w(const wchar_t *full) {
+    HANDLE h = CreateFileW(full, FILE_READ_ATTRIBUTES,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    DWORD n;
+    DWORD got;
+    wchar_t *buf;
+    wchar_t *res;
+    const wchar_t *src;
+    int unc = 0;
+
+    if (h == INVALID_HANDLE_VALUE) {
+        return NULL;
+    }
+    n = GetFinalPathNameByHandleW(h, NULL, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (n == 0) {
+        CloseHandle(h);
+        return NULL;
+    }
+    buf = malloc(((size_t)n + 1) * sizeof *buf);
+    if (buf == NULL) {
+        CloseHandle(h);
+        return NULL;
+    }
+    got = GetFinalPathNameByHandleW(h, buf, n + 1, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(h);
+    if (got == 0 || got > n) {
+        free(buf);
+        return NULL;
+    }
+    src = buf;
+    if (wcsncmp(buf, L"\\\\?\\UNC\\", 8) == 0) {
+        src = buf + 8;
+        unc = 1;
+    } else if (wcsncmp(buf, L"\\\\?\\", 4) == 0) {
+        src = buf + 4;
+    }
+    res = malloc((wcslen(src) + 3) * sizeof *res);
+    if (res != NULL) {
+        size_t o = 0;
+        if (unc) {
+            res[o++] = L'\\';
+            res[o++] = L'\\';
+        }
+        memcpy(res + o, src, (wcslen(src) + 1) * sizeof *res);
+    }
+    free(buf);
+    return res;
+}
+
+/* Canoniza (absoluto, caminho final com junções e links resolvidos no maior
+ * prefixo que existe, '\\' -> '/', minúsculas, sem barra final) mesmo quando
+ * o caminho ainda não existe: canoniza o pai e anexa o nome. */
 static wchar_t *canon_w(const wchar_t *path, int depth) {
     DWORD n;
     wchar_t *full;
@@ -350,13 +394,18 @@ static wchar_t *canon_w(const wchar_t *path, int depth) {
         free(full);
         return NULL;
     }
-    n = GetLongPathNameW(full, NULL, 0);
-    if (n != 0) {
-        lng = malloc((size_t)n * sizeof *lng);
-        if (lng != NULL && GetLongPathNameW(full, lng, n) != 0) {
-            res = lng;
-        } else {
-            free(lng);
+    /* Existe: caminho final com junções/links/8.3 resolvidos. */
+    res = final_path_w(full);
+    if (res == NULL && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) {
+        /* Existe, mas não abriu (ex.: acesso negado): ao menos o nome longo. */
+        n = GetLongPathNameW(full, NULL, 0);
+        if (n != 0) {
+            lng = malloc((size_t)n * sizeof *lng);
+            if (lng != NULL && GetLongPathNameW(full, lng, n) != 0) {
+                res = lng;
+            } else {
+                free(lng);
+            }
         }
     }
     if (res == NULL) {
@@ -636,6 +685,123 @@ ah_status ah_itest_make_dir(const char *path) {
     ok = CreateDirectoryW(w, NULL);
     free(w);
     return ok ? AH_OK : AH_ERR_IO;
+}
+
+/* Cabeçalho de reparse point de ponto de montagem (junção). A struct
+ * REPARSE_DATA_BUFFER fica em ntifs.h (DDK), fora do SDK de usuário; o
+ * layout abaixo é o documentado para IO_REPARSE_TAG_MOUNT_POINT. */
+typedef struct mount_point_reparse {
+    DWORD tag;
+    WORD data_length;
+    WORD reserved;
+    WORD substitute_offset;
+    WORD substitute_length;
+    WORD print_offset;
+    WORD print_length;
+    WCHAR path[1];
+} mount_point_reparse;
+
+#define MOUNT_POINT_HEADER (offsetof(mount_point_reparse, path))
+#define REPARSE_HEADER ((size_t)8) /* tag + data_length + reserved */
+#define REPARSE_MAX ((size_t)16 * 1024)
+
+#ifndef SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+#define SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE 0x2
+#endif
+
+static wchar_t *full_path_w(const wchar_t *p) {
+    DWORD n = GetFullPathNameW(p, 0, NULL, NULL);
+    wchar_t *full;
+    if (n == 0) {
+        return NULL;
+    }
+    full = malloc((size_t)n * sizeof *full);
+    if (full != NULL && GetFullPathNameW(p, n, full, NULL) == 0) {
+        free(full);
+        full = NULL;
+    }
+    return full;
+}
+
+static ah_status make_junction_w(const wchar_t *link, const wchar_t *target) {
+    size_t lt = wcslen(target);
+    size_t sub_chars = 4 + lt; /* "\??\" + alvo */
+    size_t total = MOUNT_POINT_HEADER + (sub_chars + 1 + lt + 1) * sizeof(WCHAR);
+    mount_point_reparse *rp;
+    HANDLE h;
+    DWORD ret = 0;
+    BOOL ok;
+
+    if (total > REPARSE_MAX) {
+        return AH_ERR_LIMIT;
+    }
+    rp = calloc(1, total);
+    if (rp == NULL) {
+        return AH_ERR_NOMEM;
+    }
+    rp->tag = IO_REPARSE_TAG_MOUNT_POINT;
+    rp->data_length = (WORD)(total - REPARSE_HEADER);
+    rp->substitute_offset = 0;
+    rp->substitute_length = (WORD)(sub_chars * sizeof(WCHAR));
+    rp->print_offset = (WORD)((sub_chars + 1) * sizeof(WCHAR));
+    rp->print_length = (WORD)(lt * sizeof(WCHAR));
+    memcpy(rp->path, L"\\??\\", 4 * sizeof(WCHAR));
+    memcpy(rp->path + 4, target, lt * sizeof(WCHAR));
+    memcpy(rp->path + sub_chars + 1, target, lt * sizeof(WCHAR));
+
+    if (!CreateDirectoryW(link, NULL)) {
+        free(rp);
+        return AH_ERR_IO;
+    }
+    h = CreateFileW(link, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        RemoveDirectoryW(link);
+        free(rp);
+        return AH_ERR_IO;
+    }
+    ok = DeviceIoControl(h, FSCTL_SET_REPARSE_POINT, rp, (DWORD)total, NULL, 0, &ret, NULL);
+    CloseHandle(h);
+    free(rp);
+    if (!ok) {
+        RemoveDirectoryW(link);
+        return AH_ERR_IO;
+    }
+    return AH_OK;
+}
+
+ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind) {
+    wchar_t *wl;
+    wchar_t *wt;
+    wchar_t *full = NULL;
+    ah_status st;
+
+    if (link == NULL || target == NULL) {
+        return AH_ERR_INVALID;
+    }
+    wl = to_wide(link);
+    wt = to_wide(target);
+    if (wl == NULL || wt == NULL) {
+        free(wl);
+        free(wt);
+        return AH_ERR_INVALID;
+    }
+    full = full_path_w(wt);
+    if (full == NULL || GetFileAttributesW(full) == INVALID_FILE_ATTRIBUTES) {
+        st = AH_ERR_NOT_FOUND;
+    } else if (kind == AH_ITEST_LINK_DIR) {
+        st = make_junction_w(wl, full);
+    } else if (kind == AH_ITEST_LINK_FILE) {
+        st = CreateSymbolicLinkW(wl, full, SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)
+                 ? AH_OK
+                 : AH_ERR_IO;
+    } else {
+        st = AH_ERR_INVALID;
+    }
+    free(full);
+    free(wl);
+    free(wt);
+    return st;
 }
 
 int ah_itest_path_exists(const char *path) {
@@ -1076,6 +1242,18 @@ int ah_itest_path_exists(const char *path) {
     return lstat(path, &sb) == 0;
 }
 
+ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind) {
+    struct stat sb;
+    if (link == NULL || target == NULL ||
+        (kind != AH_ITEST_LINK_DIR && kind != AH_ITEST_LINK_FILE)) {
+        return AH_ERR_INVALID;
+    }
+    if (stat(target, &sb) != 0) {
+        return AH_ERR_NOT_FOUND;
+    }
+    return symlink(target, link) == 0 ? AH_OK : AH_ERR_IO;
+}
+
 static ah_status os_free_port(void *ctx, unsigned *port) {
     int s;
     struct sockaddr_in addr;
@@ -1321,6 +1499,13 @@ int ah_itest_path_is_forbidden(const char *path) {
     return forbidden_check(path, 0);
 }
 
+ah_status ah_itest_remove_tree(const char *path) {
+    if (path == NULL || ah_itest_path_is_forbidden(path)) {
+        return AH_ERR_INVALID;
+    }
+    return remove_tree(path) ? AH_OK : AH_ERR_IO;
+}
+
 static unsigned parent_port(void) {
     char buf[32];
     char *end = NULL;
@@ -1460,7 +1645,6 @@ ah_status ah_itest_env_child_environ(const ah_itest_env *env,
     size_t n_extra = opts != NULL ? opts->n_extra_env : 0;
     size_t i;
     size_t j;
-    size_t k;
     char port_buf[16];
     ah_status st;
     int n;
@@ -1472,13 +1656,9 @@ ah_status ah_itest_env_child_environ(const ah_itest_env *env,
     *count = 0;
     for (i = 0; i < n_extra; i++) {
         const char *e = opts->extra_env[i];
-        if (e == NULL || e[0] == '=' || strchr(e, '=') == NULL) {
+        /* Nenhuma AGENTS_HUB_* vem do chamador: só as três do helper. */
+        if (e == NULL || e[0] == '=' || strchr(e, '=') == NULL || env_is_hub_var(e)) {
             return AH_ERR_INVALID;
-        }
-        for (k = 0; k < sizeof k_isolation_vars / sizeof k_isolation_vars[0]; k++) {
-            if (env_name_is(e, k_isolation_vars[k])) {
-                return AH_ERR_INVALID;
-            }
         }
     }
     st = env_snapshot(&parent);

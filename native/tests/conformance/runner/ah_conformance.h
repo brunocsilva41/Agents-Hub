@@ -17,7 +17,8 @@
 #include "ah_status.h"
 #include "cJSON.h"
 
-/* Teto de uma linha do corpus. A maior linha atual tem ~70 KB (mappers). */
+/* Teto de uma linha do corpus. A maior linha atual tem ~210 KB
+ * (mappers/claude.jsonl, medido com `wc -L`). */
 #define AH_CONFORMANCE_MAX_LINE ((size_t)16 * 1024 * 1024)
 
 /* Teto de casos por arquivo (o maior arquivo atual tem 2784 linhas). */
@@ -91,7 +92,7 @@ typedef struct ah_conformance_report {
     size_t divergent;             /* com marca no corpus ou entrada na tabela */
     size_t divergent_without_dv;  /* com marca e sem DV identificada */
     size_t overridden;            /* esperado trocado pela tabela (CORRECT) */
-    size_t invalid_lines;         /* JSON inválido ou que não é objeto */
+    size_t invalid_lines;         /* JSON inválido, não objeto ou com byte NUL */
     size_t unused_decided;        /* entradas da tabela que não casaram caso algum */
 } ah_conformance_report;
 

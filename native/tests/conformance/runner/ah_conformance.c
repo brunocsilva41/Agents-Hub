@@ -330,60 +330,102 @@ static FILE *open_read(const char *path) {
 #endif
 }
 
-/* Lê uma linha (sem '\n' e sem '\r' final) para *buf. Devolve AH_OK com
- * *eof = 1 quando não há mais nada. */
-static ah_status read_line(FILE *f, char **buf, size_t *cap, size_t *len, int *eof) {
-    *len = 0;
-    *eof = 0;
-    for (;;) {
-        size_t chunk;
-        if (*cap - *len < 2) {
-            size_t ncap = *cap == 0 ? 4096 : *cap * 2;
-            char *nb;
-            if (ncap > AH_CONFORMANCE_MAX_LINE + 2) {
-                ncap = AH_CONFORMANCE_MAX_LINE + 2;
-            }
-            if (ncap <= *cap) {
-                return AH_ERR_LIMIT;
-            }
-            nb = realloc(*buf, ncap);
-            if (nb == NULL) {
-                return AH_ERR_NOMEM;
-            }
-            *buf = nb;
-            *cap = ncap;
-        }
-        chunk = *cap - *len;
-        if (chunk > (size_t)0x7FFFFFFF) {
-            chunk = (size_t)0x7FFFFFFF;
-        }
-        if (fgets(*buf + *len, (int)chunk, f) == NULL) {
-            if (ferror(f)) {
-                return AH_ERR_IO;
-            }
-            if (*len == 0) {
-                *eof = 1;
-            }
-            break;
-        }
-        *len += strlen(*buf + *len);
-        if (*len > 0 && (*buf)[*len - 1] == '\n') {
-            (*len)--;
-            break;
-        }
-        if (*len > AH_CONFORMANCE_MAX_LINE) {
-            return AH_ERR_LIMIT;
-        }
+#define READ_CHUNK ((size_t)64 * 1024)
+
+/* Leitor de linhas por blocos (fread): conta os bytes de verdade, então um
+ * NUL no meio da linha é detectado em vez de cortar a linha em silêncio (o
+ * que fgets + strlen fariam). */
+typedef struct line_reader {
+    FILE *f;
+    unsigned char *in; /* READ_CHUNK bytes */
+    size_t pos;
+    size_t end;
+    int at_eof;
+    char *buf; /* linha atual, terminada em '\0' */
+    size_t cap;
+    size_t len;
+    int has_nul; /* a linha atual tem byte 0 */
+} line_reader;
+
+static ah_status reader_reserve(line_reader *r, size_t need) {
+    size_t ncap;
+    char *nb;
+    if (need <= r->cap) {
+        return AH_OK;
     }
-    if (*len > AH_CONFORMANCE_MAX_LINE) {
+    ncap = r->cap == 0 ? 4096 : r->cap;
+    while (ncap < need) {
+        ncap *= 2;
+    }
+    if (ncap > AH_CONFORMANCE_MAX_LINE + 2) {
+        ncap = AH_CONFORMANCE_MAX_LINE + 2;
+    }
+    if (ncap < need) {
         return AH_ERR_LIMIT;
     }
-    if (*len > 0 && (*buf)[*len - 1] == '\r') {
-        (*len)--;
+    nb = realloc(r->buf, ncap);
+    if (nb == NULL) {
+        return AH_ERR_NOMEM;
     }
-    if (*buf != NULL) {
-        (*buf)[*len] = '\0';
+    r->buf = nb;
+    r->cap = ncap;
+    return AH_OK;
+}
+
+/* Lê uma linha (sem '\n' e sem '\r' final) para r->buf. Devolve AH_OK com
+ * *eof = 1 quando não há mais nada. */
+static ah_status read_line(line_reader *r, int *eof) {
+    int got_any = 0;
+    ah_status st;
+
+    r->len = 0;
+    r->has_nul = 0;
+    *eof = 0;
+    for (;;) {
+        unsigned char c;
+        if (r->pos == r->end) {
+            if (r->at_eof) {
+                break;
+            }
+            r->end = fread(r->in, 1, READ_CHUNK, r->f);
+            r->pos = 0;
+            if (r->end == 0) {
+                if (ferror(r->f)) {
+                    return AH_ERR_IO;
+                }
+                r->at_eof = 1;
+                break;
+            }
+        }
+        c = r->in[r->pos++];
+        got_any = 1;
+        if (c == '\n') {
+            break;
+        }
+        if (r->len >= AH_CONFORMANCE_MAX_LINE) {
+            return AH_ERR_LIMIT;
+        }
+        if (c == '\0') {
+            r->has_nul = 1;
+        }
+        st = reader_reserve(r, r->len + 2);
+        if (st != AH_OK) {
+            return st;
+        }
+        r->buf[r->len++] = (char)c;
     }
+    if (!got_any) {
+        *eof = 1;
+        return AH_OK;
+    }
+    st = reader_reserve(r, r->len + 1);
+    if (st != AH_OK) {
+        return st;
+    }
+    if (r->len > 0 && r->buf[r->len - 1] == '\r') {
+        r->len--;
+    }
+    r->buf[r->len] = '\0';
     return AH_OK;
 }
 
@@ -518,10 +560,7 @@ ah_status ah_conformance_run_file(const char *jsonl_path,
                                   ah_conformance_sink_fn sink, void *sink_ctx,
                                   ah_conformance_report *out) {
     run_state rs;
-    FILE *f;
-    char *buf = NULL;
-    size_t cap = 0;
-    size_t len = 0;
+    line_reader rd;
     size_t line_no = 0;
     ah_status st = AH_OK;
     size_t i;
@@ -552,9 +591,16 @@ ah_status ah_conformance_run_file(const char *jsonl_path,
 
     /* fopen recebe o caminho como bytes; no Windows, caminho fora do code
      * page ativo exige a camada de plataforma (ver README, "Limites"). */
-    f = open_read(jsonl_path);
-    if (f == NULL) {
+    memset(&rd, 0, sizeof rd);
+    rd.in = malloc(READ_CHUNK);
+    if (rd.in == NULL) {
+        decided_free(&rs.decided);
+        return AH_ERR_NOMEM;
+    }
+    rd.f = open_read(jsonl_path);
+    if (rd.f == NULL) {
         emit(sink, sink_ctx, "ERRO: não abriu o corpus \"%s\"", jsonl_path);
+        free(rd.in);
         decided_free(&rs.decided);
         return AH_ERR_IO;
     }
@@ -567,7 +613,7 @@ ah_status ah_conformance_run_file(const char *jsonl_path,
         char *text;
         cJSON *caso;
 
-        st = read_line(f, &buf, &cap, &len, &eof);
+        st = read_line(&rd, &eof);
         if (st != AH_OK) {
             emit(sink, sink_ctx, "ERRO: %s na linha %zu de %s",
                  st == AH_ERR_LIMIT ? "linha acima do teto" : "falha de leitura",
@@ -578,8 +624,19 @@ ah_status ah_conformance_run_file(const char *jsonl_path,
             break;
         }
         line_no++;
-        text = buf;
-        if (line_no == 1 && len >= 3 && (unsigned char)text[0] == 0xEF &&
+        text = rd.buf;
+        if (rd.has_nul) {
+            /* JSON não tem byte 0 cru; seguir cortaria a linha no NUL. */
+            if (out->cases + out->invalid_lines >= AH_CONFORMANCE_MAX_CASES) {
+                st = AH_ERR_LIMIT;
+                break;
+            }
+            out->invalid_lines++;
+            emit(sink, sink_ctx, "FALHOU  %s linha %zu: a linha contém byte NUL", rs.corpus,
+                 line_no);
+            continue;
+        }
+        if (line_no == 1 && rd.len >= 3 && (unsigned char)text[0] == 0xEF &&
             (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF) {
             text += 3; /* BOM UTF-8 */
         }
@@ -608,8 +665,9 @@ ah_status ah_conformance_run_file(const char *jsonl_path,
             break;
         }
     }
-    free(buf);
-    if (fclose(f) != 0 && st == AH_OK) {
+    free(rd.buf);
+    free(rd.in);
+    if (fclose(rd.f) != 0 && st == AH_OK) {
         st = AH_ERR_IO;
     }
 

@@ -63,7 +63,8 @@ PASSOU  misto.jsonl ex/notas-001 [divergência DV-45: reproduz o TS (decidido)]
 PASSOU  misto.jsonl ex/corrigir-001 [divergência DV-09: esperado decidido (corrigir)]
 PASSOU  misto.jsonl ex/div-pt-001 [divergência sem ID de DV: "SPEC-04 A6: exemplo de marca sem ID de DV"]
 FALHOU  misto.jsonl linha 11: JSON inválido
-RESUMO  misto.jsonl: 11 casos, 7 passaram, 3 falharam, 1 pulados; 7 com divergência (4 com esperado decidido, 1 sem ID de DV); 2 linhas inválidas; 0 entradas da tabela sem uso
+PASSOU  misto.jsonl ex/notas-sem-dv-001 [divergência sem ID de DV: "DIVERGÊNCIA CONHECIDA: exemplo sem entrada na tabela nem ID de DV no texto"]
+RESUMO  misto.jsonl: 12 casos, 8 passaram, 3 falharam, 1 pulados; 8 com divergência (4 com esperado decidido, 2 sem ID de DV); 2 linhas inválidas; 0 entradas da tabela sem uso
 ```
 
 Saída do executável: `0` só se houve ao menos um caso e nenhuma falha, linha inválida ou entrada
@@ -71,7 +72,8 @@ da tabela sem uso. Corpus vazio é falha (um teste que não testa nada não pode
 Pulado não reprova, mas aparece com o motivo em cada linha e no resumo.
 
 Linhas em branco são ignoradas; `\r` final (checkout com `core.autocrlf`) e BOM UTF-8 na primeira
-linha são aceitos. Caso sem `id` (texto) é falha.
+linha são aceitos. Caso sem `id` (texto) é falha. Linha com byte NUL é recusada (linha inválida),
+em vez de ser cortada no NUL.
 
 ## Marcas de divergência
 
