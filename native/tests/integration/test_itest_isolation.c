@@ -911,6 +911,131 @@ static void test_unc_temp_refused(void) {
     CHECK(ah_itest_remove_tree(livre) == AH_OK);
 }
 
+/* Roda icacls.exe (System32) pelo próprio helper; devolve o código de saída
+ * ou -1 se não subiu. */
+static int run_icacls(const ah_itest_env *tool, const char *target, const char *op,
+                      const char *arg) {
+    char sysroot[512];
+    char exe[600];
+    const char *args[3];
+    ah_itest_spawn_opts opts;
+    ah_itest_proc *proc = NULL;
+    int code = -1;
+
+    if (ah_itest_getenv("SystemRoot", sysroot, sizeof sysroot) != AH_OK ||
+        snprintf(exe, sizeof exe, "%s\\System32\\icacls.exe", sysroot) <= 0) {
+        return -1;
+    }
+    args[0] = target;
+    args[1] = op;
+    args[2] = arg;
+    memset(&opts, 0, sizeof opts);
+    opts.args = args;
+    opts.nargs = 3;
+    if (ah_itest_spawn(tool, exe, &opts, &proc) != AH_OK) {
+        return -1;
+    }
+    if (ah_itest_proc_wait(proc, &code) != AH_OK) {
+        code = -1;
+    }
+    ah_itest_proc_free(proc);
+    return code;
+}
+
+/* Acesso negado não pode virar "não existe" (fail-open). Montagem do poc7 do
+ * revisor: AGENTS_HUB_HOME=<root>/fakehub, junção <td>/acl-J -> fakehub,
+ * deny RA no fakehub e deny RD no root. As ACLs são desfeitas sempre no fim
+ * (e no começo, se uma execução anterior foi interrompida). */
+static void test_access_denied_refused(void) {
+    char root[1024];
+    char hub[1200];
+    char j[1024];
+    char novo[1300];
+    char user[256];
+    char dom[256];
+    char who[600];
+    char deny_ra[700];
+    char deny_rd[700];
+    ah_itest_env *tool = NULL;
+    ah_itest_env *env = NULL;
+    char err[512];
+    saved_env sv;
+
+    if (ah_itest_getenv("USERNAME", user, sizeof user) != AH_OK) {
+        printf("aviso: USERNAME indisponível; teste de ACL pulado\n");
+        return;
+    }
+    if (ah_itest_getenv("USERDOMAIN", dom, sizeof dom) == AH_OK) {
+        CHECK(snprintf(who, sizeof who, "%s\\%s", dom, user) > 0);
+    } else {
+        CHECK(snprintf(who, sizeof who, "%s", user) > 0);
+    }
+    CHECK(snprintf(deny_ra, sizeof deny_ra, "%s:(RA)", who) > 0);
+    CHECK(snprintf(deny_rd, sizeof deny_rd, "%s:(RD)", who) > 0);
+
+    CHECK(ah_itest_env_create(&tool, err, sizeof err) == AH_OK);
+    if (tool == NULL) {
+        return;
+    }
+    path_join(root, sizeof root, g_tmp, "acl-root");
+    path_join(hub, sizeof hub, root, "fakehub");
+    path_join(j, sizeof j, g_tmp, "acl-J");
+    /* Limpeza de uma execução anterior interrompida. Ordem: primeiro o root
+     * (com deny RD nele, o icacls não processa o fakehub), depois o fakehub. */
+    if (ah_itest_path_exists(root)) {
+        (void)run_icacls(tool, root, "/remove:d", who);
+    }
+    if (ah_itest_path_exists(hub)) {
+        (void)run_icacls(tool, hub, "/remove:d", who);
+    }
+    CHECK(ah_itest_remove_tree(j) == AH_OK);
+    CHECK(ah_itest_remove_tree(root) == AH_OK);
+    CHECK(ah_itest_make_dir(root) == AH_OK);
+    CHECK(ah_itest_make_dir(hub) == AH_OK);
+    CHECK(ah_itest_make_link(j, hub, AH_ITEST_LINK_DIR) == AH_OK);
+    path_join(novo, sizeof novo, j, "novo");
+
+    env_save(&sv);
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", hub) == AH_OK);
+
+    /* Sem deny: recusado, como antes. */
+    CHECK(ah_itest_path_is_forbidden(j) == 1);
+    CHECK(ah_itest_path_is_forbidden(novo) == 1);
+    CHECK(ah_itest_remove_tree(novo) == AH_ERR_INVALID);
+    set_temp(j);
+    env = NULL;
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
+    CHECK(env == NULL);
+    (void)ah_itest_env_destroy(env);
+
+    /* Com deny: continua recusado (antes: forbidden 0 e home criado). */
+    if (run_icacls(tool, hub, "/deny", deny_ra) == 0 &&
+        run_icacls(tool, root, "/deny", deny_rd) == 0) {
+        CHECK(ah_itest_path_is_forbidden(j) == 1);
+        CHECK(ah_itest_path_is_forbidden(novo) == 1);
+        CHECK(ah_itest_remove_tree(novo) == AH_ERR_INVALID);
+        env = NULL;
+        CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
+        if (env != NULL) {
+            fprintf(stderr, "  acesso negado aceito: home %s\n", ah_itest_env_home(env));
+        }
+        CHECK(env == NULL);
+        (void)ah_itest_env_destroy(env);
+    } else {
+        printf("aviso: icacls não aplicou o deny; parte com ACL pulada\n");
+    }
+    env_restore(&sv);
+
+    /* Desfaz as ACLs SEMPRE, antes de qualquer outra coisa (root primeiro). */
+    CHECK(run_icacls(tool, root, "/remove:d", who) == 0);
+    CHECK(run_icacls(tool, hub, "/remove:d", who) == 0);
+    CHECK(ah_itest_dir_entry_count(hub) == 0); /* nada foi criado no fakehub */
+    CHECK(ah_itest_remove_tree(j) == AH_OK);
+    CHECK(ah_itest_remove_tree(root) == AH_OK);
+    CHECK(!ah_itest_path_exists(root));
+    CHECK(ah_itest_env_destroy(tool) == AH_OK);
+}
+
 /* ':' depois da letra de drive (fluxo alternativo / $INDEX_ALLOCATION) é
  * recusado antes de chegar ao NTFS. */
 static void test_alternate_stream_refused(void) {
@@ -1020,6 +1145,7 @@ int main(int argc, char **argv) {
 #if defined(_WIN32)
     test_unc_temp_refused();
     test_alternate_stream_refused();
+    test_access_denied_refused();
 #endif
     CHECK(ah_itest_set_test_dir(NULL) == AH_OK);
     return AH_TEST_END("test_itest_isolation");

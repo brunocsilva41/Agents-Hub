@@ -107,10 +107,18 @@ void ah_itest_strv_free(char **v);
  * texto não pega (UNC local "\\localhost\C$\...", bind mount). No Windows,
  * falha fechado: caminho cujo canônico não começa com letra de drive (UNC,
  * device, "\\?\UNC\") ou que tem ':' fora do drive (fluxo alternativo) é
- * proibido. Em dúvida (falha ao canonizar ou ao montar a cadeia), devolve 1.
+ * proibido. Em dúvida, devolve 1: falha ao canonizar; ancestral que existe
+ * mas não abre (acesso negado ou outro erro que não seja "não existe": só
+ * ERROR_FILE_NOT_FOUND/ERROR_PATH_NOT_FOUND e ENOENT/ENOTDIR contam como
+ * ausente); junção/link que existe e não resolve.
  * Risco residual: a identidade só vale para prefixos que existem; um alias
  * de algo que ainda não existe depende da comparação de texto. O caminho POSIX
- * (bind mount incluído) não foi verificado em Linux. */
+ * (bind mount incluído) não foi verificado em Linux.
+ * Lacuna conhecida: a camada de identidade não tem teste exclusivo. Sem
+ * privilégio não há alias que só ela pegue (subst e 8.3 o texto canônico já
+ * resolve; hard link é só de arquivo). A prova dela é a mutação B da revisão
+ * do 00c4949 (com o fail-closed desligado, a identidade sozinha recusou os
+ * três UNC locais) e o poc6 do revisor. */
 int ah_itest_path_is_forbidden(const char *path);
 
 /* Fonte de porta candidata. A padrão (NULL) pede ao SO uma porta livre em
@@ -139,6 +147,9 @@ ah_status ah_itest_make_dir(const char *path);
 
 /* 1 se o caminho existe (arquivo ou diretório). */
 int ah_itest_path_exists(const char *path);
+
+/* Número de entradas do diretório (sem "." e ".."); -1 se não abriu. */
+long ah_itest_dir_entry_count(const char *dir);
 
 typedef enum ah_itest_link_kind {
     AH_ITEST_LINK_DIR = 0, /* Windows: junção (não exige privilégio); POSIX: symlink */

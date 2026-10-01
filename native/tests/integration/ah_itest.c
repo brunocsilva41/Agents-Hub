@@ -36,6 +36,7 @@
 #include <userenv.h>
 #else
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <errno.h>
 #include <ftw.h>
 #include <netinet/in.h>
@@ -396,15 +397,31 @@ static wchar_t *canon_w(const wchar_t *path, int depth) {
     }
     /* Existe: caminho final com junções/links/8.3 resolvidos. */
     res = final_path_w(full);
-    if (res == NULL && GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES) {
-        /* Existe, mas não abriu (ex.: acesso negado): ao menos o nome longo. */
-        n = GetLongPathNameW(full, NULL, 0);
-        if (n != 0) {
-            lng = malloc((size_t)n * sizeof *lng);
-            if (lng != NULL && GetLongPathNameW(full, lng, n) != 0) {
-                res = lng;
-            } else {
-                free(lng);
+    if (res == NULL) {
+        DWORD attr = GetFileAttributesW(full);
+        if (attr == INVALID_FILE_ATTRIBUTES) {
+            DWORD e = GetLastError();
+            if (e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) {
+                /* Nem o atributo se lê (acesso negado...): em dúvida, recusa. */
+                free(full);
+                return NULL;
+            }
+            /* Não existe: segue abaixo (pai canônico + nome). */
+        } else if (attr & FILE_ATTRIBUTE_REPARSE_POINT) {
+            /* Existe, é junção/link e o alvo não abriu: não dá para saber
+             * para onde aponta. Em dúvida, recusa (não usa o nome longo). */
+            free(full);
+            return NULL;
+        } else {
+            /* Existe, não é link, mas não abriu: ao menos o nome longo. */
+            n = GetLongPathNameW(full, NULL, 0);
+            if (n != 0) {
+                lng = malloc((size_t)n * sizeof *lng);
+                if (lng != NULL && GetLongPathNameW(full, lng, n) != 0) {
+                    res = lng;
+                } else {
+                    free(lng);
+                }
             }
         }
     }
@@ -846,15 +863,19 @@ typedef struct file_ident {
     int kind; /* 0 = FileIdInfo (128 bits); 1 = BY_HANDLE_FILE_INFORMATION */
 } file_ident;
 
+/* 1 = identidade lida; 0 = não existe (ERROR_FILE_NOT_FOUND /
+ * ERROR_PATH_NOT_FOUND); -1 = qualquer outro erro (acesso negado...), que faz
+ * a cadeia falhar: em dúvida, recusa. */
 static int ident_of_w(const wchar_t *p, file_ident *out) {
     HANDLE h = CreateFileW(p, FILE_READ_ATTRIBUTES,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     FILE_ID_INFO fid;
     BY_HANDLE_FILE_INFORMATION bhi;
-    int ok = 0;
+    int ok = -1;
     if (h == INVALID_HANDLE_VALUE) {
-        return 0;
+        DWORD e = GetLastError();
+        return (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) ? 0 : -1;
     }
     memset(out, 0, sizeof *out);
     if (GetFileInformationByHandleEx(h, FileIdInfo, &fid, sizeof fid)) {
@@ -897,7 +918,15 @@ static ah_status ident_chain(const char *path, file_ident **out, size_t *n, int 
         file_ident id;
         size_t len;
         wchar_t *slash;
-        if (ident_of_w(cur, &id)) {
+        int r = ident_of_w(cur, &id);
+        if (r < 0) {
+            free(cur);
+            free(*out);
+            *out = NULL;
+            *n = 0;
+            return AH_ERR_IO;
+        }
+        if (r > 0) {
             if (*n == cap) {
                 size_t ncap = cap == 0 ? 16 : cap * 2;
                 file_ident *nv = realloc(*out, ncap * sizeof *nv);
@@ -993,6 +1022,39 @@ int ah_itest_path_exists(const char *path) {
     attr = GetFileAttributesW(w);
     free(w);
     return attr != INVALID_FILE_ATTRIBUTES;
+}
+
+long ah_itest_dir_entry_count(const char *dir) {
+    wchar_t *w = to_wide(dir);
+    wchar_t *pattern;
+    size_t lw;
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    long count = 0;
+    if (w == NULL) {
+        return -1;
+    }
+    lw = wcslen(w);
+    pattern = malloc((lw + 3) * sizeof *pattern);
+    if (pattern == NULL) {
+        free(w);
+        return -1;
+    }
+    memcpy(pattern, w, lw * sizeof *pattern);
+    memcpy(pattern + lw, L"\\*", 3 * sizeof *pattern);
+    free(w);
+    h = FindFirstFileW(pattern, &fd);
+    free(pattern);
+    if (h == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    do {
+        if (wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
+            count++;
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return count;
 }
 
 static ah_status os_free_port(void *ctx, unsigned *port) {
@@ -1292,6 +1354,16 @@ static char *canon_depth(const char *path, int depth) {
     if (r != NULL) {
         return r;
     }
+    {
+        int e = errno;
+        struct stat lsb;
+        if (e != ENOENT && e != ENOTDIR) {
+            return NULL; /* EACCES, ELOOP...: em dúvida, recusa */
+        }
+        if (lstat(path, &lsb) == 0) {
+            return NULL; /* existe (ex.: link pendente) e não resolve: recusa */
+        }
+    }
     copy = str_dup(path);
     if (copy == NULL) {
         return NULL;
@@ -1427,6 +1499,22 @@ int ah_itest_path_exists(const char *path) {
     return lstat(path, &sb) == 0;
 }
 
+long ah_itest_dir_entry_count(const char *dir) {
+    DIR *d = opendir(dir);
+    struct dirent *e;
+    long count = 0;
+    if (d == NULL) {
+        return -1;
+    }
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
+            count++;
+        }
+    }
+    closedir(d);
+    return count;
+}
+
 /* ---- identidade de arquivo (st_dev + st_ino) ----
  * Pega bind mounts e links nos prefixos que existem (o realpath não vê bind
  * mount). */
@@ -1436,11 +1524,13 @@ typedef struct file_ident {
     int kind;
 } file_ident;
 
+/* 1 = lida; 0 = não existe (ENOENT/ENOTDIR); -1 = outro erro (EACCES,
+ * ELOOP...): a cadeia falha e o chamador recusa. */
 static int ident_of(const char *p, file_ident *out) {
     struct stat sb;
     unsigned long long ino;
     if (stat(p, &sb) != 0) { /* segue links: identidade do alvo */
-        return 0;
+        return (errno == ENOENT || errno == ENOTDIR) ? 0 : -1;
     }
     memset(out, 0, sizeof *out);
     out->vol = (unsigned long long)sb.st_dev;
@@ -1468,7 +1558,15 @@ static ah_status ident_chain(const char *path, file_ident **out, size_t *n, int 
         file_ident id;
         size_t len;
         char *slash;
-        if (ident_of(cur, &id)) {
+        int r = ident_of(cur, &id);
+        if (r < 0) {
+            free(cur);
+            free(*out);
+            *out = NULL;
+            *n = 0;
+            return AH_ERR_IO;
+        }
+        if (r > 0) {
             if (*n == cap) {
                 size_t ncap = cap == 0 ? 16 : cap * 2;
                 file_ident *nv = realloc(*out, ncap * sizeof *nv);
