@@ -101,8 +101,16 @@ void ah_itest_strv_free(char **v);
  * HOMEDRIVE+HOMEPATH) ou o AGENTS_HUB_HOME do ambiente pai. Compara caminhos
  * canônicos (junções e links resolvidos; no Windows, sem diferença de caixa)
  * em duas formas: totalmente resolvida e como entrada (pai resolvido + último
- * nome literal), para que <raiz>/link-para-fora continue proibido.
- * Em dúvida (falha ao canonizar), devolve 1. */
+ * nome literal), para que <raiz>/link-para-fora continue proibido. Também
+ * compara a IDENTIDADE de arquivo dos ancestrais que existem (Windows: volume
+ * + file id de 128 bits; POSIX: st_dev + st_ino), o que pega aliases que o
+ * texto não pega (UNC local "\\localhost\C$\...", bind mount). No Windows,
+ * falha fechado: caminho cujo canônico não começa com letra de drive (UNC,
+ * device, "\\?\UNC\") ou que tem ':' fora do drive (fluxo alternativo) é
+ * proibido. Em dúvida (falha ao canonizar ou ao montar a cadeia), devolve 1.
+ * Risco residual: a identidade só vale para prefixos que existem; um alias
+ * de algo que ainda não existe depende da comparação de texto. O caminho POSIX
+ * (bind mount incluído) não foi verificado em Linux. */
 int ah_itest_path_is_forbidden(const char *path);
 
 /* Fonte de porta candidata. A padrão (NULL) pede ao SO uma porta livre em

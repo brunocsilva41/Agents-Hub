@@ -811,6 +811,122 @@ static void test_remove_tree_trailing_separator(void) {
     CHECK(ah_itest_remove_tree(alvo) == AH_OK);
 }
 
+#if defined(_WIN32)
+/* "<prefixo><D>$\resto" a partir de "D:\resto" ou "D:/resto". */
+static int unc_of(char *out, size_t cap, const char *prefix, const char *drive_path) {
+    int n;
+    size_t i;
+    if (!(drive_path[0] != '\0' && drive_path[1] == ':' &&
+          (drive_path[2] == '/' || drive_path[2] == '\\'))) {
+        return 0;
+    }
+    n = snprintf(out, cap, "%s%c$\\%s", prefix, drive_path[0], drive_path + 3);
+    if (n < 0 || (size_t)n >= cap) {
+        return 0;
+    }
+    for (i = 0; out[i] != '\0'; i++) {
+        if (out[i] == '/') {
+            out[i] = '\\';
+        }
+    }
+    return 1;
+}
+
+/* TMP por UNC local (share administrativo) que leva ao AGENTS_HUB_HOME do
+ * pai: recusado. UNC em geral é recusado (fail closed). */
+static void test_unc_temp_refused(void) {
+    static const char *const prefixes[] = {"\\\\localhost\\", "\\\\?\\UNC\\localhost\\",
+                                           "\\\\127.0.0.1\\"};
+    char hub[1024];
+    char hub_file[1200];
+    char livre[1024];
+    char livre_file[1200];
+    char ok_tmp[1024];
+    char unc[1400];
+    char unc_sub[1500];
+    saved_env sv;
+    ah_itest_env *env = NULL;
+    char err[512];
+    size_t k;
+
+    make_sentinel(hub, sizeof hub, hub_file, sizeof hub_file, "fakehub-unc");
+    make_sentinel(livre, sizeof livre, livre_file, sizeof livre_file, "tmp-unc-livre");
+    CHECK(unc_of(unc, sizeof unc, prefixes[0], hub));
+    if (!ah_itest_path_exists(unc)) {
+        printf("aviso: share administrativo %c$ indisponível via \\\\localhost; "
+               "casos UNC pulados\n",
+               hub[0]);
+        return;
+    }
+
+    env_save(&sv);
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", hub) == AH_OK);
+    for (k = 0; k < sizeof prefixes / sizeof prefixes[0]; k++) {
+        CHECK(unc_of(unc, sizeof unc, prefixes[k], hub));
+        if (!ah_itest_path_exists(unc)) {
+            printf("aviso: %s... não acessível; caso pulado\n", prefixes[k]);
+            continue;
+        }
+        CHECK(ah_itest_path_is_forbidden(unc) == 1);
+        CHECK(snprintf(unc_sub, sizeof unc_sub, "%s\\x", unc) > 0);
+        CHECK(ah_itest_path_is_forbidden(unc_sub) == 1);
+        set_temp(unc);
+        env = NULL;
+        err[0] = '\0';
+        CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
+        if (env != NULL) {
+            fprintf(stderr, "  UNC aceito como TMP: %s -> %s\n", unc, ah_itest_env_home(env));
+        }
+        CHECK(env == NULL);
+        (void)ah_itest_env_destroy(env);
+    }
+    env_restore(&sv);
+
+    /* Fail closed: UNC para um diretório sem relação com raiz alguma também é
+     * recusado. */
+    env_save(&sv);
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", NULL) == AH_OK);
+    CHECK(unc_of(unc, sizeof unc, prefixes[0], livre));
+    set_temp(unc);
+    env = NULL;
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_ERR_INVALID);
+    CHECK(env == NULL);
+    (void)ah_itest_env_destroy(env);
+    env_restore(&sv);
+
+    /* Controle: TMP normal (letra de drive) funciona. */
+    env_save(&sv);
+    scratch_dir(ok_tmp, sizeof ok_tmp, "tmp-unc-controle");
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", hub) == AH_OK);
+    set_temp(ok_tmp);
+    env = NULL;
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_OK);
+    if (env != NULL) {
+        CHECK(run_probe(env, NULL, NULL) == 0);
+        CHECK(ah_itest_env_destroy(env) == AH_OK);
+    }
+    env_restore(&sv);
+    CHECK(ah_itest_path_exists(hub_file));
+    CHECK(ah_itest_remove_tree(hub) == AH_OK);
+    CHECK(ah_itest_remove_tree(livre) == AH_OK);
+}
+
+/* ':' depois da letra de drive (fluxo alternativo / $INDEX_ALLOCATION) é
+ * recusado antes de chegar ao NTFS. */
+static void test_alternate_stream_refused(void) {
+    char p[1200];
+    path_join(p, sizeof p, g_tmp, "..::$INDEX_ALLOCATION");
+    CHECK(ah_itest_remove_tree(p) == AH_ERR_INVALID);
+    CHECK(ah_itest_path_is_forbidden(p) == 1);
+    path_join(p, sizeof p, g_tmp, "x:fluxo");
+    CHECK(ah_itest_remove_tree(p) == AH_ERR_INVALID);
+    CHECK(ah_itest_path_is_forbidden(p) == 1);
+    path_join(p, sizeof p, g_tmp, "x::$DATA");
+    CHECK(ah_itest_remove_tree(p) == AH_ERR_INVALID);
+    CHECK(ah_itest_path_exists(g_tmp));
+}
+#endif
+
 static void test_make_link_relative_target_refused(void) {
     char link[1200];
     path_join(link, sizeof link, g_tmp, "link-relativo");
@@ -901,6 +1017,10 @@ int main(int argc, char **argv) {
     test_make_link_relative_target_refused();
     test_remove_tree_relative_refused();
     test_remove_tree_trailing_separator();
+#if defined(_WIN32)
+    test_unc_temp_refused();
+    test_alternate_stream_refused();
+#endif
     CHECK(ah_itest_set_test_dir(NULL) == AH_OK);
     return AH_TEST_END("test_itest_isolation");
 }

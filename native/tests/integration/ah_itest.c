@@ -826,9 +826,127 @@ static char *normalize_abs(const char *path) {
     while (len > 3 && (full[len - 1] == L'\\' || full[len - 1] == L'/')) {
         full[--len] = L'\0';
     }
+    /* ':' só como separador do drive ("X:"). Qualquer outro é fluxo alternativo
+     * (ADS, "nome::$INDEX_ALLOCATION") ou forma de device: recusa já aqui. */
+    if (wcschr(full + 2, L':') != NULL || (full[0] != L'\0' && full[1] != L':' &&
+                                           wcschr(full, L':') != NULL)) {
+        free(full);
+        return NULL;
+    }
     u = to_utf8(full);
     free(full);
     return u;
+}
+
+/* ---- identidade de arquivo (volume + file id) ----
+ * Texto não basta: "\\localhost\C$\x" e "C:\x" são o mesmo diretório. */
+typedef struct file_ident {
+    unsigned long long vol;
+    unsigned char id[16];
+    int kind; /* 0 = FileIdInfo (128 bits); 1 = BY_HANDLE_FILE_INFORMATION */
+} file_ident;
+
+static int ident_of_w(const wchar_t *p, file_ident *out) {
+    HANDLE h = CreateFileW(p, FILE_READ_ATTRIBUTES,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    FILE_ID_INFO fid;
+    BY_HANDLE_FILE_INFORMATION bhi;
+    int ok = 0;
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    memset(out, 0, sizeof *out);
+    if (GetFileInformationByHandleEx(h, FileIdInfo, &fid, sizeof fid)) {
+        out->vol = fid.VolumeSerialNumber;
+        memcpy(out->id, fid.FileId.Identifier, sizeof out->id);
+        out->kind = 0;
+        ok = 1;
+    } else if (GetFileInformationByHandle(h, &bhi)) {
+        unsigned long long idx =
+            ((unsigned long long)bhi.nFileIndexHigh << 32) | bhi.nFileIndexLow;
+        out->vol = bhi.dwVolumeSerialNumber;
+        memcpy(out->id, &idx, sizeof idx);
+        out->kind = 1;
+        ok = 1;
+    }
+    CloseHandle(h);
+    return ok;
+}
+
+/* Identidades do caminho e de todos os ancestrais textuais que existem
+ * (abrir segue junções e links: um ancestral que é link para a raiz tem a
+ * identidade da raiz). *leaf = 1 se o próprio caminho existe (out[0]). */
+static ah_status ident_chain(const char *path, file_ident **out, size_t *n, int *leaf) {
+    wchar_t *w = to_wide(path);
+    wchar_t *cur;
+    size_t cap = 0;
+    int depth;
+    *out = NULL;
+    *n = 0;
+    *leaf = 0;
+    if (w == NULL) {
+        return AH_ERR_INVALID;
+    }
+    cur = full_path_w(w);
+    free(w);
+    if (cur == NULL) {
+        return AH_ERR_INVALID;
+    }
+    for (depth = 0; depth < 256; depth++) {
+        file_ident id;
+        size_t len;
+        wchar_t *slash;
+        if (ident_of_w(cur, &id)) {
+            if (*n == cap) {
+                size_t ncap = cap == 0 ? 16 : cap * 2;
+                file_ident *nv = realloc(*out, ncap * sizeof *nv);
+                if (nv == NULL) {
+                    free(cur);
+                    free(*out);
+                    *out = NULL;
+                    *n = 0;
+                    return AH_ERR_NOMEM;
+                }
+                *out = nv;
+                cap = ncap;
+            }
+            if (depth == 0) {
+                *leaf = 1;
+            }
+            (*out)[(*n)++] = id;
+        }
+        len = wcslen(cur);
+        while (len > 0 && (cur[len - 1] == L'\\' || cur[len - 1] == L'/')) {
+            cur[--len] = L'\0';
+        }
+        slash = wcsrchr(cur, L'\\');
+        if (slash == NULL || slash <= cur + 1) {
+            break; /* "X:" ou "\\" — acabou */
+        }
+        if (slash == cur + 2 && cur[1] == L':') {
+            if (len == 3) {
+                break; /* já era "X:\" */
+            }
+            slash[1] = L'\0'; /* "X:\a" -> "X:\" */
+        } else {
+            *slash = L'\0';
+        }
+    }
+    free(cur);
+    return AH_OK;
+}
+
+/* Fail closed: só caminhos canônicos com letra de drive ("x:/..."). UNC
+ * ("//srv/share"), device e "\\?\UNC\" (que canon devolve como "//...") são
+ * recusados: a identidade pela rede pode não bater e o texto nunca bate. */
+static int location_refused(const char *canon_form) {
+    const char *c = canon_form;
+    if (!(((c[0] >= 'a' && c[0] <= 'z') || (c[0] >= 'A' && c[0] <= 'Z')) && c[1] == ':' &&
+          c[2] == '/')) {
+        return 1;
+    }
+    return strchr(c + 2, ':') != NULL; /* ':' fora do drive: fluxo alternativo */
 }
 
 ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind) {
@@ -1309,6 +1427,89 @@ int ah_itest_path_exists(const char *path) {
     return lstat(path, &sb) == 0;
 }
 
+/* ---- identidade de arquivo (st_dev + st_ino) ----
+ * Pega bind mounts e links nos prefixos que existem (o realpath não vê bind
+ * mount). */
+typedef struct file_ident {
+    unsigned long long vol;
+    unsigned char id[16];
+    int kind;
+} file_ident;
+
+static int ident_of(const char *p, file_ident *out) {
+    struct stat sb;
+    unsigned long long ino;
+    if (stat(p, &sb) != 0) { /* segue links: identidade do alvo */
+        return 0;
+    }
+    memset(out, 0, sizeof *out);
+    out->vol = (unsigned long long)sb.st_dev;
+    ino = (unsigned long long)sb.st_ino;
+    memcpy(out->id, &ino, sizeof ino);
+    out->kind = 0;
+    return 1;
+}
+
+static ah_status ident_chain(const char *path, file_ident **out, size_t *n, int *leaf) {
+    char *cur;
+    size_t cap = 0;
+    int depth;
+    *out = NULL;
+    *n = 0;
+    *leaf = 0;
+    if (path == NULL || path[0] != '/') {
+        return AH_ERR_INVALID; /* relativo: o chamador falha fechado */
+    }
+    cur = str_dup(path);
+    if (cur == NULL) {
+        return AH_ERR_NOMEM;
+    }
+    for (depth = 0; depth < 4096; depth++) {
+        file_ident id;
+        size_t len;
+        char *slash;
+        if (ident_of(cur, &id)) {
+            if (*n == cap) {
+                size_t ncap = cap == 0 ? 16 : cap * 2;
+                file_ident *nv = realloc(*out, ncap * sizeof *nv);
+                if (nv == NULL) {
+                    free(cur);
+                    free(*out);
+                    *out = NULL;
+                    *n = 0;
+                    return AH_ERR_NOMEM;
+                }
+                *out = nv;
+                cap = ncap;
+            }
+            if (depth == 0) {
+                *leaf = 1;
+            }
+            (*out)[(*n)++] = id;
+        }
+        len = strlen(cur);
+        while (len > 1 && cur[len - 1] == '/') {
+            cur[--len] = '\0';
+        }
+        if (len <= 1) {
+            break; /* "/" */
+        }
+        slash = strrchr(cur, '/');
+        if (slash == cur) {
+            cur[1] = '\0';
+        } else {
+            *slash = '\0';
+        }
+    }
+    free(cur);
+    return AH_OK;
+}
+
+/* POSIX: o canônico sempre começa com '/'; nada a recusar por formato. */
+static int location_refused(const char *canon_form) {
+    return canon_form[0] != '/';
+}
+
 /* Normaliza UMA vez o caminho que remove_tree vai receber: exige absoluto,
  * recusa componente "." ou ".." (o kernel e o texto poderiam divergir) e tira
  * as barras finais: "lnk/" faria lstat/nftw seguirem o link. A mesma string
@@ -1620,10 +1821,9 @@ static ah_status push_root(strv *out, const char *raw) {
     return strv_push(out, e);
 }
 
-/* Raízes proibidas canônicas: <home>/.agents-hub de cada home do usuário e o
- * AGENTS_HUB_HOME do ambiente, cada uma nas duas formas. Falha ao canonizar =
- * erro (o chamador recusa). */
-static ah_status forbidden_roots(strv *out) {
+/* Raízes proibidas como o usuário/ambiente as dá (sem canonizar):
+ * <home>/.agents-hub de cada home do usuário e o AGENTS_HUB_HOME do ambiente. */
+static ah_status raw_roots(strv *out) {
     strv homes = {0};
     ah_status st = user_homes(&homes);
     size_t i;
@@ -1631,12 +1831,10 @@ static ah_status forbidden_roots(strv *out) {
 
     for (i = 0; st == AH_OK && i < homes.n; i++) {
 #if defined(_WIN32)
-        char *raw = str_cat3(homes.v[i], "\\", ".agents-hub");
+        st = strv_push(out, str_cat3(homes.v[i], "\\", ".agents-hub"));
 #else
-        char *raw = str_cat3(homes.v[i], "/", ".agents-hub");
+        st = strv_push(out, str_cat3(homes.v[i], "/", ".agents-hub"));
 #endif
-        st = raw != NULL ? push_root(out, raw) : AH_ERR_NOMEM;
-        free(raw);
     }
     strv_dispose(&homes);
     if (st != AH_OK) {
@@ -1644,20 +1842,84 @@ static ah_status forbidden_roots(strv *out) {
     }
     hub_home = env_get("AGENTS_HUB_HOME");
     if (hub_home != NULL && hub_home[0] != '\0') {
-        st = push_root(out, hub_home);
+        return strv_push(out, hub_home);
     }
     free(hub_home);
+    return AH_OK;
+}
+
+/* Raízes proibidas canônicas, cada uma nas duas formas. Falha ao canonizar =
+ * erro (o chamador recusa). */
+static ah_status forbidden_roots(const strv *raw, strv *out) {
+    ah_status st = AH_OK;
+    size_t i;
+    for (i = 0; st == AH_OK && i < raw->n; i++) {
+        st = push_root(out, raw->v[i]);
+    }
     return st;
+}
+
+static int ident_eq(const file_ident *a, const file_ident *b) {
+    return a->kind == b->kind && a->vol == b->vol && memcmp(a->id, b->id, sizeof a->id) == 0;
+}
+
+static int ident_in(const file_ident *x, const file_ident *v, size_t n) {
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (ident_eq(x, &v[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Comparação por IDENTIDADE (volume + file id / st_dev + st_ino), que pega o
+ * que o texto não pega (UNC local "\\localhost\C$", bind mount): `path` está
+ * sob uma raiz que existe se algum ancestral existente dele É a raiz; uma raiz
+ * está sob `path` (quando ele existe) se algum ancestral da raiz É ele.
+ * Falha ao montar a cadeia = recusa. */
+static int ident_related(const char *path, const strv *raw, int allow_ancestor) {
+    file_ident *cc = NULL;
+    size_t nc = 0;
+    int leaf_c = 0;
+    int bad = 0;
+    size_t i;
+
+    if (ident_chain(path, &cc, &nc, &leaf_c) != AH_OK) {
+        return 1;
+    }
+    for (i = 0; i < raw->n && !bad; i++) {
+        file_ident *cr = NULL;
+        size_t nr = 0;
+        int leaf_r = 0;
+        if (ident_chain(raw->v[i], &cr, &nr, &leaf_r) != AH_OK) {
+            bad = 1;
+            break;
+        }
+        if (leaf_r && ident_in(&cr[0], cc, nc)) {
+            bad = 1; /* path é a raiz ou está dentro dela */
+        }
+        if (!allow_ancestor && leaf_c && ident_in(&cc[0], cr, nr)) {
+            bad = 1; /* a raiz está dentro de path */
+        }
+        free(cr);
+    }
+    free(cc);
+    return bad;
 }
 
 /* allow_ancestor = 1: `path` pode conter uma raiz (usado só para a base
  * temporária, onde o home novo nasce como subdiretório vazio).
  *
- * Cada caminho é comparado em DUAS formas: totalmente resolvida (canon) e
- * como entrada (canon_entry: pai resolvido + último nome como texto). A
- * segunda é o que remove_tree apaga: <raiz>/lnk, com lnk sendo junção/link
- * para fora, resolve para fora, mas a entrada lnk está DENTRO da raiz. */
+ * Três camadas, qualquer uma recusa:
+ * 1. texto canônico em DUAS formas: totalmente resolvida (canon) e como
+ *    entrada (canon_entry: pai resolvido + último nome literal, o que
+ *    remove_tree apaga: <raiz>/lnk para fora continua dentro da raiz);
+ * 2. local fora do formato esperado (Windows: só "x:/..."; UNC, device e
+ *    fluxo alternativo ':' são recusados — fail closed);
+ * 3. identidade de arquivo dos ancestrais (ident_related). */
 static int forbidden_check(const char *path, int allow_ancestor) {
+    strv raw = {0};
     strv roots = {0};
     char *forms[2];
     int bad = 0;
@@ -1669,9 +1931,11 @@ static int forbidden_check(const char *path, int allow_ancestor) {
     }
     forms[0] = canon(path);
     forms[1] = canon_entry(path);
-    if (forms[0] == NULL || forms[1] == NULL || forbidden_roots(&roots) != AH_OK) {
+    if (forms[0] == NULL || forms[1] == NULL || raw_roots(&raw) != AH_OK ||
+        forbidden_roots(&raw, &roots) != AH_OK) {
         free(forms[0]);
         free(forms[1]);
+        strv_dispose(&raw);
         strv_dispose(&roots);
         return 1;
     }
@@ -1683,8 +1947,13 @@ static int forbidden_check(const char *path, int allow_ancestor) {
             }
         }
     }
+    if (!bad) {
+        bad = location_refused(forms[0]) || location_refused(forms[1]) ||
+              ident_related(path, &raw, allow_ancestor);
+    }
     free(forms[0]);
     free(forms[1]);
+    strv_dispose(&raw);
     strv_dispose(&roots);
     return bad;
 }
