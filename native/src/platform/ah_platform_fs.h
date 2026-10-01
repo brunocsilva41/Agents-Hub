@@ -113,9 +113,14 @@ ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
  * arquivo regular nem diretório. POSIX: 0600 (arquivo) ou 0700 (diretório).
  * Windows: pelo handle aberto sem seguir o link, troca a DACL pela DACL
  * protegida só com o SID do usuário (em diretório, a ACE é herdável) e,
- * depois, o dono por esse SID, só se o dono atual for outro. Assim funciona
- * também num arquivo do próprio usuário cuja DACL não lhe dá controle total
- * (o dono tem WRITE_DAC implícito, mas não WRITE_OWNER).
+ * depois, põe esse SID como dono. A troca de dono roda sempre, e para o
+ * próprio SID não muda nada. Ela reabre o objeto pelo nome, com
+ * WRITE_OWNER, e recusa com erro se o nome passou a apontar para outro
+ * objeto ou para um reparse point. Assim funciona também num arquivo do
+ * próprio usuário cuja DACL não lhe dá controle total (o dono tem
+ * WRITE_DAC implícito, mas não WRITE_OWNER). Se a troca do dono falhar, o
+ * erro é devolvido, mas a DACL privada já ficou aplicada: o objeto fica
+ * mais restrito do que antes, não menos.
  *
  * Diretório: só o próprio diretório fica privado. Nada garante que os
  * filhos fiquem. No Windows, o SO recalcula as ACEs HERDADAS dos filhos a

@@ -615,13 +615,54 @@ static ah_status open_no_follow(const wchar_t *w, DWORD access, HANDLE *out,
     return AH_OK;
 }
 
+/* Os dois handles apontam para o mesmo objeto do sistema de arquivos? */
+static ah_status same_object(HANDLE a, HANDLE b, bool *same) {
+    BY_HANDLE_FILE_INFORMATION ia, ib;
+
+    *same = false;
+    if (!GetFileInformationByHandle(a, &ia) ||
+        !GetFileInformationByHandle(b, &ib)) {
+        ah_status st = status_from_win32(GetLastError());
+        return st == AH_OK ? AH_ERR_IO : st;
+    }
+    *same = ia.dwVolumeSerialNumber == ib.dwVolumeSerialNumber &&
+            ia.nFileIndexHigh == ib.nFileIndexHigh &&
+            ia.nFileIndexLow == ib.nFileIndexLow &&
+            (ib.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+    return AH_OK;
+}
+
+/* Põe o SID do usuário como dono do objeto já aberto em `h` (nome `w`).
+ * Precisa de WRITE_OWNER, que o dono não tem implícito. Por isso o objeto
+ * é reaberto pelo nome DEPOIS de a DACL privada dar controle total ao
+ * usuário. O ReOpenFile seria o natural, mas falha com acesso negado em
+ * handle de diretório. Como o nome pode ter sido trocado entre as duas
+ * aberturas (por um link, por exemplo), confere que é o mesmo objeto
+ * (volume + índice do arquivo) e que não é reparse point. */
+static ah_status set_owner_by_name(const wchar_t *w, HANDLE h,
+                                   PSID user_sid) {
+    HANDLE ho;
+    DWORD attrs = 0, err;
+    bool same = false;
+    ah_status st;
+
+    st = open_no_follow(w, WRITE_OWNER, &ho, &attrs);
+    if (st != AH_OK) return st;
+    st = same_object(h, ho, &same);
+    if (st == AH_OK && !same) st = AH_ERR_IO;
+    if (st == AH_OK) {
+        err = SetSecurityInfo(ho, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION,
+                              user_sid, NULL, NULL, NULL);
+        if (err != ERROR_SUCCESS) st = status_from_win32(err);
+    }
+    CloseHandle(ho);
+    return st;
+}
+
 ah_status ah_platform_fs_restrict(const char *path) {
     wchar_t *w = NULL;
-    HANDLE h = INVALID_HANDLE_VALUE, ho;
-    PSID owner = NULL;
-    PSECURITY_DESCRIPTOR owner_sd = NULL;
+    HANDLE h = INVALID_HANDLE_VALUE;
     DWORD attrs = 0, err;
-    bool owner_ok;
     private_sd psd;
     ah_status st;
 
@@ -634,56 +675,45 @@ ah_status ah_platform_fs_restrict(const char *path) {
      * total. READ_CONTROL: o SetSecurityInfo lê o descritor atual para
      * recalcular a herança. */
     st = open_no_follow(w, READ_CONTROL | WRITE_DAC, &h, &attrs);
-    free(w);
-    if (st != AH_OK) return st;
+    if (st != AH_OK) {
+        free(w);
+        return st;
+    }
 
     /* Link simbólico ou junction: recusado, como o O_NOFOLLOW do POSIX.
      * Restringir o link não protege o alvo, e seguir o link restringiria
      * um objeto que o chamador não nomeou. */
     if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
         CloseHandle(h);
+        free(w);
         return AH_ERR_INVALID;
     }
     st = private_sd_init(&psd, (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0);
     if (st != AH_OK) {
         CloseHandle(h);
+        free(w);
         return st;
     }
-    err = GetSecurityInfo(h, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION,
-                          &owner, NULL, NULL, NULL, &owner_sd);
-    if (err != ERROR_SUCCESS) {
-        private_sd_free(&psd);
-        CloseHandle(h);
-        return status_from_win32(err);
-    }
-    owner_ok = owner != NULL && EqualSid(owner, psd.user->User.Sid);
-    LocalFree(owner_sd);
 
     /* Primeiro a DACL (só o usuário, com controle total)... */
     err = SetSecurityInfo(h, SE_FILE_OBJECT,
                           DACL_SECURITY_INFORMATION |
                               PROTECTED_DACL_SECURITY_INFORMATION,
                           NULL, NULL, psd.acl, NULL);
-    if (err == ERROR_SUCCESS && !owner_ok) {
-        /* ...depois o dono, só se ainda não for o usuário. Agora a DACL dá
-         * WRITE_OWNER ao usuário. ReOpenFile reabre o MESMO objeto (sem
-         * passar pelo nome de novo, logo sem corrida com troca de link). */
-        ho = ReOpenFile(h, WRITE_OWNER,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                        FILE_FLAG_OPEN_REPARSE_POINT |
-                            FILE_FLAG_BACKUP_SEMANTICS);
-        if (ho == INVALID_HANDLE_VALUE) {
-            err = GetLastError();
-        } else {
-            err = SetSecurityInfo(ho, SE_FILE_OBJECT,
-                                  OWNER_SECURITY_INFORMATION,
-                                  psd.user->User.Sid, NULL, NULL, NULL);
-            CloseHandle(ho);
-        }
+    if (err != ERROR_SUCCESS) {
+        st = status_from_win32(err);
+    } else {
+        /* ...depois o dono. Roda SEMPRE, mesmo quando o dono já é o
+         * usuário: para o próprio SID a troca não muda nada, e assim essa
+         * etapa passa por todo teste de restrict, em vez de só pelo caso
+         * raro de dono alheio. A DACL recém-aplicada garante WRITE_OWNER;
+         * se mesmo assim falhar, é erro real e é devolvido. */
+        st = set_owner_by_name(w, h, psd.user->User.Sid);
     }
     private_sd_free(&psd);
     CloseHandle(h);
-    return err == ERROR_SUCCESS ? AH_OK : status_from_win32(err);
+    free(w);
+    return st;
 }
 
 ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted) {
