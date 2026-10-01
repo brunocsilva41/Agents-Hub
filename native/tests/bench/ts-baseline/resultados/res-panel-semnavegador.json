@@ -1,0 +1,440 @@
+{
+  "wsBase": {
+    "n": 5,
+    "med": 71.6,
+    "min": 71.3,
+    "max": 72.1,
+    "p90": 72.1,
+    "all": [
+      71.3,
+      71.6,
+      72.1,
+      71.7,
+      71.6
+    ]
+  },
+  "privBase": {
+    "n": 5,
+    "med": 53.8,
+    "min": 53.3,
+    "max": 54.9,
+    "p90": 54.9,
+    "all": [
+      53.3,
+      54.9,
+      54.2,
+      53.8,
+      53.8
+    ]
+  },
+  "wsAfterHttp": {
+    "n": 5,
+    "med": 74.5,
+    "min": 74.2,
+    "max": 74.7,
+    "p90": 74.7,
+    "all": [
+      74.5,
+      74.7,
+      74.5,
+      74.2,
+      74.3
+    ]
+  },
+  "privAfterHttp": {
+    "n": 5,
+    "med": 87.3,
+    "min": 86.7,
+    "max": 88,
+    "p90": 88,
+    "all": [
+      86.7,
+      88,
+      87.8,
+      87.3,
+      86.8
+    ]
+  },
+  "wsAfterBrowser": null,
+  "privAfterBrowser": null,
+  "wsAfterReload": null,
+  "privAfterReload": null,
+  "peakWs": {
+    "n": 5,
+    "med": 74.5,
+    "min": 74.2,
+    "max": 74.7,
+    "p90": 74.7,
+    "all": [
+      74.5,
+      74.7,
+      74.5,
+      74.2,
+      74.3
+    ]
+  },
+  "pageLoadMs": null,
+  "browserErr": [
+    "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+    "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+    "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+    "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+    "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following"
+  ],
+  "coldLat": {
+    "GET /": {
+      "n": 5,
+      "med": 9.5,
+      "min": 7.5,
+      "max": 10.1,
+      "p90": 10.1,
+      "all": [
+        9.5,
+        10.1,
+        8,
+        9.5,
+        7.5
+      ]
+    },
+    "bytes /": 467,
+    "GET /health": {
+      "n": 5,
+      "med": 1.5,
+      "min": 1.5,
+      "max": 2.4,
+      "p90": 2.4,
+      "all": [
+        1.8,
+        1.5,
+        2.4,
+        1.5,
+        1.5
+      ]
+    },
+    "GET /agents": {
+      "n": 5,
+      "med": 578.3,
+      "min": 547.4,
+      "max": 601.2,
+      "p90": 601.2,
+      "all": [
+        591.8,
+        567.1,
+        601.2,
+        578.3,
+        547.4
+      ]
+    },
+    "GET /projects": {
+      "n": 5,
+      "med": 2.3,
+      "min": 2.2,
+      "max": 2.5,
+      "p90": 2.5,
+      "all": [
+        2.2,
+        2.2,
+        2.3,
+        2.5,
+        2.5
+      ]
+    },
+    "GET /sessions": {
+      "n": 5,
+      "med": 1.6,
+      "min": 1.5,
+      "max": 2.1,
+      "p90": 2.1,
+      "all": [
+        1.6,
+        1.6,
+        2,
+        1.5,
+        2.1
+      ]
+    },
+    "GET /approvals": {
+      "n": 5,
+      "med": 1.6,
+      "min": 1.5,
+      "max": 1.9,
+      "p90": 1.9,
+      "all": [
+        1.5,
+        1.6,
+        1.7,
+        1.6,
+        1.9
+      ]
+    },
+    "GET /workflows/runs": {
+      "n": 5,
+      "med": 1.5,
+      "min": 1.3,
+      "max": 2.6,
+      "p90": 2.6,
+      "all": [
+        1.4,
+        1.3,
+        1.6,
+        1.5,
+        2.6
+      ]
+    }
+  },
+  "hotMed": {
+    "/health": {
+      "n": 5,
+      "med": 1,
+      "min": 0.9,
+      "max": 1,
+      "p90": 1,
+      "all": [
+        1,
+        1,
+        0.9,
+        0.9,
+        1
+      ]
+    },
+    "/sessions": {
+      "n": 5,
+      "med": 1.1,
+      "min": 1.1,
+      "max": 1.2,
+      "p90": 1.2,
+      "all": [
+        1.2,
+        1.1,
+        1.1,
+        1.1,
+        1.1
+      ]
+    },
+    "/projects": {
+      "n": 5,
+      "med": 1,
+      "min": 1,
+      "max": 1.1,
+      "p90": 1.1,
+      "all": [
+        1.1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "/approvals": {
+      "n": 5,
+      "med": 1,
+      "min": 1,
+      "max": 1.2,
+      "p90": 1.2,
+      "all": [
+        1.2,
+        1,
+        1,
+        1,
+        1.1
+      ]
+    }
+  },
+  "runs": [
+    {
+      "m0": {
+        "wsMB": 71.3,
+        "privMB": 53.3,
+        "peakWsMB": 71.5,
+        "cpuMs": 906.25,
+        "threads": 13,
+        "handles": 267
+      },
+      "m1": {
+        "wsMB": 74.5,
+        "privMB": 86.7,
+        "peakWsMB": 74.5,
+        "cpuMs": 1171.875,
+        "threads": 17,
+        "handles": 271
+      },
+      "m2": null,
+      "m3": null,
+      "lat": {
+        "GET /": 9.465900000010151,
+        "bytes /": 467,
+        "GET /health": 1.767200000002049,
+        "GET /agents": 591.8159999999916,
+        "GET /projects": 2.225399999995716,
+        "GET /sessions": 1.5654999999969732,
+        "GET /approvals": 1.527700000006007,
+        "GET /workflows/runs": 1.4284000000043306
+      },
+      "hotMed": {
+        "/health": 1,
+        "/sessions": 1.2,
+        "/projects": 1.1,
+        "/approvals": 1.2
+      },
+      "pageLoadMs": null,
+      "browserErr": "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+      "shutdown": 200
+    },
+    {
+      "m0": {
+        "wsMB": 71.6,
+        "privMB": 54.9,
+        "peakWsMB": 71.6,
+        "cpuMs": 796.875,
+        "threads": 13,
+        "handles": 267
+      },
+      "m1": {
+        "wsMB": 74.7,
+        "privMB": 88,
+        "peakWsMB": 74.7,
+        "cpuMs": 1109.375,
+        "threads": 17,
+        "handles": 271
+      },
+      "m2": null,
+      "m3": null,
+      "lat": {
+        "GET /": 10.083800000022165,
+        "bytes /": 467,
+        "GET /health": 1.51490000000922,
+        "GET /agents": 567.1098999999813,
+        "GET /projects": 2.1506999999983236,
+        "GET /sessions": 1.5864999999757856,
+        "GET /approvals": 1.5916999999899417,
+        "GET /workflows/runs": 1.3377000000327826
+      },
+      "hotMed": {
+        "/health": 1,
+        "/sessions": 1.1,
+        "/projects": 1,
+        "/approvals": 1
+      },
+      "pageLoadMs": null,
+      "browserErr": "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+      "shutdown": 200
+    },
+    {
+      "m0": {
+        "wsMB": 72.1,
+        "privMB": 54.2,
+        "peakWsMB": 72.1,
+        "cpuMs": 875,
+        "threads": 13,
+        "handles": 267
+      },
+      "m1": {
+        "wsMB": 74.5,
+        "privMB": 87.8,
+        "peakWsMB": 74.5,
+        "cpuMs": 1156.25,
+        "threads": 17,
+        "handles": 271
+      },
+      "m2": null,
+      "m3": null,
+      "lat": {
+        "GET /": 7.978199999954086,
+        "bytes /": 467,
+        "GET /health": 2.4152999999932945,
+        "GET /agents": 601.1657000000123,
+        "GET /projects": 2.319100000022445,
+        "GET /sessions": 1.989099999947939,
+        "GET /approvals": 1.6982000000425614,
+        "GET /workflows/runs": 1.5741999999736436
+      },
+      "hotMed": {
+        "/health": 0.9,
+        "/sessions": 1.1,
+        "/projects": 1,
+        "/approvals": 1
+      },
+      "pageLoadMs": null,
+      "browserErr": "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+      "shutdown": 200
+    },
+    {
+      "m0": {
+        "wsMB": 71.7,
+        "privMB": 53.8,
+        "peakWsMB": 71.7,
+        "cpuMs": 796.875,
+        "threads": 13,
+        "handles": 267
+      },
+      "m1": {
+        "wsMB": 74.2,
+        "privMB": 87.3,
+        "peakWsMB": 74.2,
+        "cpuMs": 1109.375,
+        "threads": 17,
+        "handles": 271
+      },
+      "m2": null,
+      "m3": null,
+      "lat": {
+        "GET /": 9.548100000014529,
+        "bytes /": 467,
+        "GET /health": 1.4824999999837019,
+        "GET /agents": 578.2870999999577,
+        "GET /projects": 2.479100000055041,
+        "GET /sessions": 1.4956000000238419,
+        "GET /approvals": 1.6100000000442378,
+        "GET /workflows/runs": 1.4617999999900348
+      },
+      "hotMed": {
+        "/health": 0.9,
+        "/sessions": 1.1,
+        "/projects": 1,
+        "/approvals": 1
+      },
+      "pageLoadMs": null,
+      "browserErr": "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+      "shutdown": 200
+    },
+    {
+      "m0": {
+        "wsMB": 71.6,
+        "privMB": 53.8,
+        "peakWsMB": 71.6,
+        "cpuMs": 812.5,
+        "threads": 13,
+        "handles": 267
+      },
+      "m1": {
+        "wsMB": 74.3,
+        "privMB": 86.8,
+        "peakWsMB": 74.3,
+        "cpuMs": 1156.25,
+        "threads": 17,
+        "handles": 271
+      },
+      "m2": null,
+      "m3": null,
+      "lat": {
+        "GET /": 7.5458000000217,
+        "bytes /": 467,
+        "GET /health": 1.4748999999719672,
+        "GET /agents": 547.3859999999986,
+        "GET /projects": 2.5438999999896623,
+        "GET /sessions": 2.062000000034459,
+        "GET /approvals": 1.9084999999613501,
+        "GET /workflows/runs": 2.5550000000512227
+      },
+      "hotMed": {
+        "/health": 1,
+        "/sessions": 1.1,
+        "/projects": 1,
+        "/approvals": 1.1
+      },
+      "pageLoadMs": null,
+      "browserErr": "browserType.launch: Executable doesn't exist at E:\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following",
+      "shutdown": 200
+    }
+  ]
+}

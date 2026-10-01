@@ -1,0 +1,397 @@
+{
+  "freshHealthMs": {
+    "n": 7,
+    "med": 880.9,
+    "min": 844.8,
+    "max": 1096,
+    "p90": 1096,
+    "all": [
+      985.9,
+      868.4,
+      844.8,
+      880.9,
+      869,
+      1096,
+      923.8
+    ]
+  },
+  "freshWs2s": {
+    "n": 7,
+    "med": 78.7,
+    "min": 78.4,
+    "max": 79.2,
+    "p90": 79.2,
+    "all": [
+      78.7,
+      78.9,
+      79.2,
+      78.5,
+      78.5,
+      79.1,
+      78.4
+    ]
+  },
+  "freshPriv2s": {
+    "n": 7,
+    "med": 55.5,
+    "min": 54.6,
+    "max": 55.8,
+    "p90": 55.8,
+    "all": [
+      55.7,
+      55.5,
+      55.6,
+      55.3,
+      54.6,
+      55.8,
+      55.4
+    ]
+  },
+  "freshLogMs": {
+    "n": 7,
+    "med": 0,
+    "min": 0,
+    "max": 0,
+    "p90": 0,
+    "all": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "warmHealthMs": {
+    "n": 5,
+    "med": 818.4,
+    "min": 807,
+    "max": 851.4,
+    "p90": 851.4,
+    "all": [
+      822.2,
+      818.4,
+      809.7,
+      807,
+      851.4
+    ]
+  },
+  "warmLogMs": {
+    "n": 5,
+    "med": 0,
+    "min": 0,
+    "max": 0,
+    "p90": 0,
+    "all": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "ws2s": {
+    "n": 5,
+    "med": 78.3,
+    "min": 78,
+    "max": 78.5,
+    "p90": 78.5,
+    "all": [
+      78.3,
+      78.1,
+      78,
+      78.4,
+      78.5
+    ]
+  },
+  "priv2s": {
+    "n": 5,
+    "med": 55.3,
+    "min": 55,
+    "max": 55.6,
+    "p90": 55.6,
+    "all": [
+      55.1,
+      55.5,
+      55,
+      55.6,
+      55.3
+    ]
+  },
+  "ws62s": {
+    "n": 5,
+    "med": 60.9,
+    "min": 60.9,
+    "max": 61.1,
+    "p90": 61.1,
+    "all": [
+      60.9,
+      61,
+      61.1,
+      60.9,
+      60.9
+    ]
+  },
+  "priv62s": {
+    "n": 5,
+    "med": 38,
+    "min": 37.5,
+    "max": 38.2,
+    "p90": 38.2,
+    "all": [
+      37.8,
+      38.2,
+      38.1,
+      38,
+      37.5
+    ]
+  },
+  "cpuIdleMsIn60s": {
+    "n": 5,
+    "med": 109.4,
+    "min": 78.1,
+    "max": 156.3,
+    "p90": 156.3,
+    "all": [
+      156.3,
+      78.1,
+      78.1,
+      156.3,
+      109.4
+    ]
+  },
+  "threads": {
+    "n": 5,
+    "med": 12,
+    "min": 12,
+    "max": 12,
+    "p90": 12,
+    "all": [
+      12,
+      12,
+      12,
+      12,
+      12
+    ]
+  },
+  "handles": {
+    "n": 5,
+    "med": 258,
+    "min": 258,
+    "max": 258,
+    "p90": 258,
+    "all": [
+      258,
+      258,
+      258,
+      258,
+      258
+    ]
+  },
+  "children": [
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "shutdownMs": {
+    "n": 5,
+    "med": 140.7,
+    "min": 134.1,
+    "max": 148.9,
+    "p90": 148.9,
+    "all": [
+      134.1,
+      141,
+      136.5,
+      148.9,
+      140.7
+    ]
+  },
+  "freshMem": [
+    {
+      "wsMB": 78.7,
+      "privMB": 55.7,
+      "peakWsMB": 78.7,
+      "cpuMs": 1046.875,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 168.18819999997504
+    },
+    {
+      "wsMB": 78.9,
+      "privMB": 55.5,
+      "peakWsMB": 78.9,
+      "cpuMs": 906.25,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 158.71230000001378
+    },
+    {
+      "wsMB": 79.2,
+      "privMB": 55.6,
+      "peakWsMB": 79.2,
+      "cpuMs": 906.25,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 160.75900000002002
+    },
+    {
+      "wsMB": 78.5,
+      "privMB": 55.3,
+      "peakWsMB": 78.5,
+      "cpuMs": 890.625,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 151.30819999997038
+    },
+    {
+      "wsMB": 78.5,
+      "privMB": 54.6,
+      "peakWsMB": 79.7,
+      "cpuMs": 843.75,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 161.959899999958
+    },
+    {
+      "wsMB": 79.1,
+      "privMB": 55.8,
+      "peakWsMB": 79.1,
+      "cpuMs": 1312.5,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 144.18559999996796
+    },
+    {
+      "wsMB": 78.4,
+      "privMB": 55.4,
+      "peakWsMB": 78.4,
+      "cpuMs": 984.375,
+      "threads": 13,
+      "handles": 267,
+      "tLog": null,
+      "shutdownMs": 150.26539999997476
+    }
+  ],
+  "idle": [
+    {
+      "t2s": {
+        "wsMB": 78.3,
+        "privMB": 55.1,
+        "peakWsMB": 78.3,
+        "cpuMs": 812.5,
+        "threads": 12,
+        "handles": 258
+      },
+      "t62s": {
+        "wsMB": 60.9,
+        "privMB": 37.8,
+        "peakWsMB": 81.2,
+        "cpuMs": 968.75,
+        "threads": 9,
+        "handles": 257
+      },
+      "cpuIdleMsIn60s": 156.3,
+      "children": 1,
+      "shutdownMs": 134.1,
+      "tLog": null
+    },
+    {
+      "t2s": {
+        "wsMB": 78.1,
+        "privMB": 55.5,
+        "peakWsMB": 78.1,
+        "cpuMs": 1109.375,
+        "threads": 12,
+        "handles": 258
+      },
+      "t62s": {
+        "wsMB": 61,
+        "privMB": 38.2,
+        "peakWsMB": 80.9,
+        "cpuMs": 1187.5,
+        "threads": 9,
+        "handles": 257
+      },
+      "cpuIdleMsIn60s": 78.1,
+      "children": 1,
+      "shutdownMs": 141,
+      "tLog": null
+    },
+    {
+      "t2s": {
+        "wsMB": 78,
+        "privMB": 55,
+        "peakWsMB": 78,
+        "cpuMs": 843.75,
+        "threads": 12,
+        "handles": 258
+      },
+      "t62s": {
+        "wsMB": 61.1,
+        "privMB": 38.1,
+        "peakWsMB": 81.4,
+        "cpuMs": 921.875,
+        "threads": 9,
+        "handles": 257
+      },
+      "cpuIdleMsIn60s": 78.1,
+      "children": 1,
+      "shutdownMs": 136.5,
+      "tLog": null
+    },
+    {
+      "t2s": {
+        "wsMB": 78.4,
+        "privMB": 55.6,
+        "peakWsMB": 78.4,
+        "cpuMs": 937.5,
+        "threads": 12,
+        "handles": 258
+      },
+      "t62s": {
+        "wsMB": 60.9,
+        "privMB": 38,
+        "peakWsMB": 80.2,
+        "cpuMs": 1093.75,
+        "threads": 9,
+        "handles": 257
+      },
+      "cpuIdleMsIn60s": 156.3,
+      "children": 1,
+      "shutdownMs": 148.9,
+      "tLog": null
+    },
+    {
+      "t2s": {
+        "wsMB": 78.5,
+        "privMB": 55.3,
+        "peakWsMB": 78.5,
+        "cpuMs": 906.25,
+        "threads": 12,
+        "handles": 258
+      },
+      "t62s": {
+        "wsMB": 60.9,
+        "privMB": 37.5,
+        "peakWsMB": 81.7,
+        "cpuMs": 1015.625,
+        "threads": 9,
+        "handles": 257
+      },
+      "cpuIdleMsIn60s": 109.4,
+      "children": 1,
+      "shutdownMs": 140.7,
+      "tLog": null
+    }
+  ]
+}

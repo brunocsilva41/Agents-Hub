@@ -52,20 +52,24 @@ sozinho.
 | `native/spikes/` | protótipos descartáveis; não entram no produto (PROPOSTA) |
 | `packages/` | TS congelado (especificação). Só leitura |
 
-Em 2026-09-30 `native/` tem só `native/spikes/`; o resto da árvore é criado pelo esqueleto da
-fase F0 do plano.
+O esqueleto da fase F0 (CMake, presets, bibliotecas em `native/third_party/` com versão e hash em
+`VERSIONS.md`, CI em `.github/workflows/native.yml`) já existe; as demais pastas de `native/src/`
+são criadas pelas tarefas do plano.
 
 ## Comandos
 
-**Todos a confirmar pelo esqueleto F0.** Até lá, não invente flags, presets nem alvos.
+Dentro de `native/`. No Windows, depois de
+`call "<VS>\VC\Auxiliary\Build\vcvars64.bat"` (CMake e Ninja vêm do VS Build Tools). Presets em
+`native/CMakePresets.json`: `windows-msvc-debug`, `windows-msvc-release`, `windows-clangcl-asan`,
+`linux-gcc-debug`, `linux-clang-asan`. Não invente flags, presets nem alvos.
 
 | Ação | Comando | Estado |
 |---|---|---|
-| Configurar | `cmake` + Ninja sobre `native/` (ADR 8.3) | a confirmar pelo esqueleto F0 |
-| Compilar | `cmake --build <dir>` | a confirmar pelo esqueleto F0 |
-| Testar | runner de testes do CMake | a confirmar pelo esqueleto F0 |
-| Formatar | `clang-format` (PROPOSTA em `docs/18-padroes-c.md`) | a confirmar pelo esqueleto F0 |
-| Bench de desempenho | procedimento do plano (especificação 06) | a confirmar pelo plano |
+| Configurar | `cmake --preset <preset>` | verificado no Windows (2026-09-30); Linux só no CI |
+| Compilar | `cmake --build --preset <preset>` | verificado no Windows; Linux só no CI |
+| Testar | `ctest --preset <preset>` | verificado no Windows; Linux só no CI |
+| Formatar | `clang-format` (PROPOSTA em `docs/18-padroes-c.md`) | a confirmar |
+| Bench de desempenho | procedimento do plano (especificação 06); harness da linha de base TS em `native/tests/bench/ts-baseline/` | a confirmar pelo plano (DA-05) |
 
 O TS continua compilável para gerar referência (`npm ci`, `npm run verify`, ver
 CONTRIBUTING.md), mas sem mudança de código.

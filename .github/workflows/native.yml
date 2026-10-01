@@ -1,0 +1,161 @@
+# Build e testes da reescrita nativa em C (native/, ADR 07/08).
+#
+# Cada combinação configura, compila e roda o ctest com o preset de mesmo nome
+# em native/CMakePresets.json. Nenhum passo é opcional: falha em qualquer um
+# (configurar, compilar, testar, checkout sujo) falha o job.
+#
+# Compiladores (ADR 8.2): MSVC no Windows (Debug e Release, o Release é o do
+# produto), clang-cl com ASan+UBSan no Windows (o MSVC não tem UBSan) e, no
+# Ubuntu 22.04 (base do AppImage, ADR 8.14), GCC Debug e Clang, ambos com
+# ASan+UBSan (docs/18 §10). O job `portão nativo` é o único check a exigir.
+name: native
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Menor privilégio: nada aqui escreve no repositório.
+permissions:
+  contents: read
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  windows:
+    name: native (${{ matrix.preset }})
+    # Imagem fixa (não windows-latest): a troca silenciosa da imagem mudaria
+    # compilador, CMake e LLVM sem nenhum commit no repositório.
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [windows-msvc-debug, windows-msvc-release, windows-clangcl-asan]
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ninja + cl/clang-cl precisam do ambiente do vcvars64 (INCLUDE, LIB,
+      # PATH). Exporta esse ambiente para os passos seguintes sem action de
+      # terceiro.
+      - name: Ambiente MSVC (vcvars64)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw "Visual Studio com VC Tools x64 não encontrado" }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
+          $envDump = cmd /c "`"$vcvars`" >nul && set"
+          if ($LASTEXITCODE -ne 0) { throw "vcvars64.bat falhou" }
+          foreach ($line in $envDump) {
+            if ($line -match '^([^=]+)=(.*)$') { "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+          }
+
+      - name: Versões das ferramentas
+        shell: cmd
+        run: |
+          cmake --version || exit /b 1
+          ninja --version || exit /b 1
+          where clang-cl || exit /b 1
+          if "${{ matrix.preset }}"=="windows-clangcl-asan" (clang-cl --version || exit /b 1) else (cl)
+
+      - name: Configurar
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Compilar
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Testar
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Checkout continua limpo depois do build e dos testes
+        shell: bash
+        run: |
+          sujeira="$(git status --porcelain)"
+          if [ -n "$sujeira" ]; then
+            echo "::error::build/test alterou arquivos rastreados pelo git"
+            echo "$sujeira"
+            exit 1
+          fi
+
+  linux:
+    name: native (${{ matrix.preset }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-gcc-debug, linux-clang-asan]
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ninja não é garantido na imagem do Ubuntu; vem do repositório da distro.
+      - name: Instalar Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Versões das ferramentas
+        run: |
+          cmake --version
+          ninja --version
+          gcc --version
+          clang --version
+
+      - name: Configurar
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Compilar
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      # O ASan de LLVM < 18 trava ao iniciar em kernels com
+      # vm.mmap_rnd_bits=32; o Clang padrão do Ubuntu 22.04 é anterior a isso.
+      # Os dois presets Linux usam ASan (o do GCC também, docs/18 §10), e o
+      # libasan do GCC 11 vem do mesmo compiler-rt antigo, por isso o passo vale
+      # para ambos. NÃO confirmado neste runner: é precaução. O runner é
+      # descartável, então o sysctl não afeta nada fora deste job.
+      - name: Ajustar vm.mmap_rnd_bits para o ASan (precaução)
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Testar
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Checkout continua limpo depois do build e dos testes
+        run: |
+          sujeira="$(git status --porcelain)"
+          if [ -n "$sujeira" ]; then
+            echo "::error::build/test alterou arquivos rastreados pelo git"
+            echo "$sujeira"
+            exit 1
+          fi
+
+  # ------------------------------------------------------------ o único gate
+  # Mesmo modelo do `portão de qualidade` do ci.yml: a proteção de branch exige
+  # checks pelo nome, e o nome de cada combinação da matriz muda quando um
+  # preset entra ou sai. Este job é o ÚNICO check que a proteção precisa exigir:
+  # `needs` espera TODAS as combinações de `windows` e `linux`, e `if: always()`
+  # garante que ele roda (e falha) mesmo quando um deles falhou ou foi cancelado.
+  portao-nativo:
+    name: portão nativo
+    if: always()
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Falhar se qualquer combinação Windows ou Linux não passou
+        run: |
+          if [ "${{ needs.windows.result }}" != "success" ]; then
+            echo "::error::build/testes nativos falharam em pelo menos uma combinação Windows (resultado: ${{ needs.windows.result }})"
+            exit 1
+          fi
+          if [ "${{ needs.linux.result }}" != "success" ]; then
+            echo "::error::build/testes nativos falharam em pelo menos uma combinação Linux (resultado: ${{ needs.linux.result }})"
+            exit 1
+          fi
+          echo "Todas as combinações Windows e Linux passaram"

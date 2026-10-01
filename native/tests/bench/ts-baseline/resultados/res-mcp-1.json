@@ -1,0 +1,263 @@
+{
+  "initMs": {
+    "n": 8,
+    "med": 664,
+    "min": 627.2,
+    "max": 5504.7,
+    "p90": 5504.7,
+    "all": [
+      5504.7,
+      697.1,
+      657.9,
+      627.2,
+      660.2,
+      734.4,
+      667.9,
+      635.7
+    ]
+  },
+  "toolsListMs": {
+    "n": 8,
+    "med": 9.2,
+    "min": 8,
+    "max": 11.5,
+    "p90": 11.5,
+    "all": [
+      8.6,
+      9.7,
+      8.5,
+      11.5,
+      11,
+      8.3,
+      11.4,
+      8
+    ]
+  },
+  "agentListCallMs": {
+    "n": 8,
+    "med": 63.9,
+    "min": 59.9,
+    "max": 619.9,
+    "p90": 619.9,
+    "all": [
+      619.9,
+      170.2,
+      65.4,
+      83.4,
+      62,
+      59.9,
+      62.5,
+      60.3
+    ]
+  },
+  "exitAfterStdinCloseMs": {
+    "n": 8,
+    "med": 28.2,
+    "min": 19.9,
+    "max": 47.6,
+    "p90": 47.6,
+    "all": [
+      22.8,
+      32.8,
+      35,
+      47.6,
+      23.7,
+      20.4,
+      19.9,
+      33.1
+    ]
+  },
+  "wsMB": {
+    "n": 8,
+    "med": 79.2,
+    "min": 78.3,
+    "max": 79.4,
+    "p90": 79.4,
+    "all": [
+      78.3,
+      79.3,
+      79.4,
+      79.1,
+      79.3,
+      78.8,
+      78.9,
+      79.4
+    ]
+  },
+  "privMB": {
+    "n": 8,
+    "med": 74.2,
+    "min": 73.2,
+    "max": 74.8,
+    "p90": 74.8,
+    "all": [
+      73.2,
+      74.8,
+      74.5,
+      73.6,
+      73.2,
+      74.5,
+      73.9,
+      74.6
+    ]
+  },
+  "runs": [
+    {
+      "tInit": 5504.6874,
+      "tList": 8.609000000000378,
+      "tCall": 619.9346000000005,
+      "tExit": 22.83469999999943,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 78.3,
+      "privMB": 73.2,
+      "peakWsMB": 78.9,
+      "cpuMs": 1046.875,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 697.0694999999996,
+      "tList": 9.707300000000032,
+      "tCall": 170.17169999999896,
+      "tExit": 32.808100000000195,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 79.3,
+      "privMB": 74.8,
+      "peakWsMB": 79.5,
+      "cpuMs": 875,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 657.9010999999991,
+      "tList": 8.507200000000012,
+      "tCall": 65.39159999999902,
+      "tExit": 35.03639999999905,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 79.4,
+      "privMB": 74.5,
+      "peakWsMB": 79.5,
+      "cpuMs": 812.5,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 627.2212,
+      "tList": 11.502700000000914,
+      "tCall": 83.4406999999992,
+      "tExit": 47.569000000001324,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 79.1,
+      "privMB": 73.6,
+      "peakWsMB": 79.6,
+      "cpuMs": 812.5,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 660.2030000000013,
+      "tList": 10.993999999998778,
+      "tCall": 61.97869999999966,
+      "tExit": 23.690999999998894,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 79.3,
+      "privMB": 73.2,
+      "peakWsMB": 79.7,
+      "cpuMs": 984.375,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 734.4399000000012,
+      "tList": 8.29950000000099,
+      "tCall": 59.9262000000017,
+      "tExit": 20.362600000000384,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 78.8,
+      "privMB": 74.5,
+      "peakWsMB": 79.2,
+      "cpuMs": 796.875,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 667.8898000000008,
+      "tList": 11.423800000000483,
+      "tCall": 62.50830000000133,
+      "tExit": 19.9333000000006,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 78.9,
+      "privMB": 73.9,
+      "peakWsMB": 79.3,
+      "cpuMs": 750,
+      "threads": 13,
+      "handles": 171
+    },
+    {
+      "tInit": 635.6834999999992,
+      "tList": 7.955200000000332,
+      "tCall": 60.32150000000183,
+      "tExit": 33.09009999999762,
+      "tools": 16,
+      "server": {
+        "name": "agents-hub",
+        "version": "0.1.0"
+      },
+      "callOk": true,
+      "stderr": "agents-hub mcp conectado — hub: http://127.0.0.1:48731, agente: externo, sessão: (adota ao primeiro uso)\n",
+      "wsMB": 79.4,
+      "privMB": 74.6,
+      "peakWsMB": 79.6,
+      "cpuMs": 859.375,
+      "threads": 13,
+      "handles": 171
+    }
+  ],
+  "shutdown": {
+    "status": 200,
+    "ms": 134.27880000000005,
+    "exit": 0
+  }
+}

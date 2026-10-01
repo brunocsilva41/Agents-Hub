@@ -1,0 +1,3 @@
+# Bibliotecas vendorizadas: sem conversão de fim de linha, para os bytes do
+# working copy serem idênticos aos do upstream (SHA-256 em native/third_party/VERSIONS.md).
+native/third_party/** -text

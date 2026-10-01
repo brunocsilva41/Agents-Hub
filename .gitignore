@@ -32,3 +32,6 @@ packages/web/dist-test/
 
 # tarball distribuível (`npm run pack:dist`)
 dist-pack/
+
+# build da reescrita nativa em C (presets em native/CMakePresets.json)
+native/build*/
