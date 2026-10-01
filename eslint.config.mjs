@@ -22,6 +22,9 @@ export default tseslint.config(
       'coverage/**',
       '.claude/**',
       'docs/**',
+      // Reescrita em C (ADR 07): geradores de corpus e harness de medição são
+      // ferramentas de teste fora dos projetos TypeScript.
+      'native/**',
     ],
   },
   js.configs.recommended,

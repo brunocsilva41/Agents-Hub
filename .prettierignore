@@ -21,3 +21,7 @@ docs/referencias/opencode-openapi.json
 
 # Worktrees de agentes (cada uma é um checkout inteiro do repositório).
 .claude/
+
+# Reescrita em C (ADR 07): tem convenções próprias (docs/18-padroes-c.md); o
+# corpus de conformidade é gerado e as bibliotecas vendorizadas ficam byte a byte.
+native/
