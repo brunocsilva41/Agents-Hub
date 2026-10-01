@@ -27,10 +27,10 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F0-03 | Vendorização das bibliotecas do núcleo | `[x]` | 008e944 | 6 SHA-256 conferidos contra download oficial refeito; 65 arquivos idênticos ao upstream (code-reviewer); `native/third_party/VERSIONS.md` |
 | F0-04 | Padrões de código C | `[~]` | cb804af | `docs/18-padroes-c.md` aprovado em auditoria; falta a configuração de formatação (clang-format é PROPOSTA) |
 | F0-05 | Plataforma: texto, caminhos e arquivos | `[ ]` | | |
-| F0-06 | Plataforma: tempo, aleatoriedade e ambiente | `[~]` | fca9657 | Windows: build limpo + ctest 100% em windows-msvc-debug/-release/-clangcl-asan na main integrada (coordenador); revisão independente aprovada com ressalvas, fechadas em 581d745; POSIX não verificado (CI Linux ainda não rodou) |
+| F0-06 | Plataforma: tempo, aleatoriedade e ambiente | `[x]` | fca9657 | Windows: build limpo + ctest 100% em windows-msvc-debug/-release/-clangcl-asan na main integrada (coordenador); revisão independente aprovada com ressalvas, fechadas em 581d745; Linux: CI native run 36805871526 (ac1c07f) verde em linux-gcc-debug e linux-clang-asan |
 | F0-07 | Plataforma: processos (spawn, pipes, ambiente) | `[ ]` | | |
 | F0-08 | Plataforma: árvore de processos e identidade de PID | `[ ]` | | |
-| F0-09 | Plataforma: sockets loopback, laço de eventos, timers e threads | `[ ]` | | |
+| F0-09 | Plataforma: sockets loopback, laço de eventos, timers e threads | `[~]` | 137c3de | Windows: build limpo + ctest 5/5 em windows-msvc-debug/-release/-clangcl-asan na integração (coordenador); revisão independente aprovou f921552 com mutações M1–M4 reprovando. Lacunas: mutações M5 (plano B no servidor) e M6 (SID ignorado) sobrevivem; recusa de outro usuário real fica no aceite SEC-R12/R13 (CI Linux com useradd); fila de escuta cheia pode dar REFUSED imediato no Windows (conferir na F1-20). POSIX: aguardando CI Linux |
 | F0-10 | Utilitários sem I/O: UTF-8, JSON, YAML, regex | `[ ]` | | |
 | F0-11 | Runner de conformidade e utilitários de teste | `[ ]` | | |
 | F0-12 | Vendorização da UI (SDL3, SDL_ttf, Clay) | `[ ]` | | |
