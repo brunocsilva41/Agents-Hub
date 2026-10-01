@@ -36,3 +36,7 @@ foreach(_ah_t text json yaml regex)
   ah_add_test(unit.core.${_ah_t} test_core_${_ah_t})
 endforeach()
 target_include_directories(test_core_yaml PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+# Fragmentos de teste por área (cada tarefa mantém o seu):
+#   core_domain.cmake  F1-01
+include("${CMAKE_CURRENT_SOURCE_DIR}/core_domain.cmake" OPTIONAL)

@@ -311,4 +311,7 @@ caminho.
 | 2026-10-01 | Exceção do coordenador: FZ03 (fuzz do YAML) adiado; a F0-10 entrega o alvo quando a infraestrutura de fuzz da F0-02 existir | este arquivo |
 | 2026-10-01 | Decisão do coordenador: F0-12 aplica no SDL_ttf 3.2.2 vendorizado o backport da correção upstream da UB de alinhamento em BG_Blended_Color (achada pelo UBSan no teste de emoji); patch registrado em `native/third_party/patches/` e em VERSIONS.md, removido quando houver release com a correção | este arquivo; F0-12 em andamento |
 | 2026-10-01 | Corrigido: libyaml no Linux usava `strdup` sem declaração (ponteiro truncado, SEGV no CI do PR #25); `_POSIX_C_SOURCE=200809L` só no alvo `ah_yaml` fora do Windows | PR #27 (f60ebbd) |
+| 2026-10-01 | Exceção do coordenador: F1-01 começa com a F0-10 em `[~]` (só falta o FZ03, adiado até a F0-02), como na exceção da F0-12 | este arquivo |
+| 2026-10-01 | Exceção do coordenador: F1-12 cria o módulo `native/src/adapters/` (CMakeLists do módulo); a F1-11 estende. F7-03 e F7-04 com um único dono (cabeçalho do cofre comum) | este arquivo |
+| 2026-10-01 | Base comum da leva 2: fragmentos `tree.cmake` (F0-08) e `vault.cmake` (F7-03/F7-04) em `platform/`, `domain.cmake` (F1-01) em `core/`, `core_domain.cmake` em `tests/unit/` e `src/adapters` condicional na raiz | branch base/leva2 |
 | 2026-10-01 | DV a decidir pelo dono: TS aceita NUL (` `) em strings JSON; C recusa com erro próprio (`AH_ERR_LIMIT`), sem cair no valor padrão em silêncio. YAML com UTF-8 inválido: TS troca por U+FFFD, C recusa | F0-10 (em revisão) |

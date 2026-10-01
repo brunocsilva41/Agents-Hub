@@ -1,12 +1,18 @@
 # ah_core: domínio do Hub, sem I/O. Utilitários de texto, JSON, YAML e regex
 # (F0-10) são camadas finas sobre cJSON, libyaml e PCRE2; as bibliotecas ficam
 # PRIVATE porque os cabeçalhos do ah_core não expõem tipos delas.
-add_library(ah_core STATIC
+set(AH_CORE_SOURCES
   ah_version.c
   ah_text.c
   ah_json.c
   ah_yaml.c
   ah_regex.c)
+# Fragmentos por área (plano docs/17 §0): cada tarefa acrescenta as próprias
+# fontes a AH_CORE_SOURCES no seu fragmento, sem editar este arquivo.
+#   domain.cmake  F1-01  ids, tempo, erros e tipos de domínio
+include("${CMAKE_CURRENT_SOURCE_DIR}/domain.cmake" OPTIONAL)
+
+add_library(ah_core STATIC ${AH_CORE_SOURCES})
 add_library(ah::core ALIAS ah_core)
 target_include_directories(ah_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(ah_core PRIVATE

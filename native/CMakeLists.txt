@@ -32,6 +32,10 @@ add_subdirectory(third_party)
 add_subdirectory(src/core)
 add_subdirectory(src/platform)
 add_subdirectory(src/cli)
+# Módulos criados pelas tarefas do plano entram quando a pasta existir.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/adapters/CMakeLists.txt")
+  add_subdirectory(src/adapters)  # criado pela F1-12 (exceção do coordenador); F1-11 estende
+endif()
 add_subdirectory(src/updater)
 add_subdirectory(tools/ahsign)
 add_subdirectory(tests/unit)
