@@ -221,16 +221,12 @@ static int argv_matches(const char *out, const char *const *expected,
     return 1;
 }
 
+#ifdef _WIN32
+/* Só os testes do ramo via_cmd (Windows) criam .cmd e conferem marcadores;
+ * no POSIX estas funções não teriam uso (-Werror=unused-function). */
 static int file_exists(const char *path) {
     FILE *f = NULL;
-#ifdef _WIN32
-    if (fopen_s(&f, path, "rb") != 0) {
-        f = NULL;
-    }
-#else
-    f = fopen(path, "rb");
-#endif
-    if (f == NULL) {
+    if (fopen_s(&f, path, "rb") != 0 || f == NULL) {
         return 0;
     }
     fclose(f);
@@ -239,20 +235,14 @@ static int file_exists(const char *path) {
 
 static int write_file(const char *path, const char *text) {
     FILE *f = NULL;
-#ifdef _WIN32
-    if (fopen_s(&f, path, "wb") != 0) {
-        f = NULL;
-    }
-#else
-    f = fopen(path, "wb");
-#endif
-    if (f == NULL) {
+    if (fopen_s(&f, path, "wb") != 0 || f == NULL) {
         return -1;
     }
     size_t n = strlen(text);
     int ok = fwrite(text, 1, n, f) == n;
     return (fclose(f) == 0 && ok) ? 0 : -1;
 }
+#endif
 
 /* Variável de ambiente do processo de teste, em UTF-8 (NULL se ausente). */
 static int test_getenv(const char *name, char *buf, size_t cap) {
