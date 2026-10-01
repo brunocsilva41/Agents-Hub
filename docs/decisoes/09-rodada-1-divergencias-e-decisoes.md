@@ -71,3 +71,12 @@ O dono **aceitou todas as recomendações** do documento, nos seis temas:
   (SPEC-03 §1.8, SPEC-04 A4). A decisão se mantém pelo motivo correto: o campo nunca teve efeito no
   TS (o Brief já preenche o isolamento, SPEC-04 obs. 3), e o isolamento continua sendo escolhido no
   Brief (`worktree` ou `none`).
+
+## Adendo 2 (2026-09-30) — pendências levantadas pela auditoria do plano
+
+- **DA-07 (parte que faltava), decidida:** área de transferência do SO (C074), diálogo nativo de abrir
+  arquivo (C083) e diálogo nativo de salvar arquivo no lugar do download (C140).
+- **DA-32, decidida:** `hub open` abre ou traz para frente a janela `agents-hub`, iniciando o serviço
+  se preciso (resolve a contradição entre DA-20 e DV-19).
+- **DA-33, decidida:** o schema de manifesto do C aceita `defaults.isolation` com aviso de obsoleto e
+  não o usa; os manifestos empacotados são limpos; manifestos de usuário continuam válidos.
