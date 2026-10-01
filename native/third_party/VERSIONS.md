@@ -59,6 +59,8 @@ O SHA-256 é o do arquivo baixado (zip/tar.gz), calculado com `sha256sum`.
   - `YAML_DECLARE_STATIC` (público) — lib estática; sem ele, `yaml.h` declara a API como
     `__declspec(dllimport)` no Windows (igual ao CMake upstream).
   - `_CRT_SECURE_NO_WARNINGS` (só MSVC) — igual ao CMake upstream.
+  - `_POSIX_C_SOURCE=200809L` (fora do Windows) — declara `strdup` (POSIX.1-2008) usado em
+    `src/api.c`; com `-std=c17` estrito a glibc o esconde e o ponteiro era truncado (SEGV no CI, PR #25).
 
 ### PCRE2 10.49
 
