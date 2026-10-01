@@ -145,3 +145,68 @@ add_library(ah::monocypher ALIAS ah_monocypher)
 target_include_directories(ah_monocypher SYSTEM PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/monocypher"
   "${CMAKE_CURRENT_SOURCE_DIR}/monocypher/optional")
+
+# ===================================================== UI (F0-12, ADR 8.4)
+# SDL3 3.4.16 + SDL_ttf 3.2.2 (com FreeType 2.13.2 e HarfBuzz 8.5.0 dos forks
+# libsdl-org, nos commits fixados pela tag release-3.2.2) + Clay v0.14.
+#
+# SDL3 e SDL_ttf compilam pelo CMake do próprio upstream, do jeito que a
+# documentação deles indica para cópia vendorizada (SDL docs/README-cmake.md,
+# "Using a vendored SDL"; SDL_ttf docs/INTRO-cmake.md): add_subdirectory com
+# EXCLUDE_FROM_ALL e SDLTTF_VENDORED. Nada é baixado: o modo vendorizado do
+# SDL_ttf só faz add_subdirectory(external/freetype) e (external/harfbuzz),
+# relativos à pasta do SDL_ttf; por isso FreeType e HarfBuzz estão em
+# sdl_ttf/external/, onde o upstream os espera (são os submódulos da tag).
+# Nenhum dos quatro CMakeLists usa FetchContent/ExternalProject/file(DOWNLOAD).
+#
+# As opções são definidas como variáveis normais antes de cada
+# add_subdirectory. Com a CMP0077 em NEW (os dois upstreams exigem CMake
+# >= 3.16), option() respeita a variável normal e NÃO grava no cache; só
+# cmake_dependent_option (ex.: SDL_SHARED, SDL_STATIC, BUILD_SHARED_LIBS do
+# SDL_ttf) grava o valor no cache.
+#
+# Bibliotecas compartilhadas (SDL3 e SDL3_ttf), que é o padrão dos dois
+# upstreams (exceção à regra "STATIC" do topo deste arquivo; os alvos são os
+# do próprio upstream, com alias ah::); FreeType e HarfBuzz entram estáticos
+# dentro do SDL3_ttf (o SDL_ttf força isso). Warnings: os de cada upstream,
+# sem warning como erro (SDL_WERROR e SDLTTF_WERROR ficam no padrão OFF).
+# O SDL3 (no Windows) e o HarfBuzz habilitam C++: o compilador C++ vem do
+# preset (CMAKE_CXX_COMPILER em CMakePresets.json).
+
+# ---------------------------------------------------------------- SDL3
+# Opções da tabela de docs/README-cmake.md do SDL 3.4.16.
+set(SDL_SHARED ON)          # SDL3.dll / libSDL3.so (padrão upstream)
+set(SDL_STATIC OFF)
+set(SDL_TEST_LIBRARY OFF)   # SDL3_test não é usado pelo projeto
+set(SDL_TESTS OFF)
+set(SDL_EXAMPLES OFF)
+set(SDL_INSTALL OFF)        # instalação/pacote é da F8 (já é o padrão como subprojeto)
+add_subdirectory(sdl3 EXCLUDE_FROM_ALL)
+add_library(ah::sdl3 ALIAS SDL3-shared)
+
+# ------------------------------------------------------------- SDL_ttf
+# Opções do CMakeLists.txt do SDL_ttf 3.2.2.
+set(BUILD_SHARED_LIBS ON)   # SDL3_ttf compartilhado (padrão upstream); ver VERSIONS.md
+set(SDLTTF_VENDORED ON)     # compila external/freetype e external/harfbuzz (sem download)
+set(SDLTTF_HARFBUZZ ON)     # shaping (DA-12)
+set(SDLTTF_PLUTOSVG OFF)    # sem plutosvg (DA-12: emoji COLR sem plutosvg)
+set(SDLTTF_SAMPLES OFF)
+set(SDLTTF_INSTALL OFF)
+add_subdirectory(sdl_ttf EXCLUDE_FROM_ALL)
+add_library(ah::sdl3_ttf ALIAS SDL3_ttf-shared)
+# O SDL_ttf grava BUILD_SHARED_LIBS=ON no cache (cmake_dependent_option).
+# Apaga a variável normal e a do cache para src/ e tests/ não herdarem
+# bibliotecas compartilhadas por padrão.
+unset(BUILD_SHARED_LIBS)
+unset(BUILD_SHARED_LIBS CACHE)
+
+# ---------------------------------------------------------------- Clay
+# Biblioteca de um cabeçalho: a implementação entra numa TU gerada no build (o
+# clay.h vendorizado fica sem edição), compilada como código de terceiro.
+set(_clay_impl "${CMAKE_CURRENT_BINARY_DIR}/clay/clay_impl.c")
+file(CONFIGURE OUTPUT "${_clay_impl}"
+  CONTENT "/* Gerado por native/third_party/CMakeLists.txt: implementação do Clay. */\n#define CLAY_IMPLEMENTATION\n#include \"clay.h\"\n"
+  @ONLY)
+add_library(ah_clay STATIC "${_clay_impl}")
+add_library(ah::clay ALIAS ah_clay)
+target_include_directories(ah_clay SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/clay")
