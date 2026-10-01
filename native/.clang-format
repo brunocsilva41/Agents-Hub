@@ -1,0 +1,49 @@
+# Formatação do código C de native/ (F0-04; regras em docs/18-padroes-c.md §11).
+# Descreve o estilo que o código já mesclado usa (medido em native/src e native/tests),
+# não um estilo novo. Testado com clang-format 22.1.8 (LLVM).
+# native/third_party/ fica fora: tem o próprio .clang-format com DisableFormat.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Espaços, 4 por nível; continuação também com 4 (o alinhamento sob o parêntese
+# aberto vem do AlignAfterOpenBracket: Align herdado do LLVM).
+IndentWidth: 4
+ContinuationIndentWidth: 4
+UseTab: Never
+# Mantém o fim de linha que o arquivo já tem (LF no repositório; CRLF no checkout
+# Windows com core.autocrlf=true).
+LineEnding: DeriveLF
+
+# Até 100 colunas.
+ColumnLimit: 100
+
+# Chave na mesma linha em tudo (funções inclusive) e "} else {".
+BreakBeforeBraces: Attach
+# "case" no mesmo nível do "switch"; diretivas de pré-processador na coluna 0.
+IndentCaseLabels: false
+# "char *p", "const char *const *args".
+PointerAlignment: Right
+
+# Função sempre em várias linhas; "if (x) return y;" sem else e laço curto podem
+# ficar numa linha (os dois aparecem no código); enum sempre um valor por linha.
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortEnumsOnASingleLine: false
+
+# Includes: a ordem não é reordenada. Convenção do código: o header do próprio
+# módulo primeiro, linha em branco, headers padrão em ordem alfabética, e headers do
+# SO em blocos #ifdef _WIN32 / #else. Os headers do Windows dependem de ordem
+# (winsock2/ws2tcpip antes de windows.h), por isso a ordenação automática fica desligada.
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# Não reescreve comentários (vários são tabelas e trechos alinhados à mão).
+ReflowComments: false
+
+# Prefere quebrar entre argumentos a quebrar logo após "(" ou após "=".
+PenaltyBreakAssignment: 100
+PenaltyBreakBeforeFirstCallParameter: 100
+...
