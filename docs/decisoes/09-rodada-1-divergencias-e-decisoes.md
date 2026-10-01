@@ -59,3 +59,15 @@ O dono **aceitou todas as recomendações** do documento, nos seis temas:
   aceite das tarefas ajustado ao que foi decidido.
 - O S6 entra no plano como divergência própria.
 - O `SECURITY.md` do C (F7-05, SEC-R41) descreve as garantias novas.
+
+## Adendo (2026-09-30)
+
+- **DA-31 (aberta na aplicação do ADR 09 ao plano), decidida pelo dono:** o servidor MCP por stdio é
+  o subcomando **`hub mcp serve`** (o `hub mcp` existente continua listando e instalando a
+  configuração MCP nos agentes); **`hub daemon`** executa o `agents-hubd` instalado em primeiro plano
+  (mesma função do TS), e o autostart sob demanda continua subindo o `agents-hubd` em segundo plano.
+- **Correção do motivo da DV-10:** a recomendação dizia que o campo `defaults.isolation` do manifesto
+  sai "porque só `worktree` existe"; isso é impreciso, porque `isolation: none` continua existindo
+  (SPEC-03 §1.8, SPEC-04 A4). A decisão se mantém pelo motivo correto: o campo nunca teve efeito no
+  TS (o Brief já preenche o isolamento, SPEC-04 obs. 3), e o isolamento continua sendo escolhido no
+  Brief (`worktree` ou `none`).
