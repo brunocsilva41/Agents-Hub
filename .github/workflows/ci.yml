@@ -45,6 +45,76 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # ------------------------------------------------------ detecção de mudanças
+  # Desde a reescrita em C (ADR 07), o TS em `packages/` é especificação
+  # congelada (ADR 7.10): não recebe correção. Decisão do dono em 2026-10-01:
+  # os jobs do TS só rodam quando a mudança toca o TS ou algo que esses jobs
+  # leem; PR só de `native/` ou `docs/` não espera (nem herda falha de) uma
+  # suíte que ele não pode ter afetado. O `native.yml` cobre o C.
+  #
+  # Conta como "toca o TS": `packages/`, a configuração do Node e das
+  # ferramentas (`package*.json`, `tsconfig*.json`, ESLint, Prettier, versão
+  # do Node), o que os passos executam ou leem fora de `packages/`
+  # (`scripts/` — suíte, cobertura, smoke do MCP; `manifests/`, que os testes
+  # dos adapters carregam; os YAML que o `format:check` confere) e o
+  # `.gitignore`, de que depende o passo "checkout continua limpo".
+  #
+  # Falha FECHADO: sem base confiável para comparar (evento manual, push que
+  # cria branch, `before` ausente após force-push, erro do git), a saída é
+  # `ts=true` e tudo roda. E se este job inteiro falhar, o portão abaixo
+  # reprova — job do TS pulado por falha da detecção nunca vira verde.
+  detectar-mudancas:
+    name: detectar mudanças no TS
+    runs-on: ubuntu-latest
+    outputs:
+      ts: ${{ steps.diff.outputs.ts }}
+    steps:
+      # Histórico inteiro: a base do PR ou o `before` do push precisam estar
+      # no clone para o `git diff` funcionar.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Comparar com a base (PR) ou com o commit anterior (push)
+        id: diff
+        shell: bash
+        env:
+          EVENTO: ${{ github.event_name }}
+          BASE_PR: ${{ github.event.pull_request.base.sha }}
+          ANTES: ${{ github.event.before }}
+        run: |
+          padrao='^(packages/|scripts/|manifests/|examples/|\.agents-hub/)|^(package\.json|package-lock\.json|tsconfig[^/]*\.json|eslint\.config\.mjs|\.prettierrc[^/]*|\.prettierignore|\.nvmrc|\.node-version|\.gitignore)$'
+          ts=true
+          base=''
+          case "$EVENTO" in
+            pull_request) base="$BASE_PR" ;;
+            push) base="$ANTES" ;;
+            *) echo "evento '$EVENTO': sem base para comparar, roda tudo" ;;
+          esac
+          if [ -n "$base" ]; then
+            if [ "$base" = '0000000000000000000000000000000000000000' ]; then
+              echo "::warning::push sem commit anterior (branch nova): roda tudo"
+            elif ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              echo "::warning::base $base não está no clone (force-push?): roda tudo"
+            elif ! arquivos="$(git diff --name-only "$base" HEAD)"; then
+              echo "::warning::git diff contra $base falhou: roda tudo"
+            else
+              echo "arquivos alterados contra $base:"
+              printf '%s\n' "$arquivos"
+              set +e
+              grep -Eq "$padrao" <<< "$arquivos"
+              achou=$?
+              set -e
+              if [ "$achou" -eq 1 ]; then
+                ts=false
+              elif [ "$achou" -ne 0 ]; then
+                echo "::warning::grep falhou (código $achou): roda tudo"
+              fi
+            fi
+          fi
+          echo "ts=$ts"
+          echo "ts=$ts" >> "$GITHUB_OUTPUT"
+
   # ------------------------------------------------------------------ portão
   # Windows é a plataforma onde este projeto foi desenvolvido e validado contra
   # os binários reais dos agentes, e onde moram as partes que mais dependem do
@@ -55,6 +125,8 @@ jobs:
   # sem `fail-fast`: uma quebrar não deve esconder o resultado da outra.
   verificar:
     name: build + testes (Windows, Node ${{ matrix.node }})
+    needs: detectar-mudancas
+    if: needs.detectar-mudancas.outputs.ts == 'true'
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -134,6 +206,8 @@ jobs:
   # Por isso agora ele entra em `needs` do portão como qualquer outro.
   verificar-linux:
     name: build + testes (Linux, Node 24)
+    needs: detectar-mudancas
+    if: needs.detectar-mudancas.outputs.ts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +245,8 @@ jobs:
   # ainda — quando houver, este job perde o `continue-on-error`.
   cobertura:
     name: cobertura (informativo)
+    needs: detectar-mudancas
+    if: needs.detectar-mudancas.outputs.ts == 'true'
     runs-on: windows-latest
     continue-on-error: true
     steps:
@@ -205,6 +281,8 @@ jobs:
   # a cada push é o que impede a dívida de ficar invisível.
   auditoria-dependencias:
     name: auditoria de dependências (informativo)
+    needs: detectar-mudancas
+    if: needs.detectar-mudancas.outputs.ts == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -227,16 +305,34 @@ jobs:
   # Este job resolve isso: é o ÚNICO check que a proteção de branch precisa
   # exigir. Ele espera a matriz inteira do Windows (`needs: verificar`, que no
   # GitHub Actions significa TODAS as combinações, não uma) e o job Linux, e
-  # falha se qualquer um falhou — só `auditoria-dependencias` fica de fora de
-  # propósito, porque é informativo, não bloqueante.
+  # falha se qualquer um falhou — `cobertura` e `auditoria-dependencias` ficam
+  # de fora de propósito, porque são informativos, não bloqueantes.
+  #
+  # Com a detecção de mudanças, a regra ganha uma única saída: passa sem os
+  # jobs do TS SÓ se o detector terminou com sucesso E disse `ts=false`.
+  # Detector falhou, cancelado ou saída vazia/inesperada: reprova, ou exige os
+  # jobs do TS como antes — nunca "pulado" vira verde por acidente.
   portao-de-qualidade:
     name: portão de qualidade
     if: always()
-    needs: [verificar, verificar-linux]
+    needs: [detectar-mudancas, verificar, verificar-linux]
     runs-on: ubuntu-latest
     steps:
-      - name: Falhar se Windows (qualquer Node) ou Linux falhou
+      - name: Falhar se a detecção, o Windows (qualquer Node) ou o Linux falhou
         run: |
+          if [ "${{ needs.detectar-mudancas.result }}" != "success" ]; then
+            echo "::error::a detecção de mudanças não terminou com sucesso — ver o job 'detectar-mudancas' acima"
+            exit 1
+          fi
+          ts="${{ needs.detectar-mudancas.outputs.ts }}"
+          if [ "$ts" = "false" ]; then
+            echo "Nenhuma mudança no TS (packages/, config do Node, scripts/, manifests/): jobs do TS pulados por decisão (ts=false)"
+            exit 0
+          fi
+          if [ "$ts" != "true" ]; then
+            echo "::error::saída inesperada da detecção de mudanças (ts='$ts')"
+            exit 1
+          fi
           if [ "${{ needs.verificar.result }}" != "success" ]; then
             echo "::error::build+testes falhou em pelo menos uma combinação de Node no Windows — ver o job 'verificar' acima"
             exit 1
