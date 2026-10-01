@@ -36,4 +36,14 @@ void ah_proc_i_detail(char *detail, size_t cap, const char *fmt, ...);
  * começa no 2º byte. Sem '=' válido → AH_ERR_INVALID. */
 ah_status ah_proc_i_env_split(const char *entry, size_t *name_len);
 
+#ifdef _WIN32
+/* B7: lock da janela em que existem handles herdáveis do Hub (entre marcar
+ * as pontas do filho herdáveis e fechá-las depois do CreateProcessW).
+ * Qualquer código de native/src/platform/ que venha a chamar CreateProcessW
+ * com bInheritHandles=TRUE fora de ah_proc_spawn precisa segurar este lock
+ * (o caminho preferido é usar ah_proc_spawn). */
+void ah_proc_i_spawn_lock(void);
+void ah_proc_i_spawn_unlock(void);
+#endif
+
 #endif /* AH_PLATFORM_PROC_INTERNAL_H */

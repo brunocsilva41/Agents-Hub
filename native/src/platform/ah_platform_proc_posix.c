@@ -17,7 +17,9 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
+#include <sys/resource.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -116,6 +118,9 @@ static void close_range_child(int from, int to, bool to_end) {
 #endif
     for (int fd = from; fd <= to; fd++) {
         close(fd);
+        if (fd == INT_MAX) {
+            break; /* sem overflow do contador */
+        }
     }
 }
 
@@ -246,9 +251,21 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
         st = map_errno(errno);
         ah_proc_i_detail(detail, cap, "falha ao criar os pipes");
     }
+    /* Limite real para o laço alternativo ao close_range: o maior entre
+     * sysconf(_SC_OPEN_MAX) e o RLIMIT_NOFILE corrente (finito). Calculado
+     * antes do fork: sysconf/getrlimit não são async-signal-safe. Só se
+     * nenhum dos dois for conhecido vale o teto de 1 Mi descritores. */
     long maxfd = sysconf(_SC_OPEN_MAX);
-    if (maxfd < 0 || maxfd > 65536) {
-        maxfd = 65536;
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY &&
+        (maxfd < 0 || rl.rlim_cur > (rlim_t)maxfd)) {
+        maxfd = rl.rlim_cur > (rlim_t)INT_MAX ? INT_MAX : (long)rl.rlim_cur;
+    }
+    if (maxfd < 0) {
+        maxfd = 1L << 20;
+    }
+    if (maxfd > INT_MAX) {
+        maxfd = INT_MAX;
     }
 
     /* B3: todos os sinais bloqueados durante o fork. Assim nenhum handler

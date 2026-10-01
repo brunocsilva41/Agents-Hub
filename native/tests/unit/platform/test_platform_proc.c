@@ -366,9 +366,10 @@ static void test_cmd_escape_vectors(void) {
     CHECK(out != NULL && strcmp(out, "^^^\"a^^^ ^^^&^^^ b^^^\"") == 0);
     free(out);
     CHECK(ah_proc_cmd_escape_arg("x\\\"%", 4, &out) == AH_OK);
-    /* "x\\\"%" → aspas: "x\\\"%" ; cada meta (" \ não, % sim) duas vezes */
+    /* x\"% → aspas: "x\\\"%" ; `"` com ^ duas vezes; `%` sem ^, trocado
+     * por %%cd:~,% (A2, divergência deliberada do TS). */
     CHECK(out != NULL &&
-          strcmp(out, "^^^\"x\\\\\\^^^\"^^^%^^^\"") == 0);
+          strcmp(out, "^^^\"x\\\\\\^^^\"%%cd:~,%^^^\"") == 0);
     free(out);
     out = NULL;
     CHECK(ah_proc_cmd_escape_arg("a\rb", 3, &out) == AH_ERR_INVALID);
@@ -840,6 +841,78 @@ static void test_cmd_hostile_roundtrip(void) {
     CHECK(!file_exists(marker));
 }
 
+static void test_cmd_percent_neutralized(void) {
+    /* A2 (SEC-R27): o `%` não expande no ramo via_cmd, nem na forma de
+     * substituição (`%NOME:a=b%`, `%NOME:*x=y%`, `%NOME:~0,3%`), que o `^`
+     * não protegia. Só variáveis fictícias criadas aqui (e a dinâmica
+     * CMDCMDLINE do próprio cmd). Valores com & | < > e marcadores: se
+     * algum valor fosse expandido, o "segundo comando" criaria o arquivo. */
+    CHECK(SetEnvironmentVariableW(L"AH_F007_VAR", L"abcxyz"));
+    CHECK(SetEnvironmentVariableW(L"AH_F007_PERIGO",
+                                  L"x&echo PWN>pwn-a2.txt&y"));
+    CHECK(SetEnvironmentVariableW(L"AH_F007_PIPE",
+                                  L"p|echo PWN>pwn-a2b.txt|more<nul>nul"));
+    char shim[1024];
+    snprintf(shim, sizeof shim, "%s/shim.cmd", WORK); /* repassa %* */
+    native_path(shim);
+    const char *markers[] = {"pwn-a2.txt", "pwn-a2b.txt", "pwn-a2c.txt"};
+    char mpath[3][1024];
+    for (int i = 0; i < 3; i++) {
+        snprintf(mpath[i], sizeof mpath[i], "%s/%s", WORK, markers[i]);
+        native_path(mpath[i]);
+        remove(mpath[i]);
+    }
+    const char *args[] = {
+        "-p",
+        "%AH_F007_VAR%",
+        "%AH_F007_VAR:a=b%",
+        "%AH_F007_VAR:*x=y%",
+        "%AH_F007_VAR:~0,3%",
+        "%CMDCMDLINE:a=b%",
+        "%%",
+        "fim%",
+        "%",
+        "100%",
+        "%~1",
+        "%1",
+        "%cd:~,%",
+        "a%AH_F007_VAR%b%AH_F007_VAR%c",
+        "%AH_F007_PERIGO%",
+        "%AH_F007_PERIGO:x=z%",
+        "%AH_F007_PERIGO:*&=%",
+        "%AH_F007_PIPE%",
+        "%AH_F007_PIPE:p=q%",
+        "%AH_F007_VAR% & echo PWN>pwn-a2c.txt",
+        "\"%AH_F007_PERIGO%\"",
+    };
+    size_t n = sizeof args / sizeof args[0];
+    ah_proc_spawn_opts o;
+    memset(&o, 0, sizeof o);
+    o.path = shim;
+    o.args = args;
+    o.arg_count = n;
+    o.via_cmd = true;
+    o.cwd = WORK;
+    run_result r;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.st.code == 0);
+    int ok = r.out != NULL && argv_matches(r.out, args, n);
+    CHECK(ok);
+    if (!ok) {
+        fprintf(stderr, "A2: stdout [%s] stderr [%s]\n",
+                r.out != NULL ? r.out : "", r.err != NULL ? r.err : "");
+    }
+    for (int i = 0; i < 3; i++) {
+        CHECK(!file_exists(mpath[i])); /* segundo comando não rodou */
+    }
+    printf("A2: %zu argumentos com %% chegaram idênticos: %s\n", n - 1,
+           ok ? "sim" : "NÃO");
+    run_free(&r);
+    SetEnvironmentVariableW(L"AH_F007_VAR", NULL);
+    SetEnvironmentVariableW(L"AH_F007_PERIGO", NULL);
+    SetEnvironmentVariableW(L"AH_F007_PIPE", NULL);
+}
+
 static void test_start_suspended(void) {
     /* Ponto de extensão da F0-08: suspenso até ah_proc_resume. */
     const char *args[] = {"exit", "7"};
@@ -1047,13 +1120,14 @@ static void test_cmd_no_cwd_exe_search(void) {
            r.err != NULL ? r.err : "");
     run_free(&r);
 
-    /* Ambiente explícito tentando desligar a proteção: o Hub substitui. */
+    /* B5: ambiente explícito SEM a variável: só o Hub a acrescenta. (Um
+     * valor "=0" não serviria de teste: o cmd só olha se a variável
+     * existe, qualquer que seja o valor.) */
     static char path_entry[33000];
     static char sysroot_entry[1024];
     char tmp[32768];
-    const char *env[3];
+    const char *env[2];
     size_t ne = 0;
-    env[ne++] = "NoDefaultCurrentDirectoryInExePath=0";
     if (test_getenv("PATH", tmp, sizeof tmp)) {
         snprintf(path_entry, sizeof path_entry, "PATH=%s", tmp);
         env[ne++] = path_entry;
@@ -1137,18 +1211,20 @@ static void test_posix_only_options(void) {
 #endif
 
 static void test_cmd_invocation_vector(void) {
-    /* A1: /v:off presente e ANTES do /c; bytes da <linha> intocados. */
+    /* A1: /v:off presente e ANTES do /c; A2: /e:on também antes do /c;
+     * bytes da <linha> intocados. */
     char *out = NULL;
     const char *linha = "C:\\x.cmd ^^^\"a^^^\"";
     CHECK(ah_proc_cmd_invocation("C:\\Windows\\System32\\cmd.exe", linha,
                                  &out) == AH_OK);
     CHECK(out != NULL &&
-          strcmp(out, "\"C:\\Windows\\System32\\cmd.exe\" /d /s /v:off /c "
-                      "\"C:\\x.cmd ^^^\"a^^^\"\"") == 0);
+          strcmp(out, "\"C:\\Windows\\System32\\cmd.exe\" /d /s /e:on /v:off "
+                      "/c \"C:\\x.cmd ^^^\"a^^^\"\"") == 0);
     if (out != NULL) {
         const char *v = strstr(out, " /v:off ");
+        const char *e = strstr(out, " /e:on ");
         const char *c = strstr(out, " /c ");
-        CHECK(v != NULL && c != NULL && v < c);
+        CHECK(v != NULL && e != NULL && c != NULL && v < c && e < c);
     }
     free(out);
     out = NULL;
@@ -1270,8 +1346,16 @@ static void test_close_stdin_deferred_delivers(void) {
 }
 
 static void test_zero_byte_writes(void) {
-    /* B4: escritas de 0 bytes repetidas não fazem o laço girar em falso:
-     * no máximo uma volta por escrita do filho. */
+    /* B4: escritas de 0 bytes repetidas do filho não fazem o laço girar em
+     * falso (no máximo uma volta por escrita).
+     * B6: este teste NÃO passa pelo ramo "leitura concluída com 0 bytes" de
+     * ah_proc_read, e não há como fazê-lo passar: nos nossos pipes (modo
+     * byte), WriteFile de 0 bytes não conclui a leitura pendente do outro
+     * lado. Conferido em 2026-10-01: com as escritas espaçadas por Sleep(1)
+     * (leitura do Hub já pendente) e o ramo trocado por "devolve erro", o
+     * teste passou com 4 voltas do laço para 200 escritas, ou seja, nenhuma
+     * escrita vazia acordou o leitor. O ramo fica como defesa (pipe que um
+     * dia seja de mensagem, ou comportamento do NPFS que mude). */
     const char *args[] = {"zerowrites", "2000"};
     ah_proc_spawn_opts o;
     opts_init(&o, args, 2);
@@ -1339,6 +1423,7 @@ int main(void) {
     test_cmd_no_cwd_exe_search();
     test_free_suspended_terminates();
     test_comspec_unc_ignored();
+    test_cmd_percent_neutralized();
 #else
     test_posix_only_options();
 #endif

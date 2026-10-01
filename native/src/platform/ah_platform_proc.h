@@ -23,6 +23,16 @@
  *   * `NoDefaultCurrentDirectoryInExePath=1` no ambiente do filho: um .cmd
  *     que chama outro programa pelo nome não o procura no diretório corrente
  *     (o worktree) (SPEC-08 P1).
+ *   * A2, `%` neutralizado (decisão do dono de 2026-10-01; diverge de
+ *     packages/adapters/src/bin-resolver.ts:347-386): nos argumentos, cada
+ *     `%` vira `%%cd:~,%` em vez de `^^^%`, e a linha leva `/e:on`. O `^`
+ *     não protegia a forma de substituição (`%NOME:a=b%`, `%NOME:*x=y%`,
+ *     `%NOME:~0,3%`), que o cmd expande antes de processar os `^`: o valor
+ *     da variável chegava ao argv e, com `&` no valor, rodava um segundo
+ *     comando. Técnica do std do Rust contra o BatBadBut (CVE-2024-24576),
+ *     rust-lang/rust library/std/src/sys/args/windows.rs, append_bat_arg.
+ *     O caminho do .cmd mantém o `^` simples do TS (ver
+ *     ah_platform_proc_common.c).
  * - Limite conhecido (B2, paridade com o TS): um shim .cmd que faça
  *   `setlocal enabledelayedexpansion` expande `!VAR!` vindos do argumento
  *   ao repassar `%*`. Isso vaza o VALOR de variáveis de ambiente para o argv
@@ -32,11 +42,25 @@
  *   (setpgid(0,0), equivalente ao `detached: true` do TS), descritores acima
  *   de 2 fechados no filho antes do exec e todos os do Hub com O_CLOEXEC
  *   (SPEC-08 P4). NÃO VERIFICADO nesta tarefa (sem máquina POSIX).
- * - POSIX, SIGPIPE: o processo que usa esta API PRECISA ignorar SIGPIPE
- *   (signal(SIGPIPE, SIG_IGN) no início do daemon/CLI; registrado para a
- *   F0-09/F1-15). Sem isso, escrever no stdin de um filho que já fechou a
- *   ponta de leitura mata o Hub em vez de devolver AH_ERR_IO. O filho
- *   recebe SIGPIPE com a disposição padrão (restaurada antes do exec).
+ * - Windows, herança (B7): TODO processo que o Hub cria passa por
+ *   ah_proc_spawn, o único CreateProcessW do código. As pontas do filho
+ *   nascem não herdáveis e só ficam herdáveis dentro de um lock da camada,
+ *   do SetHandleInformation até o fechamento logo após o CreateProcessW.
+ *   Ninguém pode chamar CreateProcess* com bInheritHandles=TRUE fora desta
+ *   API; se um dia for preciso, dentro de native/src/platform/ e segurando
+ *   o mesmo lock (ah_platform_proc_internal.h).
+ * - POSIX, requisitos para quem inicia o processo (registrados para a
+ *   F0-09/F1-15):
+ *   * SIGPIPE ignorado (signal(SIGPIPE, SIG_IGN) no início do daemon e da
+ *     CLI). Sem isso, escrever no stdin de um filho que já fechou a ponta
+ *     de leitura mata o Hub em vez de devolver AH_ERR_IO. O filho recebe
+ *     SIGPIPE com a disposição padrão (restaurada antes do exec).
+ *   * SIGCHLD NUNCA em SIG_IGN (nem SA_NOCLDWAIT): com isso o kernel colhe
+ *     os filhos sozinho e ah_proc_wait falha com ECHILD, perdendo o código
+ *     de saída. Um handler de SIGCHLD (self-pipe) é permitido.
+ *   * Nada de waitpid(-1, ...) nem wait(): eles colhem os filhos desta API
+ *     e roubam o status que ah_proc_wait precisa. Espere por PID
+ *     (ah_proc_wait) ou pelo pidfd (ah_proc_exit_waitable).
  *
  * Texto: toda string é UTF-8 (docs/18 §9). No Windows a conversão para
  * UTF-16 acontece aqui dentro; UTF-8 inválido é recusado com AH_ERR_INVALID.
@@ -203,7 +227,11 @@ ah_status ah_proc_native_pipe(const ah_proc *p, ah_proc_stream stream,
  * algum fluxo de `mask` esteja pronto para read/write. *ready recebe a
  * máscara dos prontos (0 = estourou o tempo). Fluxos já fechados contam
  * como prontos (read devolve EOF; write, AH_ERR_IO), para o chamador não
- * ficar preso. */
+ * ficar preso. Por isso, depois de ah_proc_close_stdin, tire
+ * AH_PROC_MASK_STDIN da máscara (B8): com ele na máscara o stdin fechado
+ * sai sempre pronto e a espera volta na hora, sem esperar stdout/stderr.
+ * O fechamento diferido do Windows é acompanhado internamente, sem
+ * precisar do bit. */
 ah_status ah_proc_wait_io(ah_proc *p, unsigned mask, int32_t timeout_ms,
                           unsigned *ready);
 
@@ -250,9 +278,10 @@ ah_status ah_proc_win_command_line(const char *program,
                                    const size_t *arg_lens, size_t arg_count,
                                    char **out);
 
-/* escaparArgParaCmd (bin-resolver.ts:366-386): aspas do CommandLineToArgvW
- * (sempre entre aspas) e depois `^` antes de cada metacaractere
- * ( ) [ ] % ! ^ " ` < > & | ; , espaço * ? — duas vezes. \r, \n ou NUL →
+/* Base: escaparArgParaCmd (bin-resolver.ts:366-386). Aspas do
+ * CommandLineToArgvW (sempre entre aspas), depois `^` antes de cada
+ * metacaractere ( ) [ ] ! ^ " ` < > & | ; , espaço * ? — duas vezes. O `%`
+ * diverge do TS (A2): não recebe `^` e vira `%%cd:~,%`. \r, \n ou NUL →
  * AH_ERR_INVALID. Posse: o chamador libera *out com free(). */
 ah_status ah_proc_cmd_escape_arg(const char *arg, size_t len, char **out);
 
@@ -265,9 +294,11 @@ ah_status ah_proc_cmd_line(const char *command, const char *const *args,
                            char **out);
 
 /* Linha de comando completa do ramo via_cmd:
- * `"<comspec>" /d /s /v:off /c "<linha>"`. O `/v:off` vem antes do `/c`
- * (divergência deliberada do TS, DA-29: anula DelayedExpansion=1 do
- * registro). `comspec` não pode conter '"'. Posse: free(). */
+ * `"<comspec>" /d /s /e:on /v:off /c "<linha>"`. `/e:on` e `/v:off` vêm
+ * antes do `/c` (divergências deliberadas do TS: `/v:off` anula
+ * DelayedExpansion=1 do registro, DA-29; `/e:on` garante as extensões de
+ * que a neutralização do `%` depende, A2). `comspec` não pode conter '"'.
+ * Posse: free(). */
 ah_status ah_proc_cmd_invocation(const char *comspec, const char *linha,
                                  char **out);
 

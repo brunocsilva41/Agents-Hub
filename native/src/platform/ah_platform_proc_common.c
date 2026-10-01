@@ -331,13 +331,42 @@ static bool is_cmd_meta(char c) {
     return strchr("()][%!^\"`<>&|;, *?", c) != NULL && c != '\0';
 }
 
-static ah_status caret_escape(const char *s, size_t len, char **out) {
+/* `^` antes de cada metacaractere. Com skip_percent, o `%` passa sem `^`
+ * (ele é neutralizado à parte por neutralize_percent). */
+static ah_status caret_escape(const char *s, size_t len, bool skip_percent,
+                              char **out) {
     sbuf b = {0};
     for (size_t i = 0; i < len; i++) {
-        if (is_cmd_meta(s[i])) {
+        if (is_cmd_meta(s[i]) && !(skip_percent && s[i] == '%')) {
             sb_putc(&b, '^');
         }
         sb_putc(&b, s[i]);
+    }
+    return sb_finish(&b, out);
+}
+
+/* A2 — divergência deliberada do TS (decisão do dono de 2026-10-01): cada
+ * `%` vira `%%cd:~,%`. Técnica do std do Rust contra o BatBadBut
+ * (CVE-2024-24576): rust-lang/rust, library/std/src/sys/args/windows.rs,
+ * função append_bat_arg ("yt-dlp hack: replaces `%` with `%%cd:~,%` to stop
+ * %VAR% being expanded as an environment variable"). `%cd:~,%` é uma
+ * substring vazia da variável dinâmica `cd`, que sempre existe: a expansão
+ * de `%` do modo linha de comando (fase 1 do `cmd /c`, que roda ANTES do
+ * processamento dos `^`) consome esse trecho e deixa o `%` original como
+ * literal, sem que ele possa formar par com o `%` seguinte. Por isso o `^`
+ * não protegia: `^^^%NOME:a=b^^^%` ainda expandia a forma de substituição
+ * `%NOME:a=b%`. Exige extensões de comando ligadas (`/e:on` na linha,
+ * ah_proc_cmd_invocation), como no Rust. O `%` resultante não volta a ser
+ * expandido: o `%*` do .bat é substituído uma vez só, sem nova varredura. */
+static ah_status neutralize_percent(const char *s, size_t len, char **out) {
+    static const char rep[] = "%%cd:~,%";
+    sbuf b = {0};
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '%') {
+            sb_put(&b, rep, sizeof rep - 1);
+        } else {
+            sb_putc(&b, s[i]);
+        }
     }
     return sb_finish(&b, out);
 }
@@ -377,15 +406,23 @@ ah_status ah_proc_cmd_escape_arg(const char *arg, size_t len, char **out) {
         return st;
     }
     /* 2) `^` antes de cada metacaractere, duas vezes: a 1ª camada é
-     * consumida pelo `cmd /c`, a 2ª pelo reparse do `%*` no .bat. */
+     * consumida pelo `cmd /c`, a 2ª pelo reparse do `%*` no .bat. O `%`
+     * fica fora dos `^` (o `^` não o protege; ver neutralize_percent). */
     char *once = NULL;
-    st = caret_escape(quoted, strlen(quoted), &once);
+    st = caret_escape(quoted, strlen(quoted), true, &once);
     free(quoted);
     if (st != AH_OK) {
         return st;
     }
-    st = caret_escape(once, strlen(once), out);
+    char *twice = NULL;
+    st = caret_escape(once, strlen(once), true, &twice);
     free(once);
+    if (st != AH_OK) {
+        return st;
+    }
+    /* 3) cada `%` vira `%%cd:~,%` (A2). */
+    st = neutralize_percent(twice, strlen(twice), out);
+    free(twice);
     return st;
 }
 
@@ -395,8 +432,12 @@ ah_status ah_proc_cmd_line(const char *command, const char *const *args,
     if (command == NULL || out == NULL) {
         return AH_ERR_INVALID;
     }
+    /* O comando mantém o `^` simples do TS (paridade): o caminho vem do
+     * resolvedor, não do prompt, e a forma de substituição `%NOME:...%`
+     * exige ':' depois do nome, que um nome de arquivo do Windows não pode
+     * conter (o único ':' de um caminho absoluto é o do drive). */
     char *cmd = NULL;
-    ah_status st = caret_escape(command, strlen(command), &cmd);
+    ah_status st = caret_escape(command, strlen(command), false, &cmd);
     if (st != AH_OK) {
         return st;
     }
@@ -442,8 +483,11 @@ ah_status ah_proc_cmd_invocation(const char *comspec, const char *linha,
         return AH_ERR_INVALID;
     }
     /* `/v:off` antes do `/c`: a opção da linha vence DelayedExpansion=1 do
-     * registro, que expandiria `!` depois do escape duplo (DA-29). */
-    static const char mid[] = "\" /d /s /v:off /c \"";
+     * registro, que expandiria `!` depois do escape duplo (DA-29).
+     * `/e:on`: a neutralização do `%` (`%%cd:~,%`, A2) depende das
+     * extensões de comando, e a linha vence EnableExtensions=0 do registro;
+     * o Rust monta `cmd.exe /e:ON /v:OFF /d /c` pelo mesmo motivo. */
+    static const char mid[] = "\" /d /s /e:on /v:off /c \"";
     sbuf b = {0};
     sb_putc(&b, '"');
     sb_put(&b, comspec, strlen(comspec));

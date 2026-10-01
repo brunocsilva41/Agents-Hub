@@ -356,6 +356,18 @@ static ah_status build_env_block(const ah_proc_spawn_opts *o, wchar_t **out,
     return st;
 }
 
+/* --- lock de spawn (B7) --- */
+
+static SRWLOCK g_spawn_lock = SRWLOCK_INIT;
+
+void ah_proc_i_spawn_lock(void) {
+    AcquireSRWLockExclusive(&g_spawn_lock);
+}
+
+void ah_proc_i_spawn_unlock(void) {
+    ReleaseSRWLockExclusive(&g_spawn_lock);
+}
+
 /* --- pipes --- */
 
 /* SECURITY_ATTRIBUTES com DACL de uma ACE só, para o SID do usuário do
@@ -436,10 +448,12 @@ static ah_status make_pipe(bool parent_reads, SECURITY_ATTRIBUTES *srv_sa,
             }
             return map_spawn_error(e);
         }
+        /* B7: a ponta do filho nasce NÃO herdável; vira herdável só dentro
+         * do lock de spawn, logo antes do CreateProcessW. */
         SECURITY_ATTRIBUTES sa;
         sa.nLength = sizeof sa;
         sa.lpSecurityDescriptor = NULL;
-        sa.bInheritHandle = TRUE;
+        sa.bInheritHandle = FALSE;
         DWORD access = parent_reads ? (GENERIC_WRITE | FILE_READ_ATTRIBUTES)
                                     : (GENERIC_READ | FILE_WRITE_ATTRIBUTES);
         HANDLE cli =
@@ -726,15 +740,28 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
         }
         PROCESS_INFORMATION pi;
         memset(&pi, 0, sizeof pi);
+        /* B7: as pontas do filho só são herdáveis dentro do lock, entre o
+         * SetHandleInformation e o fechamento logo após o CreateProcessW.
+         * Todo CreateProcessW do Hub passa por aqui (ver o header), então
+         * nenhum outro spawn com herança roda nessa janela. */
+        ah_proc_i_spawn_lock();
+        for (int i = 0; i < 3 && st == AH_OK; i++) {
+            if (!SetHandleInformation(child[i], HANDLE_FLAG_INHERIT,
+                                      HANDLE_FLAG_INHERIT)) {
+                st = AH_ERR_IO;
+                ah_proc_i_detail(detail, cap,
+                                 "falha ao marcar o pipe do filho herdável");
+            }
+        }
         /* lpApplicationName absoluto: o SO não busca nada (SPEC-08 P1). */
-        if (!CreateProcessW(app, cmd, NULL, NULL, TRUE, flags, envb, cwd,
-                            &si.StartupInfo, &pi)) {
+        if (st == AH_OK && !CreateProcessW(app, cmd, NULL, NULL, TRUE, flags,
+                                           envb, cwd, &si.StartupInfo, &pi)) {
             DWORD e = GetLastError();
             st = map_spawn_error(e);
             ah_proc_i_detail(detail, cap,
                              "CreateProcessW falhou (erro %lu)",
                              (unsigned long)e);
-        } else {
+        } else if (st == AH_OK) {
             p->process = pi.hProcess;
             p->pid = pi.dwProcessId;
             if (o->start_suspended) {
@@ -743,6 +770,10 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
                 CloseHandle(pi.hThread);
             }
         }
+        for (int i = 0; i < 3; i++) {
+            close_h(&child[i]);
+        }
+        ah_proc_i_spawn_unlock();
     }
 
     for (int i = 0; i < 3; i++) {
@@ -860,10 +891,12 @@ ah_status ah_proc_read(ah_proc *p, ah_proc_stream stream, void *buf,
         *state = AH_PROC_IO_DATA;
         return AH_OK;
     }
-    /* Escrita de 0 bytes do filho: rearma UMA leitura e devolve AGAIN, sem
-     * laço interno. Cada escrita vazia custa no máximo uma volta do laço do
-     * chamador (que só volta se o evento sinalizar), então um filho que as
-     * repete não faz o Hub girar sozinho. */
+    /* Leitura concluída com 0 bytes: rearma UMA leitura e devolve AGAIN, sem
+     * laço interno, para que nada aqui faça o Hub girar sozinho. Ramo
+     * defensivo: nos pipes em modo byte criados acima, um WriteFile de 0
+     * bytes do filho não conclui a leitura pendente (conferido em
+     * 2026-10-01, ver test_zero_byte_writes), então hoje ele não é
+     * alcançado nem coberto por teste. */
     ah_status st = rd_issue(r, &eof);
     if (st != AH_OK) {
         return st;
