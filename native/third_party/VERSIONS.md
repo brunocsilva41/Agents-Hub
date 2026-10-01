@@ -224,12 +224,19 @@ oficial) tem exatamente as diferenças desta tabela.
 
 | Lib | Arquivo | Patch | Commits upstream | Motivo | SHA-256 do arquivo depois do patch |
 |---|---|---|---|---|---|
-| SDL_ttf 3.2.2 | `sdl_ttf/src/SDL_ttf.c` (só `BG_Blended_Color`) | [`patches/sdl_ttf/0001-blended-color-alinhamento.patch`](patches/sdl_ttf/0001-blended-color-alinhamento.patch) | [`6ea7d33927211629bf8326b7cc6caad34f3d4122`](https://github.com/libsdl-org/SDL_ttf/commit/6ea7d33927211629bf8326b7cc6caad34f3d4122) (só os hunks de `BG_Blended_Color`) + [`a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0`](https://github.com/libsdl-org/SDL_ttf/commit/a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0) (corrige o `dst +=` que o primeiro introduziu) | UB de alinhamento achada pelo UBSan (preset `windows-clangcl-asan`) no teste de emoji colorido do `unit.ui_smoke`: o ramo opaco lia `*src++` como `Uint32` num buffer desalinhado (`SDL_ttf.c:467:13: runtime error: load of misaligned address`) | `46ec221287f7c07ba9ec1558b54ee320f71e6e753c24387b0e16329cfe4bbcea` (o do tarball é `25a42804b18809e5c4b2eb8ed787701551d0c680aff774b7d8c54486c0d42d38`) |
+| SDL_ttf 3.2.2 | `sdl_ttf/src/SDL_ttf.c` (funções de blit de glifo e `Render_Line_##NAME`) | [`patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch`](patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch) | [`6ea7d33927211629bf8326b7cc6caad34f3d4122`](https://github.com/libsdl-org/SDL_ttf/commit/6ea7d33927211629bf8326b7cc6caad34f3d4122) e [`a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0`](https://github.com/libsdl-org/SDL_ttf/commit/a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0) **inteiros** (todos os hunks; o segundo corrige o `dst +=` que o primeiro introduziu em `BG_Blended_Color`) | UB de alinhamento: as funções de blit do 3.2.2 criam e leem ponteiros `Uint32`/`Uint64` desalinhados sobre os buffers de glifo. Achada pelo UBSan (preset `windows-clangcl-asan`) no teste de emoji colorido do `unit.ui_smoke` (`SDL_ttf.c:467:13: runtime error: load of misaligned address`); as demais funções de blit (LCD, 32/64 bits, SSE, 8 bits) têm o mesmo padrão | `4dba9c5de63ee61faf4e6fb9bcc61fb38f6c42e66746b2d1c480e28382ced14e` (o do tarball é `25a42804b18809e5c4b2eb8ed787701551d0c680aff774b7d8c54486c0d42d38`) |
 
-- Depois do patch, `BG_Blended_Color` é idêntica à do `main` do upstream (diff da função em
-  2026-10-01). Os demais hunks do 6ea7d33 (outras funções de blit) não foram trazidos.
+- Os dois commits aplicaram sobre o 3.2.2 com `git apply`, todos os hunks limpos e sem fuzz; só
+  o hunk 20 do 6ea7d33 (`Render_Line_##NAME`) entra com deslocamento de -5 linhas (commits
+  intermediários mudaram linhas acima dele). Nenhuma adaptação manual. O `.patch` é o diff
+  combinado tarball → fonte corrigido; a linha `index` dele aponta para o blob do tarball
+  (`be517a18…`) e para o blob do arquivo corrigido (`2d6e03b6…`).
+- O 6ea7d33 inclui o helper `_mm_loadu_si128_unaligned` com
+  `__attribute__((no_sanitize("alignment")))`, sob `HAVE_SSE2_INTRINSICS` (`__SSE2__`): é escolha
+  do upstream (desliga o sanitizer de alinhamento só nessa carga SIMD) e só compila em
+  GCC/Clang/clang-cl; o `cl` não define `__SSE2__` e não passa por ele.
 - Prova, a partir da raiz do repositório:
-  `git apply --check -R native/third_party/patches/sdl_ttf/0001-blended-color-alinhamento.patch`
+  `git apply --check -R native/third_party/patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch`
   tem de passar (o patch está aplicado e reverte limpo).
 - **Regra de remoção:** quando sair um release do SDL_ttf com a correção (em 2026-10-01 o último
   release era o 3.2.2, de 2025-03-31), atualizar para ele, apagar o `.patch` e esta linha, e
