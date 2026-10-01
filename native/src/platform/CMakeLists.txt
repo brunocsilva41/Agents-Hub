@@ -9,6 +9,8 @@
 #   time.cmake  F0-06  tempo, aleatoriedade, ambiente e usuário do SO
 #   proc.cmake  F0-07  processos (spawn, pipes, ambiente)
 #   net.cmake   F0-09  sockets loopback, laço de eventos, timers e threads
+#   tree.cmake  F0-08  árvore de processos e identidade de PID
+#   vault.cmake F7-03/F7-04  cofre de segredos do SO (Windows e Linux)
 #
 # Testes de plataforma ficam em native/tests/unit/platform/ e são registrados
 # pelo fragmento da área (o alvo de teste linka ah::platform e usa ah_test.h).
@@ -21,6 +23,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/fs.cmake" OPTIONAL)
 include("${CMAKE_CURRENT_SOURCE_DIR}/time.cmake" OPTIONAL)
 include("${CMAKE_CURRENT_SOURCE_DIR}/proc.cmake" OPTIONAL)
 include("${CMAKE_CURRENT_SOURCE_DIR}/net.cmake" OPTIONAL)
+include("${CMAKE_CURRENT_SOURCE_DIR}/tree.cmake" OPTIONAL)
+include("${CMAKE_CURRENT_SOURCE_DIR}/vault.cmake" OPTIONAL)
 
 add_library(ah_platform STATIC ${AH_PLATFORM_SOURCES})
 add_library(ah::platform ALIAS ah_platform)
@@ -33,7 +37,7 @@ ah_project_warnings(ah_platform)
 if(COMMAND ah_platform_register_tests)
   ah_platform_register_tests()
 endif()
-foreach(_ah_area fs time proc net)
+foreach(_ah_area fs time proc net tree vault)
   if(COMMAND ah_platform_${_ah_area}_tests)
     cmake_language(CALL ah_platform_${_ah_area}_tests)
   endif()
