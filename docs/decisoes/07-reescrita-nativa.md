@@ -51,6 +51,10 @@
 
 ## Em aberto (não decidido)
 
+> **Atualização (2026-09-30):** a biblioteca de UI, as metas de desempenho, o instalador, a
+> atualização e a pilha C foram decididos no [ADR 08](08-pilha-tecnica-c.md). O esquema exato
+> da chave e do manifesto de atualização segue como proposta técnica até o plano.
+
 - Biblioteca de UI em C (7.3), a ser pesquisada.
 - Metas numéricas de desempenho (7.19), depois da medição.
 - Formato do instalador no Windows e esquema da chave de atualização (7.12, 7.14).
