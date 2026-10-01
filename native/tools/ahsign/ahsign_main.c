@@ -16,6 +16,7 @@
 
 #include "ah_update_verify.h"
 #include "ahsign_key.h"
+#include "ah_platform_time.h"
 #include "ahsign_os.h"
 #include "monocypher.h"
 
@@ -142,6 +143,10 @@ static ah_status get_password(const options *o, int confirm, char *pw, size_t ca
     if (st != AH_OK) {
         if (st == AH_ERR_IO && !o->password_stdin) {
             fputs("ahsign: sem terminal para ler a senha; use --password-stdin\n", stderr);
+        } else if (st == AH_ERR_INVALID && o->password_stdin) {
+            fputs("ahsign: senha nao lida: vazia, ou stdin e um terminal (sem "
+                  "--password-stdin a senha e lida sem eco)\n",
+                  stderr);
         } else {
             fprintf(stderr, "ahsign: senha nao lida (%s)\n", status_text(st));
         }
@@ -166,6 +171,7 @@ static int open_key(const options *o, uint8_t sk[AHSIGN_SECRET_KEY_SIZE], uint8_
     size_t pw_len = 0;
     uint8_t *file = NULL;
     size_t file_size = 0;
+    ahsign_kdf kdf = {0, 0};
     ah_status st;
 
     st = ahsign_os_read_file(o->key, AHSIGN_KEY_FILE_SIZE, &file, &file_size);
@@ -178,10 +184,17 @@ static int open_key(const options *o, uint8_t sk[AHSIGN_SECRET_KEY_SIZE], uint8_
         free(file);
         return EXIT_OPFAIL;
     }
-    st = ahsign_key_open(file, file_size, (const uint8_t *)pw, pw_len, sk, pk);
+    st = ahsign_key_open(file, file_size, (const uint8_t *)pw, pw_len, sk, pk, &kdf);
     crypto_wipe(pw, sizeof pw);
     crypto_wipe(file, file_size);
     free(file);
+    if (st == AH_OK && ahsign_kdf_is_weak(kdf)) {
+        fprintf(stderr,
+                "ahsign: aviso: custo do Argon2id do arquivo (%u KiB, %u passadas) abaixo do "
+                "padrao (%u KiB, %u passadas); gere a chave de novo com ahsign generate\n",
+                (unsigned)kdf.nb_blocks, (unsigned)kdf.nb_passes,
+                (unsigned)ahsign_kdf_default.nb_blocks, (unsigned)ahsign_kdf_default.nb_passes);
+    }
     if (st != AH_OK) {
         if (st == AH_ERR_INVALID) {
             fputs("ahsign: senha incorreta ou arquivo de chave invalido\n", stderr);
@@ -212,15 +225,20 @@ static int cmd_generate(const options *o) {
         fprintf(stderr, "ahsign: %s ja existe; nao sobrescrevo\n", o->out);
         return EXIT_OPFAIL;
     }
+    if (ahsign_os_parent_writable_by_others(o->out)) {
+        fprintf(stderr, "ahsign: aviso: a pasta de %s aceita escrita de grupo ou de outros "
+                        "usuarios; quem escreve ali pode trocar o arquivo da chave\n",
+                o->out);
+    }
     if (get_password(o, 1, pw, sizeof pw, &pw_len) != AH_OK) {
         return EXIT_OPFAIL;
     }
-    st = ahsign_os_random(seed, sizeof seed);
+    st = ah_platform_random_bytes(seed, sizeof seed);
     if (st == AH_OK) {
-        st = ahsign_os_random(salt, sizeof salt);
+        st = ah_platform_random_bytes(salt, sizeof salt);
     }
     if (st == AH_OK) {
-        st = ahsign_os_random(nonce, sizeof nonce);
+        st = ah_platform_random_bytes(nonce, sizeof nonce);
     }
     if (st == AH_OK) {
         st = ahsign_key_seal(seed, (const uint8_t *)pw, pw_len, ahsign_kdf_default, salt,

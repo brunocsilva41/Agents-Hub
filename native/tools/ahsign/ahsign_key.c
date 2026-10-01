@@ -116,7 +116,7 @@ ah_status ahsign_key_seal(const uint8_t seed[AHSIGN_SEED_SIZE], const uint8_t *p
 
 ah_status ahsign_key_open(const uint8_t *file, size_t file_size, const uint8_t *password,
                           size_t password_size, uint8_t secret_key[AHSIGN_SECRET_KEY_SIZE],
-                          uint8_t public_key[32]) {
+                          uint8_t public_key[32], ahsign_kdf *kdf_out) {
     uint8_t seed[AHSIGN_SEED_SIZE];
     uint8_t key[32];
     uint8_t derived_public[32];
@@ -153,7 +153,15 @@ ah_status ahsign_key_open(const uint8_t *file, size_t file_size, const uint8_t *
         return AH_ERR_INVALID;
     }
     memcpy(public_key, derived_public, sizeof derived_public);
+    if (kdf_out != NULL) {
+        *kdf_out = kdf;
+    }
     return AH_OK;
+}
+
+int ahsign_kdf_is_weak(ahsign_kdf kdf) {
+    return kdf.nb_blocks < ahsign_kdf_default.nb_blocks ||
+           kdf.nb_passes < ahsign_kdf_default.nb_passes;
 }
 
 ah_status ahsign_sign_envelope(const uint8_t secret_key[AHSIGN_SECRET_KEY_SIZE],

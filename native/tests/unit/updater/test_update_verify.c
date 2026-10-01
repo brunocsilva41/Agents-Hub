@@ -6,7 +6,7 @@
 
 #include "ah_test.h"
 #include "ah_update_verify.h"
-#include "ahsign_os.h"
+#include "ah_platform_time.h"
 #include "monocypher-ed25519.h"
 #include "monocypher.h"
 
@@ -113,7 +113,7 @@ typedef struct test_signer {
 /* Par efêmero: semente do gerador do SO, descartada no fim do teste. */
 static int make_signer(test_signer *s) {
     uint8_t seed[32];
-    if (ahsign_os_random(seed, sizeof seed) != AH_OK) {
+    if (ah_platform_random_bytes(seed, sizeof seed) != AH_OK) {
         return -1;
     }
     crypto_ed25519_key_pair(s->sk, s->key.public_key, seed);
@@ -454,8 +454,226 @@ static void test_key_id(void) {
     CHECK(memcmp(id, hash, 8) == 0);
 }
 
+/* ------------------------------------------- casos fixados (revisão B5) */
+
+/* Cópia de `env` com `ins` (n bytes) inserido na posição `pos`. Posse: free(). */
+static uint8_t *insert_bytes(const uint8_t *env, size_t size, size_t pos, const char *ins,
+                             size_t n, size_t *out_size) {
+    uint8_t *copy = (uint8_t *)malloc(size + n);
+    if (copy == NULL) {
+        return NULL;
+    }
+    memcpy(copy, env, pos);
+    memcpy(copy + pos, ins, n);
+    memcpy(copy + pos + n, env + pos, size - pos);
+    *out_size = size + n;
+    return copy;
+}
+
+/* Reescreve o hex da assinatura (bytes 48..175) com `sig`. */
+static void put_sig_hex(uint8_t *env, const uint8_t sig[64]) {
+    static const char hexd[] = "0123456789abcdef";
+    size_t i;
+    for (i = 0; i < 64; i++) {
+        env[48 + 2 * i] = (uint8_t)hexd[sig[i] >> 4];
+        env[48 + 2 * i + 1] = (uint8_t)hexd[sig[i] & 0x0f];
+    }
+}
+
+/* L = 2^252 + 27742317777372353535851937790883648493, little-endian. */
+static const uint8_t k_order_l[32] = {0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
+                                      0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+                                      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10};
+
+/* S + L e S = L: a mesma assinatura com S fora de [0, L) é recusada
+ * (anti-maleabilidade, monocypher.c is_above_l). */
+static void test_b5_s_plus_l(void) {
+    test_signer s;
+    ah_update_envelope parsed;
+    uint8_t *env;
+    uint8_t sig[64];
+    uint8_t msg[sizeof k_body - 1 + AH_UPDATE_MAGIC_SIZE + 1];
+    size_t size = 0;
+    unsigned carry = 0;
+    size_t i;
+
+    CHECK(make_signer(&s) == 0);
+    env = make_envelope(&s, (const uint8_t *)k_body, sizeof k_body - 1, SIGN_WITH_PREFIX, &size);
+    CHECK(env != NULL);
+    if (env == NULL) {
+        return;
+    }
+    CHECK(ah_update_envelope_parse(env, size, &parsed) == AH_OK);
+    memcpy(sig, parsed.signature, 64);
+    memcpy(msg, AH_UPDATE_MAGIC "\n", AH_UPDATE_MAGIC_SIZE + 1u);
+    memcpy(msg + AH_UPDATE_MAGIC_SIZE + 1u, k_body, sizeof k_body - 1);
+    CHECK(crypto_ed25519_check(sig, s.key.public_key, msg, sizeof msg) == 0);
+
+    /* S' = S + L (cabe em 32 bytes: S < L < 2^253). */
+    for (i = 0; i < 32; i++) {
+        unsigned v = (unsigned)sig[32 + i] + k_order_l[i] + carry;
+        sig[32 + i] = (uint8_t)(v & 0xffu);
+        carry = v >> 8;
+    }
+    CHECK(carry == 0);
+    CHECK(crypto_ed25519_check(sig, s.key.public_key, msg, sizeof msg) != 0);
+    put_sig_hex(env, sig);
+    CHECK(verify_with(env, size, &s.key, 1) == AH_ERR_INVALID);
+
+    /* S = L. */
+    memcpy(sig + 32, k_order_l, 32);
+    put_sig_hex(env, sig);
+    CHECK(verify_with(env, size, &s.key, 1) == AH_ERR_INVALID);
+    free(env);
+    crypto_wipe(&s, sizeof s);
+}
+
+/* Cabeçalho: hex maiúsculo na sig, CRLF, BOM, NUL e `key:` repetido. */
+static void test_b5_header_variants(void) {
+    test_signer s;
+    ah_update_envelope parsed;
+    uint8_t *env;
+    uint8_t *copy;
+    size_t size = 0;
+    size_t csize = 0;
+    size_t i;
+    int changed = 0;
+
+    CHECK(make_signer(&s) == 0);
+    env = make_envelope(&s, (const uint8_t *)k_body, sizeof k_body - 1, SIGN_WITH_PREFIX, &size);
+    CHECK(env != NULL);
+    if (env == NULL) {
+        return;
+    }
+    CHECK(verify_with(env, size, &s.key, 1) == AH_OK);
+
+    /* Hex maiúsculo na assinatura. */
+    copy = (uint8_t *)malloc(size);
+    CHECK(copy != NULL);
+    if (copy != NULL) {
+        memcpy(copy, env, size);
+        for (i = 48; i < 176; i++) {
+            if (copy[i] >= 'a' && copy[i] <= 'f') {
+                copy[i] = (uint8_t)(copy[i] - 'a' + 'A');
+                changed = 1;
+                break;
+            }
+        }
+        CHECK(changed); /* 128 hex aleatórios sem a-f: probabilidade desprezível */
+        CHECK(ah_update_envelope_parse(copy, size, &parsed) == AH_ERR_INVALID);
+        CHECK(verify_with(copy, size, &s.key, 1) == AH_ERR_INVALID);
+
+        /* NUL no lugar de um byte do cabeçalho: no texto fixo e no hex. */
+        memcpy(copy, env, size);
+        copy[22] = 0;
+        CHECK(ah_update_envelope_parse(copy, size, &parsed) == AH_ERR_INVALID);
+        memcpy(copy, env, size);
+        copy[30] = 0;
+        CHECK(ah_update_envelope_parse(copy, size, &parsed) == AH_ERR_INVALID);
+        memcpy(copy, env, size);
+        copy[177] = 0; /* a linha vazia */
+        CHECK(ah_update_envelope_parse(copy, size, &parsed) == AH_ERR_INVALID);
+
+        /* `key:` no lugar de `sig:`. */
+        memcpy(copy, env, size);
+        memcpy(copy + 43, "key: ", 5);
+        CHECK(ah_update_envelope_parse(copy, size, &parsed) == AH_ERR_INVALID);
+        free(copy);
+    }
+
+    /* CRLF em cada fim de linha do cabeçalho (CR inserido antes do LF). */
+    {
+        static const size_t lf_positions[] = {20, 42, 176, 177};
+        size_t k;
+        for (k = 0; k < sizeof lf_positions / sizeof lf_positions[0]; k++) {
+            copy = insert_bytes(env, size, lf_positions[k], "\r", 1, &csize);
+            CHECK(copy != NULL);
+            if (copy != NULL) {
+                CHECK(verify_with(copy, csize, &s.key, 1) != AH_OK);
+                free(copy);
+            }
+        }
+    }
+    /* BOM UTF-8 no início. */
+    copy = insert_bytes(env, size, 0, "\xef\xbb\xbf", 3, &csize);
+    CHECK(copy != NULL);
+    if (copy != NULL) {
+        CHECK(ah_update_envelope_parse(copy, csize, &parsed) == AH_ERR_INVALID);
+        free(copy);
+    }
+    /* Uma linha `key:` repetida inteira antes da `sig:`. */
+    {
+        char line[23];
+        memcpy(line, env + 21, 22); /* "key: <16 hex>\n" */
+        line[22] = 0;
+        copy = insert_bytes(env, size, 43, line, 22, &csize);
+        CHECK(copy != NULL);
+        if (copy != NULL) {
+            CHECK(ah_update_envelope_parse(copy, csize, &parsed) == AH_ERR_INVALID);
+            CHECK(verify_with(copy, csize, &s.key, 1) != AH_OK);
+            free(copy);
+        }
+    }
+    free(env);
+    crypto_wipe(&s, sizeof s);
+}
+
+/* A e R com codificação não canônica. O Monocypher 4.0.3 ACEITA codificação
+ * não canônica de A e de R (monocypher.c, comentário em
+ * crypto_eddsa_check_equation) e não recusa ponto de ordem pequena. Fixa-se
+ * aqui o comportamento: com A = identidade (y = 1, codificado como y = 1 ou
+ * y = p + 1), a assinatura R = identidade, S = 0 vale para QUALQUER mensagem.
+ * Não afeta o Hub porque A só vem da tabela embutida (as chaves do projeto),
+ * nunca do envelope; quem montar essa tabela não pode pôr ali uma chave fraca. */
+static void test_b5_non_canonical_points(void) {
+    /* Identidade canônica: y = 1. */
+    static const uint8_t ident[32] = {0x01};
+    /* Identidade não canônica: y = p + 1 = 2^255 - 18. */
+    static const uint8_t ident_nc[32] = {
+        0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f};
+    static const uint8_t msg[] = "qualquer mensagem";
+    uint8_t sig[64];
+    ah_update_key weak;
+    uint8_t *env;
+    size_t size = 0;
+
+    memset(sig, 0, sizeof sig);
+    memcpy(sig, ident, 32);
+    CHECK(crypto_ed25519_check(sig, ident, msg, sizeof msg - 1) == 0);
+    CHECK(crypto_ed25519_check(sig, ident_nc, msg, sizeof msg - 1) == 0); /* A não canônico */
+    memcpy(sig, ident_nc, 32);
+    CHECK(crypto_ed25519_check(sig, ident, msg, sizeof msg - 1) == 0); /* R não canônico */
+    CHECK(crypto_ed25519_check(sig, ident_nc, msg, sizeof msg - 1) == 0);
+
+    /* Com uma chave válida de verdade, R não canônico não forja nada. */
+    {
+        uint8_t pk[32];
+        CHECK(hex_to_bytes(k_rfc8032[0].public_key, pk, sizeof pk) == 0);
+        CHECK(crypto_ed25519_check(sig, pk, msg, sizeof msg - 1) != 0);
+    }
+
+    /* O mesmo pelo verificador do Hub, se a tabela tivesse a chave fraca. */
+    memcpy(weak.public_key, ident_nc, 32);
+    ah_update_key_id(weak.public_key, weak.key_id);
+    env = (uint8_t *)malloc(AH_UPDATE_HEADER_SIZE + sizeof k_body - 1);
+    CHECK(env != NULL);
+    if (env != NULL) {
+        CHECK(ah_update_header_write(weak.key_id, sig, env, AH_UPDATE_HEADER_SIZE) == AH_OK);
+        memcpy(env + AH_UPDATE_HEADER_SIZE, k_body, sizeof k_body - 1);
+        size = AH_UPDATE_HEADER_SIZE + sizeof k_body - 1;
+        CHECK(verify_with(env, size, &weak, 1) == AH_OK);
+        free(env);
+    }
+}
+
 int main(void) {
     test_t1_rfc8032();
+    test_b5_s_plus_l();
+    test_b5_header_variants();
+    test_b5_non_canonical_points();
     test_header_layout();
     test_t2_good_and_bitflips();
     test_t2_header_strict();

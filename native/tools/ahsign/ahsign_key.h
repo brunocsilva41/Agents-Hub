@@ -3,7 +3,7 @@
  * do envelope do manifesto e exportação da chave pública como inicializador C.
  *
  * Sem I/O: tudo em memória, para ser testado sem disco nem terminal. A
- * aleatoriedade (sal, nonce, semente) vem do chamador.
+ * aleatoriedade (sal, nonce, semente) vem do chamador (ah_platform_random_bytes).
  *
  * Arquivo de chave (AHSIGN_KEY_FILE_SIZE bytes, inteiros little-endian):
  *
@@ -66,13 +66,18 @@ ah_status ahsign_key_seal(const uint8_t seed[AHSIGN_SEED_SIZE], const uint8_t *p
                           uint8_t out[AHSIGN_KEY_FILE_SIZE]);
 
 /* Abre o arquivo de chave. Com AH_OK, secret_key (64 bytes, apagar com
- * crypto_wipe depois do uso) e public_key ficam preenchidos.
+ * crypto_wipe depois do uso) e public_key ficam preenchidos, e *kdf_out (se
+ * não NULL) recebe o custo do Argon2 gravado no arquivo, para o chamador
+ * avisar quando ele está abaixo de ahsign_kdf_default (ahsign_kdf_is_weak).
  *   AH_ERR_INVALID formato errado, senha errada ou arquivo adulterado
  *                  (indistinguíveis de propósito);
  *   AH_ERR_NOMEM   sem memória para o Argon2. */
 ah_status ahsign_key_open(const uint8_t *file, size_t file_size, const uint8_t *password,
                           size_t password_size, uint8_t secret_key[AHSIGN_SECRET_KEY_SIZE],
-                          uint8_t public_key[32]);
+                          uint8_t public_key[32], ahsign_kdf *kdf_out);
+
+/* 1 se `kdf` custa menos que ahsign_kdf_default em memória ou em passadas. */
+int ahsign_kdf_is_weak(ahsign_kdf kdf);
 
 /* Assina `body` e monta o envelope (cabeçalho de ah_update_verify.h + corpo).
  * Antes de devolver, verifica o próprio envelope com ah_update_verify.

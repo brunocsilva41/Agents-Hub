@@ -2,13 +2,15 @@
 # com senha, opção O2 da proposta F8-04), assinar o manifesto de atualização e
 # exportar a chave pública (F8-05). Não faz parte do produto instalado.
 #
-# ahsign_os.c chama o SO (aleatoriedade, terminal, arquivos) fora de
-# native/src/platform/: exceção TEMPORÁRIA até a F0-06 (ver ahsign_os.h).
+# Aleatoriedade: ah::platform (F0-06). ahsign_os.c ainda chama o SO fora de
+# native/src/platform/ para arquivos e argumentos (migram para a F0-05) e para
+# o terminal sem eco (lacuna: sem área em platform/); ver ahsign_os.h.
 add_library(ahsign_core STATIC ahsign_key.c ahsign_os.c)
 target_include_directories(ahsign_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(ahsign_core PUBLIC ah::core ah::updater ah::monocypher)
+target_link_libraries(ahsign_core PUBLIC ah::core ah::platform ah::updater ah::monocypher)
 if(WIN32)
-  target_link_libraries(ahsign_core PRIVATE bcrypt shell32)
+  # shell32: CommandLineToArgvW. advapi32: SID do usuário e DACL do arquivo de chave.
+  target_link_libraries(ahsign_core PRIVATE shell32 advapi32)
 endif()
 ah_project_warnings(ahsign_core)
 
@@ -37,11 +39,17 @@ add_test(NAME unit.ahsign.key
   COMMAND test_ahsign_key "${CMAKE_CURRENT_BINARY_DIR}")
 _ahsign_sanitizer_env(unit.ahsign.key)
 
-# Ida e volta pela linha de comando: gerar → assinar → verificar, com chave de
-# teste efêmera num diretório temporário dentro do build.
+# Ida e volta pela linha de comando: gerar (um só generate de custo cheio) →
+# exportar → assinar → verificar, num diretório temporário dentro do build.
+# public/sign usam um arquivo de custo baixo selado pelo núcleo (auxiliar de
+# teste abaixo); a CLI não tem opção de custo.
+add_executable(ahsign_test_fixture "${_ahsign_tests}/ahsign_test_fixture.c")
+target_link_libraries(ahsign_test_fixture PRIVATE ahsign_core)
+ah_project_warnings(ahsign_test_fixture)
 add_test(NAME unit.ahsign.roundtrip
   COMMAND "${CMAKE_COMMAND}"
     "-DAHSIGN=$<TARGET_FILE:ahsign>"
+    "-DFIXTURE=$<TARGET_FILE:ahsign_test_fixture>"
     "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-ahsign-roundtrip"
     -P "${_ahsign_tests}/ahsign_roundtrip.cmake")
 _ahsign_sanitizer_env(unit.ahsign.roundtrip)

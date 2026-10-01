@@ -12,6 +12,7 @@
 #include "ah_test.h"
 #include "ah_update_verify.h"
 #include "ahsign_key.h"
+#include "ah_platform_time.h"
 #include "ahsign_os.h"
 #include "monocypher-ed25519.h"
 #include "monocypher.h"
@@ -42,9 +43,9 @@ typedef struct sealed {
 } sealed;
 
 static int make_sealed(sealed *s, ahsign_kdf kdf) {
-    if (ahsign_os_random(s->seed, sizeof s->seed) != AH_OK ||
-        ahsign_os_random(s->salt, sizeof s->salt) != AH_OK ||
-        ahsign_os_random(s->nonce, sizeof s->nonce) != AH_OK) {
+    if (ah_platform_random_bytes(s->seed, sizeof s->seed) != AH_OK ||
+        ah_platform_random_bytes(s->salt, sizeof s->salt) != AH_OK ||
+        ah_platform_random_bytes(s->nonce, sizeof s->nonce) != AH_OK) {
         return -1;
     }
     return ahsign_key_seal(s->seed, (const uint8_t *)k_password, sizeof k_password - 1, kdf,
@@ -58,11 +59,11 @@ static void test_random(void) {
     uint8_t b[32];
     uint8_t zero[32];
     memset(zero, 0, sizeof zero);
-    CHECK(ahsign_os_random(a, sizeof a) == AH_OK);
-    CHECK(ahsign_os_random(b, sizeof b) == AH_OK);
+    CHECK(ah_platform_random_bytes(a, sizeof a) == AH_OK);
+    CHECK(ah_platform_random_bytes(b, sizeof b) == AH_OK);
     CHECK(memcmp(a, b, sizeof a) != 0);
     CHECK(memcmp(a, zero, sizeof a) != 0);
-    CHECK(ahsign_os_random(a, 0) == AH_OK);
+    CHECK(ah_platform_random_bytes(a, 0) == AH_OK);
 }
 
 static void test_seal_open_roundtrip(void) {
@@ -83,8 +84,15 @@ static void test_seal_open_roundtrip(void) {
     CHECK(s.file[AHSIGN_KEY_FILE_MAGIC_SIZE] == '\n');
     CHECK(memcmp(s.file + AHSIGN_KEY_FILE_PUBLIC_OFFSET, pk_expected, 32) == 0);
 
-    CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)k_password,
-                          sizeof k_password - 1, sk, pk) == AH_OK);
+    {
+        ahsign_kdf got = {0, 0};
+        CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)k_password,
+                              sizeof k_password - 1, sk, pk, &got) == AH_OK);
+        /* O custo gravado volta para o chamador, que avisa quando é fraco. */
+        CHECK(got.nb_blocks == k_fast.nb_blocks && got.nb_passes == k_fast.nb_passes);
+        CHECK(ahsign_kdf_is_weak(got));
+        CHECK(!ahsign_kdf_is_weak(ahsign_kdf_default));
+    }
     CHECK(memcmp(sk, sk_expected, 64) == 0);
     CHECK(memcmp(pk, pk_expected, 32) == 0);
 
@@ -112,15 +120,15 @@ static void test_open_rejects(void) {
     CHECK(make_sealed(&s, k_fast) == 0);
 
     /* Senha errada, vazia, ou nula. */
-    CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)"outra senha", 11, sk, pk) ==
+    CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)"outra senha", 11, sk, pk, NULL) ==
           AH_ERR_INVALID);
-    CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)k_password, 0, sk, pk) ==
+    CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)k_password, 0, sk, pk, NULL) ==
           AH_ERR_INVALID);
-    CHECK(ahsign_key_open(s.file, sizeof s.file, NULL, 4, sk, pk) == AH_ERR_INVALID);
+    CHECK(ahsign_key_open(s.file, sizeof s.file, NULL, 4, sk, pk, NULL) == AH_ERR_INVALID);
 
     /* Tamanho errado. */
     CHECK(ahsign_key_open(s.file, sizeof s.file - 1, (const uint8_t *)k_password,
-                          sizeof k_password - 1, sk, pk) == AH_ERR_INVALID);
+                          sizeof k_password - 1, sk, pk, NULL) == AH_ERR_INVALID);
 
     /* Qualquer byte alterado (cabeçalho, custo, sal, nonce, pública, MAC, cifra): recusa.
      * Os bytes de custo trocados podem pedir mais memória; ficam limitados pela faixa. */
@@ -128,7 +136,7 @@ static void test_open_rejects(void) {
         memcpy(copy, s.file, sizeof copy);
         copy[pos] ^= 0x01;
         if (ahsign_key_open(copy, sizeof copy, (const uint8_t *)k_password,
-                            sizeof k_password - 1, sk, pk) == AH_OK) {
+                            sizeof k_password - 1, sk, pk, NULL) == AH_OK) {
             accepted++;
             fprintf(stderr, "byte %u alterado e aceito\n", (unsigned)pos);
         }
@@ -166,7 +174,7 @@ static void test_kdf_bounds(void) {
     out[27] = 0xff;
     out[28] = 0xff;
     CHECK(ahsign_key_open(out, sizeof out, (const uint8_t *)k_password, sizeof k_password - 1,
-                          sk, pk) == AH_ERR_INVALID);
+                          sk, pk, NULL) == AH_ERR_INVALID);
 
     /* O custo padrão da CLI está dentro da faixa e não é o de teste. */
     CHECK(ahsign_kdf_default.nb_blocks >= 64u * 1024u);
@@ -189,7 +197,7 @@ static void test_sign_envelope(void) {
 
     CHECK(make_sealed(&s, k_fast) == 0);
     CHECK(ahsign_key_open(s.file, sizeof s.file, (const uint8_t *)k_password,
-                          sizeof k_password - 1, sk, pk) == AH_OK);
+                          sizeof k_password - 1, sk, pk, NULL) == AH_OK);
     memcpy(key.public_key, pk, 32);
     ah_update_key_id(pk, key.key_id);
 
@@ -255,7 +263,7 @@ static void join(char *out, size_t cap, const char *dir, const char *name) {
 }
 
 /* Gravação exclusiva e leitura de volta, num diretório de trabalho do build. */
-static void test_file_io(const char *dir) {
+static void test_file_io(const char *dir, const char *own_exe) {
     sealed s;
     char path[1024];
     uint8_t *data = NULL;
@@ -265,7 +273,7 @@ static void test_file_io(const char *dir) {
     int n;
 
     CHECK(make_sealed(&s, k_fast) == 0);
-    CHECK(ahsign_os_random(suffix, sizeof suffix) == AH_OK);
+    CHECK(ah_platform_random_bytes(suffix, sizeof suffix) == AH_OK);
     n = snprintf(name, sizeof name, "chave-%02x%02x%02x%02x.bin", suffix[0], suffix[1],
                  suffix[2], suffix[3]);
     CHECK(n > 0 && (size_t)n < sizeof name);
@@ -273,6 +281,17 @@ static void test_file_io(const char *dir) {
     CHECK(path[0] != '\0');
 
     CHECK(ahsign_os_write_new_file(path, s.file, sizeof s.file) == AH_OK);
+    /* Nasce privado: DACL protegida só com o SID do usuário (Windows) ou 0600. */
+    {
+        int priv = -1;
+        CHECK(ahsign_os_file_is_private(path, &priv) == AH_OK);
+        CHECK(priv == 1);
+        /* Controle: o próprio executável do teste (criado pelo linker, com a
+         * herança da pasta ou modo 0755) não é privado. */
+        priv = -1;
+        CHECK(ahsign_os_file_is_private(own_exe, &priv) == AH_OK);
+        CHECK(priv == 0);
+    }
     /* Não sobrescreve. */
     CHECK(ahsign_os_write_new_file(path, s.file, sizeof s.file) == AH_ERR_IO);
     CHECK(ahsign_os_read_file(path, AHSIGN_KEY_FILE_SIZE - 1, &data, &size) == AH_ERR_LIMIT);
@@ -295,7 +314,7 @@ int main(int argc, char **argv) {
     test_format_c_key();
     CHECK(argc >= 2);
     if (argc >= 2) {
-        test_file_io(argv[1]);
+        test_file_io(argv[1], argv[0]);
     }
     return AH_TEST_END("test_ahsign_key");
 }
