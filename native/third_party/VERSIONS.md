@@ -217,14 +217,16 @@ roda sob `xvfb-run -a`.
 
 ## Patches aplicados
 
-Código vendorizado não é editado (`docs/18-padroes-c.md` §14), salvo o patch abaixo. O patch
-já está no fonte versionado (o build não aplica nada); o `.patch` em `patches/<lib>/` é o
-registro e a prova. A conferência de integridade (`cmp` de cada arquivo contra o download
-oficial) tem exatamente as diferenças desta tabela.
+Código vendorizado não é editado (`docs/18-padroes-c.md` §14), salvo os patches abaixo. Os
+patches já estão no fonte versionado (o build não aplica nada); os `.patch` em `patches/<lib>/`
+são o registro e a prova, aplicados em ordem numérica. A conferência de integridade (`cmp` de
+cada arquivo contra o download oficial) tem exatamente as diferenças desta tabela (hoje, um
+único arquivo: `sdl_ttf/src/SDL_ttf.c`).
 
 | Lib | Arquivo | Patch | Commits upstream | Motivo | SHA-256 do arquivo depois do patch |
 |---|---|---|---|---|---|
-| SDL_ttf 3.2.2 | `sdl_ttf/src/SDL_ttf.c` (funções de blit de glifo e `Render_Line_##NAME`) | [`patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch`](patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch) | [`6ea7d33927211629bf8326b7cc6caad34f3d4122`](https://github.com/libsdl-org/SDL_ttf/commit/6ea7d33927211629bf8326b7cc6caad34f3d4122) e [`a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0`](https://github.com/libsdl-org/SDL_ttf/commit/a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0) **inteiros** (todos os hunks; o segundo corrige o `dst +=` que o primeiro introduziu em `BG_Blended_Color`) | UB de alinhamento: as funções de blit do 3.2.2 criam e leem ponteiros `Uint32`/`Uint64` desalinhados sobre os buffers de glifo. Achada pelo UBSan (preset `windows-clangcl-asan`) no teste de emoji colorido do `unit.ui_smoke` (`SDL_ttf.c:467:13: runtime error: load of misaligned address`); as demais funções de blit (LCD, 32/64 bits, SSE, 8 bits) têm o mesmo padrão | `4dba9c5de63ee61faf4e6fb9bcc61fb38f6c42e66746b2d1c480e28382ced14e` (o do tarball é `25a42804b18809e5c4b2eb8ed787701551d0c680aff774b7d8c54486c0d42d38`) |
+| SDL_ttf 3.2.2 | `sdl_ttf/src/SDL_ttf.c` (funções de blit de glifo e `Render_Line_##NAME`) | [`patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch`](patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch) | [`6ea7d33927211629bf8326b7cc6caad34f3d4122`](https://github.com/libsdl-org/SDL_ttf/commit/6ea7d33927211629bf8326b7cc6caad34f3d4122) e [`a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0`](https://github.com/libsdl-org/SDL_ttf/commit/a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0) **inteiros** (todos os hunks; o segundo corrige o `dst +=` que o primeiro introduziu em `BG_Blended_Color`) | UB de alinhamento: as funções de blit do 3.2.2 criam e leem ponteiros `Uint32`/`Uint64` desalinhados sobre os buffers de glifo. Achada pelo UBSan (preset `windows-clangcl-asan`) no teste de emoji colorido do `unit.ui_smoke` (`SDL_ttf.c:467:13: runtime error: load of misaligned address`); as demais funções de blit (LCD, 32/64 bits, SSE, 8 bits) têm o mesmo padrão | `4dba9c5de63ee61faf4e6fb9bcc61fb38f6c42e66746b2d1c480e28382ced14e` (intermediário; o do tarball é `25a42804b18809e5c4b2eb8ed787701551d0c680aff774b7d8c54486c0d42d38`) |
+| SDL_ttf 3.2.2 | `sdl_ttf/src/SDL_ttf.c` (`Render_Line_##NAME`) | [`patches/sdl_ttf/0002-render-line-buffer-nulo.patch`](patches/sdl_ttf/0002-render-line-buffer-nulo.patch) | [`7930c0282bbec7be92195218b3a1e9e58537e6f9`](https://github.com/libsdl-org/SDL_ttf/commit/7930c0282bbec7be92195218b3a1e9e58537e6f9) inteiro ("Fixed bug #537"; o pai dele é exatamente o `SDL_ttf.c` do 3.2.2) | UB: `image->buffer += alignment` com `buffer` NULL (glifo sem bitmap, ex.: espaço). Achada pelo UBSan (preset `windows-clangcl-asan`) no `unit.ui_smoke` estendido (render Shaded/LCD/Blended): `SDL_ttf.c:1318:1: runtime error: applying non-zero offset 15 to null pointer` | `afd59291c3ab9f3d381c385b92ad58370fc8118c031e622cf6c2d009805e91b3` (**final**, o do arquivo versionado) |
 
 - Os dois commits aplicaram sobre o 3.2.2 com `git apply`, todos os hunks limpos e sem fuzz; só
   o hunk 20 do 6ea7d33 (`Render_Line_##NAME`) entra com deslocamento de -5 linhas (commits
@@ -235,12 +237,17 @@ oficial) tem exatamente as diferenças desta tabela.
   `__attribute__((no_sanitize("alignment")))`, sob `HAVE_SSE2_INTRINSICS` (`__SSE2__`): é escolha
   do upstream (desliga o sanitizer de alinhamento só nessa carga SIMD) e só compila em
   GCC/Clang/clang-cl; o `cl` não define `__SSE2__` e não passa por ele.
-- Prova, a partir da raiz do repositório:
-  `git apply --check -R native/third_party/patches/sdl_ttf/0001-blit-ponteiros-alinhados.patch`
-  tem de passar (o patch está aplicado e reverte limpo).
-- **Regra de remoção:** quando sair um release do SDL_ttf com a correção (em 2026-10-01 o último
-  release era o 3.2.2, de 2025-03-31), atualizar para ele, apagar o `.patch` e esta linha, e
-  voltar a conferência de integridade a zero diferenças.
+- O 0002 aplica depois do 0001 com `git apply`: hunk único, limpo, sem fuzz, deslocamento de +17
+  linhas. É o diff do estado depois do 0001 para o estado final (`index` `2d6e03b6…` →
+  `008d4762…`). Cadeia conferida: tarball (`be517a18…`) + 0001 + 0002, aplicados a partir dos
+  `.patch` do repositório, reproduz exatamente o blob versionado (`008d4762…`).
+- Prova, a partir da raiz do repositório (o 0002 primeiro, porque é o último aplicado):
+  `git apply --check -R native/third_party/patches/sdl_ttf/0002-render-line-buffer-nulo.patch`
+  tem de passar; para conferir o 0001, revertendo o 0002 numa cópia de trabalho, o
+  `git apply --check -R` do 0001 também passa.
+- **Regra de remoção:** quando sair um release do SDL_ttf com as correções (em 2026-10-01 o
+  último release era o 3.2.2, de 2025-03-31), atualizar para ele, apagar os `.patch` e estas
+  linhas, e voltar a conferência de integridade a zero diferenças.
 
 ## Como atualizar uma lib
 

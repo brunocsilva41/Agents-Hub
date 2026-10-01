@@ -1,0 +1,50 @@
+Patch 0002 do SDL_ttf 3.2.2 vendorizado (Agents-Hub, F0-12)
+
+Lib:       SDL_ttf 3.2.2 (native/third_party/sdl_ttf/, release-3.2.2-0-ga1ce367)
+Arquivo:   src/SDL_ttf.c, macro BUILD_RENDER_LINE (Render_Line_##NAME)
+Origem:    commit do upstream (libsdl-org/SDL_ttf, branch main) INTEIRO:
+           - 7930c0282bbec7be92195218b3a1e9e58537e6f9 (2025-04-07)
+             "Fixed bug #537 - prevent incrementing a null pointer
+             'image->buffer', which would be detected by UBsan sanitizer."
+             https://github.com/libsdl-org/SDL_ttf/commit/7930c0282bbec7be92195218b3a1e9e58537e6f9
+           O pai desse commit é exatamente o src/SDL_ttf.c do 3.2.2 (blob
+           be517a18). Aplicado DEPOIS do 0001, com `git apply`: hunk único,
+           limpo, sem fuzz, deslocamento de +17 linhas (as linhas que o 0001
+           acrescenta acima). Nenhuma adaptação manual.
+           Este arquivo é o diff do estado depois do 0001 para o estado depois
+           do 0002 (linha `index`: 2d6e03b6 -> 008d4762).
+Motivo:    UB: `image->buffer += alignment` com buffer NULL (glifo sem
+           bitmap, ex.: espaço). O UBSan do preset windows-clangcl-asan abortou
+           o unit.ui_smoke estendido (render Shaded/LCD/Blended de texto):
+           "SDL_ttf.c:1318:1: runtime error: applying non-zero offset 15 to
+           null pointer".
+Data:      2026-10-01
+Aplicação: o fonte versionado em native/third_party/sdl_ttf/ JÁ contém este
+           patch; o build não aplica nada. Prova, a partir da raiz do
+           repositório: `git apply --check -R` deste arquivo tem de funcionar
+           (com o 0001 também aplicado). Remover (com o 0001) quando houver
+           release do SDL_ttf com as correções. Ver native/third_party/VERSIONS.md,
+           "Patches aplicados".
+
+diff --git a/native/third_party/sdl_ttf/src/SDL_ttf.c b/native/third_party/sdl_ttf/src/SDL_ttf.c
+index 2d6e03b65ad1b91e48c879520080343ad6960bdb..008d47623a4a243ce44d18c8c5a4857c9df3383d 100644
+--- a/native/third_party/sdl_ttf/src/SDL_ttf.c
++++ b/native/third_party/sdl_ttf/src/SDL_ttf.c
+@@ -1205,11 +1205,16 @@ static bool Render_Line_##NAME(TTF_Font *font, SDL_Surface *textbuf, int xstart,
+             int remainder;                                                                                              \
+             Uint8 *saved_buffer = image->buffer;                                                                        \
+             int saved_width = image->width;                                                                             \
+-            image->buffer += alignment;                                                                                 \
++                                                                                                                        \
+             /* Position updated after glyph rendering */                                                                \
+             x = xstart + FT_FLOOR(x) + image->left;                                                                     \
+             y = ystart + FT_FLOOR(y) - image->top;                                                                      \
+                                                                                                                         \
++            if (image->buffer == NULL) {                                                                                \
++                continue;                                                                                               \
++            }                                                                                                           \
++            image->buffer += alignment;                                                                                 \
++                                                                                                                        \
+             /* Make sure glyph is inside textbuf */                                                                     \
+             above_w = x + image->width - textbuf->w;                                                                    \
+             above_h = y + image->rows  - textbuf->h;                                                                    \
