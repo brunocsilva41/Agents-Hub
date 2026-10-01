@@ -62,6 +62,16 @@ target_compile_definitions(ah_yaml
 if(MSVC)
   target_compile_definitions(ah_yaml PRIVATE _CRT_SECURE_NO_WARNINGS) # igual ao CMake upstream
 endif()
+if(NOT WIN32)
+  # api.c (yaml_strdup) chama strdup, que é POSIX.1-2008, não ISO C. Com
+  # -std=c17 estrito (CMAKE_C_EXTENSIONS OFF) a glibc só declara strdup em
+  # <string.h> sob __USE_XOPEN2K8 (ou __USE_XOPEN_EXTENDED); sem declaração o
+  # retorno vira int e o ponteiro de 64 bits é truncado. Isso causou SEGV no
+  # CI (PR #25, linux-clang-asan: strcmp em yaml_parser_append_tag_directive,
+  # parser.c:1350, via ah_yaml_load). _POSIX_C_SOURCE=200809L liga
+  # __USE_XOPEN2K8 em <features.h>.
+  target_compile_definitions(ah_yaml PRIVATE _POSIX_C_SOURCE=200809L)
+endif()
 
 # ------------------------------------------------------------------- PCRE2
 # Build "à mão" conforme NON-AUTOTOOLS-BUILD da 10.49: config.h.generic ->
