@@ -617,17 +617,23 @@ static ah_status open_no_follow(const wchar_t *w, DWORD access, HANDLE *out,
 
 ah_status ah_platform_fs_restrict(const char *path) {
     wchar_t *w = NULL;
-    HANDLE h = INVALID_HANDLE_VALUE;
+    HANDLE h = INVALID_HANDLE_VALUE, ho;
+    PSID owner = NULL;
+    PSECURITY_DESCRIPTOR owner_sd = NULL;
     DWORD attrs = 0, err;
+    bool owner_ok;
     private_sd psd;
     ah_status st;
 
     if (path == NULL || path[0] == '\0') return AH_ERR_INVALID;
     st = ah_platform_utf8_to_utf16(path, &w);
     if (st != AH_OK) return st;
-    /* READ_CONTROL: o SetSecurityInfo lê o descritor atual para recalcular
-     * a herança; sem ele a chamada falha com acesso negado. */
-    st = open_no_follow(w, READ_CONTROL | WRITE_DAC | WRITE_OWNER, &h, &attrs);
+    /* Sem WRITE_OWNER aqui: o dono tem READ_CONTROL e WRITE_DAC implícitos,
+     * mas não WRITE_OWNER. Pedir WRITE_OWNER logo de cara faria restrict
+     * falhar num arquivo do próprio usuário cuja DACL não lhe dá controle
+     * total. READ_CONTROL: o SetSecurityInfo lê o descritor atual para
+     * recalcular a herança. */
+    st = open_no_follow(w, READ_CONTROL | WRITE_DAC, &h, &attrs);
     free(w);
     if (st != AH_OK) return st;
 
@@ -643,11 +649,38 @@ ah_status ah_platform_fs_restrict(const char *path) {
         CloseHandle(h);
         return st;
     }
+    err = GetSecurityInfo(h, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION,
+                          &owner, NULL, NULL, NULL, &owner_sd);
+    if (err != ERROR_SUCCESS) {
+        private_sd_free(&psd);
+        CloseHandle(h);
+        return status_from_win32(err);
+    }
+    owner_ok = owner != NULL && EqualSid(owner, psd.user->User.Sid);
+    LocalFree(owner_sd);
+
+    /* Primeiro a DACL (só o usuário, com controle total)... */
     err = SetSecurityInfo(h, SE_FILE_OBJECT,
-                          OWNER_SECURITY_INFORMATION |
-                              DACL_SECURITY_INFORMATION |
+                          DACL_SECURITY_INFORMATION |
                               PROTECTED_DACL_SECURITY_INFORMATION,
-                          psd.user->User.Sid, NULL, psd.acl, NULL);
+                          NULL, NULL, psd.acl, NULL);
+    if (err == ERROR_SUCCESS && !owner_ok) {
+        /* ...depois o dono, só se ainda não for o usuário. Agora a DACL dá
+         * WRITE_OWNER ao usuário. ReOpenFile reabre o MESMO objeto (sem
+         * passar pelo nome de novo, logo sem corrida com troca de link). */
+        ho = ReOpenFile(h, WRITE_OWNER,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        FILE_FLAG_OPEN_REPARSE_POINT |
+                            FILE_FLAG_BACKUP_SEMANTICS);
+        if (ho == INVALID_HANDLE_VALUE) {
+            err = GetLastError();
+        } else {
+            err = SetSecurityInfo(ho, SE_FILE_OBJECT,
+                                  OWNER_SECURITY_INFORMATION,
+                                  psd.user->User.Sid, NULL, NULL, NULL);
+            CloseHandle(ho);
+        }
+    }
     private_sd_free(&psd);
     CloseHandle(h);
     return err == ERROR_SUCCESS ? AH_OK : status_from_win32(err);

@@ -111,9 +111,17 @@ ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
  * Link simbólico (e, no Windows, junction ou outro reparse point) é recusado
  * com AH_ERR_INVALID, sem seguir o link; no POSIX, também o que não é
  * arquivo regular nem diretório. POSIX: 0600 (arquivo) ou 0700 (diretório).
- * Windows: pelo handle aberto sem seguir o link, troca o dono pelo SID do
- * usuário e a DACL pela DACL protegida só com esse SID (em diretório, a ACE
- * é herdável). */
+ * Windows: pelo handle aberto sem seguir o link, troca a DACL pela DACL
+ * protegida só com o SID do usuário (em diretório, a ACE é herdável) e,
+ * depois, o dono por esse SID, só se o dono atual for outro. Assim funciona
+ * também num arquivo do próprio usuário cuja DACL não lhe dá controle total
+ * (o dono tem WRITE_DAC implícito, mas não WRITE_OWNER).
+ *
+ * Diretório: só o próprio diretório fica privado. Nada garante que os
+ * filhos fiquem. No Windows, o SO recalcula as ACEs HERDADAS dos filhos a
+ * partir da nova DACL, mas não mexe nas ACEs explícitas nem em filho com
+ * DACL protegida. Esse recálculo percorre a árvore, então o custo cresce
+ * linearmente com o tamanho dela. No POSIX, os filhos não são tocados. */
 ah_status ah_platform_fs_restrict(const char *path);
 
 /* Confere se `path` está restrito ao usuário do processo, sem seguir link.

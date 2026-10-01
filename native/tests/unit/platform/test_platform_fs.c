@@ -262,11 +262,12 @@ static char *env_get(const char *name) {
 }
 
 /* Põe em `path` uma DACL PROTEGIDA montada pelo teste: ACE do usuário com
- * as flags de herança `user_flags` e, se `add_world`, uma ACE de leitura
- * para Todos (WinWorldSid). Serve para criar DACLs quase certas, que
- * check_restricted precisa recusar. */
-static bool set_protected_dacl(const char *path, BYTE user_flags,
-                               bool add_world) {
+ * os direitos `user_mask` e as flags de herança `user_flags` e, se
+ * `add_world`, uma ACE de leitura para Todos (WinWorldSid). Serve para criar
+ * DACLs quase certas, que check_restricted precisa recusar ou que restrict
+ * precisa consertar. */
+static bool set_protected_dacl(const char *path, DWORD user_mask,
+                               BYTE user_flags, bool add_world) {
     wchar_t *w = wide(path);
     HANDLE token = NULL;
     TOKEN_USER *tu = NULL;
@@ -287,7 +288,7 @@ static bool set_protected_dacl(const char *path, BYTE user_flags,
                       GetLengthSid(tu->User.Sid) + world_len);
     acl = malloc(acl_len);
     if (acl == NULL || !InitializeAcl(acl, acl_len, ACL_REVISION) ||
-        !AddAccessAllowedAceEx(acl, ACL_REVISION, user_flags, FILE_ALL_ACCESS,
+        !AddAccessAllowedAceEx(acl, ACL_REVISION, user_flags, user_mask,
                                tu->User.Sid)) {
         goto done;
     }
@@ -1036,7 +1037,7 @@ static void test_restrict_existing(void) {
     {
         /* DACL protegida e só com ACEs explícitas, mas com uma ACE a mais
          * para Todos (WinWorldSid): não é restrita. */
-        CHECK(set_protected_dacl(file, 0, true));
+        CHECK(set_protected_dacl(file, FILE_ALL_ACCESS, 0, true));
         r = true;
         CHECK(ah_platform_fs_check_restricted(file, &r) == AH_OK);
         CHECK(!r);
@@ -1048,12 +1049,33 @@ static void test_restrict_existing(void) {
 
         /* Diretório com a ACE só do usuário, protegida, mas NÃO herdável:
          * o que nascer dentro não fica restrito, então não conta. */
-        CHECK(set_protected_dacl(dir, 0, false));
+        CHECK(set_protected_dacl(dir, FILE_ALL_ACCESS, 0, false));
         r = true;
         CHECK(ah_platform_fs_check_restricted(dir, &r) == AH_OK);
         CHECK(!r);
         CHECK(ah_platform_fs_restrict(dir) == AH_OK);
         CHECK(ah_platform_fs_check_restricted(dir, &r) == AH_OK);
+        CHECK(r);
+
+        /* Arquivo do próprio usuário com DACL protegida que dá a ele só
+         * leitura e escrita (sem WRITE_OWNER). O dono tem WRITE_DAC
+         * implícito, então restrict precisa funcionar sem pedir WRITE_OWNER
+         * de cara (o dono já é o usuário). */
+        CHECK(set_protected_dacl(file, FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                                 0, false));
+        r = true;
+        CHECK(ah_platform_fs_check_restricted(file, &r) == AH_OK);
+        CHECK(r); /* só o usuário tem acesso, mesmo sem controle total */
+        CHECK(!private_file_ok(file)); /* a conferência do teste exige total */
+        {
+            ah_status rs = ah_platform_fs_restrict(file);
+            if (rs != AH_OK) {
+                fprintf(stderr, "  restrict(leitura+escrita) = %d\n", (int)rs);
+            }
+            CHECK(rs == AH_OK);
+        }
+        CHECK(private_file_ok(file));
+        CHECK(ah_platform_fs_check_restricted(file, &r) == AH_OK);
         CHECK(r);
     }
     {
