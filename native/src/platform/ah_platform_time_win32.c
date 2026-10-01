@@ -164,9 +164,26 @@ ah_status ah_platform_random_bytes(void *buf, size_t len) {
 
 /* ---- Ambiente ---------------------------------------------------------- */
 
+/* Zera e libera um buffer UTF-16 de `n` unidades. Valores de ambiente podem
+ * ser segredos (chaves de API do agente): a cópia temporária não fica no
+ * heap. Laço volátil para o compilador não remover a limpeza antes do free. */
+static void free_zeroed(wchar_t *p, DWORD n) {
+    volatile wchar_t *v = p;
+    DWORD i;
+
+    if (p == NULL) {
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        v[i] = 0;
+    }
+    free(p);
+}
+
 ah_status ah_platform_env_get(const char *name, char **out) {
     wchar_t *wname = NULL;
     wchar_t *val = NULL;
+    DWORD val_cap = 0;
     DWORD cap = 256;
     ah_status st;
     int tries;
@@ -187,14 +204,18 @@ ah_status ah_platform_env_get(const char *name, char **out) {
      * thread mexendo no ambiente): tenta de novo algumas vezes. */
     st = AH_ERR_IO;
     for (tries = 0; tries < 4; tries++) {
-        wchar_t *grown = (wchar_t *)realloc(val, (size_t)cap * sizeof *val);
         DWORD r;
 
-        if (grown == NULL) {
+        /* malloc novo em vez de realloc: o realloc poderia deixar no heap uma
+         * cópia do valor anterior que não teríamos como zerar. */
+        free_zeroed(val, val_cap);
+        val_cap = 0;
+        val = (wchar_t *)malloc((size_t)cap * sizeof *val);
+        if (val == NULL) {
             st = AH_ERR_NOMEM;
             break;
         }
-        val = grown;
+        val_cap = cap;
         SetLastError(ERROR_SUCCESS);
         r = GetEnvironmentVariableW(wname, val, cap);
         if (r == 0) {
@@ -217,7 +238,7 @@ ah_status ah_platform_env_get(const char *name, char **out) {
         cap = r;
         st = AH_ERR_IO;
     }
-    free(val);
+    free_zeroed(val, val_cap);
     free(wname);
     return st;
 }

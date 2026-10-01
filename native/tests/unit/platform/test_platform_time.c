@@ -1,7 +1,21 @@
 /* Testes de ah_platform_time.h (F0-06): relógio, CSPRNG, UUID v4, ambiente e
  * usuário do SO. Os formatos são conferidos caractere a caractere (o
  * equivalente das regex dos critérios), sem biblioteca de regex. */
+/* Este teste chama o SO direto só para obter referências independentes da
+ * camada testada (hora local por outra via; variável vazia no ambiente). */
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#define _POSIX_C_SOURCE 200809L
+#include <stdlib.h>
+#include <time.h>
+#endif
+
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "ah_platform_time.h"
@@ -80,6 +94,61 @@ static void test_now_iso(void) {
     CHECK(ah_platform_time_now_iso(buf, sizeof buf) == AH_OK);
     CHECK(matches(buf, ISO_MOLD));
     CHECK(strncmp(buf, "20", 2) == 0);
+}
+
+/* Hora "AAAAMMDD-HHMMSS" obtida por outra via que não a camada testada.
+ * local = 1: hora local (GetLocalTime / localtime_r); 0: UTC. */
+static int reference_stamp(int local, char *out, size_t out_size) {
+    int n;
+#if defined(_WIN32)
+    SYSTEMTIME st;
+    if (local) {
+        GetLocalTime(&st);
+    } else {
+        GetSystemTime(&st);
+    }
+    n = snprintf(out, out_size, "%04d%02d%02d-%02d%02d%02d", (int)st.wYear,
+                 (int)st.wMonth, (int)st.wDay, (int)st.wHour, (int)st.wMinute,
+                 (int)st.wSecond);
+#else
+    time_t t = time(NULL);
+    struct tm tm;
+    tzset();
+    if (t == (time_t)-1 ||
+        (local ? localtime_r(&t, &tm) : gmtime_r(&t, &tm)) == NULL) {
+        return 0;
+    }
+    n = snprintf(out, out_size, "%04d%02d%02d-%02d%02d%02d", tm.tm_year + 1900,
+                 tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+#endif
+    return n == AH_PLATFORM_LOCAL_STAMP_SIZE - 1;
+}
+
+/* O carimbo de backup é hora LOCAL (SPEC-02 §6): ele precisa coincidir com a
+ * hora local lida antes ou depois da chamada (o par antes/depois absorve a
+ * virada de segundo). Limitação: numa máquina com fuso UTC, hora local e UTC
+ * são iguais e este teste não distingue uma implementação que use UTC; o
+ * teste avisa no stdout quando for o caso. */
+static void test_local_stamp_is_local(void) {
+    char before[AH_PLATFORM_LOCAL_STAMP_SIZE];
+    char stamp[AH_PLATFORM_LOCAL_STAMP_SIZE];
+    char after[AH_PLATFORM_LOCAL_STAMP_SIZE];
+    char utc[AH_PLATFORM_LOCAL_STAMP_SIZE];
+    char local_now[AH_PLATFORM_LOCAL_STAMP_SIZE];
+
+    CHECK(reference_stamp(1, before, sizeof before));
+    CHECK(ah_platform_time_local_stamp(stamp, sizeof stamp) == AH_OK);
+    CHECK(reference_stamp(1, after, sizeof after));
+    CHECK(strcmp(stamp, before) == 0 || strcmp(stamp, after) == 0);
+    if (strcmp(stamp, before) != 0 && strcmp(stamp, after) != 0) {
+        fprintf(stderr, "  carimbo %s fora de [%s, %s] (hora local)\n", stamp,
+                before, after);
+    }
+
+    if (reference_stamp(0, utc, sizeof utc) &&
+        reference_stamp(1, local_now, sizeof local_now) && strcmp(utc, local_now) == 0) {
+        printf("aviso: fuso UTC nesta máquina; local x UTC não é distinguível\n");
+    }
 }
 
 static void test_local_stamp(void) {
@@ -179,6 +248,20 @@ static void test_uuid_v4(void) {
     CHECK(ah_platform_uuid_v4(small, sizeof small) == AH_ERR_LIMIT);
 }
 
+/* Variável que existe com valor vazio: AH_OK e "", nunca NOT_FOUND. */
+static void test_env_empty(void) {
+    char *v = NULL;
+
+#if defined(_WIN32)
+    CHECK(SetEnvironmentVariableW(L"AH_TEST_VAZIA", L"") != 0);
+#else
+    CHECK(setenv("AH_TEST_VAZIA", "", 1) == 0);
+#endif
+    CHECK(ah_platform_env_get("AH_TEST_VAZIA", &v) == AH_OK);
+    CHECK(v != NULL && v[0] == '\0');
+    ah_platform_env_free(v);
+}
+
 static void test_env(void) {
     static char sentinel;
     char *v = &sentinel;
@@ -215,12 +298,14 @@ int main(void) {
     test_format_iso();
     test_now_iso();
     test_local_stamp();
+    test_local_stamp_is_local();
     test_monotonic();
     test_random_bytes();
     test_hex();
     test_random_hex();
     test_uuid_v4();
     test_env();
+    test_env_empty();
     test_user_name();
     return AH_TEST_END("test_platform_time");
 }
