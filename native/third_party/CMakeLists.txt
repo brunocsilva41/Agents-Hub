@@ -135,3 +135,86 @@ add_library(ah::monocypher ALIAS ah_monocypher)
 target_include_directories(ah_monocypher SYSTEM PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/monocypher"
   "${CMAKE_CURRENT_SOURCE_DIR}/monocypher/optional")
+
+# ===================================================== UI (F0-12, ADR 8.4)
+# SDL3 3.4.16 + SDL_ttf 3.2.2 (com FreeType 2.13.2 e HarfBuzz 8.5.0 dos forks
+# libsdl-org, nos commits fixados pela tag release-3.2.2) + Clay v0.14.
+#
+# SDL3 e SDL_ttf compilam pelo CMake do próprio upstream, do jeito que a
+# documentação deles indica para cópia vendorizada (SDL docs/README-cmake.md,
+# "Using a vendored SDL"; SDL_ttf docs/INTRO-cmake.md): add_subdirectory com
+# EXCLUDE_FROM_ALL e SDLTTF_VENDORED. Nada é baixado: o modo vendorizado do
+# SDL_ttf só faz add_subdirectory(external/freetype) e (external/harfbuzz),
+# relativos à pasta do SDL_ttf; por isso FreeType e HarfBuzz estão em
+# sdl_ttf/external/, onde o upstream os espera (são os submódulos da tag).
+# Nenhum dos quatro CMakeLists usa FetchContent/ExternalProject/file(DOWNLOAD).
+#
+# As opções são definidas como variáveis normais antes de cada
+# add_subdirectory (o option() do upstream as respeita e as copia para o
+# cache). Bibliotecas compartilhadas (SDL3 e SDL3_ttf), que é o padrão dos dois
+# upstreams (exceção à regra "STATIC" do topo deste arquivo; os alvos são os
+# do próprio upstream, com alias ah::); FreeType e HarfBuzz entram estáticos
+# dentro do SDL3_ttf (o SDL_ttf força isso). Warnings: os de cada upstream,
+# sem warning como erro (SDL_WERROR e SDLTTF_WERROR ficam no padrão OFF).
+
+# ------------------------------------------------- compilador C++ (UI)
+# O SDL3 (enable_language(CXX) no Windows) e o SDL_ttf (HarfBuzz é C++)
+# habilitam C++. Os presets só fixam o compilador C; sem isto o CMake escolhe
+# o C++ padrão do sistema: com clang-cl ele pega clang++ (sintaxe GNU) e
+# quebra, e no Linux Clang pegaria g++, misturando runtimes de ASan. Por isso
+# o C++ segue o compilador C do preset, salvo se CMAKE_CXX_COMPILER ou a
+# variável de ambiente CXX já o definirem.
+if(NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED ENV{CXX})
+  if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    # cl.exe e clang-cl compilam C e C++ com o mesmo executável.
+    set(CMAKE_CXX_COMPILER "${CMAKE_C_COMPILER}")
+  else()
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+      set(_ah_cxx_name g++)
+    elseif(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      set(_ah_cxx_name clang++)
+    else()
+      message(FATAL_ERROR "compilador C ${CMAKE_C_COMPILER_ID} sem par C++ conhecido; defina CMAKE_CXX_COMPILER")
+    endif()
+    get_filename_component(_ah_c_dir "${CMAKE_C_COMPILER}" DIRECTORY)
+    find_program(AH_CXX_COMPILER NAMES ${_ah_cxx_name} HINTS "${_ah_c_dir}" NO_DEFAULT_PATH)
+    if(NOT AH_CXX_COMPILER)
+      message(FATAL_ERROR "não achei ${_ah_cxx_name} ao lado de ${CMAKE_C_COMPILER}; defina CMAKE_CXX_COMPILER")
+    endif()
+    set(CMAKE_CXX_COMPILER "${AH_CXX_COMPILER}")
+  endif()
+  message(STATUS "UI: compilador C++ = ${CMAKE_CXX_COMPILER}")
+endif()
+
+# ---------------------------------------------------------------- SDL3
+# Opções da tabela de docs/README-cmake.md do SDL 3.4.16.
+set(SDL_SHARED ON)          # SDL3.dll / libSDL3.so (padrão upstream)
+set(SDL_STATIC OFF)
+set(SDL_TEST_LIBRARY OFF)   # SDL3_test não é usado pelo projeto
+set(SDL_TESTS OFF)
+set(SDL_EXAMPLES OFF)
+set(SDL_INSTALL OFF)        # instalação/pacote é da F8 (já é o padrão como subprojeto)
+add_subdirectory(sdl3 EXCLUDE_FROM_ALL)
+add_library(ah::sdl3 ALIAS SDL3-shared)
+
+# ------------------------------------------------------------- SDL_ttf
+# Opções do CMakeLists.txt do SDL_ttf 3.2.2.
+set(BUILD_SHARED_LIBS ON)   # SDL3_ttf compartilhado (padrão upstream); ver VERSIONS.md
+set(SDLTTF_VENDORED ON)     # compila external/freetype e external/harfbuzz (sem download)
+set(SDLTTF_HARFBUZZ ON)     # shaping (DA-12)
+set(SDLTTF_PLUTOSVG OFF)    # sem plutosvg (DA-12: emoji COLR sem plutosvg)
+set(SDLTTF_SAMPLES OFF)
+set(SDLTTF_INSTALL OFF)
+add_subdirectory(sdl_ttf EXCLUDE_FROM_ALL)
+add_library(ah::sdl3_ttf ALIAS SDL3_ttf-shared)
+
+# ---------------------------------------------------------------- Clay
+# Biblioteca de um cabeçalho: a implementação entra numa TU gerada no build (o
+# clay.h vendorizado fica sem edição), compilada como código de terceiro.
+set(_clay_impl "${CMAKE_CURRENT_BINARY_DIR}/clay/clay_impl.c")
+file(CONFIGURE OUTPUT "${_clay_impl}"
+  CONTENT "/* Gerado por native/third_party/CMakeLists.txt: implementação do Clay. */\n#define CLAY_IMPLEMENTATION\n#include \"clay.h\"\n"
+  @ONLY)
+add_library(ah_clay STATIC "${_clay_impl}")
+add_library(ah::clay ALIAS ah_clay)
+target_include_directories(ah_clay SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/clay")

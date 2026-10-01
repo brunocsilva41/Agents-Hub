@@ -15,6 +15,12 @@ O SHA-256 é o do arquivo baixado (zip/tar.gz), calculado com `sha256sum`.
 | libyaml | 0.2.5 | https://github.com/yaml/libyaml/releases/download/0.2.5/yaml-0.2.5.tar.gz | `c642ae9b75fee120b2d96c712538bd2cf283228d2337df2cf2988e3c02678ef4` | MIT |
 | PCRE2 | 10.49 | https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.49/pcre2-10.49.tar.gz | `929f0b20e62879252a15886b06c89f1edef61a363cbd5826fb041080a5e557ae` | BSD-3-Clause com exceção PCRE2 (LICENCE.md) |
 | Monocypher | 4.0.3 | https://github.com/LoupVaillant/Monocypher/releases/download/4.0.3/monocypher-4.0.3.tar.gz | `8cc9bc341a66249016db9bd70e9142d8d0aef9945973744b1ac05dbc55d8ee66` | BSD-2-Clause ou CC0-1.0 (à escolha) |
+| SDL3 | 3.4.16 (`REVISION.txt`: `release-3.4.16-0-gfa2c02bb6`) | https://github.com/libsdl-org/SDL/releases/download/release-3.4.16/SDL3-3.4.16.tar.gz | `7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68` | Zlib |
+| SDL_ttf | 3.2.2 (`REVISION.txt`: `release-3.2.2-0-ga1ce367`) | https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2.tar.gz | `63547d58d0185c833213885b635a2c0548201cc8f301e6587c0be1a67e1e045d` | Zlib |
+| FreeType (fork `libsdl-org/freetype`, submódulo do SDL_ttf 3.2.2) | 2.13.2 (commit `9973564cfa63763a3e4ac67c09147899539b1e07`) | https://github.com/libsdl-org/freetype/archive/9973564cfa63763a3e4ac67c09147899539b1e07.tar.gz | `026a05a49d114a1235d2926f4c03a9330e4b1a6efe7c217ec9607904c32907d4` | FreeType License (FTL), escolhida; a outra opção é GPLv2 |
+| HarfBuzz (fork `libsdl-org/harfbuzz`, submódulo do SDL_ttf 3.2.2) | 8.5.0 (commit `564bf9818a18709776856533829c0c04950773d6`) | https://github.com/libsdl-org/harfbuzz/archive/564bf9818a18709776856533829c0c04950773d6.tar.gz | `a448dd6c22d8e1e1cf39438c662251c1f97f810b8780eed4a6d6ada948c99ddc` | "Old MIT" (`COPYING`); `src/ms-use/` MIT (Microsoft) |
+| Clay (`clay.h`) | v0.14 | https://github.com/nicbarker/clay/releases/download/v0.14/clay.h | `c97241cc423af3fa11267978adce9cbb46274a2ad0709a5d4b2b1092dc27599d` | Zlib |
+| Clay (`LICENSE.md`, `README.md`) | v0.14 | https://github.com/nicbarker/clay/archive/refs/tags/v0.14.zip | `e8f7eb9202561527cd8bd4d5e9f110f937c11b1f9de3dc91dd1e3ee7e31e5d15` | Zlib |
 
 ## Notas por biblioteca
 
@@ -90,6 +96,113 @@ O SHA-256 é o do arquivo baixado (zip/tar.gz), calculado com `sha256sum`.
 - Arquivos: `monocypher.c`, `monocypher.h`, `optional/monocypher-ed25519.c`,
   `optional/monocypher-ed25519.h` (Ed25519 e SHA-512, ADR 8.10), `LICENCE.md`.
 - Defines: nenhum.
+
+### UI: SDL3 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2, HarfBuzz 8.5.0, Clay v0.14 (F0-12)
+
+Pilha do ADR 8.4; FreeType e HarfBuzz vendorizados com o SDL_ttf (DA-25, ADR 09) e HarfBuzz
+ligado, sem plutosvg (DA-12, ADR 09). Baixados em 2026-09-30.
+
+**Conferência dos arquivos.** O SHA-256 do `SDL3-3.4.16.tar.gz` e do `clay.h` é igual ao
+`digest` do asset na API do GitHub (`/repos/<dono>/<repo>/releases/tags/<tag>`). O release
+do SDL_ttf 3.2.2 não publica `digest` (campo `null`), e a assinatura `.sig` não foi conferida.
+FreeType e HarfBuzz não têm release próprio no fork: o arquivo é o tarball que o GitHub gera
+para o commit; a referência forte é o hash do commit (o GitHub não garante bytes estáveis
+para tarballs gerados).
+
+**De onde vêm FreeType e HarfBuzz.** O tarball de release do SDL_ttf não traz `external/`. O
+`.gitmodules` da tag `release-3.2.2` aponta para os forks `libsdl-org/freetype` (branch
+`VER-2-13-2-SDL`) e `libsdl-org/harfbuzz` (branch `8.5.0-SDL`); os commits acima são os que a
+árvore da tag fixa (API `contents/external/<lib>?ref=release-3.2.2`, campo `sha` do
+submódulo). plutosvg e plutovg, também submódulos, **não** foram baixados.
+
+**Onde estão.** `sdl3/`, `clay/` e `sdl_ttf/`, com FreeType em `sdl_ttf/external/freetype/` e
+HarfBuzz em `sdl_ttf/external/harfbuzz/`. Não ficam em `third_party/freetype/` e
+`third_party/harfbuzz/` porque o modo vendorizado do SDL_ttf 3.2.2 faz
+`add_subdirectory(external/freetype)` e `add_subdirectory(external/harfbuzz)` relativos à
+própria pasta, sem opção para mudar o caminho; outro lugar exigiria editar o CMake do SDL_ttf.
+
+**O que foi copiado (sem edição; o resto do arquivo baixado ficou de fora).**
+
+| Lib | Copiado | Fora (motivo) | Tamanho no repositório |
+|---|---|---|---|
+| SDL3 | `CMakeLists.txt`, `cmake/`, `include/`, `src/`, `wayland-protocols/` (usado pelo CMake no Linux), `LICENSE.txt`, `README.md`, `CREDITS.md`, `REVISION.txt` (sem ele o CMake chama `git describe`) | `test/`, `examples/` (`SDL_TESTS`/`SDL_EXAMPLES` desligados), `docs/`, `build-scripts/` (só para man pages na instalação), `VisualC*/`, `Xcode/`, `android-project/`, `Android.mk`, `INSTALL.md`, `WhatsNew.txt` | 33 MB (o tarball extraído tem 53 MB) |
+| SDL_ttf | `CMakeLists.txt`, `cmake/`, `include/`, `src/`, `LICENSE.txt`, `README.md`, `REVISION.txt` | `examples/`, `docs/`, `build-scripts/`, `VisualC/`, `Xcode/` (15 MB), `mingw/`, `Android.mk`, `external/download.sh` e `Get-GitModules.ps1` (scripts de download) | 0,8 MB sem `external/` |
+| FreeType | `CMakeLists.txt`, `builds/` (o CMake usa `builds/cmake`, `builds/unix`, `builds/windows`...), `include/`, `src/`, `LICENSE.TXT`, `README`, `docs/FTL.TXT`, `docs/GPLv2.TXT` | resto de `docs/`, `devel/`, `objs/`, `tests/`, `subprojects/`, arquivos de make/meson/autotools | 9,8 MB (13 MB extraído) |
+| HarfBuzz | `CMakeLists.txt`, `src/`, `util/Makefile.sources` e `configure.ac` (lidos por `file(READ)` no CMake), `replace-enum-strings.cmake`, `COPYING`, `README.md` | `test/` (90 MB), `perf/`, `docs/`, resto de `util/`, `config*.h` (não usados pelo CMake), meson/autotools | 6,4 MB (100 MB extraído) |
+| Clay | `clay.h` (asset do release), `LICENSE.md` e `README.md` (do zip da tag; o `clay.h` do zip é idêntico ao asset, conferido com `cmp`) | `renderers/` (o renderer SDL3 oficial usa VLA e não compila no MSVC em C17, relatório da F0-14 §8), `examples/`, `bindings/`, `tests/`, `cmake/` | 0,4 MB |
+
+Oito arquivos do SDL3 casam com regras de ignore (`src/hidapi/dist/hidapi.podspec`, pela regra
+`dist/` do `.gitignore` da raiz, e sete `src/render/gpu/shaders/*.hlsl`, pelo `.gitignore` do
+próprio SDL nessa pasta). Foram adicionados com `git add -f` para a cópia ficar igual ao tarball.
+
+**Build** (em [CMakeLists.txt](CMakeLists.txt), seção "UI"). SDL3 e SDL_ttf usam o CMake do
+upstream via `add_subdirectory(... EXCLUDE_FROM_ALL)`, como indicam SDL `docs/README-cmake.md`
+("Using a vendored SDL") e SDL_ttf `docs/INTRO-cmake.md`. Nenhum dos CMakeLists (SDL3,
+SDL_ttf, FreeType, HarfBuzz) usa `FetchContent`, `ExternalProject` ou `file(DOWNLOAD)`. Opções
+(definidas como variáveis normais antes de cada `add_subdirectory`; o `option()` do upstream as
+respeita e as grava no cache):
+
+- SDL3: `SDL_SHARED=ON`, `SDL_STATIC=OFF` (padrão upstream: só a biblioteca compartilhada),
+  `SDL_TEST_LIBRARY=OFF`, `SDL_TESTS=OFF`, `SDL_EXAMPLES=OFF`, `SDL_INSTALL=OFF`. Subsistemas no
+  padrão upstream (nenhum desligado).
+- SDL_ttf: `SDLTTF_VENDORED=ON` (compila `external/freetype` e `external/harfbuzz`; o padrão
+  fora do MSVC é OFF, que procuraria as libs do sistema), `SDLTTF_HARFBUZZ=ON`,
+  `SDLTTF_PLUTOSVG=OFF`, `SDLTTF_SAMPLES=OFF`, `SDLTTF_INSTALL=OFF`, `BUILD_SHARED_LIBS=ON`
+  (SDL3_ttf compartilhado, padrão upstream). O SDL_ttf compila FreeType e HarfBuzz estáticos
+  dentro do SDL3_ttf e força, no FreeType, `FT_DISABLE_ZLIB/BZIP2/PNG/BROTLI=ON` e
+  `FT_REQUIRE_HARFBUZZ=ON`: nenhuma outra dependência transitiva entra.
+  **Efeito colateral:** o SDL_ttf grava `BUILD_SHARED_LIBS=ON` no cache (é um
+  `cmake_dependent_option`); por isso todo `add_library` do projeto deve declarar `STATIC`
+  (todos já declaram).
+- Compilador C++: o SDL3 (no Windows) e o HarfBuzz habilitam C++. Os presets só fixam o compilador C, então o
+  `CMakeLists.txt` faz o C++ seguir o C (cl → cl, clang-cl → clang-cl, gcc → g++, clang →
+  clang++ na mesma pasta), salvo se `CMAKE_CXX_COMPILER` ou `CXX` já estiverem definidos. Sem
+  isso o preset clang-cl pegava `clang++` com flags do MSVC e o configure falhava.
+- Clay: a implementação (`#define CLAY_IMPLEMENTATION` + `#include "clay.h"`) vai numa TU gerada
+  em `build/.../third_party/clay/clay_impl.c` (`file(CONFIGURE)`), alvo `ah_clay` com alias
+  `ah::clay`. O `clay.h` fica sem edição.
+- Alvos para o projeto: `ah::sdl3` (alias de `SDL3-shared`), `ah::sdl3_ttf` (alias de
+  `SDL3_ttf-shared`), `ah::clay`.
+- Warnings: os do próprio upstream, sem warning como erro (`SDL_WERROR` e `SDLTTF_WERROR` no
+  padrão OFF). Com `AH_SANITIZE`, SDL3, SDL_ttf, FreeType e HarfBuzz também são instrumentados.
+
+**Licenças e distribuição com o Hub (MIT).**
+
+- SDL3, SDL_ttf e Clay: Zlib. Permite uso comercial e redistribuição binária; o crédito na
+  documentação é "apreciado, não exigido".
+- FreeType: escolhemos a **FTL** (a GPLv2 obrigaria o Hub a ser GPL). A FTL é do estilo BSD com
+  cláusula de crédito: quem distribui um programa que usa FreeType **deve citar na documentação
+  que usa código do FreeType** (`docs/FTL.TXT`, "credits"; texto sugerido: "Portions of this
+  software are copyright © 2023 The FreeType Project (www.freetype.org). All rights reserved.",
+  com o ano da versão usada). É compatível com distribuir o Hub sob MIT, desde que esse crédito
+  vá na documentação/tela "sobre" e o `FTL.TXT` acompanhe a distribuição de fonte.
+- HarfBuzz: "Old MIT" (o aviso de copyright e os dois parágrafos de `COPYING` devem aparecer em
+  todas as cópias); `src/ms-use/` é MIT (Microsoft), mesma exigência de aviso. Compatível com
+  MIT.
+- Código de terceiros dentro do SDL3 com licença própria, por exemplo `src/hidapi/` (HIDAPI,
+  escolha entre GPLv3, BSD ou licença original; para o Hub, BSD ou original) e
+  `src/video/yuv2rgb/` (BSD-3). O inventário completo dos avisos de terceiros que vão no
+  instalador **não** foi feito aqui (fica para o empacotamento).
+
+**Tamanho dos binários** (2026-09-30, Windows x64, build limpo com os presets):
+
+| Preset | `SDL3.dll` | `SDL3_ttf.dll` | `test_ui_smoke.exe` |
+|---|---|---|---|
+| `windows-msvc-release` | 2.713.088 B | 1.590.784 B | 92.672 B |
+| `windows-msvc-debug` | 6.840.832 B | 5.404.160 B | 331.264 B |
+| `windows-clangcl-asan` | 13.063.168 B | 7.800.320 B | 359.936 B |
+
+No Release, `SDL3.dll` importa só DLLs do Windows e o CRT (`VCRUNTIME140.dll`,
+`api-ms-win-crt-*`); `SDL3_ttf.dll` importa `SDL3.dll`, `GDI32`, `USP10`, `RPCRT4`, `KERNEL32`,
+`USER32` e o CRT, incluindo `VCRUNTIME140_1.dll` (C++ do HarfBuzz). Nenhum símbolo plutosvg
+(`dumpbin /dependents` e `/exports`). Os binários oficiais pré-compilados usados no spike da
+F0-14 não dependiam do VC++ Redistributable; estes dependem (CRT `/MD`, padrão do projeto).
+
+**Teste:** `native/tests/unit/ui_smoke/` (CTest `unit.ui_smoke`): janela SDL3 oculta, SDL_ttf
+medindo um texto com uma fonte do sistema e layout vazio no Clay. Confere as versões
+compiladas (SDL 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2, HarfBuzz 8.5.0). Sem display, sai com
+77 e o CTest marca "Skipped" (`SKIP_RETURN_CODE 77`); fora do Windows, também pula se não
+achar a DejaVu Sans. Nenhuma fonte é vendorizada.
 
 ## Como atualizar uma lib
 
