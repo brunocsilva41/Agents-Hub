@@ -262,9 +262,10 @@ proibidos no produto `system()`, `popen()`, `strcpy`/`sprintf` sem tamanho, chec
 ### 2d. Cofre do SO (ADR 7.16; ADR 08)
 
 **V1 — Limite do Credential Manager. Média.** `ProjectContextSchema` aceita valor de env até 2000
-caracteres (SPEC-01:457); o blob do Credential Manager tem teto de 2560 bytes (⚠ valor a
-conferir na documentação oficial), e 2000 caracteres dão até 4000 bytes em UTF-16 ou até 8000 em
-UTF-8. Mitigação (PROPOSTA), uma de duas: (a) guardar no Credential Manager só valores ≤ 2560
+caracteres (SPEC-01:457), contados em unidades UTF-16 (`.length` do zod,
+`node_modules/zod/v3/types.js:510`, zod 3.25.76); o blob do Credential Manager tem teto de 2560
+bytes (`CRED_MAX_CREDENTIAL_BLOB_SIZE (5*512)`, `wincred.h:455` do Windows SDK 10.0.26100.0), e
+2000 unidades dão até 4000 bytes em UTF-16 ou até 6000 em UTF-8. Mitigação (PROPOSTA), uma de duas: (a) guardar no Credential Manager só valores ≤ 2560
 bytes em UTF-8 e recusar acima disso com erro claro, nunca truncar; ou (b) cifrar com DPAPI de
 usuário e guardar o blob em arquivo do usuário fora do banco. Guardar o blob no próprio banco
 contradiz o ADR 7.16 ("o banco guarda só a referência") e só cabe se o dono revisar essa decisão.
