@@ -3,7 +3,9 @@
  * 1. Janela SDL3 oculta.
  * 2. Versões compiladas: SDL 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2,
  *    HarfBuzz 8.5.0 (HarfBuzz 0.0.0 significaria SDL_ttf sem shaping).
- * 3. Medida de um texto latino.
+ * 3. Medida de um texto latino e render dele pelos caminhos de blit Blended
+ *    (opaco e com alpha), Shaded e LCD (sem Solid: FreeType #1261, ver
+ *    test_render_paths).
  * 4. Shaping (HarfBuzz): a palavra árabe "بببب" (quatro BEH) só sai com as
  *    formas inicial/medial/final, mais estreitas, se houver shaping. Sem
  *    shaping cada letra vira o glifo isolado do cmap, e a palavra mede o
@@ -95,6 +97,77 @@ static void test_measure_latin(TTF_Font *font) {
     printf("texto latino: %dx%d px\n", w, h);
     CHECK(w > 0);
     CHECK(h > 0);
+}
+
+/* Conta pixels "com tinta": alpha > 0 (por_alpha) ou vermelho > 0 sobre fundo
+ * preto opaco. -1 se a superfície for NULL. */
+static int count_ink(SDL_Surface *surface, bool por_alpha) {
+    int x, y, ink = 0;
+
+    if (surface == NULL) {
+        return -1;
+    }
+    for (y = 0; y < surface->h; y++) {
+        for (x = 0; x < surface->w; x++) {
+            Uint8 r, g, b, a;
+            if (SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a) &&
+                (por_alpha ? a > 0 : r > 0)) {
+                ink++;
+            }
+        }
+    }
+    return ink;
+}
+
+/* Passa o texto pelos outros caminhos de blit do SDL_ttf (todos tocados pelo
+ * patch 0001 em native/third_party/patches/sdl_ttf/): Blended opaco e com
+ * alpha, Shaded e LCD. Sob ASan/UBSan, ponteiro desalinhado aborta. */
+static void test_render_paths(TTF_Font *font) {
+    static const char text[] = "Agents-Hub a\xc3\xa7\xc3\xa3o";
+    const SDL_Color white = {255, 255, 255, 255};
+    const SDL_Color white_half = {255, 255, 255, 128};
+    const SDL_Color black = {0, 0, 0, 255};
+    struct {
+        const char *name;
+        SDL_Surface *surface;
+        bool por_alpha;
+    } r[4];
+    size_t i;
+
+    r[0].name = "Blended";
+    r[0].surface = TTF_RenderText_Blended(font, text, 0, white);
+    r[0].por_alpha = true;
+    r[1].name = "Blended (alpha 128)";
+    r[1].surface = TTF_RenderText_Blended(font, text, 0, white_half);
+    r[1].por_alpha = true;
+    r[2].name = "Shaded";
+    r[2].surface = TTF_RenderText_Shaded(font, text, 0, white, black);
+    r[2].por_alpha = false;
+    /* Sem render Solid, de propósito. O Solid usa o rasterizador mono do
+     * FreeType (src/raster/ftraster.c), que no Windows 64-bit põe o TProfile
+     * desalinhado: Long tem 4 bytes no Win64 e o perfil, que tem ponteiros,
+     * fica alinhado só a 4 (UBSan: "ftraster.c:727:21 ... misaligned ...
+     * 'TProfile'"). Defeito aberto no upstream, sem correção nem no master:
+     * https://gitlab.freedesktop.org/freetype/freetype/-/work_items/1261
+     * Regra: a UI não usa render Solid (TTF_Render*_Solid) enquanto a #1261
+     * estiver aberta. Ver native/third_party/VERSIONS.md, "Defeitos
+     * conhecidos". */
+    r[3].name = "LCD";
+    r[3].surface = TTF_RenderText_LCD(font, text, 0, white, black);
+    r[3].por_alpha = false;
+
+    for (i = 0; i < sizeof r / sizeof r[0]; i++) {
+        int ink = count_ink(r[i].surface, r[i].por_alpha);
+        if (r[i].surface == NULL) {
+            fprintf(stderr, "render %s: %s\n", r[i].name, SDL_GetError());
+        } else {
+            printf("render %s: %dx%d, %d pixels com tinta\n", r[i].name,
+                   r[i].surface->w, r[i].surface->h, ink);
+        }
+        CHECK(r[i].surface != NULL);
+        CHECK(ink > 0);
+        SDL_DestroySurface(r[i].surface);
+    }
 }
 
 static void test_shaping(TTF_Font *font) {
@@ -225,6 +298,7 @@ int main(void) {
 
     if (!skip) {
         test_measure_latin(text_font);
+        test_render_paths(text_font);
         test_shaping(text_font);
 #ifdef _WIN32
         test_color_emoji(emoji_font);

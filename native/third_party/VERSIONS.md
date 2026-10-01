@@ -204,7 +204,8 @@ F0-14 não dependiam do VC++ Redistributable; estes dependem (CRT `/MD`, padrão
 
 **Teste:** `native/tests/unit/ui_smoke/` (CTest `unit.ui_smoke`): janela SDL3 oculta; versões
 compiladas (SDL 3.4.16, SDL_ttf 3.2.2, FreeType 2.13.2, HarfBuzz 8.5.0); medida de texto
-latino; **shaping** (a palavra árabe de quatro BEH tem de medir menos de 80% de quatro BEH
+latino; render do texto pelos caminhos de blit Blended (opaco e com alpha), Shaded e LCD, com
+tinta na superfície (sem `Solid`: ver "Defeitos conhecidos"); **shaping** (a palavra árabe de quatro BEH tem de medir menos de 80% de quatro BEH
 isolados, o que só acontece com as formas contextuais do HarfBuzz, e `TTF_SetFontDirection(RTL)`
 tem de ser aceito); **emoji COLR** (só no Windows: U+1F600 do `seguiemj.ttf` renderizado numa
 superfície com cor de frente cinza tem de ter pixels coloridos, não R=G=B); layout vazio no
@@ -248,6 +249,12 @@ cada arquivo contra o download oficial) tem exatamente as diferenças desta tabe
 - **Regra de remoção:** quando sair um release do SDL_ttf com as correções (em 2026-10-01 o
   último release era o 3.2.2, de 2025-03-31), atualizar para ele, apagar os `.patch` e estas
   linhas, e voltar a conferência de integridade a zero diferenças.
+
+## Defeitos conhecidos (sem patch)
+
+| Lib | Defeito | Efeito | Regra enquanto estiver aberto |
+|---|---|---|---|
+| FreeType 2.13.2 (`sdl_ttf/external/freetype/`) | [Issue #1261, "Windows pointer alignment"](https://gitlab.freedesktop.org/freetype/freetype/-/work_items/1261), aberta desde 2023-10-15. O rasterizador mono (`src/raster/ftraster.c`) põe cada `TProfile` logo depois de `height` elementos `Long`; no Windows 64-bit `Long` tem 4 bytes e o `TProfile` (com ponteiros) fica alinhado só a 4. Sem correção no upstream: nem na 2.13.3 nem no `master` (conferido em 2026-10-01; `New_Profile` ainda faz `ras.cProfile = (PProfile)ras.top`) | UB de alinhamento no render mono no Windows 64-bit. O UBSan (preset `windows-clangcl-asan`) aborta em `ftraster.c:727:21: member access within misaligned address ... 'TProfile'` ao renderizar com `TTF_RenderText_Solid` | **A UI não usa render `Solid` (`TTF_Render*_Solid`) enquanto a #1261 estiver aberta.** O `unit.ui_smoke` não testa o `Solid` por isso (comentário em `test_render_paths`). Não há patch local nem sanitizer desligado. Remover este registro (e voltar o `Solid` ao teste) quando o upstream corrigir e o FreeType vendorizado for atualizado |
 
 ## Como atualizar uma lib
 
