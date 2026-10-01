@@ -253,6 +253,10 @@ ah_status ahsign_format_c_key(const uint8_t public_key[32], const char *name, ch
     if (public_key == NULL || name == NULL || out == NULL || out_cap == 0) {
         return AH_ERR_INVALID;
     }
+    /* A tabela embutida nunca pode receber uma chave de ordem pequena. */
+    if (ah_update_public_key_is_small_order(public_key)) {
+        return AH_ERR_INVALID;
+    }
     name_len = strlen(name);
     if (name_len == 0 || name_len > 64) {
         return AH_ERR_INVALID;

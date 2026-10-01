@@ -178,6 +178,17 @@ check("NOT _pos EQUAL -1" "motivo: assinado por outra chave")
 run_ahsign(rc out "" verify --public-key "${PUBLIC_KEY}" --in "${WORK_DIR}/env.manifest")
 check("rc EQUAL 1" "verify com a chave do passo 1 recusado (rc ${rc})")
 
+# 10b. Chave pública de ordem pequena (y = 0 e identidade): recusada antes de
+# ler o envelope (SEC-R17); a forja com ela é coberta em test_update_verify.c.
+set(_zero32 "0000000000000000000000000000000000000000000000000000000000000000")
+set(_ident32 "0100000000000000000000000000000000000000000000000000000000000000")
+foreach(_weak "${_zero32}" "${_ident32}")
+  run_ahsign(rc out "" verify --public-key "${_weak}" --in "${WORK_DIR}/env.manifest")
+  check("rc EQUAL 1" "verify com chave de ordem pequena recusado (rc ${rc})")
+  string(FIND "${out}" "ordem pequena" _pos)
+  check("NOT _pos EQUAL -1" "motivo: chave de ordem pequena (${_weak})")
+endforeach()
+
 # 11. Não sobrescreve o envelope (recusa antes de pedir a senha).
 run_ahsign(rc out "${WORK_DIR}/pw.txt" sign --key "${WORK_DIR}/fix.bin"
   --body "${WORK_DIR}/body.json" --out "${WORK_DIR}/env.manifest" --password-stdin)

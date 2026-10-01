@@ -281,6 +281,10 @@ static int cmd_public(const options *o) {
     if (rc != 0) {
         return rc;
     }
+    if (ah_update_public_key_is_small_order(pk)) {
+        fputs("ahsign: recusado: chave publica de ordem pequena\n", stderr);
+        return EXIT_OPFAIL;
+    }
     st = ahsign_format_c_key(pk, o->name != NULL ? o->name : "chave", text, sizeof text);
     if (st != AH_OK) {
         fprintf(stderr, "ahsign: nao formatei a chave (%s)\n", status_text(st));
@@ -358,6 +362,11 @@ static int cmd_verify(const options *o) {
     if (parse_hex(o->public_key, key.public_key, sizeof key.public_key) != 0) {
         fputs("ahsign: --public-key exige 64 hex minusculos\n", stderr);
         return EXIT_USAGE;
+    }
+    /* Ponto de ordem pequena aceitaria qualquer envelope (R = identidade, S = 0). */
+    if (ah_update_public_key_is_small_order(key.public_key)) {
+        fputs("ahsign: recusado: chave publica de ordem pequena\n", stderr);
+        return EXIT_OPFAIL;
     }
     ah_update_key_id(key.public_key, key.key_id);
     st = ahsign_os_read_file(o->in, AH_UPDATE_ENVELOPE_MAX, &env, &env_size);

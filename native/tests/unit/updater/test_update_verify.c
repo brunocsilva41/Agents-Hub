@@ -623,9 +623,10 @@ static void test_b5_header_variants(void) {
  * não canônica de A e de R (monocypher.c, comentário em
  * crypto_eddsa_check_equation) e não recusa ponto de ordem pequena. Fixa-se
  * aqui o comportamento: com A = identidade (y = 1, codificado como y = 1 ou
- * y = p + 1), a assinatura R = identidade, S = 0 vale para QUALQUER mensagem.
- * Não afeta o Hub porque A só vem da tabela embutida (as chaves do projeto),
- * nunca do envelope; quem montar essa tabela não pode pôr ali uma chave fraca. */
+ * y = p + 1), a assinatura R = identidade, S = 0 vale para QUALQUER mensagem
+ * em crypto_ed25519_check. O Hub fecha isso recusando chave de ordem pequena
+ * na tabela embutida (ah_update_public_key_is_small_order; ver
+ * test_small_order_keys). */
 static void test_b5_non_canonical_points(void) {
     /* Identidade canônica: y = 1. */
     static const uint8_t ident[32] = {0x01};
@@ -655,7 +656,8 @@ static void test_b5_non_canonical_points(void) {
         CHECK(crypto_ed25519_check(sig, pk, msg, sizeof msg - 1) != 0);
     }
 
-    /* O mesmo pelo verificador do Hub, se a tabela tivesse a chave fraca. */
+    /* Pelo verificador do Hub, a mesma chave fraca na tabela é recusada como
+     * tabela embutida inválida (SEC-R17), antes de verificar a assinatura. */
     memcpy(weak.public_key, ident_nc, 32);
     ah_update_key_id(weak.public_key, weak.key_id);
     env = (uint8_t *)malloc(AH_UPDATE_HEADER_SIZE + sizeof k_body - 1);
@@ -664,9 +666,144 @@ static void test_b5_non_canonical_points(void) {
         CHECK(ah_update_header_write(weak.key_id, sig, env, AH_UPDATE_HEADER_SIZE) == AH_OK);
         memcpy(env + AH_UPDATE_HEADER_SIZE, k_body, sizeof k_body - 1);
         size = AH_UPDATE_HEADER_SIZE + sizeof k_body - 1;
-        CHECK(verify_with(env, size, &weak, 1) == AH_OK);
+        CHECK(verify_with(env, size, &weak, 1) == AH_ERR_INTERNAL);
         free(env);
     }
+}
+
+/* -------------------------------------- chaves de ordem pequena (SEC-R17) */
+
+/* y dos 8 pontos de torção (bit de sinal zerado). Mesma fonte da lista de
+ * produção (libsodium, ge25519_has_small_order); as de y = 0, 1, p-1, p e
+ * p+1 têm forma fechada, as duas de ordem 8 são as do libsodium. Cada uma é
+ * provada abaixo por [8]A = identidade, sem confiar na lista. */
+static const uint8_t k_torsion_y[7][32] = {
+    {0x00},
+    {0x01},
+    {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+     0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+     0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x05},
+    {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+     0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+     0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0x7a},
+    {0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, /* p - 1 */
+    {0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, /* p */
+    {0xee, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f}, /* p + 1 */
+};
+
+/* 1 se `a` decodifica para um ponto e [8]A = identidade. Só no teste, com
+ * crypto_eddsa_check_equation: com R = identidade, S = 0 e h = 1 ela confere
+ * [8](-[1]A - R) = identidade, e devolve -1 se A nem decodifica. */
+static int is_torsion_point(const uint8_t a[32]) {
+    uint8_t sig[64];
+    uint8_t h[32];
+    memset(sig, 0, sizeof sig);
+    sig[0] = 0x01; /* R = identidade canônica */
+    memset(h, 0, sizeof h);
+    h[0] = 0x01;
+    return crypto_eddsa_check_equation(sig, a, h) == 0;
+}
+
+static void test_small_order_keys(void) {
+    static const uint8_t msg[] = "qualquer manifesto";
+    uint8_t forged[64];
+    uint8_t enc[32];
+    uint8_t pk[32];
+    ah_update_key weak;
+    uint8_t *env;
+    size_t i;
+    int sign;
+    int covered = 0;
+    unsigned y;
+
+    memset(forged, 0, sizeof forged);
+    forged[0] = 0x01; /* R = identidade, S = 0 */
+    env = (uint8_t *)malloc(AH_UPDATE_HEADER_SIZE + sizeof k_body - 1);
+    CHECK(env != NULL);
+    if (env == NULL) {
+        return;
+    }
+    memcpy(env + AH_UPDATE_HEADER_SIZE, k_body, sizeof k_body - 1);
+
+    /* As 14 codificações (7 y × bit de sinal): todas são pontos de torção, o
+     * Monocypher aceitaria a assinatura forjada com elas, e o Hub recusa. */
+    for (i = 0; i < sizeof k_torsion_y / sizeof k_torsion_y[0]; i++) {
+        for (sign = 0; sign < 2; sign++) {
+            memcpy(enc, k_torsion_y[i], 32);
+            enc[31] = (uint8_t)(enc[31] | (sign ? 0x80u : 0u));
+            CHECK(is_torsion_point(enc));
+            CHECK(crypto_ed25519_check(forged, enc, msg, sizeof msg - 1) == 0);
+            CHECK(ah_update_public_key_is_small_order(enc) == 1);
+
+            memcpy(weak.public_key, enc, 32);
+            ah_update_key_id(weak.public_key, weak.key_id);
+            CHECK(ah_update_header_write(weak.key_id, forged, env, AH_UPDATE_HEADER_SIZE) ==
+                  AH_OK);
+            CHECK(verify_with(env, AH_UPDATE_HEADER_SIZE + sizeof k_body - 1, &weak, 1) ==
+                  AH_ERR_INTERNAL);
+            covered++;
+        }
+    }
+    CHECK(covered == 14);
+
+    /* Completude das formas não canônicas: y = p + 2 .. p + 18 (as únicas
+     * outras com y >= p abaixo de 2^255) e y = 2 .. 18 não são torção. */
+    for (y = 2; y <= 18; y++) {
+        for (sign = 0; sign < 2; sign++) {
+            memset(enc, 0, sizeof enc);
+            enc[0] = (uint8_t)y;
+            enc[31] = (uint8_t)(sign ? 0x80u : 0u);
+            CHECK(!is_torsion_point(enc));
+            CHECK(ah_update_public_key_is_small_order(enc) == 0);
+            memset(enc, 0xff, sizeof enc);
+            enc[0] = (uint8_t)(0xedu + y); /* p + y */
+            enc[31] = (uint8_t)(0x7fu | (sign ? 0x80u : 0u));
+            CHECK(!is_torsion_point(enc));
+            CHECK(ah_update_public_key_is_small_order(enc) == 0);
+        }
+    }
+
+    /* Controle: chave real (RFC 8032 TEST 1) não é torção nem é recusada. */
+    CHECK(hex_to_bytes(k_rfc8032[0].public_key, pk, sizeof pk) == 0);
+    CHECK(!is_torsion_point(pk));
+    CHECK(ah_update_public_key_is_small_order(pk) == 0);
+    free(env);
+}
+
+/* `sig:` antes de `key:` (linhas trocadas, mesmo tamanho): recusado. */
+static void test_sig_before_key(void) {
+    test_signer s;
+    uint8_t *env;
+    uint8_t *swapped;
+    size_t size = 0;
+    ah_update_envelope parsed;
+
+    CHECK(make_signer(&s) == 0);
+    env = make_envelope(&s, (const uint8_t *)k_body, sizeof k_body - 1, SIGN_WITH_PREFIX, &size);
+    CHECK(env != NULL);
+    if (env == NULL) {
+        return;
+    }
+    swapped = (uint8_t *)malloc(size);
+    CHECK(swapped != NULL);
+    if (swapped != NULL) {
+        memcpy(swapped, env, 21);                  /* mágico + LF */
+        memcpy(swapped + 21, env + 43, 134);       /* "sig: <128 hex>\n" */
+        memcpy(swapped + 155, env + 21, 22);       /* "key: <16 hex>\n" */
+        memcpy(swapped + 177, env + 177, size - 177); /* linha vazia + corpo */
+        CHECK(memcmp(swapped + 21, "sig: ", 5) == 0 && memcmp(swapped + 155, "key: ", 5) == 0);
+        CHECK(ah_update_envelope_parse(swapped, size, &parsed) == AH_ERR_INVALID);
+        CHECK(verify_with(swapped, size, &s.key, 1) == AH_ERR_INVALID);
+        free(swapped);
+    }
+    free(env);
+    crypto_wipe(&s, sizeof s);
 }
 
 int main(void) {
@@ -674,6 +811,8 @@ int main(void) {
     test_b5_s_plus_l();
     test_b5_header_variants();
     test_b5_non_canonical_points();
+    test_small_order_keys();
+    test_sig_before_key();
     test_header_layout();
     test_t2_good_and_bitflips();
     test_t2_header_strict();

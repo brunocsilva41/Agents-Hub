@@ -90,7 +90,9 @@ ah_status ahsign_sign_envelope(const uint8_t secret_key[AHSIGN_SECRET_KEY_SIZE],
 /* Escreve em `out` (texto com NUL) o inicializador C de um ah_update_key para
  * a chave pública, com o key_id calculado. `name` só rotula o comentário:
  * [A-Za-z0-9_], 1 a 64 caracteres.
- *   AH_ERR_INVALID nome inválido; AH_ERR_LIMIT `out` pequeno demais. */
+ *   AH_ERR_INVALID nome inválido ou chave de ordem pequena
+ *                  (ah_update_public_key_is_small_order);
+ *   AH_ERR_LIMIT   `out` pequeno demais. */
 ah_status ahsign_format_c_key(const uint8_t public_key[32], const char *name, char *out,
                               size_t out_cap);
 

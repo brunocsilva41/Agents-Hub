@@ -62,6 +62,14 @@ typedef struct ah_update_envelope {
 void ah_update_key_id(const uint8_t public_key[AH_UPDATE_PUBLIC_KEY_SIZE],
                       uint8_t out[AH_UPDATE_KEY_ID_SIZE]);
 
+/* 1 se `public_key` é a codificação de um ponto de ordem pequena (ordem 1, 2,
+ * 4 ou 8: os 8 pontos de torção de Ed25519), em forma canônica ou não
+ * canônica (y >= p, ou bit de sinal com x = 0); 0 se não. Com uma chave
+ * dessas, crypto_ed25519_check aceita R = identidade, S = 0 para qualquer
+ * mensagem (a equação é conferida com cofator e A de ordem pequena não é
+ * recusado). Só compara bytes; não chama crypto_eddsa_*. */
+int ah_update_public_key_is_small_order(const uint8_t public_key[AH_UPDATE_PUBLIC_KEY_SIZE]);
+
 /* Lê só o cabeçalho, por comparação de bytes exatos. Não verifica assinatura.
  * `data` é emprestado. Resultado:
  *   AH_OK          cabeçalho válido, *out preenchido;
@@ -79,6 +87,8 @@ ah_status ah_update_envelope_parse(const uint8_t *data, size_t size,
  *   AH_ERR_LIMIT     envelope maior que AH_UPDATE_ENVELOPE_MAX (sem verificar);
  *   AH_ERR_INVALID   cabeçalho inválido ou assinatura inválida;
  *   AH_ERR_NOT_FOUND key_id não está entre `keys`;
+ *   AH_ERR_INTERNAL  tabela embutida inválida: key_id que não é o da chave,
+ *                    ou chave pública de ordem pequena;
  *   AH_ERR_NOMEM     sem memória para montar a mensagem assinada. */
 ah_status ah_update_verify(const uint8_t *data, size_t size,
                            const ah_update_key *keys, size_t key_count,

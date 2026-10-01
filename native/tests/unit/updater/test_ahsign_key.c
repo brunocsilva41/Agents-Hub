@@ -253,6 +253,16 @@ static void test_format_c_key(void) {
     CHECK(ahsign_format_c_key(pk, "a*/b", out, sizeof out) == AH_ERR_INVALID);
     CHECK(ahsign_format_c_key(pk, "", out, sizeof out) == AH_ERR_INVALID);
     CHECK(ahsign_format_c_key(pk, "k", out, 40) == AH_ERR_LIMIT);
+
+    /* Chave de ordem pequena nunca vira entrada da tabela embutida. */
+    {
+        uint8_t weak[32];
+        memset(weak, 0, sizeof weak); /* y = 0: ordem 4 */
+        CHECK(ahsign_format_c_key(weak, "k", out, sizeof out) == AH_ERR_INVALID);
+        weak[0] = 0x01; /* identidade */
+        weak[31] = 0x80; /* com bit de sinal (não canônica) */
+        CHECK(ahsign_format_c_key(weak, "k", out, sizeof out) == AH_ERR_INVALID);
+    }
 }
 
 static void join(char *out, size_t cap, const char *dir, const char *name) {

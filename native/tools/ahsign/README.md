@@ -15,7 +15,7 @@ Compilada com o resto de `native/` (alvo `ahsign`, em `build/<preset>/bin/`).
 | Gerar um par de chaves | `ahsign generate --out <arquivo-da-chave>` |
 | Exportar a chave pública como inicializador C de `ah_update_key` | `ahsign public --key <arquivo-da-chave> --name <nome>` |
 | Assinar um corpo de manifesto e gerar o envelope | `ahsign sign --key <arquivo-da-chave> --body <corpo> --out <envelope>` |
-| Verificar um envelope com uma chave pública | `ahsign verify --public-key <64 hex> --in <envelope>` |
+| Verificar um envelope com uma chave pública | `ahsign verify --public-key <64 hex> --in <envelope>` (recusa chave de ordem pequena; `public` também) |
 
 - A senha é lida do terminal, sem eco (`generate` pede duas vezes); Ctrl+C durante a leitura devolve
   o eco ao terminal. Com `--password-stdin`, vem da primeira linha de stdin, lida byte a byte sem o
@@ -52,7 +52,7 @@ chave que vaze para o repositório, para um workflow ou para o executável `hub`
 
 | Teste | O que prova |
 |---|---|
-| `unit.updater.verify` | T1 (vetores do RFC 8032 §7.1 em `crypto_ed25519_check`, recusados por `crypto_eddsa_check`), T2 (bit invertido em qualquer byte, chave desconhecida), T3 (sem o prefixo de domínio), T4 (> 64 KiB recusado antes de verificar); S ≥ L, hex maiúsculo, CRLF, BOM, NUL e `key:` repetido recusados; A e R não canônicos aceitos pelo Monocypher (fixado: só importa se a tabela embutida tiver chave fraca) |
+| `unit.updater.verify` | T1 (vetores do RFC 8032 §7.1 em `crypto_ed25519_check`, recusados por `crypto_eddsa_check`), T2 (bit invertido em qualquer byte, chave desconhecida), T3 (sem o prefixo de domínio), T4 (> 64 KiB recusado antes de verificar); S ≥ L, hex maiúsculo, CRLF, BOM, NUL e `key:` repetido recusados; `sig:` antes de `key:` recusado; A e R não canônicos aceitos pelo Monocypher (fixado), e chave pública de ordem pequena (as 14 codificações dos 8 pontos de torção) recusada como tabela embutida inválida (SEC-R17) |
 | `unit.ahsign.key` | arquivo de chave sem a semente em claro, senha errada, byte adulterado, faixa do Argon2, assinatura, exportação e arquivo criado privado (DACL só do usuário / 0600) |
 | `unit.ahsign.roundtrip` | gerar → exportar → assinar → verificar pela linha de comando, com chave e senha de teste num diretório do build |
 | `unit.ahsign.secret_scan` | T14: o cabeçalho do arquivo de chave não aparece em nenhum arquivo do repositório (rastreado ou novo não ignorado), nos workflows nem no `hub`; cada arquivo permitido tem exatamente uma ocorrência, e em `ahsign_key.c` só na linha da definição |
