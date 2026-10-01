@@ -1,0 +1,79 @@
+Patch 0001 do SDL_ttf 3.2.2 vendorizado (Agents-Hub, F0-12)
+
+Lib:       SDL_ttf 3.2.2 (native/third_party/sdl_ttf/, release-3.2.2-0-ga1ce367)
+Arquivo:   src/SDL_ttf.c, só a função BG_Blended_Color
+Origem:    backport dos hunks de BG_Blended_Color de dois commits do upstream
+           (libsdl-org/SDL_ttf, branch main), sem nada a mais:
+           - 6ea7d33927211629bf8326b7cc6caad34f3d4122 (2025-07-14)
+             "Make various pointers Uint8* in glyph blitting functions to avoid
+             creating misaligned pointers"
+             https://github.com/libsdl-org/SDL_ttf/commit/6ea7d33927211629bf8326b7cc6caad34f3d4122
+           - a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0 (2025-07-15)
+             "Fixed invalid write in BG_Blended_Color() after previous change (6ea7d33)"
+             (o 6ea7d33 escreveu `dst += sizeof(Uint32)` no ramo opaco; o
+             a9a4fea corrige para `dst += 1`)
+             https://github.com/libsdl-org/SDL_ttf/commit/a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0
+           Os outros hunks do 6ea7d33 (BG_Blended_LCD, BG_Blended_32, SSE, BG_*
+           de 8 bits, Render_Line) NÃO foram trazidos.
+           Resultado: BG_Blended_Color fica idêntica à do main do upstream
+           (conferido em 2026-10-01 com diff da função).
+Motivo:    UB de alinhamento. No ramo opaco de BG_Blended_Color (glifos
+           coloridos, ex.: emoji COLR) o 3.2.2 lê `*src++` como Uint32 num
+           buffer desalinhado. O UBSan do preset windows-clangcl-asan aborta o
+           teste unit.ui_smoke (render do emoji): "SDL_ttf.c:467:13: runtime
+           error: load of misaligned address ... for type 'const Uint32'".
+Data:      2026-10-01
+Aplicação: o fonte versionado em native/third_party/sdl_ttf/ JÁ contém este
+           patch; o build não aplica nada. Este arquivo é registro e prova:
+           `git apply --check -R` dele, a partir da raiz do repositório, tem de
+           funcionar. Remover (e restaurar o arquivo do tarball) quando houver
+           release do SDL_ttf com a correção. Ver native/third_party/VERSIONS.md,
+           "Patches aplicados".
+
+diff --git a/native/third_party/sdl_ttf/src/SDL_ttf.c b/native/third_party/sdl_ttf/src/SDL_ttf.c
+index be517a1..fa0a5ce 100644
+--- a/native/third_party/sdl_ttf/src/SDL_ttf.c
++++ b/native/third_party/sdl_ttf/src/SDL_ttf.c
+@@ -456,7 +456,7 @@ static bool Find_GlyphByIndex(TTF_Font *font, FT_UInt idx, int want_bitmap, int
+ // Blend colored glyphs
+ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32 srcskip, Uint32 dstskip, Uint8 fg_alpha)
+ {
+-    const Uint32 *src   = (Uint32 *)image->buffer;
++    const Uint8  *src   = image->buffer;
+     Uint32      *dst    = destination;
+     Uint32       width  = image->width;
+     Uint32       height = image->rows;
+@@ -465,10 +465,12 @@ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32
+         while (height--) {
+             /* *INDENT-OFF* */
+             DUFFS_LOOP4(
+-                *dst++ = *src++;
++                SDL_memcpy(dst, src, sizeof(Uint32));
++                src += sizeof(Uint32);
++                dst += 1;
+             , width);
+             /* *INDENT-ON* */
+-            src = (const Uint32 *)((const Uint8 *)src + srcskip);
++            src += srcskip;
+             dst = (Uint32 *)((Uint8 *)dst + dstskip);
+         }
+     } else {
+@@ -480,7 +482,8 @@ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32
+             DUFFS_LOOP4(
+                     /* prevent misaligned load: tmp = *src++; */
+                     // eventually, we can expect the compiler to replace the memcpy call with something optimized
+-                    SDL_memcpy(&tmp, src++, sizeof(tmp));
++                    SDL_memcpy(&tmp, src, sizeof(tmp));
++                    src += sizeof(Uint32);
+                     alpha = tmp >> 24;
+                     tmp &= ~0xFF000000;
+                     alpha = fg_alpha * alpha;
+@@ -488,7 +491,7 @@ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32
+                     *dst++ = tmp | alpha
+                     , width);
+             /* *INDENT-ON* */
+-            src = (const Uint32 *)((const Uint8 *)src + srcskip);
++            src += srcskip;
+             dst = (Uint32 *)((Uint8 *)dst + dstskip);
+         }
+     }

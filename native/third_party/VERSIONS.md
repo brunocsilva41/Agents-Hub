@@ -121,7 +121,8 @@ HarfBuzz em `sdl_ttf/external/harfbuzz/`. Não ficam em `third_party/freetype/` 
 `add_subdirectory(external/freetype)` e `add_subdirectory(external/harfbuzz)` relativos à
 própria pasta, sem opção para mudar o caminho; outro lugar exigiria editar o CMake do SDL_ttf.
 
-**O que foi copiado (sem edição; o resto do arquivo baixado ficou de fora).**
+**O que foi copiado (sem edição, com uma exceção registrada em "Patches aplicados", abaixo; o
+resto do arquivo baixado ficou de fora).**
 
 | Lib | Copiado | Fora (motivo) | Tamanho no repositório |
 |---|---|---|---|
@@ -214,10 +215,32 @@ antes de tocar no SDL); `SDL_Init(SDL_INIT_VIDEO)` falha; ou uma fonte exigida n
 Linux o emoji colorido não é testado (DA-12 em aberto; a saída diz isso). No CI Linux o teste
 roda sob `xvfb-run -a`.
 
+## Patches aplicados
+
+Código vendorizado não é editado (`docs/18-padroes-c.md` §14), salvo o patch abaixo. O patch
+já está no fonte versionado (o build não aplica nada); o `.patch` em `patches/<lib>/` é o
+registro e a prova. A conferência de integridade (`cmp` de cada arquivo contra o download
+oficial) tem exatamente as diferenças desta tabela.
+
+| Lib | Arquivo | Patch | Commits upstream | Motivo | SHA-256 do arquivo depois do patch |
+|---|---|---|---|---|---|
+| SDL_ttf 3.2.2 | `sdl_ttf/src/SDL_ttf.c` (só `BG_Blended_Color`) | [`patches/sdl_ttf/0001-blended-color-alinhamento.patch`](patches/sdl_ttf/0001-blended-color-alinhamento.patch) | [`6ea7d33927211629bf8326b7cc6caad34f3d4122`](https://github.com/libsdl-org/SDL_ttf/commit/6ea7d33927211629bf8326b7cc6caad34f3d4122) (só os hunks de `BG_Blended_Color`) + [`a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0`](https://github.com/libsdl-org/SDL_ttf/commit/a9a4fea81b41f3ceefcfacd5b32fa3e838a554c0) (corrige o `dst +=` que o primeiro introduziu) | UB de alinhamento achada pelo UBSan (preset `windows-clangcl-asan`) no teste de emoji colorido do `unit.ui_smoke`: o ramo opaco lia `*src++` como `Uint32` num buffer desalinhado (`SDL_ttf.c:467:13: runtime error: load of misaligned address`) | `46ec221287f7c07ba9ec1558b54ee320f71e6e753c24387b0e16329cfe4bbcea` (o do tarball é `25a42804b18809e5c4b2eb8ed787701551d0c680aff774b7d8c54486c0d42d38`) |
+
+- Depois do patch, `BG_Blended_Color` é idêntica à do `main` do upstream (diff da função em
+  2026-10-01). Os demais hunks do 6ea7d33 (outras funções de blit) não foram trazidos.
+- Prova, a partir da raiz do repositório:
+  `git apply --check -R native/third_party/patches/sdl_ttf/0001-blended-color-alinhamento.patch`
+  tem de passar (o patch está aplicado e reverte limpo).
+- **Regra de remoção:** quando sair um release do SDL_ttf com a correção (em 2026-10-01 o último
+  release era o 3.2.2, de 2025-03-31), atualizar para ele, apagar o `.patch` e esta linha, e
+  voltar a conferência de integridade a zero diferenças.
+
 ## Como atualizar uma lib
 
 1. Baixar o novo arquivo da mesma fonte oficial e calcular `sha256sum`.
-2. Substituir só os arquivos listados acima (sem editar o conteúdo).
+2. Substituir só os arquivos listados acima (sem editar o conteúdo). Se a lib tem patch em
+   "Patches aplicados", conferir se a versão nova já traz a correção (então remover o patch) ou
+   reaplicá-lo.
 3. Atualizar esta tabela (versão, URL, SHA-256) e conferir se os defines ainda batem com a
    documentação da nova versão (o `NON-AUTOTOOLS-BUILD` do PCRE2 avisa que isso muda entre releases).
 4. Rodar todos os presets (ver `native/README.md`).

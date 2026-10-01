@@ -456,7 +456,7 @@ static bool Find_GlyphByIndex(TTF_Font *font, FT_UInt idx, int want_bitmap, int 
 // Blend colored glyphs
 static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32 srcskip, Uint32 dstskip, Uint8 fg_alpha)
 {
-    const Uint32 *src   = (Uint32 *)image->buffer;
+    const Uint8  *src   = image->buffer;
     Uint32      *dst    = destination;
     Uint32       width  = image->width;
     Uint32       height = image->rows;
@@ -465,10 +465,12 @@ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32
         while (height--) {
             /* *INDENT-OFF* */
             DUFFS_LOOP4(
-                *dst++ = *src++;
+                SDL_memcpy(dst, src, sizeof(Uint32));
+                src += sizeof(Uint32);
+                dst += 1;
             , width);
             /* *INDENT-ON* */
-            src = (const Uint32 *)((const Uint8 *)src + srcskip);
+            src += srcskip;
             dst = (Uint32 *)((Uint8 *)dst + dstskip);
         }
     } else {
@@ -480,7 +482,8 @@ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32
             DUFFS_LOOP4(
                     /* prevent misaligned load: tmp = *src++; */
                     // eventually, we can expect the compiler to replace the memcpy call with something optimized
-                    SDL_memcpy(&tmp, src++, sizeof(tmp));
+                    SDL_memcpy(&tmp, src, sizeof(tmp));
+                    src += sizeof(Uint32);
                     alpha = tmp >> 24;
                     tmp &= ~0xFF000000;
                     alpha = fg_alpha * alpha;
@@ -488,7 +491,7 @@ static void BG_Blended_Color(const TTF_Image *image, Uint32 *destination, Sint32
                     *dst++ = tmp | alpha
                     , width);
             /* *INDENT-ON* */
-            src = (const Uint32 *)((const Uint8 *)src + srcskip);
+            src += srcskip;
             dst = (Uint32 *)((Uint8 *)dst + dstskip);
         }
     }
