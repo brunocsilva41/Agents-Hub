@@ -8,7 +8,8 @@
  * - POSIX: diretórios criados com 0700, arquivos privados com 0600, e
  *   umask(077) aplicado por ah_platform_fs_init.
  * - Windows: DACL protegida (sem herança) com uma única ACE que dá controle
- *   total ao SID do usuário do processo, aplicada já na criação do objeto,
+ *   total ao SID do usuário do processo, e esse SID como dono (num processo
+ *   elevado o dono padrão seria Administradores), aplicada já na criação do objeto,
  *   pelas APIs de segurança Win32 (nada de icacls nem de principal por nome).
  *
  * Posse de memória: toda string ou buffer devolvido por parâmetro de saída é
@@ -84,8 +85,10 @@ enum {
 };
 
 /* Grava `len` bytes de `data` em `path` de forma atômica (espelha o
- * gravarAtomico de packages/daemon/src/safe-write.ts): cria a pasta pai se
- * faltar (ah_platform_fs_mkdirs), escreve num temporário exclusivo no MESMO
+ * gravarAtomico de packages/daemon/src/safe-write.ts). `path` é normalizado
+ * antes de tudo (ah_platform_path_normalize), e pasta pai, temporário e
+ * destino saem desse mesmo caminho: cria a pasta pai se faltar
+ * (ah_platform_fs_mkdirs), escreve num temporário exclusivo no MESMO
  * diretório, `<path>.tmp-<pid>-<aleatório>`, força os dados ao disco
  * (FlushFileBuffers / fsync) e faz rename por cima de `path`. Quem lê `path`
  * vê o conteúdo antigo ou o novo inteiro, nunca um parcial. Em qualquer falha
@@ -95,23 +98,32 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
                                       size_t len, unsigned flags);
 
 /* Lê o arquivo inteiro. Mais de `max_bytes` bytes -> AH_ERR_LIMIT (nada é
- * devolvido). Arquivo inexistente -> AH_ERR_NOT_FOUND. O buffer tem um '\0'
+ * devolvido). Arquivo inexistente -> AH_ERR_NOT_FOUND. Só arquivo regular:
+ * FIFO, socket, pipe nomeado ou dispositivo -> AH_ERR_INVALID, sem bloquear
+ * (POSIX abre com O_NONBLOCK); diretório -> AH_ERR_INVALID no POSIX e
+ * AH_ERR_IO no Windows (a abertura falha). O buffer tem um '\0'
  * extra depois dos dados (não contado em *out_len), para uso como texto.
  * Posse: *out é do chamador (free). */
 ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
                                   char **out, size_t *out_len);
 
-/* Restringe um arquivo ou diretório existente ao usuário do processo:
- * POSIX 0600 (arquivo) ou 0700 (diretório), recusando link simbólico com
- * AH_ERR_INVALID; Windows, troca a DACL pela DACL protegida só com o SID do
- * usuário (em diretório, a ACE é herdável). */
+/* Restringe um arquivo ou diretório existente ao usuário do processo.
+ * Link simbólico (e, no Windows, junction ou outro reparse point) é recusado
+ * com AH_ERR_INVALID, sem seguir o link; no POSIX, também o que não é
+ * arquivo regular nem diretório. POSIX: 0600 (arquivo) ou 0700 (diretório).
+ * Windows: pelo handle aberto sem seguir o link, troca o dono pelo SID do
+ * usuário e a DACL pela DACL protegida só com esse SID (em diretório, a ACE
+ * é herdável). */
 ah_status ah_platform_fs_restrict(const char *path);
 
-/* Confere se `path` está restrito ao usuário do processo. *restricted fica
- * true só se: POSIX, não é link simbólico, o dono é o usuário efetivo e não
- * há nenhum bit de grupo/outros; Windows, a DACL existe, é protegida (sem
- * herança), não tem ACE herdada e toda ACE é de permissão para o SID do
- * usuário (pelo menos uma). Erro de leitura -> status != AH_OK. */
+/* Confere se `path` está restrito ao usuário do processo, sem seguir link.
+ * *restricted fica true só se: POSIX, é arquivo regular ou diretório (link
+ * simbólico nunca conta), o dono é o usuário efetivo e não há nenhum bit de
+ * grupo/outros; Windows, não é reparse point (link/junction nunca conta), o
+ * dono é o SID do usuário (equivalente ao st_uid do POSIX), a DACL existe, é
+ * protegida (sem herança), não tem ACE herdada e toda ACE é de permissão
+ * para o SID do usuário (pelo menos uma) e, em diretório, herdável por
+ * arquivos e subpastas (OI|CI). Erro de leitura -> status != AH_OK. */
 ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted);
 
 /* Resolve o home do Hub (SPEC-02 §1; daemon/src/config.ts defaultHome):

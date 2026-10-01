@@ -209,6 +209,10 @@ static ah_status private_sd_init(private_sd *p, int is_dir) {
             FILE_ALL_ACCESS, p->user->User.Sid) ||
         !InitializeSecurityDescriptor(&p->sd, SECURITY_DESCRIPTOR_REVISION) ||
         !SetSecurityDescriptorDacl(&p->sd, TRUE, p->acl, FALSE) ||
+        /* Dono explícito = o usuário: num processo elevado o dono padrão
+         * seria o grupo Administradores, e o dono sempre pode reescrever a
+         * DACL. O próprio SID do usuário sempre pode ser dono. */
+        !SetSecurityDescriptorOwner(&p->sd, p->user->User.Sid, FALSE) ||
         !SetSecurityDescriptorControl(&p->sd, SE_DACL_PROTECTED,
                                       SE_DACL_PROTECTED)) {
         st = status_from_win32(GetLastError());
@@ -385,7 +389,7 @@ static ah_status rename_by_handle(HANDLE h, const wchar_t *dest,
 
 ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
                                       size_t len, unsigned flags) {
-    char *dir = NULL, *tmp = NULL;
+    char *norm = NULL, *dir = NULL, *tmp = NULL;
     wchar_t *wpath = NULL, *wtmp = NULL;
     HANDLE h = INVALID_HANDLE_VALUE;
     private_sd psd;
@@ -399,19 +403,24 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
         return AH_ERR_INVALID;
     }
 
-    st = ah_platform_fs_dirname(path, &dir);
+    /* Tudo (pasta pai, temporário e destino) sai do MESMO caminho
+     * normalizado: "x/../y/f" cria y e grava y/f, sem depender de x. */
+    st = ah_platform_path_normalize(path, &norm);
     if (st != AH_OK) return st;
-    st = ah_platform_fs_mkdirs(dir);
+    st = ah_platform_fs_dirname(norm, &dir);
+    if (st == AH_OK) st = ah_platform_fs_mkdirs(dir);
     free(dir);
-    if (st != AH_OK) return st;
-
-    st = ah_platform_utf8_to_utf16(path, &wpath);
-    if (st != AH_OK) return st;
+    if (st == AH_OK) st = ah_platform_utf8_to_utf16(norm, &wpath);
+    if (st != AH_OK) {
+        free(norm);
+        return st;
+    }
 
     if (flags & AH_PLATFORM_FS_PRIVATE) {
         st = private_sd_init(&psd, 0);
         if (st != AH_OK) {
             free(wpath);
+            free(norm);
             return st;
         }
         have_sd = 1;
@@ -421,7 +430,7 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
     }
 
     for (attempt = 0; attempt < TMP_NAME_ATTEMPTS; attempt++) {
-        st = ah_platform_fs_tmp_name(path, (unsigned long)GetCurrentProcessId(),
+        st = ah_platform_fs_tmp_name(norm, (unsigned long)GetCurrentProcessId(),
                                      tmp_nonce(attempt), &tmp);
         if (st != AH_OK) break;
         st = ah_platform_utf8_to_utf16(tmp, &wtmp);
@@ -447,6 +456,7 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
         wtmp = NULL;
         st = AH_ERR_IO;
     }
+    free(norm);
     if (h == INVALID_HANDLE_VALUE) {
         free(wtmp);
         free(wpath);
@@ -509,6 +519,12 @@ ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
                     NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     free(w);
     if (h == INVALID_HANDLE_VALUE) return status_from_win32(GetLastError());
+    /* Só arquivo em disco: pipe nomeado ou dispositivo podem bloquear a
+     * leitura e não têm tamanho confiável. */
+    if (GetFileType(h) != FILE_TYPE_DISK) {
+        CloseHandle(h);
+        return AH_ERR_INVALID;
+    }
 
     if (!GetFileSizeEx(h, &size) || size.QuadPart < 0) {
         st = status_from_win32(GetLastError());
@@ -572,42 +588,80 @@ ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
 /* Restrição                                                                 */
 /* ------------------------------------------------------------------------ */
 
+/* Abre `w` sem seguir link simbólico nem junction (FILE_FLAG_OPEN_REPARSE_POINT;
+ * BACKUP_SEMANTICS para aceitar diretório) e devolve os atributos do objeto
+ * aberto. Trabalhar pelo handle evita trocar o caminho entre a checagem e o
+ * uso. */
+static ah_status open_no_follow(const wchar_t *w, DWORD access, HANDLE *out,
+                                DWORD *attrs) {
+    BY_HANDLE_FILE_INFORMATION info;
+    HANDLE h;
+    ah_status st;
+
+    *out = INVALID_HANDLE_VALUE;
+    h = CreateFileW(w, access | FILE_READ_ATTRIBUTES,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    NULL, OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                    NULL);
+    if (h == INVALID_HANDLE_VALUE) return status_from_win32(GetLastError());
+    if (!GetFileInformationByHandle(h, &info)) {
+        st = status_from_win32(GetLastError());
+        CloseHandle(h);
+        return st == AH_OK ? AH_ERR_IO : st;
+    }
+    *attrs = info.dwFileAttributes;
+    *out = h;
+    return AH_OK;
+}
+
 ah_status ah_platform_fs_restrict(const char *path) {
     wchar_t *w = NULL;
-    DWORD attrs, err;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    DWORD attrs = 0, err;
     private_sd psd;
     ah_status st;
 
     if (path == NULL || path[0] == '\0') return AH_ERR_INVALID;
     st = ah_platform_utf8_to_utf16(path, &w);
     if (st != AH_OK) return st;
+    /* READ_CONTROL: o SetSecurityInfo lê o descritor atual para recalcular
+     * a herança; sem ele a chamada falha com acesso negado. */
+    st = open_no_follow(w, READ_CONTROL | WRITE_DAC | WRITE_OWNER, &h, &attrs);
+    free(w);
+    if (st != AH_OK) return st;
 
-    attrs = GetFileAttributesW(w);
-    if (attrs == INVALID_FILE_ATTRIBUTES) {
-        st = status_from_win32(GetLastError());
-        free(w);
-        return st;
+    /* Link simbólico ou junction: recusado, como o O_NOFOLLOW do POSIX.
+     * Restringir o link não protege o alvo, e seguir o link restringiria
+     * um objeto que o chamador não nomeou. */
+    if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
+        CloseHandle(h);
+        return AH_ERR_INVALID;
     }
     st = private_sd_init(&psd, (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0);
     if (st != AH_OK) {
-        free(w);
+        CloseHandle(h);
         return st;
     }
-    err = SetNamedSecurityInfoW(
-        w, SE_FILE_OBJECT,
-        DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION, NULL,
-        NULL, psd.acl, NULL);
+    err = SetSecurityInfo(h, SE_FILE_OBJECT,
+                          OWNER_SECURITY_INFORMATION |
+                              DACL_SECURITY_INFORMATION |
+                              PROTECTED_DACL_SECURITY_INFORMATION,
+                          psd.user->User.Sid, NULL, psd.acl, NULL);
     private_sd_free(&psd);
-    free(w);
+    CloseHandle(h);
     return err == ERROR_SUCCESS ? AH_OK : status_from_win32(err);
 }
 
 ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted) {
     wchar_t *w = NULL;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    PSID owner = NULL;
     PACL dacl = NULL;
     PSECURITY_DESCRIPTOR sd = NULL;
     SECURITY_DESCRIPTOR_CONTROL ctrl = 0;
-    DWORD rev = 0, err, i;
+    DWORD rev = 0, err, i, attrs = 0;
+    BYTE need_flags;
     TOKEN_USER *user = NULL;
     bool ok;
     ah_status st;
@@ -618,9 +672,18 @@ ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted) {
     }
     st = ah_platform_utf8_to_utf16(path, &w);
     if (st != AH_OK) return st;
-    err = GetNamedSecurityInfoW(w, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                                NULL, NULL, &dacl, NULL, &sd);
+    st = open_no_follow(w, READ_CONTROL, &h, &attrs);
     free(w);
+    if (st != AH_OK) return st;
+    if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) {
+        /* Link/junction nunca conta como restrito (POSIX: S_ISLNK). */
+        CloseHandle(h);
+        return AH_OK;
+    }
+    err = GetSecurityInfo(h, SE_FILE_OBJECT,
+                          OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                          &owner, NULL, &dacl, NULL, &sd);
+    CloseHandle(h);
     if (err != ERROR_SUCCESS) return status_from_win32(err);
 
     st = current_user(&user);
@@ -635,8 +698,17 @@ ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted) {
         return st == AH_OK ? AH_ERR_IO : st;
     }
 
-    /* DACL nula = acesso total para todos; protegida = não herda da pasta. */
-    ok = dacl != NULL && (ctrl & SE_DACL_PROTECTED) != 0 && dacl->AceCount > 0;
+    /* Em diretório, a ACE precisa ser herdável por arquivos e subpastas:
+     * sem isso, o que nascer dentro herda a DACL do resto do caminho. */
+    need_flags = (attrs & FILE_ATTRIBUTE_DIRECTORY)
+                     ? (BYTE)(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE)
+                     : (BYTE)0;
+
+    /* Dono = usuário (equivale ao st_uid == geteuid() do POSIX): o dono
+     * pode reescrever a DACL a qualquer momento. DACL nula = acesso total
+     * para todos; protegida = não herda da pasta. */
+    ok = owner != NULL && EqualSid(owner, user->User.Sid) && dacl != NULL &&
+         (ctrl & SE_DACL_PROTECTED) != 0 && dacl->AceCount > 0;
     for (i = 0; ok && i < dacl->AceCount; i++) {
         void *ace = NULL;
         const ACE_HEADER *hdr;
@@ -646,7 +718,8 @@ ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted) {
         }
         hdr = (const ACE_HEADER *)ace;
         if (hdr->AceType != ACCESS_ALLOWED_ACE_TYPE ||
-            (hdr->AceFlags & INHERITED_ACE) != 0) {
+            (hdr->AceFlags & INHERITED_ACE) != 0 ||
+            (hdr->AceFlags & need_flags) != need_flags) {
             ok = false;
             break;
         }

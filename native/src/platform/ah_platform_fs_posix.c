@@ -131,7 +131,7 @@ static void sync_dir(const char *dir) {
 
 ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
                                       size_t len, unsigned flags) {
-    char *dir = NULL, *tmp = NULL;
+    char *norm = NULL, *dir = NULL, *tmp = NULL;
     int fd = -1;
     int is_private;
     unsigned attempt;
@@ -143,16 +143,20 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
     }
     is_private = (flags & AH_PLATFORM_FS_PRIVATE) != 0;
 
-    st = ah_platform_fs_dirname(path, &dir);
+    /* Tudo (pasta pai, temporário e destino) sai do MESMO caminho
+     * normalizado: "x/../y/f" cria y e grava y/f, sem depender de x. */
+    st = ah_platform_path_normalize(path, &norm);
     if (st != AH_OK) return st;
-    st = ah_platform_fs_mkdirs(dir);
+    st = ah_platform_fs_dirname(norm, &dir);
+    if (st == AH_OK) st = ah_platform_fs_mkdirs(dir);
     if (st != AH_OK) {
         free(dir);
+        free(norm);
         return st;
     }
 
     for (attempt = 0; attempt < TMP_NAME_ATTEMPTS; attempt++) {
-        st = ah_platform_fs_tmp_name(path, (unsigned long)getpid(),
+        st = ah_platform_fs_tmp_name(norm, (unsigned long)getpid(),
                                      tmp_nonce(attempt, &fd), &tmp);
         if (st != AH_OK) break;
         /* O_EXCL = flag `wx` do TS; O_NOFOLLOW recusa um link plantado no
@@ -172,6 +176,7 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
     }
     if (fd < 0) {
         free(dir);
+        free(norm);
         return st == AH_OK ? AH_ERR_IO : st;
     }
 
@@ -179,7 +184,7 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
     if (st == AH_OK) st = write_all(fd, data, len);
     if (st == AH_OK && fsync(fd) != 0) st = status_from_errno(errno);
     if (close(fd) != 0 && st == AH_OK) st = status_from_errno(errno);
-    if (st == AH_OK && rename(tmp, path) != 0) st = status_from_errno(errno);
+    if (st == AH_OK && rename(tmp, norm) != 0) st = status_from_errno(errno);
     if (st != AH_OK) {
         (void)unlink(tmp); /* melhor esforço: o erro original é o que vale */
     } else {
@@ -188,6 +193,7 @@ ah_status ah_platform_fs_write_atomic(const char *path, const void *data,
 
     free(tmp);
     free(dir);
+    free(norm);
     return st;
 }
 
@@ -208,8 +214,10 @@ ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
     if (path == NULL || out == NULL || out_len == NULL) return AH_ERR_INVALID;
     if (max_bytes > SIZE_MAX - 2) return AH_ERR_INVALID;
 
+    /* O_NONBLOCK: abrir um FIFO para leitura bloquearia até aparecer um
+     * escritor. Em arquivo regular a flag não muda nada. */
     do {
-        fd = open(path, O_RDONLY | O_CLOEXEC);
+        fd = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
     } while (fd < 0 && errno == EINTR);
     if (fd < 0) return status_from_errno(errno);
 
@@ -218,9 +226,11 @@ ah_status ah_platform_fs_read_all(const char *path, size_t max_bytes,
         (void)close(fd);
         return st;
     }
-    if (S_ISDIR(stbuf.st_mode)) {
+    /* Só arquivo regular: diretório, FIFO, socket e dispositivo não têm
+     * "conteúdo inteiro" com teto confiável. */
+    if (!S_ISREG(stbuf.st_mode)) {
         (void)close(fd);
-        return AH_ERR_IO;
+        return AH_ERR_INVALID;
     }
     if (stbuf.st_size < 0 ||
         (unsigned long long)stbuf.st_size > (unsigned long long)max_bytes) {
@@ -292,14 +302,17 @@ ah_status ah_platform_fs_restrict(const char *path) {
     if (path == NULL || path[0] == '\0') return AH_ERR_INVALID;
     /* O_NOFOLLOW + fchmod: o modo vai para o objeto aberto, sem janela para
      * trocar o caminho por um link entre a checagem e o chmod. */
+    /* O_NONBLOCK: um FIFO no caminho não pode travar o open. */
     do {
-        fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     } while (fd < 0 && errno == EINTR);
     if (fd < 0) {
         return errno == ELOOP ? AH_ERR_INVALID : status_from_errno(errno);
     }
     if (fstat(fd, &stbuf) != 0) {
         st = status_from_errno(errno);
+    } else if (!S_ISREG(stbuf.st_mode) && !S_ISDIR(stbuf.st_mode)) {
+        st = AH_ERR_INVALID;
     } else if (fchmod(fd, S_ISDIR(stbuf.st_mode) ? 0700 : 0600) != 0) {
         st = status_from_errno(errno);
     }
@@ -315,8 +328,8 @@ ah_status ah_platform_fs_check_restricted(const char *path, bool *restricted) {
         return AH_ERR_INVALID;
     }
     if (lstat(path, &stbuf) != 0) return status_from_errno(errno);
-    *restricted = !S_ISLNK(stbuf.st_mode) && stbuf.st_uid == geteuid() &&
-                  (stbuf.st_mode & 077) == 0;
+    *restricted = (S_ISREG(stbuf.st_mode) || S_ISDIR(stbuf.st_mode)) &&
+                  stbuf.st_uid == geteuid() && (stbuf.st_mode & 077) == 0;
     return AH_OK;
 }
 

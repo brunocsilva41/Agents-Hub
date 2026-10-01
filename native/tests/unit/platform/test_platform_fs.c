@@ -27,6 +27,7 @@
 #include <windows.h>
 
 #include <aclapi.h>
+#include <winioctl.h>
 #else
 #include <dirent.h>
 #include <errno.h>
@@ -93,7 +94,10 @@ static void remove_tree_w(const wchar_t *dir) {
             memcpy(child, dir, n * sizeof *child);
             child[n] = L'\\';
             memcpy(child + n + 1, fd.cFileName, (m + 1) * sizeof *child);
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+                RemoveDirectoryW(child); /* junction: não entra no alvo */
+            } else if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 remove_tree_w(child);
             } else {
                 SetFileAttributesW(child, FILE_ATTRIBUTE_NORMAL);
@@ -164,12 +168,14 @@ static bool exists_any(const char *path) {
     return a != INVALID_FILE_ATTRIBUTES;
 }
 
-/* Conferência independente da DACL: protegida, sem ACE herdada, toda ACE
- * de permissão para o SID do usuário do processo, com controle total; em
- * diretório, a ACE precisa ser herdável por arquivos e pastas. */
+/* Conferência independente da DACL: dono = usuário, DACL protegida, sem ACE
+ * herdada, toda ACE de permissão para o SID do usuário do processo, com
+ * controle total; em diretório, a ACE precisa ser herdável por arquivos e
+ * pastas. */
 static bool dacl_only_user(const char *path, bool is_dir) {
     wchar_t *w = wide(path);
     PACL dacl = NULL;
+    PSID owner = NULL;
     PSECURITY_DESCRIPTOR sd = NULL;
     SECURITY_DESCRIPTOR_CONTROL ctrl = 0;
     DWORD rev = 0, i, size = 0;
@@ -178,8 +184,10 @@ static bool dacl_only_user(const char *path, bool is_dir) {
     bool ok = false;
 
     if (w == NULL) return false;
-    if (GetNamedSecurityInfoW(w, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
-                              NULL, NULL, &dacl, NULL, &sd) != ERROR_SUCCESS) {
+    if (GetNamedSecurityInfoW(
+            w, SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner,
+            NULL, &dacl, NULL, &sd) != ERROR_SUCCESS) {
         free(w);
         return false;
     }
@@ -191,6 +199,7 @@ static bool dacl_only_user(const char *path, bool is_dir) {
         goto done;
     }
     if (!GetSecurityDescriptorControl(sd, &ctrl, &rev)) goto done;
+    if (owner == NULL || !EqualSid(owner, tu->User.Sid)) goto done;
     if (dacl == NULL || !(ctrl & SE_DACL_PROTECTED) || dacl->AceCount == 0) {
         goto done;
     }
@@ -250,6 +259,106 @@ static char *env_get(const char *name) {
     if (n == 0) buf[0] = L'\0';
     if (ah_platform_utf16_to_utf8(buf, &out) != AH_OK) return NULL;
     return out;
+}
+
+/* Põe em `path` uma DACL PROTEGIDA montada pelo teste: ACE do usuário com
+ * as flags de herança `user_flags` e, se `add_world`, uma ACE de leitura
+ * para Todos (WinWorldSid). Serve para criar DACLs quase certas, que
+ * check_restricted precisa recusar. */
+static bool set_protected_dacl(const char *path, BYTE user_flags,
+                               bool add_world) {
+    wchar_t *w = wide(path);
+    HANDLE token = NULL;
+    TOKEN_USER *tu = NULL;
+    BYTE world[SECURITY_MAX_SID_SIZE];
+    DWORD world_len = sizeof world, size = 0, acl_len;
+    ACL *acl = NULL;
+    bool ok = false;
+
+    if (w == NULL) return false;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) goto done;
+    GetTokenInformation(token, TokenUser, NULL, 0, &size);
+    tu = size ? malloc(size) : NULL;
+    if (tu == NULL || !GetTokenInformation(token, TokenUser, tu, size, &size)) {
+        goto done;
+    }
+    if (!CreateWellKnownSid(WinWorldSid, NULL, world, &world_len)) goto done;
+    acl_len = (DWORD)(sizeof(ACL) + 2 * sizeof(ACCESS_ALLOWED_ACE) +
+                      GetLengthSid(tu->User.Sid) + world_len);
+    acl = malloc(acl_len);
+    if (acl == NULL || !InitializeAcl(acl, acl_len, ACL_REVISION) ||
+        !AddAccessAllowedAceEx(acl, ACL_REVISION, user_flags, FILE_ALL_ACCESS,
+                               tu->User.Sid)) {
+        goto done;
+    }
+    if (add_world && !AddAccessAllowedAceEx(acl, ACL_REVISION, 0,
+                                            FILE_GENERIC_READ, world)) {
+        goto done;
+    }
+    ok = SetNamedSecurityInfoW(w, SE_FILE_OBJECT,
+                               DACL_SECURITY_INFORMATION |
+                                   PROTECTED_DACL_SECURITY_INFORMATION,
+                               NULL, NULL, acl, NULL) == ERROR_SUCCESS;
+done:
+    free(acl);
+    free(tu);
+    if (token != NULL) CloseHandle(token);
+    free(w);
+    return ok;
+}
+
+/* Cria em `link` (diretório vazio novo) uma junction para `target`
+ * (absoluto). Junction não exige privilégio, ao contrário do link
+ * simbólico. O layout é o REPARSE_DATA_BUFFER de mount point (ntifs.h, que
+ * não faz parte do SDK de modo usuário). */
+static bool make_junction(const char *link, const char *target) {
+    typedef struct {
+        DWORD ReparseTag;
+        WORD ReparseDataLength;
+        WORD Reserved;
+        WORD SubstituteNameOffset;
+        WORD SubstituteNameLength;
+        WORD PrintNameOffset;
+        WORD PrintNameLength;
+        WCHAR PathBuffer[1];
+    } mount_point;
+    wchar_t *wl = wide(link), *wt = wide(target);
+    BYTE raw[4096];
+    mount_point *mp = (mount_point *)raw;
+    size_t tl;
+    WORD sub_bytes;
+    DWORD returned = 0;
+    HANDLE h;
+    bool ok = false;
+
+    memset(raw, 0, sizeof raw);
+    if (wl == NULL || wt == NULL) goto done;
+    tl = wcslen(wt);
+    if ((tl + 4 + 2) * sizeof(WCHAR) + 16 > sizeof raw) goto done;
+    if (!CreateDirectoryW(wl, NULL)) goto done;
+    /* Nome de substituição "\??\C:\..." seguido de L'\0'; nome de exibição
+     * vazio (só o L'\0'). */
+    memcpy(mp->PathBuffer, L"\\??\\", 4 * sizeof(WCHAR));
+    memcpy(mp->PathBuffer + 4, wt, tl * sizeof(WCHAR));
+    sub_bytes = (WORD)((tl + 4) * sizeof(WCHAR));
+    mp->ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
+    mp->SubstituteNameOffset = 0;
+    mp->SubstituteNameLength = sub_bytes;
+    mp->PrintNameOffset = (WORD)(sub_bytes + sizeof(WCHAR));
+    mp->PrintNameLength = 0;
+    mp->ReparseDataLength = (WORD)(8 + sub_bytes + 2 * sizeof(WCHAR));
+    h = CreateFileW(wl, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+                    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+                    NULL);
+    if (h == INVALID_HANDLE_VALUE) goto done;
+    ok = DeviceIoControl(h, FSCTL_SET_REPARSE_POINT, raw,
+                         (DWORD)(8 + mp->ReparseDataLength), NULL, 0,
+                         &returned, NULL) != 0;
+    CloseHandle(h);
+done:
+    free(wt);
+    free(wl);
+    return ok;
 }
 
 #define USER_HOME_VAR "USERPROFILE"
@@ -592,6 +701,34 @@ out:
     free(dir);
 }
 
+/* Caminho com ".." e separadores repetidos: pasta pai, temporário e destino
+ * saem do caminho normalizado ("x/../y//f" grava y/f e não cria x). */
+static void test_write_atomic_unnormalized(void) {
+    char raw[1024];
+    char *x = join(g_root, "x");
+    char *y = join(g_root, "y");
+    char *f = y ? join(y, "f.txt") : NULL;
+    int n;
+
+    CHECK(x != NULL && f != NULL);
+    if (x == NULL || f == NULL) goto out;
+    n = snprintf(raw, sizeof raw, "%s%cx%c..%cy%c%cf.txt", g_root,
+                 AH_PLATFORM_PATH_SEP, AH_PLATFORM_PATH_SEP,
+                 AH_PLATFORM_PATH_SEP, AH_PLATFORM_PATH_SEP,
+                 AH_PLATFORM_PATH_SEP);
+    CHECK(n > 0 && (size_t)n < sizeof raw);
+    if (n <= 0 || (size_t)n >= sizeof raw) goto out;
+
+    CHECK(ah_platform_fs_write_atomic(raw, "norm", 4, 0) == AH_OK);
+    CHECK(content_is(f, "norm"));
+    CHECK(!exists_any(x));
+    CHECK(count_tmp_entries(y) == 0);
+out:
+    free(f);
+    free(y);
+    free(x);
+}
+
 /* Falha no rename: o destino fica intacto e o temporário é removido. */
 static void test_write_atomic_failure(void) {
     char *dir = join(g_root, "falha");
@@ -845,7 +982,11 @@ static void test_restrict_existing(void) {
     CHECK(ah_platform_fs_check_restricted(dir, &r) == AH_OK);
     CHECK(!r);
 
-    CHECK(ah_platform_fs_restrict(file) == AH_OK);
+    {
+        ah_status rs = ah_platform_fs_restrict(file);
+        if (rs != AH_OK) fprintf(stderr, "  restrict(file) = %d\n", (int)rs);
+        CHECK(rs == AH_OK);
+    }
     CHECK(ah_platform_fs_check_restricted(file, &r) == AH_OK);
     CHECK(r);
     CHECK(private_file_ok(file));
@@ -874,6 +1015,66 @@ static void test_restrict_existing(void) {
         CHECK(ah_platform_fs_check_restricted(link, &r) == AH_OK);
         CHECK(!r);
         free(link);
+    }
+    {
+        /* FIFO: restrict e read_all recusam sem travar (O_NONBLOCK); um
+         * FIFO nunca conta como "restrito". */
+        char *fifo = join(g_root, "fifo");
+        char *buf = NULL;
+        size_t len = 0;
+        CHECK(fifo != NULL && mkfifo(fifo, 0600) == 0);
+        CHECK(ah_platform_fs_restrict(fifo) == AH_ERR_INVALID);
+        CHECK(ah_platform_fs_read_all(fifo, 16, &buf, &len) ==
+              AH_ERR_INVALID);
+        CHECK(buf == NULL);
+        r = true;
+        CHECK(ah_platform_fs_check_restricted(fifo, &r) == AH_OK);
+        CHECK(!r);
+        free(fifo);
+    }
+#else
+    {
+        /* DACL protegida e só com ACEs explícitas, mas com uma ACE a mais
+         * para Todos (WinWorldSid): não é restrita. */
+        CHECK(set_protected_dacl(file, 0, true));
+        r = true;
+        CHECK(ah_platform_fs_check_restricted(file, &r) == AH_OK);
+        CHECK(!r);
+        CHECK(!private_file_ok(file));
+        /* restrict devolve ao estado só-do-usuário. */
+        CHECK(ah_platform_fs_restrict(file) == AH_OK);
+        CHECK(ah_platform_fs_check_restricted(file, &r) == AH_OK);
+        CHECK(r);
+
+        /* Diretório com a ACE só do usuário, protegida, mas NÃO herdável:
+         * o que nascer dentro não fica restrito, então não conta. */
+        CHECK(set_protected_dacl(dir, 0, false));
+        r = true;
+        CHECK(ah_platform_fs_check_restricted(dir, &r) == AH_OK);
+        CHECK(!r);
+        CHECK(ah_platform_fs_restrict(dir) == AH_OK);
+        CHECK(ah_platform_fs_check_restricted(dir, &r) == AH_OK);
+        CHECK(r);
+    }
+    {
+        /* Junction (reparse point): restrict recusa sem tocar no alvo, e
+         * check_restricted nunca a dá como restrita. */
+        char *target = join(g_root, "alvo-junction");
+        char *junction = join(g_root, "junction");
+        wchar_t *wt = target ? wide(target) : NULL;
+        CHECK(wt != NULL && CreateDirectoryW(wt, NULL));
+        CHECK(junction != NULL && make_junction(junction, target));
+        CHECK(ah_platform_fs_restrict(junction) == AH_ERR_INVALID);
+        r = true;
+        CHECK(ah_platform_fs_check_restricted(junction, &r) == AH_OK);
+        CHECK(!r);
+        /* O alvo continua com a DACL herdada da pasta. */
+        r = true;
+        CHECK(ah_platform_fs_check_restricted(target, &r) == AH_OK);
+        CHECK(!r);
+        free(wt);
+        free(junction);
+        free(target);
     }
 #endif
 out:
@@ -1002,6 +1203,7 @@ int main(void) {
     test_paths();
     test_mkdirs();
     test_write_atomic_basic();
+    test_write_atomic_unnormalized();
     test_write_atomic_failure();
     test_write_atomic_concurrent();
     test_read_all();
