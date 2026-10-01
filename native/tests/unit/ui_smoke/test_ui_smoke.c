@@ -19,11 +19,14 @@
  * 6. Layout vazio no Clay.
  *
  * Skip (código AH_UI_SMOKE_SKIP = 77, que o CTest conta como "Skipped" via
- * SKIP_RETURN_CODE em CMakeLists.txt), sempre com mensagem "SKIP: ...":
- * - Linux sem DISPLAY nem WAYLAND_DISPLAY: sai antes de tocar no SDL;
- * - SDL_Init(SDL_INIT_VIDEO) falha (sem display utilizável);
- * - uma fonte exigida não existe (nenhuma fonte é vendorizada; decisão de
- *   fonte em aberto, relatório da F0-14 §10). */
+ * SKIP_RETURN_CODE em CMakeLists.txt) só por falta de display, e só fora do
+ * Windows, sempre com mensagem "SKIP: ...":
+ * - sem DISPLAY nem WAYLAND_DISPLAY: sai antes de tocar no SDL;
+ * - SDL_Init(SDL_INIT_VIDEO) falha (sem display utilizável).
+ * No Windows, SDL_Init falhar é falha. Fonte exigida ausente é falha em
+ * qualquer SO (segoeui.ttf/seguiemj.ttf no Windows, DejaVu Sans no Linux;
+ * nenhuma fonte é vendorizada, decisão de fonte em aberto, relatório da F0-14
+ * §10): sem a fonte o aceite ficaria sem prova. */
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -47,12 +50,12 @@ static TTF_Font *open_font(const char *name) {
     int n;
 
     if (windir == NULL) {
-        printf("SKIP: WINDIR não definido, sem como achar %s\n", name);
+        fprintf(stderr, "FALHA: WINDIR não definido, sem como achar %s\n", name);
         return NULL;
     }
     n = SDL_snprintf(path, sizeof path, "%s\\Fonts\\%s", windir, name);
     if (n <= 0 || (size_t)n >= sizeof path) {
-        printf("SKIP: caminho da fonte %s longo demais\n", name);
+        fprintf(stderr, "FALHA: caminho da fonte %s longo demais\n", name);
         return NULL;
     }
 #else
@@ -60,7 +63,7 @@ static TTF_Font *open_font(const char *name) {
 #endif
     font = TTF_OpenFont(path, FONT_PT);
     if (font == NULL) {
-        printf("SKIP: fonte %s não abriu (%s)\n", path, SDL_GetError());
+        fprintf(stderr, "FALHA: fonte %s não abriu (%s)\n", path, SDL_GetError());
         return NULL;
     }
     printf("fonte: %s\n", path);
@@ -260,7 +263,7 @@ int main(void) {
 #ifdef _WIN32
     TTF_Font *emoji_font = NULL;
 #endif
-    int skip = 0;
+    bool fonts_ok;
 
 #ifndef _WIN32
     /* Sem servidor gráfico, nem toca no SDL (evita vazamentos de libs do
@@ -272,9 +275,15 @@ int main(void) {
 #endif
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
+#ifdef _WIN32
+        fprintf(stderr, "FALHA: SDL_Init(VIDEO): %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+#else
         printf("SKIP: sem display (SDL_Init(VIDEO): %s)\n", SDL_GetError());
         SDL_Quit();
         return AH_UI_SMOKE_SKIP;
+#endif
     }
     printf("driver de video: %s\n", SDL_GetCurrentVideoDriver());
 
@@ -290,13 +299,14 @@ int main(void) {
 #ifdef _WIN32
     text_font = open_font("segoeui.ttf");
     emoji_font = open_font("seguiemj.ttf");
-    skip = (text_font == NULL || emoji_font == NULL);
+    fonts_ok = (text_font != NULL && emoji_font != NULL);
 #else
     text_font = open_font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-    skip = (text_font == NULL);
+    fonts_ok = (text_font != NULL);
 #endif
+    CHECK(fonts_ok);
 
-    if (!skip) {
+    if (fonts_ok) {
         test_measure_latin(text_font);
         test_render_paths(text_font);
         test_shaping(text_font);
@@ -325,8 +335,5 @@ int main(void) {
     }
     SDL_Quit();
 
-    if (skip && ah_test_failures == 0) {
-        return AH_UI_SMOKE_SKIP;
-    }
     return AH_TEST_END("test_ui_smoke");
 }

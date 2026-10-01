@@ -210,11 +210,12 @@ isolados, o que só acontece com as formas contextuais do HarfBuzz, e `TTF_SetFo
 tem de ser aceito); **emoji COLR** (só no Windows: U+1F600 do `seguiemj.ttf` renderizado numa
 superfície com cor de frente cinza tem de ter pixels coloridos, não R=G=B); layout vazio no
 Clay. Fontes do sistema: `segoeui.ttf` e `seguiemj.ttf` no Windows, DejaVu Sans no Linux
-(nenhuma fonte é vendorizada). Sai com 77 e o CTest marca "Skipped" (`SKIP_RETURN_CODE 77`),
-sempre com mensagem `SKIP: ...`, quando: no Linux não há `DISPLAY` nem `WAYLAND_DISPLAY` (sai
-antes de tocar no SDL); `SDL_Init(SDL_INIT_VIDEO)` falha; ou uma fonte exigida não existe. No
-Linux o emoji colorido não é testado (DA-12 em aberto; a saída diz isso). No CI Linux o teste
-roda sob `xvfb-run -a`.
+(nenhuma fonte é vendorizada); fonte exigida ausente é **falha**, em qualquer SO. Skip (sai com 77
+e o CTest marca "Skipped", `SKIP_RETURN_CODE 77`, sempre com mensagem `SKIP: ...`) só por falta
+de display e só fora do Windows: sem `DISPLAY` nem `WAYLAND_DISPLAY` (sai antes de tocar no
+SDL) ou `SDL_Init(SDL_INIT_VIDEO)` falhando; no Windows, `SDL_Init` falhar é falha. No Linux o
+emoji colorido não é testado (DA-12 em aberto; a saída diz isso). No CI Linux o teste roda sob
+`xvfb-run -a -s "-screen 0 1280x1024x24"`.
 
 ## Patches aplicados
 
