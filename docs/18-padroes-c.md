@@ -168,9 +168,29 @@ Compilar sem warnings (`c-engineer.md:22`). PROPOSTA de flags, a fixar pelo esqu
 
 ## 11. Formatação
 
-PROPOSTA: **clang-format** com arquivo `.clang-format` em `native/`, criado pelo esqueleto F0.
-Estilo (largura, chaves, indentação) a definir nesse arquivo; até lá, imite o código vizinho.
-A checagem de formatação entra no portão do CI. (PROPOSTA)
+**clang-format**, configurado em [`native/.clang-format`](../native/.clang-format) (F0-04). O
+arquivo descreve o estilo que o código já mesclado usa (medido em `native/src/` e
+`native/tests/`): 4 espaços, sem tab; até 100 colunas; chave na mesma linha, funções inclusive;
+`case` no nível do `switch`; ponteiro junto do nome (`char *p`); função nunca numa linha só;
+`if` curto sem `else` e laço curto podem ficar numa linha; enum com um valor por linha. Os
+includes não são reordenados: o header do próprio módulo vem primeiro, depois os padrão em
+ordem alfabética, depois os do SO em blocos `#ifdef _WIN32`/`#else`; os do Windows dependem
+de ordem e ficam como estão. Testado com clang-format 22.1.8 (LLVM).
+
+`native/third_party/` fica fora: `native/third_party/.clang-format` tem `DisableFormat: true`
+(os bytes ficam iguais aos do upstream, ver §14).
+
+Checagem, dentro de `native/` (lista os desvios e sai com código diferente de 0 se houver algum;
+não altera arquivos):
+
+```sh
+find src tests -name '*.c' -o -name '*.h' | xargs clang-format --dry-run --Werror
+```
+
+Em 2026-10-01 o código existente ainda tem desvios (42 de 54 arquivos; quase todos são
+quebras feitas em 80 colunas em arquivos que hoje caberiam em 100). Não foi reformatado na
+F0-04. Código novo segue o arquivo; ao editar código antigo, imite o vizinho. Reformatar o
+código existente e ligar a checagem ao portão do CI (F0-02) ainda não foi decidido.
 
 ## 12. Testes
 

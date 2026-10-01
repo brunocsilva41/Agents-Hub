@@ -68,7 +68,7 @@ Dentro de `native/`. No Windows, depois de
 | Configurar | `cmake --preset <preset>` | verificado no Windows (2026-09-30); Linux só no CI |
 | Compilar | `cmake --build --preset <preset>` | verificado no Windows; Linux só no CI |
 | Testar | `ctest --preset <preset>` | verificado no Windows; Linux só no CI |
-| Formatar | `clang-format` (PROPOSTA em `docs/18-padroes-c.md`) | a confirmar |
+| Formatar | `find src tests -name '*.c' -o -name '*.h' \| xargs clang-format --dry-run --Werror` (config em `native/.clang-format`; `third_party/` excluído) | verificado no Windows com clang-format 22.1.8 (2026-10-01); o código atual ainda tem desvios (42 de 54 arquivos), não está no CI |
 | Bench de desempenho | procedimento do plano (especificação 06); harness da linha de base TS em `native/tests/bench/ts-baseline/` | a confirmar pelo plano (DA-05) |
 
 O TS continua compilável para gerar referência (`npm ci`, `npm run verify`, ver

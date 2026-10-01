@@ -1,0 +1,6 @@
+# Código de terceiros vendorizado: nunca formatar (bytes idênticos ao upstream,
+# SHA-256 em VERSIONS.md). Ver docs/18-padroes-c.md §11.
+---
+DisableFormat: true
+SortIncludes: Never
+...
