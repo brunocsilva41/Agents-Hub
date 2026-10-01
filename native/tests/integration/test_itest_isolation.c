@@ -743,6 +743,74 @@ static void test_remove_tree_scope(void) {
     CHECK(ah_itest_set_test_dir(g_tmp) == AH_OK);
 }
 
+/* Caminho relativo nunca é aceito pelo remove_tree, nem com o cwd dentro do
+ * diretório de teste (o CTest roda este teste com cwd = itest-tmp). Um
+ * sentinela no cwd prova que nada foi apagado. */
+static void test_remove_tree_relative_refused(void) {
+    char sent[1024];
+    char sent_file[1200];
+    char drive_dot[8];
+    char drive_name[64];
+
+    make_sentinel(sent, sizeof sent, sent_file, sizeof sent_file, "sentinela-relativo");
+#if defined(_WIN32)
+    /* Drive relativo: "Q:." (drive provavelmente inexistente) e "<drive do
+     * cwd>:." / "<drive>:nome", que o SO resolveria no cwd do drive. */
+    CHECK(ah_itest_remove_tree("Q:.") == AH_ERR_INVALID);
+    CHECK(ah_itest_remove_tree("Q:nome") == AH_ERR_INVALID);
+    CHECK(g_tmp[0] != '\0' && g_tmp[1] == ':');
+    drive_dot[0] = g_tmp[0];
+    drive_dot[1] = ':';
+    drive_dot[2] = '.';
+    drive_dot[3] = '\0';
+    CHECK(ah_itest_remove_tree(drive_dot) == AH_ERR_INVALID);
+    CHECK(snprintf(drive_name, sizeof drive_name, "%c:sentinela-relativo", g_tmp[0]) > 0);
+    CHECK(ah_itest_remove_tree(drive_name) == AH_ERR_INVALID);
+    CHECK(ah_itest_remove_tree("\\sentinela-relativo") == AH_ERR_INVALID); /* raiz do drive atual */
+#else
+    (void)drive_dot;
+    (void)drive_name;
+#endif
+    CHECK(ah_itest_remove_tree(".") == AH_ERR_INVALID);
+    CHECK(ah_itest_remove_tree("sentinela-relativo") == AH_ERR_INVALID);
+    CHECK(ah_itest_remove_tree("." SEP "sentinela-relativo") == AH_ERR_INVALID);
+    CHECK(ah_itest_path_exists(sent_file));
+    CHECK(ah_itest_remove_tree(sent) == AH_OK); /* absoluto, no escopo: aceito */
+}
+
+/* "<testdir>/x/lnk/" com barra final, lnk apontando para fora do link: só o
+ * link some; o conteúdo do alvo sobrevive (POSIX: sem a normalização,
+ * lstat/nftw seguiriam o link por causa da barra). */
+static void test_remove_tree_trailing_separator(void) {
+    char alvo[1024];
+    char alvo_file[1200];
+    char dir[1024];
+    char dir_file[1200];
+    char lnk[1200];
+    char lnk_slash[1300];
+
+    make_sentinel(alvo, sizeof alvo, alvo_file, sizeof alvo_file, "alvo-barra-final");
+    make_sentinel(dir, sizeof dir, dir_file, sizeof dir_file, "dir-barra-final");
+    path_join(lnk, sizeof lnk, dir, "lnk");
+    CHECK(ah_itest_make_link(lnk, alvo, AH_ITEST_LINK_DIR) == AH_OK);
+    CHECK(snprintf(lnk_slash, sizeof lnk_slash, "%s" SEP, lnk) > 0);
+
+    CHECK(ah_itest_remove_tree(lnk_slash) == AH_OK);
+    CHECK(!ah_itest_path_exists(lnk));
+    CHECK(ah_itest_path_exists(alvo_file));
+    CHECK(ah_itest_path_exists(dir_file));
+#if defined(_WIN32)
+    /* Barra '/' final e várias barras também. */
+    CHECK(ah_itest_make_link(lnk, alvo, AH_ITEST_LINK_DIR) == AH_OK);
+    CHECK(snprintf(lnk_slash, sizeof lnk_slash, "%s//", lnk) > 0);
+    CHECK(ah_itest_remove_tree(lnk_slash) == AH_OK);
+    CHECK(!ah_itest_path_exists(lnk));
+    CHECK(ah_itest_path_exists(alvo_file));
+#endif
+    CHECK(ah_itest_remove_tree(dir) == AH_OK);
+    CHECK(ah_itest_remove_tree(alvo) == AH_OK);
+}
+
 static void test_make_link_relative_target_refused(void) {
     char link[1200];
     path_join(link, sizeof link, g_tmp, "link-relativo");
@@ -831,6 +899,8 @@ int main(int argc, char **argv) {
     test_link_inside_forbidden_root();
     test_remove_tree_scope();
     test_make_link_relative_target_refused();
+    test_remove_tree_relative_refused();
+    test_remove_tree_trailing_separator();
     CHECK(ah_itest_set_test_dir(NULL) == AH_OK);
     return AH_TEST_END("test_itest_isolation");
 }

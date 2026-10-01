@@ -788,17 +788,57 @@ static ah_status make_junction_w(const wchar_t *link, const wchar_t *target) {
     return AH_OK;
 }
 
+/* Absoluto no Windows: "X:\..." / "X:/..." ou UNC ("\\..."). "X:nome",
+ * "X:." (relativo ao cwd do drive) e "\nome" (relativo ao drive atual) não. */
+static int is_abs_path(const char *p) {
+    if (p == NULL) {
+        return 0;
+    }
+    if (((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) && p[1] == ':' &&
+        (p[2] == '\\' || p[2] == '/')) {
+        return 1;
+    }
+    return p[0] == '\\' && p[1] == '\\';
+}
+
+/* Normaliza UMA vez o caminho que remove_tree vai receber: exige absoluto,
+ * aplica GetFullPathNameW (resolve ".", "..", ponto/espaço final, '/') e
+ * tira separadores finais (fora a raiz "X:\"). A mesma string vai para a
+ * checagem e para a remoção. */
+static char *normalize_abs(const char *path) {
+    wchar_t *w;
+    wchar_t *full;
+    size_t len;
+    char *u;
+    if (!is_abs_path(path)) {
+        return NULL;
+    }
+    w = to_wide(path);
+    if (w == NULL) {
+        return NULL;
+    }
+    full = full_path_w(w);
+    free(w);
+    if (full == NULL) {
+        return NULL;
+    }
+    len = wcslen(full);
+    while (len > 3 && (full[len - 1] == L'\\' || full[len - 1] == L'/')) {
+        full[--len] = L'\0';
+    }
+    u = to_utf8(full);
+    free(full);
+    return u;
+}
+
 ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind) {
     wchar_t *wl;
     wchar_t *wt;
     wchar_t *full = NULL;
     ah_status st;
 
-    /* Mesmo contrato do POSIX: alvo absoluto ("X:\..." / "X:/..." ou UNC). */
-    if (link == NULL || target == NULL ||
-        !((((target[0] >= 'A' && target[0] <= 'Z') || (target[0] >= 'a' && target[0] <= 'z')) &&
-           target[1] == ':' && (target[2] == '\\' || target[2] == '/')) ||
-          (target[0] == '\\' && target[1] == '\\'))) {
+    /* Mesmo contrato do POSIX: alvo absoluto. */
+    if (link == NULL || !is_abs_path(target)) {
         return AH_ERR_INVALID;
     }
     wl = to_wide(link);
@@ -1269,6 +1309,36 @@ int ah_itest_path_exists(const char *path) {
     return lstat(path, &sb) == 0;
 }
 
+/* Normaliza UMA vez o caminho que remove_tree vai receber: exige absoluto,
+ * recusa componente "." ou ".." (o kernel e o texto poderiam divergir) e tira
+ * as barras finais: "lnk/" faria lstat/nftw seguirem o link. A mesma string
+ * vai para a checagem e para a remoção. */
+static char *normalize_abs(const char *path) {
+    char *c;
+    size_t len;
+    const char *p;
+    if (path == NULL || path[0] != '/') {
+        return NULL;
+    }
+    for (p = path; *p != '\0'; p++) {
+        if (*p == '.' && (p == path || p[-1] == '/')) {
+            size_t n = (p[1] == '.') ? 2 : 1;
+            if (p[n] == '/' || p[n] == '\0') {
+                return NULL;
+            }
+        }
+    }
+    c = str_dup(path);
+    if (c == NULL) {
+        return NULL;
+    }
+    len = strlen(c);
+    while (len > 1 && c[len - 1] == '/') {
+        c[--len] = '\0';
+    }
+    return c;
+}
+
 ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind) {
     struct stat sb;
     /* Alvo relativo é recusado: stat() o resolveria a partir do cwd, mas o
@@ -1667,18 +1737,29 @@ static int in_remove_scope(const char *entry) {
 }
 
 ah_status ah_itest_remove_tree(const char *path) {
+    char *norm;
     char *entry;
     int allowed;
+    int ok;
     if (path == NULL || path[0] == '\0') {
         return AH_ERR_INVALID;
     }
-    entry = canon_entry(path);
-    allowed = entry != NULL && in_remove_scope(entry) && !forbidden_check(path, 0);
-    free(entry);
-    if (!allowed) {
+    /* Uma string só: a normalizada é checada E removida (o texto cru, com
+     * "X:." ou barra final, poderia apontar para outro lugar). */
+    norm = normalize_abs(path);
+    if (norm == NULL) {
         return AH_ERR_INVALID;
     }
-    return remove_tree(path) ? AH_OK : AH_ERR_IO;
+    entry = canon_entry(norm);
+    allowed = entry != NULL && in_remove_scope(entry) && !forbidden_check(norm, 0);
+    free(entry);
+    if (!allowed) {
+        free(norm);
+        return AH_ERR_INVALID;
+    }
+    ok = remove_tree(norm);
+    free(norm);
+    return ok ? AH_OK : AH_ERR_IO;
 }
 
 static unsigned parent_port(void) {

@@ -150,10 +150,15 @@ ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link
 ah_status ah_itest_set_test_dir(const char *dir);
 
 /* Remove `path` recursivamente sem seguir junções/links (um link é removido
- * como entrada; o alvo fica intacto). Só age DENTRO do diretório de teste
- * registrado (não ele próprio) ou de um home "ah-itest-*" da base temporária
- * do SO; fora disso, ou em caminho proibido (ah_itest_path_is_forbidden),
- * devolve AH_ERR_INVALID sem tocar em nada. Inexistente no escopo = AH_OK. */
+ * como entrada; o alvo fica intacto). `path` precisa ser ABSOLUTO: no
+ * Windows "X:\..."/"X:/..." ou UNC ("X:nome", "X:." e "\nome" são recusados);
+ * no POSIX começa com '/' e não tem componente "." nem "..". O caminho é
+ * normalizado uma vez (Windows: GetFullPathNameW; os dois: sem separador
+ * final) e essa MESMA string é checada e removida. Só age DENTRO do diretório
+ * de teste registrado (não ele próprio) ou de um home "ah-itest-*" da base
+ * temporária do SO; fora disso, em caminho relativo ou proibido
+ * (ah_itest_path_is_forbidden), devolve AH_ERR_INVALID sem tocar em nada.
+ * Inexistente no escopo = AH_OK. */
 ah_status ah_itest_remove_tree(const char *path);
 
 #endif /* AH_ITEST_H */

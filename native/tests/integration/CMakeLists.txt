@@ -25,8 +25,11 @@ add_executable(test_itest_isolation test_itest_isolation.c)
 target_include_directories(test_itest_isolation PRIVATE "${PROJECT_SOURCE_DIR}/tests/unit")
 target_link_libraries(test_itest_isolation PRIVATE ah::itest)
 ah_project_warnings(test_itest_isolation)
+# cwd DENTRO do diretório de teste: prova que caminho relativo ("C:.", ".")
+# não escapa do escopo do ah_itest_remove_tree nem com o cwd no escopo.
 add_test(NAME integration.itest.isolation
-  COMMAND test_itest_isolation "$<TARGET_FILE:itest_probe>" "${_ah_itest_tmp}")
+  COMMAND test_itest_isolation "$<TARGET_FILE:itest_probe>" "${_ah_itest_tmp}"
+  WORKING_DIRECTORY "${_ah_itest_tmp}")
 set_tests_properties(integration.itest.isolation PROPERTIES TIMEOUT 120 LABELS integration)
 if(AH_SANITIZE AND WIN32 AND AH_SANITIZER_RUNTIME_DIR)
   file(TO_NATIVE_PATH "${AH_SANITIZER_RUNTIME_DIR}" _ah_itest_dir)
