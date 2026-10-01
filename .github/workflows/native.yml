@@ -97,10 +97,48 @@ jobs:
       - uses: actions/checkout@v4
 
       # Ninja não é garantido na imagem do Ubuntu; vem do repositório da distro.
-      - name: Instalar Ninja
+      # Dependências do SDL3 vendorizado (F0-12), conferidas no CMake do
+      # SDL 3.4.16 (native/third_party/sdl3/cmake/sdlchecks.cmake e macros.cmake).
+      # Erros fatais do configure que dependem de pacote no Linux (todos os
+      # FATAL_ERROR de cmake/*.cmake e CMakeLists.txt foram listados; os demais
+      # não dependem de pacote):
+      # - SDL_missing_dependency (macros.cmake:431), chamado pelo CheckX11 quando
+      #   uma extensão ligada por padrão (SDL_X11_*, CMakeLists.txt:342-350)
+      #   falta. Header procurado -> pacote do Ubuntu 22.04 (conferido em
+      #   packages.ubuntu.com, jammy/amd64, 2026-10-01):
+      #     XCURSOR    X11/Xcursor/Xcursor.h        -> libxcursor-dev
+      #     XDBE       X11/extensions/Xdbe.h        -> libxext-dev
+      #     XINPUT     X11/extensions/XInput2.h     -> libxi-dev
+      #     XFIXES     X11/extensions/Xfixes.h (+ XInput2.h) -> libxfixes-dev
+      #     XSYNC      X11/extensions/sync.h        -> libxext-dev
+      #     XRANDR     X11/extensions/Xrandr.h      -> libxrandr-dev
+      #     XSCRNSAVER X11/extensions/scrnsaver.h   -> libxss-dev
+      #     XSHAPE     X11/extensions/shape.h       -> libxext-dev
+      #     XTEST      X11/extensions/XTest.h       -> libxtst-dev
+      #   e o núcleo X11/Xlib.h e X11/extensions/Xext.h -> libx11-dev, libxext-dev.
+      # - "SDL could not find X11 or Wayland" (macros.cmake:415): coberto pelo X11
+      #   acima.
+      # Sem erro fatal quando faltam (só aviso ou recurso desligado), mas
+      # instalados porque a UI precisa deles:
+      # - pkg-config: o CheckWayland e a busca de dbus/ibus usam pkg-config;
+      # - Wayland (CheckWayland, sdlchecks.cmake:643): libwayland-dev
+      #   (wayland-client/egl/cursor e wayland-scanner), libegl-dev ("egl"),
+      #   libxkbcommon-dev, libdecor-0-dev (decoração de janela);
+      # - IME: libdbus-1-dev (fcitx via dbus) e libibus-1.0-dev (ibus).
+      # Fora de propósito, para o empacotamento da F8: áudio, udev, drm/gbm,
+      # fribidi, libthai (sem erro fatal; o SDL desliga o recurso).
+      # Para rodar o teste de janela (unit.ui_smoke) sem monitor: xvfb (servidor
+      # X virtual) e fonts-dejavu-core (DejaVu Sans, a fonte que o teste usa no
+      # Linux; nenhuma fonte é vendorizada).
+      - name: Instalar Ninja e dependências do SDL3
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build pkg-config \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxfixes-dev \
+            libxrandr-dev libxss-dev libxtst-dev \
+            libwayland-dev libegl-dev libxkbcommon-dev libdecor-0-dev \
+            libdbus-1-dev libibus-1.0-dev \
+            xvfb fonts-dejavu-core
 
       - name: Versões das ferramentas
         run: |
@@ -124,8 +162,11 @@ jobs:
       - name: Ajustar vm.mmap_rnd_bits para o ASan (precaução)
         run: sudo sysctl -w vm.mmap_rnd_bits=28
 
+      # Sob xvfb-run (-a: escolhe um número de display livre; tela fixa de
+      # 1280x1024 com 24 bits de cor), para o unit.ui_smoke abrir a janela SDL3
+      # de verdade em vez de ficar em skip.
       - name: Testar
-        run: ctest --preset ${{ matrix.preset }}
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" ctest --preset ${{ matrix.preset }}
 
       - name: Checkout continua limpo depois do build e dos testes
         run: |
