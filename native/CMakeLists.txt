@@ -30,5 +30,6 @@ enable_testing()
 
 add_subdirectory(third_party)
 add_subdirectory(src/core)
+add_subdirectory(src/platform)
 add_subdirectory(src/cli)
 add_subdirectory(tests/unit)
