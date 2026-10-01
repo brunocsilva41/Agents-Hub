@@ -48,10 +48,11 @@ static int expect(const uint8_t *p, const char *lit, size_t n) {
 
 /* Coordenada y (32 bytes, little-endian, bit 255 = sinal de x zerado) dos 8
  * pontos de torção de Ed25519, em todas as codificações com y < 2^255.
- * Fonte: a lista de bloqueio de pontos de ordem pequena do libsodium
- * (src/libsodium/crypto_core/ed25519/ref10/ed25519_ref10.c, função
- * ge25519_has_small_order), que compara com o bit de sinal ignorado como
- * aqui. Cada entrada, com sinal 0 e 1, é provada no teste
+ * Fonte: libsodium 1.0.18, ed25519_ref10.c
+ * (src/libsodium/crypto_core/ed25519/ref10/), função
+ * ge25519_has_small_order(const unsigned char s[32]), tabela
+ * blacklist[7][32], que compara com o bit de sinal ignorado como aqui. Em
+ * versões posteriores do libsodium a função é aritmética e não tem a tabela. Cada entrada, com sinal 0 e 1, é provada no teste
  * (test_update_verify.c: decodifica e [8]A = identidade).
  *
  *   y = 0      ordem 4 (x = ±sqrt(-1))

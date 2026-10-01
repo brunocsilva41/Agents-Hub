@@ -674,7 +674,9 @@ static void test_b5_non_canonical_points(void) {
 /* -------------------------------------- chaves de ordem pequena (SEC-R17) */
 
 /* y dos 8 pontos de torção (bit de sinal zerado). Mesma fonte da lista de
- * produção (libsodium, ge25519_has_small_order); as de y = 0, 1, p-1, p e
+ * produção (libsodium 1.0.18, ed25519_ref10.c,
+ * ge25519_has_small_order(const unsigned char s[32]), blacklist[7][32]; em
+ * versões posteriores a função é aritmética, sem a tabela); as de y = 0, 1, p-1, p e
  * p+1 têm forma fechada, as duas de ordem 8 são as do libsodium. Cada uma é
  * provada abaixo por [8]A = identidade, sem confiar na lista. */
 static const uint8_t k_torsion_y[7][32] = {
