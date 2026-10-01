@@ -313,7 +313,8 @@ ah_status ah_proc_win_command_line(const char *program,
         return st;
     }
     st = ah_proc_i_utf16_units(*out, b.len, &units);
-    if (st == AH_OK && units > AH_PROC_WIN_MAX_CMDLINE) {
+    /* O teto do CreateProcessW conta o NUL final. */
+    if (st == AH_OK && units >= AH_PROC_WIN_MAX_CMDLINE) {
         st = AH_ERR_LIMIT;
     }
     if (st != AH_OK) {
@@ -425,6 +426,37 @@ ah_status ah_proc_cmd_line(const char *command, const char *const *args,
     size_t units = 0;
     st = ah_proc_i_utf16_units(*out, b.len, &units);
     if (st == AH_OK && units + 16 > AH_PROC_CMD_MAX_LINE) {
+        st = AH_ERR_LIMIT;
+    }
+    if (st != AH_OK) {
+        free(*out);
+        *out = NULL;
+    }
+    return st;
+}
+
+ah_status ah_proc_cmd_invocation(const char *comspec, const char *linha,
+                                 char **out) {
+    if (comspec == NULL || linha == NULL || out == NULL ||
+        strchr(comspec, '"') != NULL) {
+        return AH_ERR_INVALID;
+    }
+    /* `/v:off` antes do `/c`: a opção da linha vence DelayedExpansion=1 do
+     * registro, que expandiria `!` depois do escape duplo (DA-29). */
+    static const char mid[] = "\" /d /s /v:off /c \"";
+    sbuf b = {0};
+    sb_putc(&b, '"');
+    sb_put(&b, comspec, strlen(comspec));
+    sb_put(&b, mid, sizeof mid - 1);
+    sb_put(&b, linha, strlen(linha));
+    sb_putc(&b, '"');
+    ah_status st = sb_finish(&b, out);
+    if (st != AH_OK) {
+        return st;
+    }
+    size_t units = 0;
+    st = ah_proc_i_utf16_units(*out, b.len, &units);
+    if (st == AH_OK && units >= AH_PROC_WIN_MAX_CMDLINE) {
         st = AH_ERR_LIMIT;
     }
     if (st != AH_OK) {

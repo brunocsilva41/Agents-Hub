@@ -4,12 +4,18 @@
  * aceita E/S assíncrona, e o laço da F0-09 precisa esperar por evento sem
  * polling, docs/18 §8). O lado do filho é síncrono e herdável, mas só entra
  * no filho porque está na PROC_THREAD_ATTRIBUTE_HANDLE_LIST (SPEC-08 P4).
- * Cada pipe tem uma instância só e é criado com FILE_FLAG_FIRST_PIPE_INSTANCE
- * e PIPE_REJECT_REMOTE_CLIENTS: se outro processo criar o nome antes ou
- * conectar antes do Hub, a criação ou o CreateFileW falha e o spawn é
- * abortado antes de qualquer byte ser escrito ou lido. */
+ * Cada pipe:
+ * - tem nome com 128 bits aleatórios do SO (BCryptGenRandom);
+ * - tem DACL com uma única ACE, para o SID do usuário do token (sem
+ *   Everyone/Anonymous, que o DACL padrão de named pipe inclui para leitura);
+ * - tem uma instância só, com FILE_FLAG_FIRST_PIPE_INSTANCE e
+ *   PIPE_REJECT_REMOTE_CLIENTS: se outro processo criar o nome antes ou
+ *   conectar antes do Hub, a criação ou o CreateFileW falha e o spawn é
+ *   abortado antes de qualquer byte ser escrito ou lido. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
+#include <bcrypt.h>
 
 #include <limits.h>
 #include <stdio.h>
@@ -20,6 +26,8 @@
 #include "ah_platform_proc_internal.h"
 
 #define PIPE_BUF_BYTES 65536u
+
+static const wchar_t NO_CWD_VAR[] = L"NoDefaultCurrentDirectoryInExePath";
 
 typedef struct rd_state {
     HANDLE h;
@@ -44,6 +52,7 @@ struct ah_proc {
     OVERLAPPED in_ov;
     char *wbuf;
     bool wpending;
+    bool close_pending; /* close_stdin pedido com escrita em curso */
 
     rd_state rd[2]; /* [0] stdout, [1] stderr */
 };
@@ -115,9 +124,17 @@ static ah_status map_spawn_error(DWORD e) {
 
 /* --- ComSpec --- */
 
-/* Caminho do cmd.exe: %ComSpec% se for absoluto, sem aspas e terminar em
- * .exe (SPEC-08 P1: "%ComSpec% validado como absoluto"); senão o cmd.exe do
- * diretório de sistema. Posse: free(). */
+/* "X:\..." ou "X:/...": absoluto com letra de drive (nunca UNC). */
+static bool drive_absolute(const char *u) {
+    char c = u[0];
+    bool letter = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+    return letter && u[1] == ':' && (u[2] == '\\' || u[2] == '/');
+}
+
+/* Caminho do cmd.exe: %ComSpec% se for absoluto com letra de drive, sem
+ * aspas e terminar em .exe (SPEC-08 P1: "%ComSpec% validado como
+ * absoluto"; UNC recusado: um cmd.exe num compartilhamento de rede não é
+ * aceitável); senão o cmd.exe do diretório de sistema. Posse: free(). */
 static ah_status comspec_path(char **out) {
     *out = NULL;
     wchar_t buf[MAX_PATH + 1];
@@ -127,8 +144,8 @@ static ah_status comspec_path(char **out) {
         if (to_utf8(buf, &u) == AH_OK) {
             size_t len = strlen(u);
             bool exe = len > 4 && _stricmp(u + len - 4, ".exe") == 0;
-            if (exe && ah_proc_i_win_is_absolute(u) &&
-                strchr(u, '"') == NULL && !ah_proc_i_win_name_has_colon(u)) {
+            if (exe && drive_absolute(u) && strchr(u, '"') == NULL &&
+                !ah_proc_i_win_name_has_colon(u)) {
                 *out = u;
                 return AH_OK;
             }
@@ -160,43 +177,145 @@ static int env_cmp(const void *a, const void *b) {
     return r - CSTR_EQUAL;
 }
 
-/* Bloco UTF-16 "A=1\0B=2\0\0" ordenado por nome sem diferenciar
- * maiúsculas (exigência documentada do CreateProcessW). Posse: free(). */
-static ah_status build_env_block(const char *const *env, size_t count,
-                                 wchar_t **out, char *detail, size_t cap) {
-    *out = NULL;
-    env_item *items = NULL;
-    if (count > 0) {
-        if (count > SIZE_MAX / sizeof(env_item)) {
-            return AH_ERR_LIMIT;
+static bool is_no_cwd_var(const env_item *it) {
+    return CompareStringOrdinal(it->w, it->name_units, NO_CWD_VAR,
+                                (int)(sizeof NO_CWD_VAR / sizeof(wchar_t)) - 1,
+                                TRUE) == CSTR_EQUAL;
+}
+
+static wchar_t *wdup(const wchar_t *s) {
+    size_t n = wcslen(s) + 1;
+    wchar_t *d = malloc(n * sizeof(wchar_t));
+    if (d != NULL) {
+        memcpy(d, s, n * sizeof(wchar_t));
+    }
+    return d;
+}
+
+/* Lista de entradas do ambiente do filho: as de `o->env` (UTF-8) ou, com
+ * env == NULL, as do próprio Hub (GetEnvironmentStringsW). Reserva uma vaga
+ * extra para NoDefaultCurrentDirectoryInExePath. */
+static ah_status env_collect(const ah_proc_spawn_opts *o, env_item **items,
+                             size_t *count, char *detail, size_t cap) {
+    *items = NULL;
+    *count = 0;
+    wchar_t *parent = NULL;
+    size_t n = 0;
+    if (o->env != NULL) {
+        n = o->env_count;
+    } else {
+        parent = GetEnvironmentStringsW();
+        if (parent == NULL) {
+            return AH_ERR_IO;
         }
-        items = calloc(count, sizeof(env_item));
-        if (items == NULL) {
-            return AH_ERR_NOMEM;
+        for (const wchar_t *q = parent; *q != L'\0'; q += wcslen(q) + 1) {
+            n++;
         }
     }
+    if (n > SIZE_MAX / sizeof(env_item) - 1) {
+        if (parent != NULL) {
+            FreeEnvironmentStringsW(parent);
+        }
+        return AH_ERR_LIMIT;
+    }
+    env_item *it = calloc(n + 1, sizeof(env_item));
+    if (it == NULL) {
+        if (parent != NULL) {
+            FreeEnvironmentStringsW(parent);
+        }
+        return AH_ERR_NOMEM;
+    }
     ah_status st = AH_OK;
+    size_t k = 0;
+    if (o->env != NULL) {
+        for (size_t i = 0; i < n && st == AH_OK; i++) {
+            size_t name_len = 0;
+            st = ah_proc_i_env_split(o->env[i], &name_len);
+            if (st != AH_OK) {
+                ah_proc_i_detail(detail, cap,
+                                 "entrada de ambiente %zu sem NOME=valor", i);
+                break;
+            }
+            st = to_wide(o->env[i], strlen(o->env[i]), &it[k].w);
+            if (st != AH_OK) {
+                ah_proc_i_detail(detail, cap,
+                                 "entrada de ambiente %zu com UTF-8 inválido",
+                                 i);
+                break;
+            }
+            k++;
+        }
+    } else {
+        for (const wchar_t *q = parent; *q != L'\0' && st == AH_OK;
+             q += wcslen(q) + 1) {
+            if (wcschr(q + 1, L'=') == NULL) {
+                continue; /* entrada sem '=': não há o que repassar */
+            }
+            it[k].w = wdup(q);
+            if (it[k].w == NULL) {
+                st = AH_ERR_NOMEM;
+                break;
+            }
+            k++;
+        }
+        FreeEnvironmentStringsW(parent);
+    }
+    for (size_t i = 0; i < k; i++) {
+        it[i].name_units = (int)(wcschr(it[i].w + 1, L'=') - it[i].w);
+    }
+    if (st != AH_OK) {
+        for (size_t i = 0; i < k; i++) {
+            free(it[i].w);
+        }
+        free(it);
+        return st;
+    }
+    *items = it;
+    *count = k;
+    return AH_OK;
+}
+
+/* Bloco UTF-16 "A=1\0B=2\0\0" ordenado por nome sem diferenciar maiúsculas
+ * (exigência documentada do CreateProcessW). Com env == NULL e sem via_cmd,
+ * *out = NULL (o filho herda direto). Posse: free(). */
+static ah_status build_env_block(const ah_proc_spawn_opts *o, wchar_t **out,
+                                 char *detail, size_t cap) {
+    *out = NULL;
+    if (o->env == NULL && !o->via_cmd) {
+        return AH_OK;
+    }
+    env_item *items = NULL;
+    size_t count = 0;
+    ah_status st = env_collect(o, &items, &count, detail, cap);
+    if (st != AH_OK) {
+        return st;
+    }
+    if (o->via_cmd) {
+        /* P1 (DA-29): o cmd.exe não procura no diretório corrente quando o
+         * .cmd chama outro programa pelo nome. Substitui valor anterior. */
+        size_t k = 0;
+        for (size_t i = 0; i < count; i++) {
+            if (is_no_cwd_var(&items[i])) {
+                free(items[i].w);
+            } else {
+                items[k++] = items[i];
+            }
+        }
+        count = k;
+        items[count].w = wdup(L"NoDefaultCurrentDirectoryInExePath=1");
+        if (items[count].w == NULL) {
+            st = AH_ERR_NOMEM;
+        } else {
+            items[count].name_units =
+                (int)(sizeof NO_CWD_VAR / sizeof(wchar_t)) - 1;
+            count++;
+        }
+    }
     size_t total = 1; /* NUL final do bloco */
     for (size_t i = 0; i < count && st == AH_OK; i++) {
-        size_t name_len = 0;
-        st = ah_proc_i_env_split(env[i], &name_len);
-        if (st != AH_OK) {
-            ah_proc_i_detail(detail, cap,
-                             "entrada de ambiente %zu sem NOME=valor", i);
-            break;
-        }
-        st = to_wide(env[i], strlen(env[i]), &items[i].w);
-        if (st != AH_OK) {
-            ah_proc_i_detail(detail, cap,
-                             "entrada de ambiente %zu com UTF-8 inválido", i);
-            break;
-        }
-        const wchar_t *eq = wcschr(items[i].w + 1, L'=');
-        items[i].name_units = (int)(eq - items[i].w);
         size_t wl = wcslen(items[i].w) + 1;
-        if (wl > SIZE_MAX - total) {
+        if (wl > SIZE_MAX / sizeof(wchar_t) - total) {
             st = AH_ERR_LIMIT;
-            break;
         }
         total += wl;
     }
@@ -230,7 +349,7 @@ static ah_status build_env_block(const char *const *env, size_t count,
         }
         *out = block;
     }
-    for (size_t i = 0; i < count && items != NULL; i++) {
+    for (size_t i = 0; i < count; i++) {
         free(items[i].w);
     }
     free(items);
@@ -239,23 +358,69 @@ static ah_status build_env_block(const char *const *env, size_t count,
 
 /* --- pipes --- */
 
-static LONG volatile g_pipe_seq = 0;
+/* SECURITY_ATTRIBUTES com DACL de uma ACE só, para o SID do usuário do
+ * token. Buffers alinhados (TOKEN_USER tem ponteiro; ACL exige DWORD). */
+typedef struct pipe_sec {
+    SECURITY_ATTRIBUTES sa;
+    SECURITY_DESCRIPTOR sd;
+    union {
+        TOKEN_USER tu;
+        unsigned char raw[256];
+    } tok;
+    DWORD acl[64];
+} pipe_sec;
+
+static ah_status pipe_security(pipe_sec *ps) {
+    HANDLE tok = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
+        return AH_ERR_IO;
+    }
+    DWORD need = 0;
+    BOOL ok = GetTokenInformation(tok, TokenUser, &ps->tok, sizeof ps->tok,
+                                  &need);
+    CloseHandle(tok);
+    if (!ok) {
+        return AH_ERR_IO;
+    }
+    PSID sid = ps->tok.tu.User.Sid;
+    DWORD acl_size = (DWORD)(sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) -
+                             sizeof(DWORD) + GetLengthSid(sid));
+    if (acl_size > sizeof ps->acl) {
+        return AH_ERR_LIMIT;
+    }
+    PACL acl = (PACL)ps->acl;
+    if (!InitializeAcl(acl, acl_size, ACL_REVISION) ||
+        !AddAccessAllowedAce(acl, ACL_REVISION, FILE_ALL_ACCESS, sid) ||
+        !InitializeSecurityDescriptor(&ps->sd, SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorDacl(&ps->sd, TRUE, acl, FALSE)) {
+        return AH_ERR_IO;
+    }
+    ps->sa.nLength = sizeof ps->sa;
+    ps->sa.lpSecurityDescriptor = &ps->sd;
+    ps->sa.bInheritHandle = FALSE;
+    return AH_OK;
+}
 
 /* Cria um pipe com o lado do Hub overlapped e não herdável e o lado do filho
  * síncrono e herdável. parent_reads: o Hub lê (stdout/stderr). */
-static ah_status make_pipe(bool parent_reads, HANDLE *parent, HANDLE *child) {
+static ah_status make_pipe(bool parent_reads, SECURITY_ATTRIBUTES *srv_sa,
+                           HANDLE *parent, HANDLE *child) {
     *parent = INVALID_HANDLE_VALUE;
     *child = INVALID_HANDLE_VALUE;
-    for (int attempt = 0; attempt < 8; attempt++) {
-        wchar_t name[96];
-        LONG seq = InterlockedIncrement(&g_pipe_seq);
-        int w = swprintf(name, sizeof name / sizeof name[0],
-                         L"\\\\.\\pipe\\agents-hub-proc-%lu-%ld-%llu",
-                         (unsigned long)GetCurrentProcessId(), (long)seq,
-                         (unsigned long long)GetTickCount64());
-        if (w < 0) {
-            return AH_ERR_INTERNAL;
+    for (int attempt = 0; attempt < 4; attempt++) {
+        unsigned char rnd[16];
+        if (!BCRYPT_SUCCESS(BCryptGenRandom(NULL, rnd, sizeof rnd,
+                                            BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+            return AH_ERR_IO;
         }
+        wchar_t name[80] = L"\\\\.\\pipe\\agents-hub-proc-";
+        size_t pos = wcslen(name);
+        static const wchar_t hex[] = L"0123456789abcdef";
+        for (size_t i = 0; i < sizeof rnd; i++) {
+            name[pos++] = hex[rnd[i] >> 4];
+            name[pos++] = hex[rnd[i] & 0xF];
+        }
+        name[pos] = L'\0';
         DWORD open_mode =
             (parent_reads ? PIPE_ACCESS_INBOUND : PIPE_ACCESS_OUTBOUND) |
             FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE;
@@ -263,11 +428,11 @@ static ah_status make_pipe(bool parent_reads, HANDLE *parent, HANDLE *child) {
             name, open_mode,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
                 PIPE_REJECT_REMOTE_CLIENTS,
-            1, PIPE_BUF_BYTES, PIPE_BUF_BYTES, 0, NULL);
+            1, PIPE_BUF_BYTES, PIPE_BUF_BYTES, 0, srv_sa);
         if (srv == INVALID_HANDLE_VALUE) {
             DWORD e = GetLastError();
             if (e == ERROR_ACCESS_DENIED || e == ERROR_PIPE_BUSY) {
-                continue; /* nome já existe: tenta outro */
+                continue; /* nome já existe: sorteia outro */
             }
             return map_spawn_error(e);
         }
@@ -298,9 +463,11 @@ static void close_h(HANDLE *h) {
 }
 
 /* Cancela a E/S em curso e espera o cancelamento: o kernel não pode
- * escrever num buffer já liberado. */
+ * escrever num buffer já liberado. A espera é limitada: depois do
+ * CancelIoEx a operação termina (com ERROR_OPERATION_ABORTED ou com o
+ * resultado que já tinha). */
 static void cancel_pending(HANDLE h, OVERLAPPED *ov, bool *pending) {
-    if (*pending && h != NULL) {
+    if (*pending && h != NULL && h != INVALID_HANDLE_VALUE) {
         DWORD n = 0;
         CancelIoEx(h, ov);
         GetOverlappedResult(h, ov, &n, TRUE);
@@ -308,11 +475,30 @@ static void cancel_pending(HANDLE h, OVERLAPPED *ov, bool *pending) {
     *pending = false;
 }
 
+/* Conclui um fechamento diferido do stdin se a escrita em curso acabou. */
+static void finish_deferred_close(ah_proc *p) {
+    if (!p->close_pending) {
+        return;
+    }
+    DWORD put = 0;
+    if (GetOverlappedResult(p->in_h, &p->in_ov, &put, FALSE) ||
+        GetLastError() != ERROR_IO_INCOMPLETE) {
+        p->wpending = false;
+        p->close_pending = false;
+        close_h(&p->in_h);
+    }
+}
+
 void ah_proc_free(ah_proc *p) {
     if (p == NULL) {
         return;
     }
+    if (p->thread != NULL && p->process != NULL) {
+        /* Suspenso e nunca retomado: ficaria parado para sempre. */
+        TerminateProcess(p->process, 1);
+    }
     cancel_pending(p->in_h, &p->in_ov, &p->wpending);
+    p->close_pending = false;
     close_h(&p->in_h);
     close_h(&p->in_ev);
     free(p->wbuf);
@@ -360,7 +546,7 @@ static ah_status build_command(const ah_proc_spawn_opts *o, char **app,
         if (st == AH_ERR_LIMIT) {
             ah_proc_i_detail(detail, cap,
                              "linha de comando excede o limite do Windows "
-                             "(%d caracteres)",
+                             "(%d caracteres com o NUL)",
                              AH_PROC_WIN_MAX_CMDLINE);
         } else if (st == AH_ERR_INVALID) {
             ah_proc_i_detail(detail, cap,
@@ -407,27 +593,15 @@ static ah_status build_command(const ah_proc_spawn_opts *o, char **app,
     }
     char *comspec = NULL;
     st = comspec_path(&comspec);
+    if (st == AH_OK) {
+        st = ah_proc_cmd_invocation(comspec, linha, cmdline);
+    }
+    free(linha);
     if (st != AH_OK) {
-        free(linha);
+        free(comspec);
         return st;
     }
-    /* "<cmd.exe>" /d /s /c "<linha>" — windowsVerbatimArguments do TS. */
-    size_t need = strlen(comspec) + strlen(linha) + 32;
-    char *line = malloc(need);
-    if (line == NULL) {
-        free(linha);
-        free(comspec);
-        return AH_ERR_NOMEM;
-    }
-    int w = snprintf(line, need, "\"%s\" /d /s /c \"%s\"", comspec, linha);
-    free(linha);
-    if (w < 0 || (size_t)w >= need) {
-        free(line);
-        free(comspec);
-        return AH_ERR_INTERNAL;
-    }
     *app = comspec;
-    *cmdline = line;
     return AH_OK;
 }
 
@@ -454,6 +628,8 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
     bool attrs_init = false;
     HANDLE child[3] = {INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE,
                        INVALID_HANDLE_VALUE};
+    pipe_sec psec;
+    memset(&psec, 0, sizeof psec);
     ah_proc *p = calloc(1, sizeof *p);
     if (p == NULL) {
         return AH_ERR_NOMEM;
@@ -472,17 +648,20 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
             ah_proc_i_detail(detail, cap, "cwd com UTF-8 inválido");
         }
     }
-    if (st == AH_OK && o->env != NULL) {
-        st = build_env_block(o->env, o->env_count, &envb, detail, cap);
+    if (st == AH_OK) {
+        st = build_env_block(o, &envb, detail, cap);
     }
 
     /* Recursos do Hub, todos antes do CreateProcessW: depois dele nada pode
      * falhar sem deixar um processo órfão. */
     if (st == AH_OK) {
-        st = make_pipe(false, &p->in_h, &child[0]);
+        st = pipe_security(&psec);
+    }
+    if (st == AH_OK) {
+        st = make_pipe(false, &psec.sa, &p->in_h, &child[0]);
     }
     for (int i = 0; i < 2 && st == AH_OK; i++) {
-        st = make_pipe(true, &p->rd[i].h, &child[i + 1]);
+        st = make_pipe(true, &psec.sa, &p->rd[i].h, &child[i + 1]);
     }
     if (st == AH_OK) {
         p->in_ev = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -602,6 +781,36 @@ static bool is_eof_error(DWORD e) {
            e == ERROR_PIPE_NOT_CONNECTED;
 }
 
+/* Arma uma leitura overlapped. Mesmo concluída na hora, fica "em curso"
+ * (o evento já está sinalizado) e é colhida por GetOverlappedResult. */
+static ah_status rd_issue(rd_state *r, bool *eof) {
+    *eof = false;
+    memset(&r->ov, 0, sizeof r->ov);
+    r->ov.hEvent = r->ev;
+    r->len = 0;
+    r->off = 0;
+    if (!ReadFile(r->h, r->buf, PIPE_BUF_BYTES, NULL, &r->ov)) {
+        DWORD e = GetLastError();
+        if (e != ERROR_IO_PENDING) {
+            if (is_eof_error(e)) {
+                *eof = true;
+                return AH_OK;
+            }
+            return AH_ERR_IO;
+        }
+    }
+    r->pending = true;
+    return AH_OK;
+}
+
+static ah_status rd_eof(rd_state *r, ah_proc_io *state) {
+    r->eof = true;
+    r->pending = false;
+    SetEvent(r->ev); /* fluxo fechado conta como pronto */
+    *state = AH_PROC_IO_EOF;
+    return AH_OK;
+}
+
 ah_status ah_proc_read(ah_proc *p, ah_proc_stream stream, void *buf,
                        size_t cap, size_t *n, ah_proc_io *state) {
     if (p == NULL || buf == NULL || cap == 0 || n == NULL || state == NULL ||
@@ -609,6 +818,7 @@ ah_status ah_proc_read(ah_proc *p, ah_proc_stream stream, void *buf,
         return AH_ERR_INVALID;
     }
     *n = 0;
+    finish_deferred_close(p);
     rd_state *r = &p->rd[stream - 1];
     if (r->off < r->len) {
         copy_out(r, buf, cap, n);
@@ -619,68 +829,48 @@ ah_status ah_proc_read(ah_proc *p, ah_proc_stream stream, void *buf,
         *state = AH_PROC_IO_EOF;
         return AH_OK;
     }
-    if (r->pending) {
-        DWORD got = 0;
-        if (!GetOverlappedResult(r->h, &r->ov, &got, FALSE)) {
-            DWORD e = GetLastError();
-            if (e == ERROR_IO_INCOMPLETE) {
-                *state = AH_PROC_IO_AGAIN;
-                return AH_OK;
-            }
-            r->pending = false;
-            if (is_eof_error(e)) {
-                r->eof = true;
-                SetEvent(r->ev);
-                *state = AH_PROC_IO_EOF;
-                return AH_OK;
-            }
-            return AH_ERR_IO;
+    bool eof = false;
+    if (!r->pending) {
+        ah_status st = rd_issue(r, &eof);
+        if (st != AH_OK) {
+            return st;
         }
-        r->pending = false;
-        r->len = got;
-        r->off = 0;
-        if (got > 0) {
-            copy_out(r, buf, cap, n);
-            *state = AH_PROC_IO_DATA;
-            return AH_OK;
+        if (eof) {
+            return rd_eof(r, state);
         }
     }
-    /* Nova leitura. Leitura de 0 bytes (escrita vazia do filho) não é EOF:
-     * tenta de novo algumas vezes antes de devolver AGAIN com o evento
-     * sinalizado, para o chamador voltar sem esperar. */
-    for (int tries = 0; tries < 4; tries++) {
-        memset(&r->ov, 0, sizeof r->ov);
-        r->ov.hEvent = r->ev;
-        r->len = 0;
-        r->off = 0;
-        if (ReadFile(r->h, r->buf, PIPE_BUF_BYTES, NULL, &r->ov)) {
-            DWORD got = 0;
-            if (!GetOverlappedResult(r->h, &r->ov, &got, FALSE)) {
-                return AH_ERR_IO;
-            }
-            if (got == 0) {
-                continue;
-            }
-            r->len = got;
-            copy_out(r, buf, cap, n);
-            *state = AH_PROC_IO_DATA;
-            return AH_OK;
-        }
+    DWORD got = 0;
+    if (!GetOverlappedResult(r->h, &r->ov, &got, FALSE)) {
         DWORD e = GetLastError();
-        if (e == ERROR_IO_PENDING) {
-            r->pending = true;
+        if (e == ERROR_IO_INCOMPLETE) {
             *state = AH_PROC_IO_AGAIN;
             return AH_OK;
         }
+        r->pending = false;
         if (is_eof_error(e)) {
-            r->eof = true;
-            SetEvent(r->ev);
-            *state = AH_PROC_IO_EOF;
-            return AH_OK;
+            return rd_eof(r, state);
         }
         return AH_ERR_IO;
     }
-    SetEvent(r->ev);
+    r->pending = false;
+    if (got > 0) {
+        r->len = got;
+        r->off = 0;
+        copy_out(r, buf, cap, n);
+        *state = AH_PROC_IO_DATA;
+        return AH_OK;
+    }
+    /* Escrita de 0 bytes do filho: rearma UMA leitura e devolve AGAIN, sem
+     * laço interno. Cada escrita vazia custa no máximo uma volta do laço do
+     * chamador (que só volta se o evento sinalizar), então um filho que as
+     * repete não faz o Hub girar sozinho. */
+    ah_status st = rd_issue(r, &eof);
+    if (st != AH_OK) {
+        return st;
+    }
+    if (eof) {
+        return rd_eof(r, state);
+    }
     *state = AH_PROC_IO_AGAIN;
     return AH_OK;
 }
@@ -692,7 +882,7 @@ ah_status ah_proc_write(ah_proc *p, const void *buf, size_t len,
         return AH_ERR_INVALID;
     }
     *accepted = 0;
-    if (p->in_h == NULL) {
+    if (p->in_h == NULL || p->close_pending) {
         return AH_ERR_IO;
     }
     if (p->wpending) {
@@ -735,16 +925,22 @@ ah_status ah_proc_close_stdin(ah_proc *p) {
     if (p->in_h == NULL) {
         return AH_OK;
     }
-    ah_status st = AH_OK;
+    if (p->close_pending) {
+        finish_deferred_close(p);
+        return AH_OK;
+    }
     if (p->wpending) {
         DWORD put = 0;
-        if (!GetOverlappedResult(p->in_h, &p->in_ov, &put, TRUE)) {
-            st = AH_ERR_IO;
+        if (!GetOverlappedResult(p->in_h, &p->in_ov, &put, FALSE) &&
+            GetLastError() == ERROR_IO_INCOMPLETE) {
+            /* Não bloqueia: fecha quando a escrita em curso terminar. */
+            p->close_pending = true;
+            return AH_OK;
         }
         p->wpending = false;
     }
     close_h(&p->in_h);
-    return st;
+    return AH_OK;
 }
 
 ah_status ah_proc_waitable(const ah_proc *p, ah_proc_stream stream,
@@ -771,6 +967,38 @@ ah_status ah_proc_waitable(const ah_proc *p, ah_proc_stream stream,
     }
 }
 
+ah_status ah_proc_exit_waitable(const ah_proc *p, intptr_t *out) {
+    if (p == NULL || out == NULL || p->process == NULL) {
+        return AH_ERR_INVALID;
+    }
+    *out = (intptr_t)p->process;
+    return AH_OK;
+}
+
+ah_status ah_proc_native_pipe(const ah_proc *p, ah_proc_stream stream,
+                              intptr_t *out) {
+    if (p == NULL || out == NULL) {
+        return AH_ERR_INVALID;
+    }
+    HANDLE h;
+    switch (stream) {
+    case AH_PROC_STDIN:
+        h = p->in_h;
+        break;
+    case AH_PROC_STDOUT:
+    case AH_PROC_STDERR:
+        h = p->rd[stream - 1].h;
+        break;
+    default:
+        return AH_ERR_INVALID;
+    }
+    if (h == NULL) {
+        return AH_ERR_NOT_FOUND;
+    }
+    *out = (intptr_t)h;
+    return AH_OK;
+}
+
 ah_status ah_proc_wait_io(ah_proc *p, unsigned mask, int32_t timeout_ms,
                           unsigned *ready) {
     if (p == NULL || ready == NULL || mask == 0 ||
@@ -778,48 +1006,69 @@ ah_status ah_proc_wait_io(ah_proc *p, unsigned mask, int32_t timeout_ms,
                   AH_PROC_MASK_STDERR)) != 0) {
         return AH_ERR_INVALID;
     }
-    *ready = 0;
-    HANDLE hs[3];
-    unsigned bits[3];
-    DWORD count = 0;
-    if (mask & AH_PROC_MASK_STDIN) {
-        if (p->in_h == NULL || !p->wpending) {
-            *ready |= AH_PROC_MASK_STDIN;
-        } else {
+    ULONGLONG start = GetTickCount64();
+    for (;;) {
+        *ready = 0;
+        finish_deferred_close(p);
+        HANDLE hs[4];
+        unsigned bits[4];
+        DWORD count = 0;
+        if (mask & AH_PROC_MASK_STDIN) {
+            if (p->in_h == NULL || p->close_pending || !p->wpending) {
+                *ready |= AH_PROC_MASK_STDIN;
+            } else {
+                hs[count] = p->in_ev;
+                bits[count++] = AH_PROC_MASK_STDIN;
+            }
+        }
+        for (int i = 0; i < 2; i++) {
+            unsigned bit = 1u << (i + 1);
+            if (!(mask & bit)) {
+                continue;
+            }
+            rd_state *r = &p->rd[i];
+            if (r->h == NULL || r->eof || r->off < r->len || !r->pending) {
+                *ready |= bit;
+            } else {
+                hs[count] = r->ev;
+                bits[count++] = bit;
+            }
+        }
+        if (*ready != 0 || count == 0) {
+            return AH_OK;
+        }
+        if (p->close_pending) {
+            /* Interno: concluir o fechamento diferido assim que a escrita
+             * terminar, mesmo que o chamador só espere stdout/stderr. */
             hs[count] = p->in_ev;
-            bits[count++] = AH_PROC_MASK_STDIN;
+            bits[count++] = 0;
         }
-    }
-    for (int i = 0; i < 2; i++) {
-        unsigned bit = 1u << (i + 1);
-        if (!(mask & bit)) {
-            continue;
+        DWORD to = INFINITE;
+        if (timeout_ms >= 0) {
+            ULONGLONG elapsed = GetTickCount64() - start;
+            to = elapsed >= (ULONGLONG)timeout_ms
+                     ? 0
+                     : (DWORD)((ULONGLONG)timeout_ms - elapsed);
         }
-        rd_state *r = &p->rd[i];
-        if (r->h == NULL || r->eof || r->off < r->len || !r->pending) {
-            *ready |= bit;
-        } else {
-            hs[count] = r->ev;
-            bits[count++] = bit;
+        DWORD w = WaitForMultipleObjects(count, hs, FALSE, to);
+        if (w == WAIT_TIMEOUT) {
+            return AH_OK;
         }
-    }
-    if (*ready != 0 || count == 0) {
-        return AH_OK;
-    }
-    DWORD to = timeout_ms < 0 ? INFINITE : (DWORD)timeout_ms;
-    DWORD w = WaitForMultipleObjects(count, hs, FALSE, to);
-    if (w == WAIT_TIMEOUT) {
-        return AH_OK;
-    }
-    if (w >= WAIT_OBJECT_0 + count) {
-        return AH_ERR_IO;
-    }
-    for (DWORD i = 0; i < count; i++) {
-        if (WaitForSingleObject(hs[i], 0) == WAIT_OBJECT_0) {
-            *ready |= bits[i];
+        if (w >= WAIT_OBJECT_0 + count) {
+            return AH_ERR_IO;
         }
+        for (DWORD i = 0; i < count; i++) {
+            if (WaitForSingleObject(hs[i], 0) == WAIT_OBJECT_0) {
+                *ready |= bits[i];
+            }
+        }
+        if (*ready != 0) {
+            finish_deferred_close(p);
+            return AH_OK;
+        }
+        /* Só o evento interno sinalizou: conclui o fechamento e volta a
+         * esperar pelo tempo que resta. */
     }
-    return AH_OK;
 }
 
 /* --- ciclo de vida --- */
@@ -829,6 +1078,7 @@ ah_status ah_proc_wait(ah_proc *p, bool block, bool *exited,
     if (p == NULL || exited == NULL || st == NULL) {
         return AH_ERR_INVALID;
     }
+    finish_deferred_close(p);
     if (!p->exited) {
         DWORD w = WaitForSingleObject(p->process, block ? INFINITE : 0);
         if (w == WAIT_TIMEOUT) {

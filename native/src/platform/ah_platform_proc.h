@@ -9,14 +9,34 @@
  * - Windows: a linha de comando é montada por UMA função (ah_proc_win_command_line)
  *   com as aspas do CommandLineToArgvW, teto de 32.767 unidades UTF-16
  *   (SPEC-08 P3). `.bat`/`.cmd` só passam pelo ramo explícito `via_cmd`
- *   (`cmd.exe /d /s /c "<linha>"` com o escape duplo de escaparArgParaCmd,
- *   SPEC-04 B5, SPEC-08 P2, SEC-R27); entregá-los por outro caminho é recusado.
- *   Janela oculta (CREATE_NO_WINDOW + SW_HIDE). O filho herda SÓ os três pipes
- *   (STARTUPINFOEX + PROC_THREAD_ATTRIBUTE_HANDLE_LIST, SPEC-08 P4, SEC-R28).
+ *   (`cmd.exe /d /s /v:off /c "<linha>"` com o escape duplo de
+ *   escaparArgParaCmd, SPEC-04 B5, SPEC-08 P2, SEC-R27); entregá-los por
+ *   outro caminho é recusado. Janela oculta (CREATE_NO_WINDOW + SW_HIDE). O
+ *   filho herda SÓ os três pipes (STARTUPINFOEX +
+ *   PROC_THREAD_ATTRIBUTE_HANDLE_LIST, SPEC-08 P4, SEC-R28). Os pipes têm
+ *   DACL só com o SID do usuário do token e nome com 128 bits aleatórios.
+ * - Divergências deliberadas do TS no ramo `via_cmd` (endurecimentos da
+ *   DA-29, ADR 09):
+ *   * `/v:off`: com DelayedExpansion=1 no registro (HKCU/HKLM\Software\
+ *     Microsoft\Command Processor) o `!` seria expandido depois do escape
+ *     duplo e reabriria a injeção; `/v:off` na linha vence o registro.
+ *   * `NoDefaultCurrentDirectoryInExePath=1` no ambiente do filho: um .cmd
+ *     que chama outro programa pelo nome não o procura no diretório corrente
+ *     (o worktree) (SPEC-08 P1).
+ * - Limite conhecido (B2, paridade com o TS): um shim .cmd que faça
+ *   `setlocal enabledelayedexpansion` expande `!VAR!` vindos do argumento
+ *   ao repassar `%*`. Isso vaza o VALOR de variáveis de ambiente para o argv
+ *   do programa final, mas não executa comando: `&`, `|`, `>` continuam
+ *   escapados. O `/v:off` não alcança o `setlocal` de dentro do script.
  * - POSIX: fork + execve, filho num grupo de processos próprio
  *   (setpgid(0,0), equivalente ao `detached: true` do TS), descritores acima
  *   de 2 fechados no filho antes do exec e todos os do Hub com O_CLOEXEC
  *   (SPEC-08 P4). NÃO VERIFICADO nesta tarefa (sem máquina POSIX).
+ * - POSIX, SIGPIPE: o processo que usa esta API PRECISA ignorar SIGPIPE
+ *   (signal(SIGPIPE, SIG_IGN) no início do daemon/CLI; registrado para a
+ *   F0-09/F1-15). Sem isso, escrever no stdin de um filho que já fechou a
+ *   ponta de leitura mata o Hub em vez de devolver AH_ERR_IO. O filho
+ *   recebe SIGPIPE com a disposição padrão (restaurada antes do exec).
  *
  * Texto: toda string é UTF-8 (docs/18 §9). No Windows a conversão para
  * UTF-16 acontece aqui dentro; UTF-8 inválido é recusado com AH_ERR_INVALID.
@@ -48,8 +68,8 @@
 
 #include "ah_status.h"
 
-/* Teto da linha de comando do CreateProcessW, em unidades UTF-16, sem o NUL
- * final (SPEC-08 P3). */
+/* Teto da linha de comando do CreateProcessW, em unidades UTF-16, CONTANDO o
+ * NUL final (SPEC-08 P3): a linha útil tem no máximo 32.766 unidades. */
 #define AH_PROC_WIN_MAX_CMDLINE 32767
 /* Teto da linha do cmd.exe (CMD_MAX_LINHA, bin-resolver.ts:347). A regra do
  * TS é `linha + 16 > 8191` → recusa (SPEC-04 B5). */
@@ -96,9 +116,13 @@ typedef struct ah_proc_spawn_opts {
     const char *const *env;
     size_t env_count;
     /* Windows: entrega `path` (.cmd/.bat) pelo ramo explícito
-     * `<ComSpec> /d /s /c "<linha>"` (SPEC-04 B5). ComSpec é usado só se for
-     * absoluto e terminar em .exe; senão, <GetSystemDirectory>\cmd.exe.
-     * `path` precisa terminar em .cmd/.bat. POSIX: recusado (AH_ERR_INVALID). */
+     * `"<ComSpec>" /d /s /v:off /c "<linha>"` (SPEC-04 B5; ver
+     * ah_proc_cmd_invocation). ComSpec é usado só se for absoluto com letra
+     * de drive ("X:\", nunca UNC) e terminar em .exe; senão,
+     * <GetSystemDirectory>\cmd.exe. O ambiente do filho (explícito ou
+     * herdado) recebe NoDefaultCurrentDirectoryInExePath=1, substituindo um
+     * valor anterior. `path` precisa terminar em .cmd/.bat. POSIX: recusado
+     * (AH_ERR_INVALID). */
     bool via_cmd;
     /* Windows: cria o processo suspenso (ver ah_proc_resume). POSIX:
      * recusado (AH_ERR_INVALID). */
@@ -135,16 +159,21 @@ ah_status ah_proc_read(ah_proc *p, ah_proc_stream stream, void *buf,
  * próxima chamada). Windows: os bytes aceitos ficam numa escrita em curso
  * (o Hub guarda a cópia); `ah_proc_write(p, NULL, 0, ...)` devolve
  * AH_PROC_IO_DATA quando não há escrita em curso e AH_PROC_IO_AGAIN enquanto
- * houver. Filho que fechou o stdin → AH_ERR_IO.
- * POSIX: o processo precisa ignorar SIGPIPE (responsabilidade de quem inicia
- * o daemon); sem isso, escrever num pipe fechado mata o Hub. */
+ * houver. Filho que fechou o stdin → AH_ERR_IO; depois de
+ * ah_proc_close_stdin, também AH_ERR_IO.
+ * POSIX: o processo precisa ignorar SIGPIPE (ver o topo do arquivo). */
 ah_status ah_proc_write(ah_proc *p, const void *buf, size_t len,
                         size_t *accepted, ah_proc_io *state);
 
-/* Fecha o stdin do filho (EOF para ele). Windows: se houver escrita em curso,
- * espera ela terminar antes de fechar (bloqueia); para não bloquear, chame
- * antes ah_proc_write(p, NULL, 0, ...) até ele devolver AH_PROC_IO_DATA.
- * Fechar de novo é no-op. */
+/* Fecha o stdin do filho (EOF para ele). Nunca bloqueia.
+ * Windows: se houver escrita em curso, o fechamento é DIFERIDO: o handle é
+ * fechado quando essa escrita terminar (os bytes já aceitos não se perdem).
+ * Enquanto isso, o waitable de AH_PROC_STDIN continua válido; quando ele
+ * sinalizar, chame ah_proc_close_stdin de novo para concluir.
+ * ah_proc_wait_io, ah_proc_read e ah_proc_wait concluem o fechamento
+ * diferido sozinhos, e ah_proc_wait_io inclui esse evento na espera mesmo
+ * fora da máscara. Se o filho nunca ler, o handle fica aberto até
+ * ah_proc_free (que cancela a escrita). Fechar de novo é no-op. */
 ah_status ah_proc_close_stdin(ah_proc *p);
 
 /* Objeto nativo aguardável do fluxo (ver o contrato no topo). *out recebe o
@@ -152,6 +181,23 @@ ah_status ah_proc_close_stdin(ah_proc *p);
  * emprestado: continua do ah_proc. Fluxo já fechado → AH_ERR_NOT_FOUND. */
 ah_status ah_proc_waitable(const ah_proc *p, ah_proc_stream stream,
                            intptr_t *out);
+
+/* Objeto aguardável do FIM do processo, para o laço da F0-09. Windows: o
+ * HANDLE do processo (sinalizado quando ele termina). Linux: um pidfd
+ * (pidfd_open, kernel >= 5.3; poll com POLLIN), aberto no spawn. Sem pidfd
+ * (kernel antigo, macOS e outros) → AH_ERR_NOT_FOUND: aí o laço da F0-09 é
+ * responsável por um self-pipe acionado por SIGCHLD (ou kqueue EVFILT_PROC
+ * no macOS) e por chamar ah_proc_wait(p, false, ...). Emprestado: vale até
+ * ah_proc_free. */
+ah_status ah_proc_exit_waitable(const ah_proc *p, intptr_t *out);
+
+/* Handle/descritor nativo do pipe do lado do Hub (emprestado; vale até
+ * ah_proc_free). Para inspeção (testes de DACL) e para a F0-09 decidir a
+ * integração com o laço; não faça E/S direta nele (o estado interno de
+ * read/write ficaria inconsistente). No Windows o handle é OVERLAPPED.
+ * Fluxo já fechado → AH_ERR_NOT_FOUND. */
+ah_status ah_proc_native_pipe(const ah_proc *p, ah_proc_stream stream,
+                              intptr_t *out);
 
 /* Espera, por até `timeout_ms` (< 0 = sem limite; 0 = só consulta), até que
  * algum fluxo de `mask` esteja pronto para read/write. *ready recebe a
@@ -183,8 +229,9 @@ uint32_t ah_proc_pid(const ah_proc *p);
 intptr_t ah_proc_native_process(const ah_proc *p);
 
 /* Fecha pipes e handles e libera `p`. Não mata nem espera o processo:
- * chame ah_proc_wait antes (no POSIX, sem isso fica um zumbi). E/S em curso
- * é cancelada. NULL é no-op. */
+ * chame ah_proc_wait antes (no POSIX, sem isso fica um zumbi). Exceção: um
+ * processo criado com start_suspended e nunca retomado é TERMINADO (senão
+ * ficaria suspenso para sempre). E/S em curso é cancelada. NULL é no-op. */
 void ah_proc_free(ah_proc *p);
 
 /* --- Montagem de linha (funções puras, sem SO; compilam em toda plataforma,
@@ -195,8 +242,9 @@ void ah_proc_free(ah_proc *p);
  * conter '"'); cada argumento como no libuv/Node (sem aspas se não tiver
  * espaço, tab nem '"'; vazio vira ""; barras antes de '"' dobradas).
  * `arg_lens` opcional como em ah_proc_spawn_opts. Recusa NUL embutido e
- * UTF-8 inválido (AH_ERR_INVALID) e linha acima de AH_PROC_WIN_MAX_CMDLINE
- * unidades UTF-16 (AH_ERR_LIMIT). Posse: o chamador libera *out com free(). */
+ * UTF-8 inválido (AH_ERR_INVALID) e linha com AH_PROC_WIN_MAX_CMDLINE ou
+ * mais unidades UTF-16 (o teto conta o NUL; AH_ERR_LIMIT). Posse: o
+ * chamador libera *out com free(). */
 ah_status ah_proc_win_command_line(const char *program,
                                    const char *const *args,
                                    const size_t *arg_lens, size_t arg_count,
@@ -215,5 +263,12 @@ ah_status ah_proc_cmd_escape_arg(const char *arg, size_t len, char **out);
 ah_status ah_proc_cmd_line(const char *command, const char *const *args,
                            const size_t *arg_lens, size_t arg_count,
                            char **out);
+
+/* Linha de comando completa do ramo via_cmd:
+ * `"<comspec>" /d /s /v:off /c "<linha>"`. O `/v:off` vem antes do `/c`
+ * (divergência deliberada do TS, DA-29: anula DelayedExpansion=1 do
+ * registro). `comspec` não pode conter '"'. Posse: free(). */
+ah_status ah_proc_cmd_invocation(const char *comspec, const char *linha,
+                                 char **out);
 
 #endif /* AH_PLATFORM_PROC_H */

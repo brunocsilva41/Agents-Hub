@@ -8,6 +8,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <aclapi.h>
 #else
 #define _POSIX_C_SOURCE 200809L
 #include <fcntl.h>
@@ -76,10 +77,14 @@ static int drain(ah_proc *p, ah_proc_stream s, char **buf, size_t *len,
     }
 }
 
+/* Voltas do laço de run() na última execução (mede giro em falso). */
+static unsigned long g_run_iterations = 0;
+
 /* Roda até o fim: escreve `in` no stdin (e fecha), coleta stdout/stderr
  * pelo contrato não bloqueante e espera o código de saída. */
 static ah_status run(const ah_proc_spawn_opts *o, const char *in,
                      size_t in_len, run_result *r) {
+    g_run_iterations = 0;
     memset(r, 0, sizeof *r);
     char detail[256];
     ah_proc *p = NULL;
@@ -97,6 +102,7 @@ static ah_status run(const ah_proc_spawn_opts *o, const char *in,
         st = AH_ERR_NOMEM;
     }
     while (st == AH_OK && (stdin_open || !out_eof || !err_eof)) {
+        g_run_iterations++;
         unsigned mask = 0;
         if (stdin_open) {
             size_t acc = 0;
@@ -333,10 +339,17 @@ static void test_command_line_vectors(void) {
         const char *h[1] = {huge};
         CHECK(ah_proc_win_command_line("C:\\p.exe", h, NULL, 1, &out) ==
               AH_ERR_LIMIT);
-        /* "C:\p.exe" entre aspas (10) + espaço (1) + arg = 32.767: cabe. */
+        /* B1: o teto de 32.767 conta o NUL. "C:\p.exe" entre aspas (10) +
+         * espaço (1) + arg: com 32.756 'a' a linha tem 32.767 unidades e
+         * NÃO cabe; com 32.755 tem 32.766 e cabe. */
         huge[big - 11] = '\0';
         CHECK(ah_proc_win_command_line("C:\\p.exe", h, NULL, 1, &out) ==
+              AH_ERR_LIMIT);
+        CHECK(out == NULL);
+        huge[big - 12] = '\0';
+        CHECK(ah_proc_win_command_line("C:\\p.exe", h, NULL, 1, &out) ==
               AH_OK);
+        CHECK(out != NULL && strlen(out) == AH_PROC_WIN_MAX_CMDLINE - 1);
         free(out);
         out = NULL;
         free(huge);
@@ -848,6 +861,266 @@ static void test_start_suspended(void) {
     CHECK(st.code == 7);
     ah_proc_free(p);
 }
+
+/* cmd.exe do sistema, em UTF-8 (para os testes que o chamam direto). */
+static int system_cmd(char *buf, size_t cap) {
+    wchar_t w[MAX_PATH + 16];
+    UINT n = GetSystemDirectoryW(w, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        return 0;
+    }
+    if (wcscat_s(w, MAX_PATH + 16, L"\\cmd.exe") != 0) {
+        return 0;
+    }
+    return WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, (int)cap, NULL, NULL) >
+           0;
+}
+
+static void test_cmd_last_v_flag_wins(void) {
+    /* A1: com dois /v, o último vence. Controle: /v:on sozinho expande
+     * !OS!; /v:on seguido de /v:off não expande. É a mesma regra que faz o
+     * nosso /v:off vencer DelayedExpansion=1 do registro (que este teste
+     * não altera: o registro do usuário não é tocado). */
+    char cmd[MAX_PATH * 3];
+    CHECK(system_cmd(cmd, sizeof cmd));
+    const char *on[] = {"/d", "/v:on", "/c", "echo !OS!"};
+    ah_proc_spawn_opts o;
+    memset(&o, 0, sizeof o);
+    o.path = cmd;
+    o.args = on;
+    o.arg_count = 4;
+    run_result r;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && strstr(r.out, "Windows_NT") != NULL);
+    run_free(&r);
+
+    const char *on_off[] = {"/d", "/v:on", "/v:off", "/c", "echo !OS!"};
+    o.args = on_off;
+    o.arg_count = 5;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && strstr(r.out, "!OS!") != NULL &&
+          strstr(r.out, "Windows_NT") == NULL);
+    run_free(&r);
+}
+
+static void test_pipe_dacl_and_name(void) {
+    /* M1: DACL com uma ACE só, do SID do usuário do token; nada de
+     * Everyone/Anonymous; nome com 32 dígitos hex (128 bits). */
+    union {
+        TOKEN_USER tu;
+        unsigned char raw[256];
+    } tok;
+    HANDLE th = NULL;
+    DWORD need = 0;
+    CHECK(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &th));
+    CHECK(GetTokenInformation(th, TokenUser, &tok, sizeof tok, &need));
+    CloseHandle(th);
+    union {
+        SID sid;
+        unsigned char raw[SECURITY_MAX_SID_SIZE];
+    } everyone, anonymous;
+    DWORD sz = sizeof everyone;
+    CHECK(CreateWellKnownSid(WinWorldSid, NULL, &everyone, &sz));
+    sz = sizeof anonymous;
+    CHECK(CreateWellKnownSid(WinAnonymousSid, NULL, &anonymous, &sz));
+
+    const char *args[] = {"hang"};
+    ah_proc_spawn_opts o;
+    opts_init(&o, args, 1);
+    ah_proc *p = NULL;
+    CHECK(ah_proc_spawn(&o, &p, NULL, 0) == AH_OK);
+    if (p == NULL) {
+        return;
+    }
+    for (int s = 0; s < 3; s++) {
+        intptr_t hv = 0;
+        CHECK(ah_proc_native_pipe(p, (ah_proc_stream)s, &hv) == AH_OK);
+        PACL dacl = NULL;
+        PSECURITY_DESCRIPTOR sd = NULL;
+        DWORD e = GetSecurityInfo((HANDLE)hv, SE_KERNEL_OBJECT,
+                                  DACL_SECURITY_INFORMATION, NULL, NULL,
+                                  &dacl, NULL, &sd);
+        CHECK(e == ERROR_SUCCESS && dacl != NULL);
+        if (e != ERROR_SUCCESS) {
+            fprintf(stderr, "GetSecurityInfo falhou: %lu\n", (unsigned long)e);
+        }
+        if (e == ERROR_SUCCESS && dacl != NULL) {
+            ACL_SIZE_INFORMATION si;
+            CHECK(GetAclInformation(dacl, &si, sizeof si, AclSizeInformation));
+            CHECK(si.AceCount == 1);
+            for (DWORD i = 0; i < si.AceCount; i++) {
+                void *ace = NULL;
+                CHECK(GetAce(dacl, i, &ace));
+                ACE_HEADER *hd = ace;
+                CHECK(hd != NULL && hd->AceType == ACCESS_ALLOWED_ACE_TYPE);
+                if (hd != NULL && hd->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+                    PSID sid = &((ACCESS_ALLOWED_ACE *)ace)->SidStart;
+                    CHECK(EqualSid(sid, tok.tu.User.Sid));
+                    CHECK(!EqualSid(sid, &everyone));
+                    CHECK(!EqualSid(sid, &anonymous));
+                }
+            }
+            printf("pipe %d: DACL com %lu ACE (SID do usuário)\n", s,
+                   (unsigned long)si.AceCount);
+        }
+        LocalFree(sd);
+
+        union {
+            FILE_NAME_INFO fi;
+            unsigned char raw[1024];
+        } nb;
+        CHECK(GetFileInformationByHandleEx((HANDLE)hv, FileNameInfo, &nb,
+                                           sizeof nb));
+        static const wchar_t prefix[] = L"\\agents-hub-proc-";
+        size_t plen = sizeof prefix / sizeof(wchar_t) - 1;
+        size_t nlen = nb.fi.FileNameLength / sizeof(wchar_t);
+        CHECK(nlen == plen + 32);
+        CHECK(nlen >= plen &&
+              wcsncmp(nb.fi.FileName, prefix, plen) == 0);
+        int hex_ok = nlen == plen + 32;
+        for (size_t i = plen; i < nlen && hex_ok; i++) {
+            wchar_t c = nb.fi.FileName[i];
+            hex_ok = (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f');
+        }
+        CHECK(hex_ok);
+    }
+    CHECK(ah_proc_kill(p) == AH_OK);
+    bool exited = false;
+    ah_proc_exit st;
+    CHECK(ah_proc_wait(p, true, &exited, &st) == AH_OK && exited);
+    ah_proc_free(p);
+}
+
+static void test_cmd_no_cwd_exe_search(void) {
+    /* M3: um .cmd que chama "ahisca" pelo nome, com ahisca.exe (cópia do
+     * helper) no cwd e fora do PATH, não executa a isca. */
+    char shim[1024];
+    snprintf(shim, sizeof shim, "%s/shim-isca.cmd", WORK);
+    native_path(shim);
+    CHECK(write_file(shim, "@echo off\r\nahisca argv marcador\r\n") == 0);
+    char isca_dir[1024];
+    snprintf(isca_dir, sizeof isca_dir, "%s/isca", WORK);
+    native_path(isca_dir);
+    char isca_exe[1024];
+    snprintf(isca_exe, sizeof isca_exe, "%s\\ahisca.exe", isca_dir);
+    CHECK(file_exists(isca_exe));
+
+    /* O ambiente de quem roda o teste pode já trazer a variável (a sessão
+     * do agente de código traz); sem tirá-la do processo de teste o
+     * controle abaixo não provaria nada. Restaurada no fim. */
+    wchar_t saved[64];
+    DWORD saved_n = GetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath",
+                                            saved, 64);
+    CHECK(SetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath", NULL) ||
+          saved_n == 0);
+
+    /* Controle: cmd.exe chamado direto (sem o ramo via_cmd) executa a isca
+     * do diretório corrente; é o risco que o M3 fecha. */
+    char cmd[MAX_PATH * 3];
+    CHECK(system_cmd(cmd, sizeof cmd));
+    const char *ctl[] = {"/d", "/c", "ahisca argv marcador"};
+    ah_proc_spawn_opts o;
+    memset(&o, 0, sizeof o);
+    o.path = cmd;
+    o.args = ctl;
+    o.arg_count = 3;
+    o.cwd = isca_dir;
+    run_result r;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && strstr(r.out, "n=1") != NULL);
+    printf("controle (cmd direto) com isca no cwd: código %lld, stdout [%s], "
+           "stderr [%s]\n",
+           (long long)r.st.code, r.out != NULL ? r.out : "",
+           r.err != NULL ? r.err : "");
+    run_free(&r);
+
+    /* Ramo via_cmd, ambiente herdado: a isca não roda. */
+    memset(&o, 0, sizeof o);
+    o.path = shim;
+    o.via_cmd = true;
+    o.cwd = isca_dir;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && strstr(r.out, "n=") == NULL);
+    CHECK(r.st.code != 0);
+    printf("via_cmd com isca no cwd: código %lld, stdout [%s], stderr [%s]\n",
+           (long long)r.st.code, r.out != NULL ? r.out : "",
+           r.err != NULL ? r.err : "");
+    run_free(&r);
+
+    /* Ambiente explícito tentando desligar a proteção: o Hub substitui. */
+    static char path_entry[33000];
+    static char sysroot_entry[1024];
+    char tmp[32768];
+    const char *env[3];
+    size_t ne = 0;
+    env[ne++] = "NoDefaultCurrentDirectoryInExePath=0";
+    if (test_getenv("PATH", tmp, sizeof tmp)) {
+        snprintf(path_entry, sizeof path_entry, "PATH=%s", tmp);
+        env[ne++] = path_entry;
+    }
+    if (test_getenv("SystemRoot", tmp, sizeof tmp)) {
+        snprintf(sysroot_entry, sizeof sysroot_entry, "SystemRoot=%s", tmp);
+        env[ne++] = sysroot_entry;
+    }
+    o.env = env;
+    o.env_count = ne;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && strstr(r.out, "n=") == NULL);
+    CHECK(r.st.code != 0);
+    run_free(&r);
+
+    if (saved_n > 0 && saved_n < 64) {
+        SetEnvironmentVariableW(L"NoDefaultCurrentDirectoryInExePath", saved);
+    }
+}
+
+static void test_free_suspended_terminates(void) {
+    /* B4: ah_proc_free de um processo suspenso nunca retomado o termina. */
+    const char *args[] = {"exit", "7"};
+    ah_proc_spawn_opts o;
+    opts_init(&o, args, 2);
+    o.start_suspended = true;
+    ah_proc *p = NULL;
+    CHECK(ah_proc_spawn(&o, &p, NULL, 0) == AH_OK);
+    if (p == NULL) {
+        return;
+    }
+    HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                           FALSE, (DWORD)ah_proc_pid(p));
+    CHECK(h != NULL);
+    ah_proc_free(p);
+    if (h != NULL) {
+        CHECK(WaitForSingleObject(h, 10000) == WAIT_OBJECT_0);
+        DWORD code = 0;
+        CHECK(GetExitCodeProcess(h, &code) && code == 1); /* não o 7 */
+        CloseHandle(h);
+    }
+}
+
+static void test_comspec_unc_ignored(void) {
+    /* B4: ComSpec UNC é recusado; o ramo cai no cmd.exe do sistema (se o
+     * UNC fosse aceito, o spawn falharia: o servidor não existe). */
+    wchar_t old[MAX_PATH + 1];
+    DWORD n = GetEnvironmentVariableW(L"ComSpec", old, MAX_PATH + 1);
+    CHECK(SetEnvironmentVariableW(
+        L"ComSpec", L"\\\\nao-existe.invalid\\share\\cmd.exe"));
+    char shim[1024];
+    snprintf(shim, sizeof shim, "%s/shim.cmd", WORK);
+    native_path(shim);
+    const char *args[2] = {"-p", "ok"};
+    ah_proc_spawn_opts o;
+    memset(&o, 0, sizeof o);
+    o.path = shim;
+    o.args = args;
+    o.arg_count = 2;
+    o.via_cmd = true;
+    run_result r;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && argv_matches(r.out, args, 2));
+    run_free(&r);
+    SetEnvironmentVariableW(L"ComSpec",
+                            (n > 0 && n <= MAX_PATH) ? old : NULL);
+}
 #else
 static void test_posix_only_options(void) {
     const char *args[] = {"exit", "0"};
@@ -863,7 +1136,189 @@ static void test_posix_only_options(void) {
 }
 #endif
 
+static void test_cmd_invocation_vector(void) {
+    /* A1: /v:off presente e ANTES do /c; bytes da <linha> intocados. */
+    char *out = NULL;
+    const char *linha = "C:\\x.cmd ^^^\"a^^^\"";
+    CHECK(ah_proc_cmd_invocation("C:\\Windows\\System32\\cmd.exe", linha,
+                                 &out) == AH_OK);
+    CHECK(out != NULL &&
+          strcmp(out, "\"C:\\Windows\\System32\\cmd.exe\" /d /s /v:off /c "
+                      "\"C:\\x.cmd ^^^\"a^^^\"\"") == 0);
+    if (out != NULL) {
+        const char *v = strstr(out, " /v:off ");
+        const char *c = strstr(out, " /c ");
+        CHECK(v != NULL && c != NULL && v < c);
+    }
+    free(out);
+    out = NULL;
+    CHECK(ah_proc_cmd_invocation("C:\\a\"b.exe", linha, &out) ==
+          AH_ERR_INVALID);
+    CHECK(out == NULL);
+}
+
+/* Escreve no stdin até a escrita ficar em curso (AGAIN). Guarda a cópia do
+ * que foi aceito. Devolve 1 se chegou a AGAIN. */
+static int fill_stdin(ah_proc *p, char **copy, size_t *copy_len) {
+    static char chunk[65536];
+    for (size_t i = 0; i < sizeof chunk; i++) {
+        chunk[i] = (char)('a' + i % 23);
+    }
+    for (int round = 0; round < 256; round++) {
+        size_t acc = 0;
+        ah_proc_io io;
+        if (ah_proc_write(p, chunk, sizeof chunk, &acc, &io) != AH_OK) {
+            return 0;
+        }
+        if (acc > 0 && append(copy, copy_len, chunk, acc) != 0) {
+            return 0;
+        }
+        if (io == AH_PROC_IO_AGAIN) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void test_close_stdin_never_blocks(void) {
+    /* M2: filho que nunca lê; escrita > 64 KiB em curso; close_stdin volta
+     * na hora (se bloqueasse, o TIMEOUT do ctest derrubaria o teste). */
+    const char *args[] = {"hang"};
+    ah_proc_spawn_opts o;
+    opts_init(&o, args, 1);
+    ah_proc *p = NULL;
+    CHECK(ah_proc_spawn(&o, &p, NULL, 0) == AH_OK);
+    if (p == NULL) {
+        return;
+    }
+    char *copy = NULL;
+    size_t copy_len = 0;
+    CHECK(fill_stdin(p, &copy, &copy_len));
+    CHECK(copy_len >= 65536);
+    printf("stdin aceito antes do AGAIN (filho não lê): %zu bytes\n",
+           copy_len);
+    CHECK(ah_proc_close_stdin(p) == AH_OK);
+    size_t acc = 0;
+    ah_proc_io io;
+    CHECK(ah_proc_write(p, "x", 1, &acc, &io) == AH_ERR_IO);
+    CHECK(ah_proc_close_stdin(p) == AH_OK);
+    unsigned ready = 0;
+    CHECK(ah_proc_wait_io(p, AH_PROC_MASK_STDOUT, 50, &ready) == AH_OK);
+    CHECK(ah_proc_kill(p) == AH_OK);
+    bool exited = false;
+    ah_proc_exit st;
+    CHECK(ah_proc_wait(p, true, &exited, &st) == AH_OK && exited);
+    ah_proc_free(p); /* cancela a escrita em curso */
+    free(copy);
+}
+
+static void test_close_stdin_deferred_delivers(void) {
+    /* M2: com o fechamento diferido, os bytes já aceitos chegam e o filho
+     * recebe EOF quando a escrita em curso termina, mesmo que o chamador
+     * só espere stdout/stderr. */
+    const char *args[] = {"cat"};
+    ah_proc_spawn_opts o;
+    opts_init(&o, args, 1);
+    ah_proc *p = NULL;
+    CHECK(ah_proc_spawn(&o, &p, NULL, 0) == AH_OK);
+    if (p == NULL) {
+        return;
+    }
+    char *copy = NULL;
+    size_t copy_len = 0;
+    CHECK(fill_stdin(p, &copy, &copy_len));
+    CHECK(ah_proc_close_stdin(p) == AH_OK);
+    char *out = NULL;
+    size_t out_len = 0;
+    char *err = NULL;
+    size_t err_len = 0;
+    int out_eof = 0;
+    int err_eof = 0;
+    int ok = 1;
+    while (ok && (!out_eof || !err_eof)) {
+        if (drain(p, AH_PROC_STDOUT, &out, &out_len, &out_eof) != 0 ||
+            drain(p, AH_PROC_STDERR, &err, &err_len, &err_eof) != 0) {
+            ok = 0;
+            break;
+        }
+        unsigned mask = (out_eof ? 0u : AH_PROC_MASK_STDOUT) |
+                        (err_eof ? 0u : AH_PROC_MASK_STDERR);
+        if (mask == 0) {
+            break;
+        }
+        unsigned ready = 0;
+        if (ah_proc_wait_io(p, mask, IO_TIMEOUT_MS, &ready) != AH_OK ||
+            ready == 0) {
+            ok = 0;
+        }
+    }
+    CHECK(ok);
+    CHECK(out_len == copy_len);
+    CHECK(out != NULL && copy != NULL && out_len == copy_len &&
+          memcmp(out, copy, copy_len) == 0);
+    if (!ok) {
+        ah_proc_kill(p);
+    }
+    bool exited = false;
+    ah_proc_exit st;
+    CHECK(ah_proc_wait(p, true, &exited, &st) == AH_OK && exited);
+    CHECK(ok == 0 || st.code == 0);
+    ah_proc_free(p);
+    free(copy);
+    free(out);
+    free(err);
+}
+
+static void test_zero_byte_writes(void) {
+    /* B4: escritas de 0 bytes repetidas não fazem o laço girar em falso:
+     * no máximo uma volta por escrita do filho. */
+    const char *args[] = {"zerowrites", "2000"};
+    ah_proc_spawn_opts o;
+    opts_init(&o, args, 2);
+    run_result r;
+    CHECK(run(&o, NULL, 0, &r) == AH_OK);
+    CHECK(r.out != NULL && strcmp(r.out, "fim") == 0);
+    CHECK(r.st.code == 0);
+    CHECK(g_run_iterations <= 2 * 2000 + 50);
+    printf("2000 escritas de 0 bytes: %lu voltas do laço\n",
+           g_run_iterations);
+    run_free(&r);
+}
+
+static void test_exit_waitable(void) {
+    /* M4: aguardável de fim de processo (Windows: HANDLE do processo;
+     * Linux: pidfd; sem suporte: AH_ERR_NOT_FOUND documentado). */
+    const char *args[] = {"exit", "3"};
+    ah_proc_spawn_opts o;
+    opts_init(&o, args, 2);
+    ah_proc *p = NULL;
+    CHECK(ah_proc_spawn(&o, &p, NULL, 0) == AH_OK);
+    if (p == NULL) {
+        return;
+    }
+    intptr_t w = 0;
+    ah_status s = ah_proc_exit_waitable(p, &w);
+#ifdef _WIN32
+    CHECK(s == AH_OK && w != 0);
+    if (s == AH_OK) {
+        CHECK(WaitForSingleObject((HANDLE)w, 20000) == WAIT_OBJECT_0);
+    }
+#else
+    CHECK(s == AH_OK || s == AH_ERR_NOT_FOUND);
+#endif
+    bool exited = false;
+    ah_proc_exit st;
+    CHECK(ah_proc_wait(p, true, &exited, &st) == AH_OK && exited);
+    CHECK(st.code == 3);
+    ah_proc_free(p);
+}
+
 int main(void) {
+    test_cmd_invocation_vector();
+    test_close_stdin_never_blocks();
+    test_close_stdin_deferred_delivers();
+    test_zero_byte_writes();
+    test_exit_waitable();
     test_command_line_vectors();
     test_cmd_escape_vectors();
     test_relative_path_rejected();
@@ -879,6 +1334,11 @@ int main(void) {
     test_batch_only_via_cmd();
     test_cmd_hostile_roundtrip();
     test_start_suspended();
+    test_cmd_last_v_flag_wins();
+    test_pipe_dacl_and_name();
+    test_cmd_no_cwd_exe_search();
+    test_free_suspended_terminates();
+    test_comspec_unc_ignored();
 #else
     test_posix_only_options();
 #endif

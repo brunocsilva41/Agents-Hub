@@ -10,6 +10,9 @@
  *   cwd             imprime "cwd=<hex UTF-8>".
  *   exit N          sai com o código N.
  *   stderr TEXTO    escreve TEXTO no stderr.
+ *   zerowrites N    faz N escritas de 0 bytes no stdout e depois escreve "fim".
+ *   hang            fica parado sem nunca ler o stdin, até ser morto
+ *                   (espera bloqueante num evento que ninguém sinaliza).
  *   handles         enumera os próprios handles herdáveis (Windows) ou fds
  *                   abertos (POSIX) e imprime "std=<qtd de stdio achados>",
  *                   uma linha "leak=<valor>" por handle/fd que não seja stdio
@@ -274,6 +277,34 @@ int main(int argc, char **argv) {
         fputs(argv[2], stderr);
         rc = 0;
 #endif
+    } else if (strcmp(mode, "zerowrites") == 0 && argc >= 3) {
+        long count = strtol(argv[2], NULL, 10);
+        rc = 0;
+        for (long i = 0; i < count && rc == 0; i++) {
+#ifdef _WIN32
+            DWORD w = 0;
+            if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "", 0, &w, NULL)) {
+                rc = 3;
+            }
+#else
+            if (write(1, "", 0) < 0) {
+                rc = 3;
+            }
+#endif
+        }
+        fputs("fim", stdout);
+    } else if (strcmp(mode, "hang") == 0) {
+#ifdef _WIN32
+        HANDLE never = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (never != NULL) {
+            WaitForSingleObject(never, INFINITE);
+        }
+#else
+        for (;;) {
+            pause();
+        }
+#endif
+        rc = 3;
     } else if (strcmp(mode, "handles") == 0) {
         rc = mode_handles(0);
     } else if (strcmp(mode, "handles-selftest") == 0) {

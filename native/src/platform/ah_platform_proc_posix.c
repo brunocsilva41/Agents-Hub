@@ -7,7 +7,7 @@
  * e as ações equivalentes do posix_spawn (addchdir_np, addclosefrom_np) não
  * são portáveis. Entre o fork e o exec só há chamadas async-signal-safe. */
 #if defined(__linux__)
-#define _GNU_SOURCE /* pipe2 */
+#define _GNU_SOURCE /* pipe2, syscall */
 #else
 #define _POSIX_C_SOURCE 200809L
 #if defined(__APPLE__)
@@ -18,13 +18,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <stdint.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 
 #include "ah_platform_proc_internal.h"
 
@@ -36,7 +40,21 @@ struct ah_proc {
     ah_proc_exit st;
     int fd[3]; /* lado do Hub: stdin (escrita), stdout, stderr (leitura) */
     bool eof[3];
+    int pidfd; /* Linux >= 5.3; -1 sem suporte */
 };
+
+/* pidfd do filho (aguardável de fim de processo, M4). -1 se o kernel ou a
+ * libc não tiverem pidfd_open: aí o laço usa SIGCHLD (ver o header). O
+ * pidfd já nasce com O_CLOEXEC. */
+static int open_pidfd(pid_t pid) {
+#if defined(__linux__) && defined(SYS_pidfd_open)
+    long fd = syscall(SYS_pidfd_open, (long)pid, 0L);
+    return fd < 0 ? -1 : (int)fd;
+#else
+    (void)pid;
+    return -1;
+#endif
+}
 
 static void close_fd(int *fd) {
     if (*fd >= 0) {
@@ -81,8 +99,21 @@ static ah_status map_errno(int e) {
     }
 }
 
-/* Fecha [from, to] no filho. */
-static void close_range_child(int from, int to) {
+/* Fecha [from, to] no filho: close_range (Linux >= 5.9) numa chamada (com
+ * to_end, até o último descritor possível, não só até `to`); sem ele, laço
+ * de close() até `to`. Ambos async-signal-safe. */
+static void close_range_child(int from, int to, bool to_end) {
+    if (from > to) {
+        return;
+    }
+#if defined(__linux__) && defined(SYS_close_range)
+    unsigned last = to_end ? ~0u : (unsigned)to;
+    if (syscall(SYS_close_range, (unsigned)from, last, 0u) == 0) {
+        return;
+    }
+#else
+    (void)to_end;
+#endif
     for (int fd = from; fd <= to; fd++) {
         close(fd);
     }
@@ -104,6 +135,7 @@ void ah_proc_free(ah_proc *p) {
     for (int i = 0; i < 3; i++) {
         close_fd(&p->fd[i]);
     }
+    close_fd(&p->pidfd);
     free(p);
 }
 
@@ -206,6 +238,7 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
             st = AH_ERR_NOMEM;
         } else {
             p->fd[0] = p->fd[1] = p->fd[2] = -1;
+            p->pidfd = -1;
         }
     }
     if (st == AH_OK && (make_pipe(pin) != 0 || make_pipe(pout) != 0 ||
@@ -216,6 +249,22 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
     long maxfd = sysconf(_SC_OPEN_MAX);
     if (maxfd < 0 || maxfd > 65536) {
         maxfd = 65536;
+    }
+
+    /* B3: todos os sinais bloqueados durante o fork. Assim nenhum handler
+     * do Hub roda no filho entre o fork e a restauração das disposições. */
+    sigset_t all_sigs;
+    sigset_t old_mask;
+    bool masked = false;
+    if (st == AH_OK) {
+        sigfillset(&all_sigs);
+        int e = pthread_sigmask(SIG_SETMASK, &all_sigs, &old_mask);
+        if (e != 0) {
+            st = map_errno(e);
+            ah_proc_i_detail(detail, cap, "falha ao bloquear sinais");
+        } else {
+            masked = true;
+        }
     }
 
     pid_t pid = -1;
@@ -229,6 +278,15 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
     if (st == AH_OK && pid == 0) {
         /* --- filho: só async-signal-safe daqui até o exec --- */
         int errfd = errp[1];
+        /* O pipe de erro sai de 0..2 primeiro; se falhar, ainda dá para
+         * escrever o errno nele (o pai reconhece como falha de spawn). */
+        if (errfd < 3) {
+            int moved = fcntl(errfd, F_DUPFD_CLOEXEC, 3);
+            if (moved < 0) {
+                child_fail(errfd, errno);
+            }
+            errfd = moved;
+        }
         setpgid(0, 0); /* grupo próprio: `detached: true` do TS (B6) */
         int src[3] = {pin[0], pout[1], perr[1]};
         for (int i = 0; i < 3; i++) {
@@ -241,35 +299,28 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
                 src[i] = moved;
             }
         }
-        if (errfd < 3) {
-            int moved = fcntl(errfd, F_DUPFD_CLOEXEC, 3);
-            if (moved < 0) {
-                _exit(127);
-            }
-            errfd = moved;
-        }
         for (int i = 0; i < 3; i++) {
             if (dup2(src[i], i) < 0) {
                 child_fail(errfd, errno);
             }
         }
         /* P4: nada além de 0..2 (e do pipe de erro, que é O_CLOEXEC). */
-        close_range_child(3, errfd - 1);
-        close_range_child(errfd + 1, (int)maxfd);
-        /* Sinais: máscara vazia e disposição padrão (ignorado sobrevive ao
+        close_range_child(3, errfd - 1, false);
+        close_range_child(errfd + 1, (int)maxfd, true);
+        /* B3: disposição padrão ANTES de desbloquear (ignorado sobrevive ao
          * exec; um SIGPIPE ignorado pelo Hub não pode passar ao agente). */
-        sigset_t none;
-        sigemptyset(&none);
-        sigprocmask(SIG_SETMASK, &none, NULL);
         struct sigaction dfl;
         memset(&dfl, 0, sizeof dfl);
         dfl.sa_handler = SIG_DFL;
         sigemptyset(&dfl.sa_mask);
         for (int sig = 1; sig < 65; sig++) {
             if (sig != SIGKILL && sig != SIGSTOP) {
-                sigaction(sig, &dfl, NULL);
+                sigaction(sig, &dfl, NULL); /* EINVAL fora da faixa: ok */
             }
         }
+        sigset_t none;
+        sigemptyset(&none);
+        sigprocmask(SIG_SETMASK, &none, NULL);
         if (o->cwd != NULL && chdir(o->cwd) != 0) {
             child_fail(errfd, errno);
         }
@@ -278,6 +329,9 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
     }
 
     /* --- Hub --- */
+    if (masked) {
+        pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+    }
     if (st == AH_OK) {
         /* Repetido no pai para não haver corrida com um kill(-pid) logo
          * depois do spawn; EACCES (filho já executou) e ESRCH são normais. */
@@ -305,6 +359,7 @@ ah_status ah_proc_spawn(const ah_proc_spawn_opts *o, ah_proc **out,
     close_fd(&errp[0]);
     if (st == AH_OK) {
         p->pid = pid;
+        p->pidfd = open_pidfd(pid);
         p->fd[0] = pin[1];
         p->fd[1] = pout[0];
         p->fd[2] = perr[0];
@@ -415,6 +470,31 @@ ah_status ah_proc_close_stdin(ah_proc *p) {
 
 ah_status ah_proc_waitable(const ah_proc *p, ah_proc_stream stream,
                            intptr_t *out) {
+    if (p == NULL || out == NULL ||
+        (stream != AH_PROC_STDIN && stream != AH_PROC_STDOUT &&
+         stream != AH_PROC_STDERR)) {
+        return AH_ERR_INVALID;
+    }
+    if (p->fd[stream] < 0) {
+        return AH_ERR_NOT_FOUND;
+    }
+    *out = (intptr_t)p->fd[stream];
+    return AH_OK;
+}
+
+ah_status ah_proc_exit_waitable(const ah_proc *p, intptr_t *out) {
+    if (p == NULL || out == NULL) {
+        return AH_ERR_INVALID;
+    }
+    if (p->pidfd < 0) {
+        return AH_ERR_NOT_FOUND; /* laço usa SIGCHLD (ver o header) */
+    }
+    *out = (intptr_t)p->pidfd;
+    return AH_OK;
+}
+
+ah_status ah_proc_native_pipe(const ah_proc *p, ah_proc_stream stream,
+                              intptr_t *out) {
     if (p == NULL || out == NULL ||
         (stream != AH_PROC_STDIN && stream != AH_PROC_STDOUT &&
          stream != AH_PROC_STDERR)) {
