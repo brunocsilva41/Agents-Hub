@@ -3,8 +3,7 @@
 > Estado de cada tarefa do [plano](17-plano-reescrita-c.md) e de cada pendência (DV/DA). Só o
 > coordenador edita este arquivo; as tarefas entregam a evidência no relatório (plano, §0, tabela de
 > donos). Uma marca só muda com evidência: commit, saída de teste ou medição citada (plano, §5;
-> critério de pronto do `CONTRIBUTING.md`). Criado em 2026-09-30 só com a estrutura: nenhuma tarefa
-> foi avaliada aqui.
+> critério de pronto do `CONTRIBUTING.md`). Criado em 2026-09-30; primeira atualização do coordenador em 2026-09-30.
 
 ## Legenda
 
@@ -23,10 +22,10 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 
 | ID | Tarefa | Estado | Commit | Evidência |
 |---|---|---|---|---|
-| F0-01 | Esqueleto de build (CMake + Ninja) | `[ ]` | | |
-| F0-02 | CI da reescrita | `[ ]` | | |
-| F0-03 | Vendorização das bibliotecas do núcleo | `[ ]` | | |
-| F0-04 | Padrões de código C | `[ ]` | | |
+| F0-01 | Esqueleto de build (CMake + Ninja) | `[~]` | 008e944 | build limpo + ctest 100% em windows-msvc-debug/-release/-clangcl-asan (coordenador e code-reviewer); entrega menos que a frase: só os alvos `ah_core` e `hub` (as demais pastas de `native/src/` e os executáveis MCP/serviço dependem de tarefas e de DA-14) |
+| F0-02 | CI da reescrita | `[~]` | 008e944 | `.github/workflows/native.yml` com portão agregador; nunca rodou no GitHub (Linux e runners não provados); conformance ainda não ligado ao CI |
+| F0-03 | Vendorização das bibliotecas do núcleo | `[x]` | 008e944 | 6 SHA-256 conferidos contra download oficial refeito; 65 arquivos idênticos ao upstream (code-reviewer); `native/third_party/VERSIONS.md` |
+| F0-04 | Padrões de código C | `[~]` | cb804af | `docs/18-padroes-c.md` aprovado em auditoria; falta a configuração de formatação (clang-format é PROPOSTA) |
 | F0-05 | Plataforma: texto, caminhos e arquivos | `[ ]` | | |
 | F0-06 | Plataforma: tempo, aleatoriedade e ambiente | `[ ]` | | |
 | F0-07 | Plataforma: processos (spawn, pipes, ambiente) | `[ ]` | | |
@@ -35,9 +34,9 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F0-10 | Utilitários sem I/O: UTF-8, JSON, YAML, regex | `[ ]` | | |
 | F0-11 | Runner de conformidade e utilitários de teste | `[ ]` | | |
 | F0-12 | Vendorização da UI (SDL3, SDL_ttf, Clay) | `[ ]` | | |
-| F0-13 | Corpus de conformidade gerado do TS | `[ ]` | | |
-| F0-14 | Spike de UI e relatório | `[ ]` | | |
-| F0-15 | Proposta do procedimento de medição | `[ ]` | | |
+| F0-13 | Corpus de conformidade gerado do TS | `[~]` |  | corpus classifier/mappers/domain gerados e auditados, em correção; faltam corpora de HTTP (SPEC-01), banco (SPEC-02) e CLI (SPEC-03) |
+| F0-14 | Spike de UI e relatório | `[~]` |  | spike em `native/spikes/ui/` revisado; relatório em escrita; Linux e plutosvg não cobertos |
+| F0-15 | Proposta do procedimento de medição | `[x]` | 008e944 | `docs/propostas/F0-15-procedimento-de-medicao.md` aprovado em auditoria (aguarda decisão DA-05) |
 
 ### F1 — Vertical fina (ADR 7.18)
 
@@ -90,7 +89,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F2-16 | Daemon: send, interrupt, pause, handoff e adoção | `[ ]` | | |
 | F2-17 | Daemon: retenção, compactação, espaço do banco e reaper | `[ ]` | | |
 | F2-18 | Daemon: captura de diff e artefatos | `[ ]` | | |
-| F2-19 | Levantamento de DV-13 no código TS | `[ ]` | | |
+| F2-19 | Levantamento de DV-13 no código TS | `[x]` | ba96da0 | `docs/propostas/F2-19-dv13.md`; linhas centrais reconferidas pelo coordenador |
 
 ### F3 — Os 9 adapters e o gate (ADR 7.8)
 
@@ -125,7 +124,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F4-11 | MCP: identidade, adoção, escopo e erros | `[ ]` | | |
 | F4-12 | MCP: tools 1 a 8 | `[ ]` | | |
 | F4-13 | MCP: tools 9 a 16 | `[ ]` | | |
-| F4-14 | Levantamento dos erros de domínio por rota | `[ ]` | | |
+| F4-14 | Levantamento dos erros de domínio por rota | `[~]` |  | `native/tests/conformance/domain-errors/` (141 casos, 117 executados contra o TS); em auditoria |
 
 ### F5 — CLI completa (46 comandos)
 
@@ -173,7 +172,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 
 | ID | Tarefa | Estado | Commit | Evidência |
 |---|---|---|---|---|
-| F7-01 | Proposta de desenho: migração e cofre | `[ ]` | | |
+| F7-01 | Proposta de desenho: migração e cofre | `[x]` | 7b33a44 | `docs/propostas/F7-01-migracao-e-cofre.md` revisado pelo security-auditor (aprovado com ressalvas, aplicadas); aguarda decisões DA-01/02/03 |
 | F7-02 | Migração do banco na primeira execução | `[ ]` | | |
 | F7-03 | Cofre no Windows | `[ ]` | | |
 | F7-04 | Cofre no Linux | `[ ]` | | |
@@ -187,7 +186,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F8-01 | Layout de instalação | `[ ]` | | |
 | F8-02 | Instalador Windows | `[ ]` | | |
 | F8-03 | AppImage | `[ ]` | | |
-| F8-04 | Proposta do esquema de chave e manifesto de atualização | `[ ]` | | |
+| F8-04 | Proposta do esquema de chave e manifesto de atualização | `[x]` | 008e944 | `docs/propostas/F8-04-chave-e-manifesto-de-atualizacao.md` aprovado em auditoria (aguarda DA-04) |
 | F8-05 | Chave de assinatura e assinatura da release | `[ ]` | | |
 | F8-06 | Atualizador | `[ ]` | | |
 | F8-07 | Pipeline de release | `[ ]` | | |
