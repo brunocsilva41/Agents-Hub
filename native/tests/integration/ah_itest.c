@@ -492,6 +492,24 @@ static char *canon(const char *path) {
     return u;
 }
 
+/* Cópia em minúsculas (mesma regra de canon), para comparar um nome de
+ * entrada anexado como texto. */
+static char *fold_case_dup(const char *s) {
+    wchar_t *w = to_wide(s);
+    size_t len;
+    char *u;
+    if (w == NULL) {
+        return NULL;
+    }
+    len = wcslen(w);
+    if (len > 0) {
+        CharLowerBuffW(w, (DWORD)len);
+    }
+    u = to_utf8(w);
+    free(w);
+    return u;
+}
+
 /* Raízes de usuário (sem o "/.agents-hub"). */
 static ah_status user_homes(strv *out) {
     static const char *const vars[] = {"USERPROFILE", "HOME"};
@@ -776,7 +794,11 @@ ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link
     wchar_t *full = NULL;
     ah_status st;
 
-    if (link == NULL || target == NULL) {
+    /* Mesmo contrato do POSIX: alvo absoluto ("X:\..." / "X:/..." ou UNC). */
+    if (link == NULL || target == NULL ||
+        !((((target[0] >= 'A' && target[0] <= 'Z') || (target[0] >= 'a' && target[0] <= 'z')) &&
+           target[1] == ':' && (target[2] == '\\' || target[2] == '/')) ||
+          (target[0] == '\\' && target[1] == '\\'))) {
         return AH_ERR_INVALID;
     }
     wl = to_wide(link);
@@ -1165,6 +1187,11 @@ static char *canon(const char *path) {
     return c;
 }
 
+/* POSIX diferencia caixa: só copia. */
+static char *fold_case_dup(const char *s) {
+    return str_dup(s);
+}
+
 static ah_status user_homes(strv *out) {
     struct passwd *pw = getpwuid(getuid());
     char *home = env_get("HOME");
@@ -1244,7 +1271,9 @@ int ah_itest_path_exists(const char *path) {
 
 ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind) {
     struct stat sb;
-    if (link == NULL || target == NULL ||
+    /* Alvo relativo é recusado: stat() o resolveria a partir do cwd, mas o
+     * symlink o resolve a partir do diretório do link (alvos diferentes). */
+    if (link == NULL || target == NULL || target[0] != '/' ||
         (kind != AH_ITEST_LINK_DIR && kind != AH_ITEST_LINK_FILE)) {
         return AH_ERR_INVALID;
     }
@@ -1436,8 +1465,94 @@ ah_status ah_itest_environ_snapshot(char ***out, size_t *count) {
     return AH_OK;
 }
 
+static int is_sep(char c) {
+#if defined(_WIN32)
+    return c == '/' || c == '\\';
+#else
+    return c == '/';
+#endif
+}
+
+/* Forma "entrada" de um caminho: o PAI canonizado (links resolvidos) + o
+ * último nome como texto (sem resolver), na mesma caixa/separador de canon.
+ * É a entrada que remove_tree apagaria. Para raiz, "." e ".." no último
+ * nome, devolve canon(path). */
+static char *canon_entry(const char *path) {
+    char *copy = str_dup(path);
+    size_t len;
+    char *sep = NULL;
+    char *p;
+    const char *name;
+    char *parent;
+    char *folded;
+    char *res;
+
+    if (copy == NULL) {
+        return NULL;
+    }
+    len = strlen(copy);
+    while (len > 1 && is_sep(copy[len - 1])) {
+        copy[--len] = '\0';
+    }
+    for (p = copy; *p != '\0'; p++) {
+        if (is_sep(*p)) {
+            sep = p;
+        }
+    }
+    name = sep != NULL ? sep + 1 : copy;
+    if (name[0] == '\0' || strcmp(name, ".") == 0 || strcmp(name, "..") == 0 ||
+        (len == 2 && copy[1] == ':')) {
+        free(copy);
+        return canon(path);
+    }
+    if (sep == NULL) {
+        parent = canon(".");
+    } else if (sep == copy) {
+        parent = canon("/"); /* "/x" */
+    } else if (sep == copy + 2 && copy[1] == ':') {
+        char root[4];
+        root[0] = copy[0];
+        root[1] = ':';
+        root[2] = '/';
+        root[3] = '\0';
+        parent = canon(root); /* "C:\x" -> pai "C:\" */
+    } else {
+        *sep = '\0';
+        parent = canon(copy);
+    }
+    folded = fold_case_dup(name);
+    res = NULL;
+    if (parent != NULL && folded != NULL) {
+        size_t lp = strlen(parent);
+        res = str_cat3(parent, (lp > 0 && parent[lp - 1] == '/') ? "" : "/", folded);
+    }
+    free(parent);
+    free(folded);
+    free(copy);
+    return res;
+}
+
+/* Acrescenta as duas formas de uma raiz (resolvida e como entrada). */
+static ah_status push_root(strv *out, const char *raw) {
+    char *c = canon(raw);
+    char *e = canon_entry(raw);
+    ah_status st;
+    if (c == NULL || e == NULL) {
+        free(c);
+        free(e);
+        return AH_ERR_INTERNAL;
+    }
+    st = strv_push(out, c);
+    if (st != AH_OK) {
+        free(e);
+        return st;
+    }
+    return strv_push(out, e);
+}
+
 /* Raízes proibidas canônicas: <home>/.agents-hub de cada home do usuário e o
- * AGENTS_HUB_HOME do ambiente. Falha ao canonizar = erro (o chamador recusa). */
+ * AGENTS_HUB_HOME do ambiente, cada uma nas duas formas. Falha ao canonizar =
+ * erro (o chamador recusa). */
 static ah_status forbidden_roots(strv *out) {
     strv homes = {0};
     ah_status st = user_homes(&homes);
@@ -1450,9 +1565,8 @@ static ah_status forbidden_roots(strv *out) {
 #else
         char *raw = str_cat3(homes.v[i], "/", ".agents-hub");
 #endif
-        char *c = raw != NULL ? canon(raw) : NULL;
+        st = raw != NULL ? push_root(out, raw) : AH_ERR_NOMEM;
         free(raw);
-        st = c != NULL ? strv_push(out, c) : AH_ERR_INTERNAL;
     }
     strv_dispose(&homes);
     if (st != AH_OK) {
@@ -1460,37 +1574,47 @@ static ah_status forbidden_roots(strv *out) {
     }
     hub_home = env_get("AGENTS_HUB_HOME");
     if (hub_home != NULL && hub_home[0] != '\0') {
-        char *c = canon(hub_home);
-        free(hub_home);
-        return c != NULL ? strv_push(out, c) : AH_ERR_INTERNAL;
+        st = push_root(out, hub_home);
     }
     free(hub_home);
-    return AH_OK;
+    return st;
 }
 
 /* allow_ancestor = 1: `path` pode conter uma raiz (usado só para a base
- * temporária, onde o home novo nasce como subdiretório vazio). */
+ * temporária, onde o home novo nasce como subdiretório vazio).
+ *
+ * Cada caminho é comparado em DUAS formas: totalmente resolvida (canon) e
+ * como entrada (canon_entry: pai resolvido + último nome como texto). A
+ * segunda é o que remove_tree apaga: <raiz>/lnk, com lnk sendo junção/link
+ * para fora, resolve para fora, mas a entrada lnk está DENTRO da raiz. */
 static int forbidden_check(const char *path, int allow_ancestor) {
     strv roots = {0};
-    char *c;
+    char *forms[2];
     int bad = 0;
     size_t i;
+    size_t f;
 
     if (path == NULL || path[0] == '\0') {
         return 1;
     }
-    c = canon(path);
-    if (c == NULL || forbidden_roots(&roots) != AH_OK) {
-        free(c);
+    forms[0] = canon(path);
+    forms[1] = canon_entry(path);
+    if (forms[0] == NULL || forms[1] == NULL || forbidden_roots(&roots) != AH_OK) {
+        free(forms[0]);
+        free(forms[1]);
         strv_dispose(&roots);
         return 1;
     }
-    for (i = 0; i < roots.n && !bad; i++) {
-        if (is_under(c, roots.v[i]) || (!allow_ancestor && is_under(roots.v[i], c))) {
-            bad = 1;
+    for (f = 0; f < 2 && !bad; f++) {
+        for (i = 0; i < roots.n && !bad; i++) {
+            if (is_under(forms[f], roots.v[i]) ||
+                (!allow_ancestor && is_under(roots.v[i], forms[f]))) {
+                bad = 1;
+            }
         }
     }
-    free(c);
+    free(forms[0]);
+    free(forms[1]);
     strv_dispose(&roots);
     return bad;
 }
@@ -1499,8 +1623,59 @@ int ah_itest_path_is_forbidden(const char *path) {
     return forbidden_check(path, 0);
 }
 
+/* Diretório de teste registrado (canônico) onde ah_itest_remove_tree pode
+ * apagar, além dos homes "ah-itest-*" da base temporária. */
+static char *g_test_dir = NULL;
+
+ah_status ah_itest_set_test_dir(const char *dir) {
+    free(g_test_dir);
+    g_test_dir = NULL;
+    if (dir == NULL) {
+        return AH_OK;
+    }
+    if (dir[0] == '\0' || !ah_itest_path_exists(dir) || forbidden_check(dir, 0)) {
+        return AH_ERR_INVALID;
+    }
+    g_test_dir = canon(dir);
+    return g_test_dir != NULL ? AH_OK : AH_ERR_NOMEM;
+}
+
+static int strictly_under(const char *child, const char *parent) {
+    return is_under(child, parent) && strcmp(child, parent) != 0;
+}
+
+/* `entry` (forma canon_entry) está dentro do diretório de teste registrado
+ * ou dentro de um home "ah-itest-*" (ou é o próprio) da base temporária. */
+static int in_remove_scope(const char *entry) {
+    char *base;
+    char *cb;
+    int ok = 0;
+
+    if (g_test_dir != NULL && strictly_under(entry, g_test_dir)) {
+        return 1;
+    }
+    base = temp_base();
+    cb = base != NULL ? canon(base) : NULL;
+    free(base);
+    if (cb != NULL && strictly_under(entry, cb)) {
+        size_t lb = strlen(cb);
+        const char *rest = entry + lb + (cb[lb - 1] == '/' ? 0 : 1);
+        ok = strncmp(rest, HOME_DIR_PREFIX, sizeof HOME_DIR_PREFIX - 1) == 0;
+    }
+    free(cb);
+    return ok;
+}
+
 ah_status ah_itest_remove_tree(const char *path) {
-    if (path == NULL || ah_itest_path_is_forbidden(path)) {
+    char *entry;
+    int allowed;
+    if (path == NULL || path[0] == '\0') {
+        return AH_ERR_INVALID;
+    }
+    entry = canon_entry(path);
+    allowed = entry != NULL && in_remove_scope(entry) && !forbidden_check(path, 0);
+    free(entry);
+    if (!allowed) {
         return AH_ERR_INVALID;
     }
     return remove_tree(path) ? AH_OK : AH_ERR_IO;

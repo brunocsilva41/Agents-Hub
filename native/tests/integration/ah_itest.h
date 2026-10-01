@@ -99,7 +99,9 @@ void ah_itest_strv_free(char **v);
 /* 1 se `path` é igual a, está dentro de, ou contém um caminho proibido:
  * ~/.agents-hub (perfil real do SO e as variáveis HOME/USERPROFILE/
  * HOMEDRIVE+HOMEPATH) ou o AGENTS_HUB_HOME do ambiente pai. Compara caminhos
- * canônicos (no Windows: absolutos, longos, sem diferença de caixa).
+ * canônicos (junções e links resolvidos; no Windows, sem diferença de caixa)
+ * em duas formas: totalmente resolvida e como entrada (pai resolvido + último
+ * nome literal), para que <raiz>/link-para-fora continue proibido.
  * Em dúvida (falha ao canonizar), devolve 1. */
 int ah_itest_path_is_forbidden(const char *path);
 
@@ -135,15 +137,23 @@ typedef enum ah_itest_link_kind {
     AH_ITEST_LINK_FILE     /* Windows: link simbólico de arquivo; POSIX: symlink */
 } ah_itest_link_kind;
 
-/* Cria `link` apontando para `target` (que deve existir; caminhos UTF-8).
- * Serve aos testes que provam que a limpeza não segue links. No Windows, link
- * simbólico de arquivo exige modo desenvolvedor ou privilégio: sem isso,
- * AH_ERR_IO (o teste decide o que fazer). */
+/* Cria `link` apontando para `target` (caminhos UTF-8). `target` precisa ser
+ * ABSOLUTO (relativo: AH_ERR_INVALID, porque o SO o resolveria a partir do
+ * diretório do link) e existir (AH_ERR_NOT_FOUND). Serve aos testes que
+ * provam que a limpeza não segue links. No Windows, link simbólico de arquivo
+ * exige modo desenvolvedor ou privilégio: sem isso, AH_ERR_IO. */
 ah_status ah_itest_make_link(const char *link, const char *target, ah_itest_link_kind kind);
 
+/* Registra o diretório de teste (deve existir e não ser proibido) onde
+ * ah_itest_remove_tree pode apagar; NULL desfaz o registro. Uma cópia
+ * canônica fica guardada até a próxima chamada. */
+ah_status ah_itest_set_test_dir(const char *dir);
+
 /* Remove `path` recursivamente sem seguir junções/links (um link é removido
- * como entrada; o alvo fica intacto). Recusa caminho proibido
- * (ah_itest_path_is_forbidden) com AH_ERR_INVALID. Inexistente = AH_OK. */
+ * como entrada; o alvo fica intacto). Só age DENTRO do diretório de teste
+ * registrado (não ele próprio) ou de um home "ah-itest-*" da base temporária
+ * do SO; fora disso, ou em caminho proibido (ah_itest_path_is_forbidden),
+ * devolve AH_ERR_INVALID sem tocar em nada. Inexistente no escopo = AH_OK. */
 ah_status ah_itest_remove_tree(const char *path);
 
 #endif /* AH_ITEST_H */

@@ -633,6 +633,124 @@ static void test_temp_link_into_parent_home(void) {
     CHECK(ah_itest_path_exists(pai_file)); /* remover a junção não tocou o alvo */
 }
 
+/* Junção (e link de arquivo, se o SO deixar) DENTRO de um AGENTS_HUB_HOME
+ * falso, apontando para fora: a entrada continua proibida e remove_tree recusa
+ * sem apagar nada (regressão achada na revisão do 5ecb6d8). */
+static void test_link_inside_forbidden_root(void) {
+    char hub[1024];
+    char hub_file[1200];
+    char fora[1024];
+    char fora_file[1200];
+    char lnk[1200];
+    char flnk[1200];
+    char via[1300];
+    int have_file_link;
+    saved_env sv;
+
+    make_sentinel(hub, sizeof hub, hub_file, sizeof hub_file, "fakehub-links");
+    make_sentinel(fora, sizeof fora, fora_file, sizeof fora_file, "fora-links");
+    path_join(lnk, sizeof lnk, hub, "lnk");
+    CHECK(ah_itest_make_link(lnk, fora, AH_ITEST_LINK_DIR) == AH_OK);
+    path_join(flnk, sizeof flnk, hub, "flnk.txt");
+    have_file_link = ah_itest_make_link(flnk, fora_file, AH_ITEST_LINK_FILE) == AH_OK;
+    if (!have_file_link) {
+        printf("aviso: link simbólico de arquivo indisponível; só a junção testada\n");
+    }
+
+    env_save(&sv);
+    CHECK(ah_itest_setenv("AGENTS_HUB_HOME", hub) == AH_OK);
+    CHECK(ah_itest_path_is_forbidden(hub) == 1);
+    CHECK(ah_itest_path_is_forbidden(lnk) == 1);
+    CHECK(ah_itest_remove_tree(lnk) == AH_ERR_INVALID);
+    path_join(via, sizeof via, lnk, "vivo.txt");
+    CHECK(ah_itest_path_exists(lnk));
+    CHECK(ah_itest_path_exists(via));
+    if (have_file_link) {
+        CHECK(ah_itest_path_is_forbidden(flnk) == 1);
+        CHECK(ah_itest_remove_tree(flnk) == AH_ERR_INVALID);
+        CHECK(ah_itest_path_exists(flnk));
+    }
+    CHECK(ah_itest_remove_tree(hub) == AH_ERR_INVALID);
+    CHECK(ah_itest_path_exists(hub_file));
+    env_restore(&sv);
+
+    /* Sem o AGENTS_HUB_HOME apontando para lá, a limpeza do scratch remove só
+     * os links; o alvo de fora fica. */
+    CHECK(ah_itest_remove_tree(hub) == AH_OK);
+    CHECK(!ah_itest_path_exists(hub));
+    CHECK(ah_itest_path_exists(fora_file));
+}
+
+/* remove_tree só age dentro do diretório de teste registrado ou de um home
+ * ah-itest-* da base temporária. */
+static void test_remove_tree_scope(void) {
+    char outside[1200];
+    char inside[1200];
+    char home_sub[4200];
+    ah_itest_env *env = NULL;
+    char err[512];
+    const char *last;
+    size_t lp;
+
+    /* Irmão do diretório de teste (no build, fora do escopo registrado). */
+    last = base_name(g_tmp);
+    lp = (size_t)(last - g_tmp);
+    CHECK(lp > 0 && lp < sizeof outside);
+    if (lp == 0 || lp >= sizeof outside) {
+        return;
+    }
+    memcpy(outside, g_tmp, lp);
+    outside[lp] = '\0';
+    CHECK(snprintf(outside + lp, sizeof outside - lp, "%s", "fora-do-escopo-itest") > 0);
+    if (!ah_itest_path_exists(outside)) {
+        CHECK(ah_itest_make_dir(outside) == AH_OK);
+    }
+    CHECK(ah_itest_remove_tree(outside) == AH_ERR_INVALID);
+    CHECK(ah_itest_path_exists(outside)); /* nada tocado */
+    /* Mesmo inexistente, fora do escopo é recusa (não "AH_OK, já não existe"). */
+    path_join(inside, sizeof inside, outside, "nao-existe");
+    CHECK(ah_itest_remove_tree(inside) == AH_ERR_INVALID);
+
+    /* O próprio diretório de teste não é removível; o que está dentro, sim. */
+    CHECK(ah_itest_remove_tree(g_tmp) == AH_ERR_INVALID);
+    path_join(inside, sizeof inside, g_tmp, "escopo-dentro");
+    CHECK(ah_itest_remove_tree(inside) == AH_OK);
+    CHECK(ah_itest_make_dir(inside) == AH_OK);
+    CHECK(ah_itest_remove_tree(inside) == AH_OK);
+    CHECK(!ah_itest_path_exists(inside));
+
+    /* Sem diretório registrado, o mesmo caminho dentro do build é recusado. */
+    CHECK(ah_itest_make_dir(inside) == AH_OK);
+    CHECK(ah_itest_set_test_dir(NULL) == AH_OK);
+    CHECK(ah_itest_remove_tree(inside) == AH_ERR_INVALID);
+    CHECK(ah_itest_path_exists(inside));
+    CHECK(ah_itest_set_test_dir(g_tmp) == AH_OK);
+    CHECK(ah_itest_remove_tree(inside) == AH_OK);
+
+    /* Dentro de um home ah-itest-* da base temporária: permitido. */
+    CHECK(ah_itest_env_create(&env, err, sizeof err) == AH_OK);
+    if (env != NULL) {
+        path_join(home_sub, sizeof home_sub, ah_itest_env_home(env), "sub");
+        CHECK(ah_itest_make_dir(home_sub) == AH_OK);
+        CHECK(ah_itest_remove_tree(home_sub) == AH_OK);
+        CHECK(!ah_itest_path_exists(home_sub));
+        CHECK(ah_itest_env_destroy(env) == AH_OK);
+    }
+
+    /* Registrar diretório inexistente ou proibido é recusado. */
+    path_join(inside, sizeof inside, g_tmp, "nao-existe-registro");
+    CHECK(ah_itest_set_test_dir(inside) == AH_ERR_INVALID);
+    CHECK(ah_itest_set_test_dir(g_tmp) == AH_OK);
+}
+
+static void test_make_link_relative_target_refused(void) {
+    char link[1200];
+    path_join(link, sizeof link, g_tmp, "link-relativo");
+    CHECK(ah_itest_make_link(link, "relativo", AH_ITEST_LINK_DIR) == AH_ERR_INVALID);
+    CHECK(ah_itest_make_link(link, "." SEP "sub", AH_ITEST_LINK_FILE) == AH_ERR_INVALID);
+    CHECK(!ah_itest_path_exists(link));
+}
+
 /* ------------------------------------------------------------ processos */
 
 static void test_kill_and_free(void) {
@@ -694,6 +812,11 @@ int main(int argc, char **argv) {
     }
     g_probe = argv[1];
     g_tmp = argv[2];
+    /* Único lugar (além dos homes ah-itest-*) onde ah_itest_remove_tree age. */
+    if (ah_itest_set_test_dir(g_tmp) != AH_OK) {
+        fprintf(stderr, "não registrou o diretório de teste %s\n", g_tmp);
+        return 2;
+    }
 
     test_pick_port_rejects_4747();
     test_pick_port_avoids_parent_port();
@@ -705,5 +828,9 @@ int main(int argc, char **argv) {
     test_kill_and_free();
     test_destroy_does_not_follow_links();
     test_temp_link_into_parent_home();
+    test_link_inside_forbidden_root();
+    test_remove_tree_scope();
+    test_make_link_relative_target_refused();
+    CHECK(ah_itest_set_test_dir(NULL) == AH_OK);
     return AH_TEST_END("test_itest_isolation");
 }
