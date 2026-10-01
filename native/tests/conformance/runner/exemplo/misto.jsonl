@@ -1,0 +1,15 @@
+{"id":"ex/passa-001","spec":"exemplo do runner","entrada":2,"esperado":4}
+{"id":"ex/pula-001","spec":"exemplo do runner","entrada":1,"esperado":2,"pular":"o módulo de exemplo não cobre este caso"}
+{"id":"ex/div-en-001","spec":"exemplo do runner","entrada":5,"esperado":10,"divergence":"DV-44 (docs/17-plano-reescrita-c.md): exemplo com o ID da DV no texto da marca"}
+{"id":"ex/notas-001","spec":"exemplo do runner","entrada":4,"esperado":8,"notes":"DIVERGÊNCIA CONHECIDA: exemplo cujo ID da DV vem da tabela (reproduzir)"}
+{"id":"ex/corrigir-001","spec":"exemplo do runner","entrada":6,"esperado":13,"divergencia":"exemplo: o TS dá 13; a DV foi decidida como corrigir e o esperado do C é 12"}
+{"id":"ex/lote-001","spec":"exemplo do runner","entrada":0,"esperado":99,"divergencia":"exemplo de entrada da tabela por prefixo"}
+{"id":"ex/lote-002","spec":"exemplo do runner","entrada":0,"esperado":98,"divergencia":"exemplo de entrada da tabela por prefixo"}
+{"id":"ex/falha-001","spec":"exemplo do runner","entrada":3,"esperado":7}
+{"id":"ex/div-pt-001","spec":"exemplo do runner","entrada":5,"esperado":10,"divergencia":"SPEC-04 A6: exemplo de marca sem ID de DV"}
+
+{"id":"ex/quebrado","entrada":
+[1,2]
+{"spec":"exemplo do runner: caso sem id","entrada":1,"esperado":2}
+{"id":"ex/lote-003","spec":"exemplo do runner","entrada":1,"esperado":99,"divergencia":"prefixo da tabela; o esperado decidido (0) não é o dobro de 1"}
+{"id":"ex/notas-sem-dv-001","spec":"exemplo do runner","entrada":7,"esperado":14,"notes":"DIVERGÊNCIA CONHECIDA: exemplo sem entrada na tabela nem ID de DV no texto"}
