@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <pwd.h>
 #include <stdint.h>
+#include <stdio.h> /* rename */
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
