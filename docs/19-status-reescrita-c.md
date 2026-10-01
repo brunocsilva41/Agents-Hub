@@ -30,7 +30,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F0-06 | Plataforma: tempo, aleatoriedade e ambiente | `[x]` | fca9657 | Windows: build limpo + ctest 100% em windows-msvc-debug/-release/-clangcl-asan na main integrada (coordenador); revisão independente aprovada com ressalvas, fechadas em 581d745; Linux: CI native run 36805871526 (ac1c07f) verde em linux-gcc-debug e linux-clang-asan |
 | F0-07 | Plataforma: processos (spawn, pipes, ambiente) | `[ ]` | | |
 | F0-08 | Plataforma: árvore de processos e identidade de PID | `[ ]` | | |
-| F0-09 | Plataforma: sockets loopback, laço de eventos, timers e threads | `[~]` | 137c3de | Windows: build limpo + ctest 5/5 em windows-msvc-debug/-release/-clangcl-asan na integração (coordenador); revisão independente aprovou f921552 com mutações M1–M4 reprovando. Lacunas: mutações M5 (plano B no servidor) e M6 (SID ignorado) sobrevivem; recusa de outro usuário real fica no aceite SEC-R12/R13 (CI Linux com useradd); fila de escuta cheia pode dar REFUSED imediato no Windows (conferir na F1-20). POSIX: aguardando CI Linux |
+| F0-09 | Plataforma: sockets loopback, laço de eventos, timers e threads | `[x]` | 6f683ca (PR #20) | Windows: build limpo + ctest 5/5 em windows-msvc-debug/-release/-clangcl-asan (coordenador); CI do PR #20 verde em linux-gcc-debug e linux-clang-asan depois da correção 354d573 (dono no Linux ignora linha com inode 0); revisões independentes aprovaram f921552 (mutações M1–M4 reprovam) e 354d573 (sem falha-aberta). Lacunas: M5 (plano B no servidor) e M6 (SID ignorado) sobrevivem; recusa de outro usuário real fica no aceite SEC-R12/R13 (CI Linux com useradd); fila de escuta cheia pode dar REFUSED imediato no Windows (conferir na F1-20); custo da leitura de /proc/net/tcp não medido (conferir na F1-15) |
 | F0-10 | Utilitários sem I/O: UTF-8, JSON, YAML, regex | `[ ]` | | |
 | F0-11 | Runner de conformidade e utilitários de teste | `[ ]` | | |
 | F0-12 | Vendorização da UI (SDL3, SDL_ttf, Clay) | `[ ]` | | |
@@ -187,7 +187,7 @@ Colunas: **Commit** = hash do commit mesclado; **Evidência** = comando executad
 | F8-02 | Instalador Windows | `[ ]` | | |
 | F8-03 | AppImage | `[ ]` | | |
 | F8-04 | Proposta do esquema de chave e manifesto de atualização | `[x]` | 008e944 | `docs/propostas/F8-04-chave-e-manifesto-de-atualizacao.md` aprovado em auditoria; decidido no ADR 09 (DA-04) |
-| F8-05 | Chave de assinatura e assinatura da release | `[ ]` | | |
+| F8-05 | Chave de assinatura e assinatura da release | `[~]` | 5ca4b10 (PR #23) | Feito: `ahsign` (chave Ed25519 cifrada com Argon2, arquivo privado desde a criação, assinatura e verificação) e `ah_update_verify` (recusa S ≥ L, variações de formato e chave de ordem pequena pela lista do libsodium 1.0.18, SEC-R17); auditoria de segurança aprovou 5f688ae; build limpo + ctest 6/6 em windows-msvc-debug/-release/-clangcl-asan; CI do PR #23 verde no Linux. Falta: lugar das chaves públicas embutidas, passo no pipeline, chave real (ação do dono), FZ11 (depende da F0-02). Para depois: `ahsign_test_fixture` fora dos artefatos (F8-07); aviso de pasta gravável por outros no Windows (após F0-05); SIGTSTP no POSIX não tratado |
 | F8-06 | Atualizador | `[ ]` | | |
 | F8-07 | Pipeline de release | `[ ]` | | |
 | F8-08 | Auditoria do instalador e do atualizador | `[ ]` | | |
@@ -306,3 +306,9 @@ caminho.
 | 2026-09-30 | Base comum da leva 1 de implementação | ef81091 |
 | 2026-09-30 | Exceção do coordenador: F0-12 iniciada com F0-14 em `[~]` (Windows comprovado; Linux validado pelo CI da F0-12) | este arquivo |
 | 2026-09-30 | Backlog pós-paridade fora das 137 tarefas: PP-01 (markdown), PP-02 (grafo desenhado) | plano §7 |
+| 2026-10-01 | Decisão do dono: jobs do TS no CI só rodam quando a mudança toca o TS; o portão passa sem eles quando não toca (TS congelado; job Windows/Node 22.5 reprova com EBUSY em hub.db/hub.db-wal desde antes da reescrita) | PR #22 (d49a5a8) |
+| 2026-10-01 | Decisão do dono: F0-07 neutraliza o `%` no ramo via_cmd (técnica do Rust contra BatBadBut); divergência deliberada do TS (`bin-resolver.ts:347-386`), assim como o `/v:off` (A1) e o `NoDefaultCurrentDirectoryInExePath` (M3), cobertos pela DA-29 | este arquivo; correção em andamento na F0-07 |
+| 2026-10-01 | Exceção do coordenador: FZ03 (fuzz do YAML) adiado; a F0-10 entrega o alvo quando a infraestrutura de fuzz da F0-02 existir | este arquivo |
+| 2026-10-01 | Decisão do coordenador: F0-12 aplica no SDL_ttf 3.2.2 vendorizado o backport da correção upstream da UB de alinhamento em BG_Blended_Color (achada pelo UBSan no teste de emoji); patch registrado em `native/third_party/patches/` e em VERSIONS.md, removido quando houver release com a correção | este arquivo; F0-12 em andamento |
+| 2026-10-01 | Pendência: libyaml compila no Linux com `strdup` sem declaração (aviso de ponteiro truncado em 64 bits, `third_party/libyaml/src/api.c:66`); corrigir com feature-test macro no alvo, depois da F0-12 | CI native (linux-gcc-debug) |
+| 2026-10-01 | DV a decidir pelo dono: TS aceita NUL (` `) em strings JSON; C recusa com erro próprio (`AH_ERR_LIMIT`), sem cair no valor padrão em silêncio. YAML com UTF-8 inválido: TS troca por U+FFFD, C recusa | F0-10 (em revisão) |
